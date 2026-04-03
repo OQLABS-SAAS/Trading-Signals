@@ -186,7 +186,7 @@ Return this exact JSON structure:
   "supertrend_assessment": "one line supertrend interpretation"
 }}"""
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+   api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     resp = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={
