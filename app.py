@@ -148,7 +148,7 @@ def calculate_indicators(df):
 
 # ─── CLAUDE ANALYSIS ─────────────────────────────────────────
 def get_analysis(ticker, asset_type, ind):
-    client = anthropic.Anthropic()
+    
 
     rsi_tag = "[OVERSOLD]" if ind["rsi"] < 30 else "[OVERBOUGHT]" if ind["rsi"] > 70 else "[NEUTRAL]"
     macd_tag = "[BULLISH MOMENTUM]" if ind["macd_hist"] > 0 else "[BEARISH MOMENTUM]"
