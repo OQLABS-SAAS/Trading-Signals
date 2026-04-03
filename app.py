@@ -253,7 +253,12 @@ def analyze():
 # ─── HEALTH CHECK ────────────────────────────────────────────
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat()})
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    return jsonify({
+        "status": "ok",
+        "key_set": bool(key),
+        "key_preview": key[:8] + "..." if key else "NOT SET"
+    })
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
