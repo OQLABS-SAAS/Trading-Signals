@@ -148,7 +148,7 @@ def calculate_indicators(df):
 
 # ─── CLAUDE ANALYSIS ─────────────────────────────────────────
 def get_analysis(ticker, asset_type, ind):
-   api_key = os.environ.get("ANTHROPIC_API_KEY")
+  client = anthropic.Anthropic()
 if not api_key:
     raise ValueError("ANTHROPIC_API_KEY environment variable is not set in Railway")
 client = anthropic.Anthropic(api_key=api_key)
