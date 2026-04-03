@@ -1,0 +1,396 @@
+"""
+Trading Signals SaaS — Backend
+Supports: Stocks, Crypto, Forex, Commodities, Indices
+Features: Multi-timeframe, MTF trend analysis, historical win rate
+"""
+
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import requests
+import os, json
+from datetime import datetime
+
+app = Flask(__name__, static_folder="static")
+CORS(app)
+
+# ─── TIMEFRAME CONFIG ─────────────────────────────────────────
+TIMEFRAME_CONFIG = {
+    "5m":  {"interval": "5m",  "period": "5d",  "chart_bars": 100, "date_fmt": "%H:%M"},
+    "15m": {"interval": "15m", "period": "5d",  "chart_bars": 100, "date_fmt": "%H:%M"},
+    "30m": {"interval": "30m", "period": "5d",  "chart_bars": 100, "date_fmt": "%b%d %H:%M"},
+    "1h":  {"interval": "1h",  "period": "30d", "chart_bars": 100, "date_fmt": "%b%d %H:%M"},
+    "4h":  {"interval": "1h",  "period": "60d", "chart_bars": 90,  "date_fmt": "%b %d", "resample": "4h"},
+    "1d":  {"interval": "1d",  "period": "1y",  "chart_bars": 90,  "date_fmt": "%b %d"},
+}
+
+# ─── INDICATOR HELPERS ────────────────────────────────────────
+def rma(series, length):
+    alpha  = 1.0 / length
+    vals   = series.values if hasattr(series, "values") else np.array(series)
+    result = np.full(len(vals), np.nan)
+    valid  = [i for i, v in enumerate(vals) if not np.isnan(v)]
+    if len(valid) < length:
+        return pd.Series(result, index=getattr(series, "index", None))
+    start  = valid[length - 1]
+    result[start] = np.nanmean(vals[valid[0]:valid[0] + length])
+    for i in range(start + 1, len(vals)):
+        if not np.isnan(vals[i]):
+            result[i] = alpha * vals[i] + (1 - alpha) * result[i - 1]
+    return pd.Series(result, index=getattr(series, "index", None))
+
+def ema_tv(series, span):
+    alpha  = 2.0 / (span + 1)
+    vals   = series.values if hasattr(series, "values") else np.array(series)
+    result = np.full(len(vals), np.nan)
+    valid  = [i for i, v in enumerate(vals) if not np.isnan(v)]
+    if len(valid) < span:
+        return pd.Series(result, index=getattr(series, "index", None))
+    start  = valid[span - 1]
+    result[start] = np.nanmean(vals[valid[0]:valid[0] + span])
+    for i in range(start + 1, len(vals)):
+        if not np.isnan(vals[i]):
+            result[i] = alpha * vals[i] + (1 - alpha) * result[i - 1]
+    return pd.Series(result, index=getattr(series, "index", None))
+
+def get_rsi(close):
+    delta = close.diff()
+    gain  = delta.clip(lower=0).fillna(0)
+    loss  = (-delta).clip(lower=0).fillna(0)
+    return 100 - 100 / (1 + rma(gain, 14) / rma(loss, 14))
+
+# ─── INDICATOR CALCULATION ────────────────────────────────────
+def calculate_indicators(df, timeframe="1d"):
+    close = df["Close"].squeeze()
+    high  = df["High"].squeeze()
+    low   = df["Low"].squeeze()
+    vol   = df["Volume"].squeeze()
+
+    rsi_series = get_rsi(close)
+    rsi        = rsi_series.iloc[-1]
+
+    e20  = ema_tv(close, 20).iloc[-1]
+    e50  = ema_tv(close, 50).iloc[-1] if len(close) >= 50 else ema_tv(close, 20).iloc[-1]
+    e200 = ema_tv(close, 200).iloc[-1] if len(close) >= 200 else ema_tv(close, 50).iloc[-1]
+
+    macd_line = ema_tv(close, 12) - ema_tv(close, 26)
+    macd_sig  = ema_tv(macd_line.dropna().reindex(macd_line.index), 9)
+    macd_hist = (macd_line - macd_sig).iloc[-1]
+
+    bb_mid   = close.rolling(20).mean()
+    bb_std   = close.rolling(20).std(ddof=0)
+    bb_upper = bb_mid + 2 * bb_std
+    bb_lower = bb_mid - 2 * bb_std
+    bb_denom = (bb_upper - bb_lower).iloc[-1]
+    bb_pos   = float((close.iloc[-1] - bb_lower.iloc[-1]) / bb_denom) if bb_denom != 0 else 0.5
+    bb_width = float(((bb_upper - bb_lower) / bb_mid).iloc[-1])
+
+    tr  = pd.concat([high - low,
+                     (high - close.shift()).abs(),
+                     (low  - close.shift()).abs()], axis=1).max(axis=1)
+    atr = float(rma(tr, 14).iloc[-1])
+
+    vol_avg   = float(vol.rolling(20).mean().iloc[-1])
+    vol_ratio = round(float(vol.iloc[-1]) / vol_avg, 2) if vol_avg > 0 else 1.0
+
+    atr10  = rma(tr, 10).values
+    hl2    = ((high + low) / 2).values
+    cv     = close.values
+    n      = len(cv)
+    bu, bl = hl2 + 3.0 * atr10, hl2 - 3.0 * atr10
+    fu, fl = bu.copy(), bl.copy()
+    dirn   = np.zeros(n)
+    for i in range(1, n):
+        fu[i] = bu[i] if (bu[i] < fu[i-1] or cv[i-1] > fu[i-1]) else fu[i-1]
+        fl[i] = bl[i] if (bl[i] > fl[i-1] or cv[i-1] < fl[i-1]) else fl[i-1]
+        if   cv[i] > fu[i-1]: dirn[i] =  1
+        elif cv[i] < fl[i-1]: dirn[i] = -1
+        else:                  dirn[i] =  dirn[i-1]
+    st_dir = dirn[-1]
+
+    p  = float(close.iloc[-1])
+    p1 = float(close.iloc[-2])  if len(close) > 1  else p
+    pw = float(close.iloc[-6])  if len(close) > 6  else float(close.iloc[0])
+    pm = float(close.iloc[-22]) if len(close) > 22 else float(close.iloc[0])
+
+    high52 = float(high.iloc[-252:].max()) if len(high) >= 252 else float(high.max())
+    low52  = float(low.iloc[-252:].min())  if len(low)  >= 252 else float(low.min())
+
+    res = float(high.rolling(10).max().iloc[-1])
+    sup = float(low.rolling(10).min().iloc[-1])
+
+    ema_trend = (
+        "STRONG BULL" if p > e20 > e50 > e200 else
+        "BULL"        if p > e50 and e50 > e200 else
+        "STRONG BEAR" if p < e20 < e50 < e200 else
+        "BEAR"        if p < e50 and e50 < e200 else
+        "MIXED"
+    )
+
+    # Chart data
+    cfg       = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
+    n_bars    = cfg["chart_bars"]
+    date_fmt  = cfg["date_fmt"]
+    chart_close  = close.iloc[-n_bars:]
+    ema20_series = ema_tv(close, 20).iloc[-n_bars:]
+    ema50_series = ema_tv(close, 50).iloc[-n_bars:] if len(close) >= 50 else ema_tv(close, 20).iloc[-n_bars:]
+    chart_dates  = [d.strftime(date_fmt) for d in chart_close.index]
+    chart_prices = [round(float(v), 4) for v in chart_close]
+    chart_ema20  = [None if np.isnan(v) else round(float(v), 4) for v in ema20_series]
+    chart_ema50  = [None if np.isnan(v) else round(float(v), 4) for v in ema50_series]
+
+    return {
+        "price":        round(p, 4),
+        "chg_1d":       round((p / p1 - 1) * 100, 2),
+        "chg_1w":       round((p / pw - 1) * 100, 2),
+        "chg_1m":       round((p / pm - 1) * 100, 2),
+        "high_52w":     round(high52, 4),
+        "low_52w":      round(low52, 4),
+        "rsi":          round(float(rsi), 1),
+        "ema20":        round(float(e20), 4),
+        "ema50":        round(float(e50), 4),
+        "ema200":       round(float(e200), 4),
+        "ema_trend":    ema_trend,
+        "macd_hist":    round(float(macd_hist), 6),
+        "bb_pos":       round(bb_pos, 3),
+        "bb_width":     round(bb_width, 3),
+        "atr":          round(atr, 4),
+        "vol_ratio":    vol_ratio,
+        "supertrend":   "BULLISH" if st_dir > 0 else ("BEARISH" if st_dir < 0 else "NEUTRAL"),
+        "resistance":   round(res, 4),
+        "support":      round(sup, 4),
+        "chart_dates":  chart_dates,
+        "chart_prices": chart_prices,
+        "chart_ema20":  chart_ema20,
+        "chart_ema50":  chart_ema50,
+    }
+
+# ─── MULTI-TIMEFRAME TREND ────────────────────────────────────
+def get_mtf_trend(ticker):
+    result = {}
+    configs = {
+        "4H": {"interval": "1h",  "period": "60d", "resample": "4h"},
+        "1D": {"interval": "1d",  "period": "1y"},
+    }
+    for label, cfg in configs.items():
+        try:
+            df_m = yf.download(ticker, period=cfg["period"],
+                               interval=cfg["interval"], progress=False, auto_adjust=True)
+            if "resample" in cfg:
+                df_m = df_m.resample(cfg["resample"]).agg(
+                    {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
+                ).dropna()
+            if len(df_m) < 20:
+                result[label] = {"trend": "N/A", "rsi": 0}
+                continue
+            c   = df_m["Close"].squeeze()
+            e20 = float(ema_tv(c, 20).iloc[-1])
+            e50 = float(ema_tv(c, min(50, len(c)-1)).iloc[-1])
+            p   = float(c.iloc[-1])
+            rsi = float(get_rsi(c).iloc[-1])
+            if p > e20 > e50:   trend = "BULLISH"
+            elif p < e20 < e50: trend = "BEARISH"
+            else:               trend = "NEUTRAL"
+            result[label] = {"trend": trend, "rsi": round(rsi, 1)}
+        except Exception:
+            result[label] = {"trend": "N/A", "rsi": 0}
+    return result
+
+# ─── HISTORICAL WIN RATE ──────────────────────────────────────
+def calculate_win_rate(df, signal):
+    try:
+        close      = df["Close"].squeeze()
+        rsi_series = get_rsi(close)
+        forward    = max(5, len(close) // 50)   # ~2% of history look-forward
+        wins, total = 0, 0
+        for i in range(len(close) - forward - 1):
+            r = rsi_series.iloc[i]
+            if np.isnan(r):
+                continue
+            if signal == "BUY"  and r < 38:
+                fut = float(close.iloc[i + forward]) / float(close.iloc[i]) - 1
+                total += 1
+                if fut > 0: wins += 1
+            elif signal == "SELL" and r > 62:
+                fut = float(close.iloc[i + forward]) / float(close.iloc[i]) - 1
+                total += 1
+                if fut < 0: wins += 1
+        if total < 3:
+            return {"win_rate": None, "sample_size": total}
+        return {"win_rate": round(wins / total * 100), "sample_size": total}
+    except Exception:
+        return {"win_rate": None, "sample_size": 0}
+
+# ─── CLAUDE ANALYSIS ─────────────────────────────────────────
+def get_analysis(ticker, asset_type, ind, timeframe):
+    rsi_tag  = "[OVERSOLD]"   if ind["rsi"] < 30 else "[OVERBOUGHT]" if ind["rsi"] > 70 else "[NEUTRAL]"
+    macd_tag = "[BULLISH MOMENTUM]" if ind["macd_hist"] > 0 else "[BEARISH MOMENTUM]"
+    bb_tag   = "near lower band" if ind["bb_pos"] < 0.2 else "near upper band" if ind["bb_pos"] > 0.8 else "mid-range"
+
+    prompt = f"""You are a professional quantitative analyst. Analyze {ticker} ({asset_type}) on the {timeframe} timeframe using the indicator data below and return ONLY a valid JSON object — no markdown, no explanation outside the JSON.
+
+INDICATOR DATA ({timeframe} timeframe):
+Price: {ind['price']} | 1-bar chg: {ind['chg_1d']:+}%
+RSI(14): {ind['rsi']} {rsi_tag}
+EMA Trend: {ind['ema_trend']} | EMA20={ind['ema20']} | EMA50={ind['ema50']} | EMA200={ind['ema200']}
+MACD Histogram: {ind['macd_hist']} {macd_tag}
+Bollinger Position: {ind['bb_pos']:.2f} ({bb_tag}) | BB Width: {ind['bb_width']:.3f}
+ATR(14): {ind['atr']} | Volume: {ind['vol_ratio']}x 20-bar average
+Supertrend: {ind['supertrend']}
+Support: {ind['support']} | Resistance: {ind['resistance']}
+
+IMPORTANT RULES:
+- If signal is HOLD: set entry, stop_loss, tp1, tp2, tp3, rr1, rr2, rr3 all to null. Do NOT invent trade levels for a HOLD signal.
+- If signal is BUY or SELL: provide all trade levels based on the indicators.
+
+Return this exact JSON structure:
+{{
+  "signal": "BUY" or "HOLD" or "SELL",
+  "confidence": "HIGH" or "MEDIUM" or "LOW",
+  "summary": "2-3 sentence plain English signal explanation",
+  "bull_scenario": "What happens if bulls take control (1-2 sentences)",
+  "base_scenario": "Most likely scenario (1-2 sentences)",
+  "bear_scenario": "What happens if bears take control (1-2 sentences)",
+  "entry": <entry price as number, or null if HOLD>,
+  "stop_loss": <stop loss price as number, or null if HOLD>,
+  "tp1": <conservative take profit — 1:1.5 R/R, or null if HOLD>,
+  "tp2": <moderate take profit — 1:2.5 R/R, or null if HOLD>,
+  "tp3": <aggressive take profit — 1:4 R/R, or null if HOLD>,
+  "rr1": <R/R ratio for TP1 to 1dp, or null if HOLD>,
+  "rr2": <R/R ratio for TP2 to 1dp, or null if HOLD>,
+  "rr3": <R/R ratio for TP3 to 1dp, or null if HOLD>,
+  "rsi_assessment": "one line RSI interpretation",
+  "trend_assessment": "one line trend interpretation",
+  "macd_assessment": "one line MACD interpretation",
+  "volume_assessment": "one line volume interpretation",
+  "supertrend_assessment": "one line supertrend interpretation"
+}}"""
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key":         api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type":      "application/json",
+        },
+        json={
+            "model":      "claude-sonnet-4-6",
+            "max_tokens": 1500,
+            "messages":   [{"role": "user", "content": prompt}],
+        },
+        timeout=60,
+    )
+    if resp.status_code != 200:
+        raise Exception(f"Anthropic API error {resp.status_code}: {resp.text[:200]}")
+
+    text = resp.json()["content"][0]["text"].strip()
+    if "```" in text:
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text.strip())
+
+# ─── TICKER NORMALISATION ─────────────────────────────────────
+def normalise_ticker(ticker, asset_type):
+    if asset_type == "crypto":
+        ticker = ticker.replace("/", "-")
+        if not ticker.endswith("-USD"):
+            ticker += "-USD"
+    elif asset_type == "forex":
+        ticker = ticker.replace("/", "").replace("-", "")
+        if not ticker.endswith("=X"):
+            ticker += "=X"
+    elif asset_type == "commodity":
+        m = {"GOLD":"GC=F","XAUUSD":"GC=F","SILVER":"SI=F","XAGUSD":"SI=F",
+             "OIL":"CL=F","WTI":"CL=F","CRUDE":"CL=F","CRUDEOIL":"CL=F",
+             "NATGAS":"NG=F","GAS":"NG=F","COPPER":"HG=F",
+             "WHEAT":"ZW=F","CORN":"ZC=F","PLATINUM":"PL=F"}
+        ticker = m.get(ticker, ticker)
+    elif asset_type == "index":
+        m = {"SPX":"^GSPC","SP500":"^GSPC","SMP500":"^GSPC","S&P500":"^GSPC","S&P":"^GSPC","US500":"^GSPC",
+             "NDX":"^IXIC","NASDAQ":"^IXIC","NAS100":"^IXIC","US100":"^IXIC",
+             "DOW":"^DJI","DJIA":"^DJI","DJI":"^DJI","US30":"^DJI",
+             "FTSE":"^FTSE","FTSE100":"^FTSE","UK100":"^FTSE",
+             "DAX":"^GDAXI","GER40":"^GDAXI",
+             "NIKKEI":"^N225","NKY":"^N225","JPN225":"^N225",
+             "HSI":"^HSI","HANGSENG":"^HSI",
+             "CAC":"^FCHI","CAC40":"^FCHI",
+             "ASX":"^AXJO","ASX200":"^AXJO"}
+        ticker = m.get(ticker, ticker)
+    return ticker
+
+# ─── ROUTES ──────────────────────────────────────────────────
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
+@app.route("/api/analyze", methods=["POST"])
+def analyze():
+    try:
+        body       = request.json or {}
+        ticker     = body.get("ticker", "").upper().strip()
+        asset_type = body.get("asset_type", "stock")
+        timeframe  = body.get("timeframe", "1d").lower()
+
+        if not ticker:
+            return jsonify({"error": "Ticker symbol is required"}), 400
+        if timeframe not in TIMEFRAME_CONFIG:
+            timeframe = "1d"
+
+        ticker = normalise_ticker(ticker, asset_type)
+        cfg    = TIMEFRAME_CONFIG[timeframe]
+
+        # Fetch main OHLCV
+        df = yf.download(ticker, period=cfg["period"], interval=cfg["interval"],
+                         progress=False, auto_adjust=True)
+
+        # Resample for 4h
+        if "resample" in cfg:
+            df = df.resample(cfg["resample"]).agg(
+                {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
+            ).dropna()
+
+        min_bars = 30
+        if df.empty or len(df) < min_bars:
+            return jsonify({"error": f"Not enough data for '{ticker}' on {timeframe}. Try a longer timeframe."}), 404
+
+        ind      = calculate_indicators(df, timeframe)
+        analysis = get_analysis(ticker, asset_type, ind, timeframe)
+
+        # Historical win rate (always on daily data for reliability)
+        df_daily = yf.download(ticker, period="1y", interval="1d",
+                                progress=False, auto_adjust=True) if timeframe != "1d" else df
+        wr = calculate_win_rate(df_daily, analysis.get("signal", "HOLD"))
+
+        # Multi-timeframe trend (skip for intraday to save time)
+        mtf = {}
+        if timeframe in ("1d", "4h", "1h"):
+            mtf = get_mtf_trend(ticker)
+
+        return jsonify({
+            "ticker":     ticker,
+            "asset_type": asset_type,
+            "timeframe":  timeframe,
+            "timestamp":  datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+            **ind,
+            **analysis,
+            "win_rate":    wr.get("win_rate"),
+            "sample_size": wr.get("sample_size"),
+            "mtf":         mtf,
+        })
+
+    except json.JSONDecodeError:
+        return jsonify({"error": "Analysis generation failed. Please try again."}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat()})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
