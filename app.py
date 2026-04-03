@@ -9,13 +9,14 @@ from flask_cors import CORS
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import anthropic
+import requests
 import os, json
 from datetime import datetime
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
+# ─── INDICATOR HELPERS (TradingView-compatible) ───────────────
 def rma(series, length):
     alpha  = 1.0 / length
     vals   = series.values if hasattr(series, "values") else np.array(series)
@@ -44,25 +45,30 @@ def ema_tv(series, span):
             result[i] = alpha * vals[i] + (1 - alpha) * result[i - 1]
     return pd.Series(result, index=getattr(series, "index", None))
 
+# ─── INDICATOR CALCULATION ────────────────────────────────────
 def calculate_indicators(df):
     close = df["Close"].squeeze()
     high  = df["High"].squeeze()
     low   = df["Low"].squeeze()
     vol   = df["Volume"].squeeze()
 
+    # RSI 14
     delta = close.diff()
     gain  = delta.clip(lower=0).fillna(0)
     loss  = (-delta).clip(lower=0).fillna(0)
     rsi   = (100 - 100 / (1 + rma(gain, 14) / rma(loss, 14))).iloc[-1]
 
+    # EMAs
     e20  = ema_tv(close, 20).iloc[-1]
     e50  = ema_tv(close, 50).iloc[-1]
     e200 = ema_tv(close, 200).iloc[-1]
 
+    # MACD (12,26,9)
     macd_line = ema_tv(close, 12) - ema_tv(close, 26)
     macd_sig  = ema_tv(macd_line.dropna().reindex(macd_line.index), 9)
     macd_hist = (macd_line - macd_sig).iloc[-1]
 
+    # Bollinger Bands (20, 2σ)
     bb_mid   = close.rolling(20).mean()
     bb_std   = close.rolling(20).std(ddof=0)
     bb_upper = bb_mid + 2 * bb_std
@@ -70,14 +76,17 @@ def calculate_indicators(df):
     bb_pos   = float(((close - bb_lower) / (bb_upper - bb_lower)).iloc[-1])
     bb_width = float(((bb_upper - bb_lower) / bb_mid).iloc[-1])
 
+    # ATR 14
     tr  = pd.concat([high - low,
                      (high - close.shift()).abs(),
                      (low  - close.shift()).abs()], axis=1).max(axis=1)
     atr = float(rma(tr, 14).iloc[-1])
 
+    # Volume ratio
     vol_avg   = float(vol.rolling(20).mean().iloc[-1])
     vol_ratio = round(float(vol.iloc[-1]) / vol_avg, 2) if vol_avg > 0 else 1.0
 
+    # Supertrend (3×ATR10)
     atr10  = rma(tr, 10).values
     hl2    = ((high + low) / 2).values
     cv     = close.values
@@ -93,14 +102,17 @@ def calculate_indicators(df):
         else:                  dirn[i] =  dirn[i-1]
     st_dir = dirn[-1]
 
+    # Price changes
     p  = float(close.iloc[-1])
     p1 = float(close.iloc[-2])  if len(close) > 1  else p
     pw = float(close.iloc[-6])  if len(close) > 6  else float(close.iloc[0])
     pm = float(close.iloc[-22]) if len(close) > 22 else float(close.iloc[0])
 
+    # 52-week range
     high52 = float(high.iloc[-252:].max()) if len(high) >= 252 else float(high.max())
     low52  = float(low.iloc[-252:].min())  if len(low)  >= 252 else float(low.min())
 
+    # Pivot support / resistance (10-bar)
     res = float(high.rolling(10).max().iloc[-1])
     sup = float(low.rolling(10).min().iloc[-1])
 
@@ -134,12 +146,13 @@ def calculate_indicators(df):
         "support":    round(sup, 4),
     }
 
+# ─── CLAUDE ANALYSIS ─────────────────────────────────────────
 def get_analysis(ticker, asset_type, ind):
     client = anthropic.Anthropic()
 
-    rsi_tag  = "[OVERSOLD]" if ind["rsi"] < 30 else "[OVERBOUGHT]" if ind["rsi"] > 70 else "[NEUTRAL]"
+    rsi_tag = "[OVERSOLD]" if ind["rsi"] < 30 else "[OVERBOUGHT]" if ind["rsi"] > 70 else "[NEUTRAL]"
     macd_tag = "[BULLISH MOMENTUM]" if ind["macd_hist"] > 0 else "[BEARISH MOMENTUM]"
-    bb_tag   = "near lower band" if ind["bb_pos"] < 0.2 else "near upper band" if ind["bb_pos"] > 0.8 else "mid-range"
+    bb_tag = "near lower band" if ind["bb_pos"] < 0.2 else "near upper band" if ind["bb_pos"] > 0.8 else "mid-range"
 
     prompt = f"""You are a professional quantitative analyst. Analyze {ticker} ({asset_type}) using the indicator data below and return ONLY a valid JSON object — no markdown, no explanation outside the JSON.
 
@@ -173,19 +186,32 @@ Return this exact JSON structure:
   "supertrend_assessment": "one line supertrend interpretation"
 }}"""
 
-    msg = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}]
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key":         api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type":      "application/json",
+        },
+        json={
+            "model":      "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "messages":   [{"role": "user", "content": prompt}],
+        },
+        timeout=60,
     )
+    if resp.status_code != 200:
+        raise Exception(f"Anthropic API error {resp.status_code}: {resp.text[:200]}")
 
-    text = msg.content[0].text.strip()
+    text = resp.json()["content"][0]["text"].strip()
     if "```" in text:
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
     return json.loads(text.strip())
 
+# ─── ROUTES ──────────────────────────────────────────────────
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
@@ -193,13 +219,14 @@ def index():
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
     try:
-        body       = request.json or {}
-        ticker     = body.get("ticker", "").upper().strip()
-        asset_type = body.get("asset_type", "stock")
+        body        = request.json or {}
+        ticker      = body.get("ticker", "").upper().strip()
+        asset_type  = body.get("asset_type", "stock")
 
         if not ticker:
             return jsonify({"error": "Ticker symbol is required"}), 400
 
+        # Normalise ticker for yfinance
         if asset_type == "crypto" and "-USD" not in ticker:
             ticker = ticker.replace("/", "-")
             if not ticker.endswith("-USD"):
@@ -209,21 +236,15 @@ def analyze():
             if not ticker.endswith("=X"):
                 ticker += "=X"
 
-        try:
-            df = yf.download(ticker, period="1y", interval="1d",
-                             progress=False, auto_adjust=True)
-        except Exception as e:
-            return jsonify({"error": f"Market data failed: {type(e).__name__}: {str(e)[:150]}"}), 500
-
+        # Fetch OHLCV
+        df = yf.download(ticker, period="1y", interval="1d",
+                         progress=False, auto_adjust=True)
         if df.empty or len(df) < 50:
             return jsonify({"error": f"No data found for '{ticker}'. Check the symbol and try again."}), 404
 
-        ind = calculate_indicators(df)
-
-        try:
-            analysis = get_analysis(ticker, asset_type, ind)
-        except Exception as e:
-            return jsonify({"error": f"AI analysis failed: {type(e).__name__}: {str(e)[:150]}"}), 500
+        # Indicators + AI analysis
+        ind      = calculate_indicators(df)
+        analysis = get_analysis(ticker, asset_type, ind)
 
         return jsonify({
             "ticker":     ticker,
@@ -238,6 +259,7 @@ def analyze():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ─── HEALTH CHECK ────────────────────────────────────────────
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat()})
