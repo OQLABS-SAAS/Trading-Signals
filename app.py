@@ -209,13 +209,21 @@ def analyze():
             if not ticker.endswith("=X"):
                 ticker += "=X"
 
-        df = yf.download(ticker, period="1y", interval="1d",
-                         progress=False, auto_adjust=True)
+        try:
+            df = yf.download(ticker, period="1y", interval="1d",
+                             progress=False, auto_adjust=True)
+        except Exception as e:
+            return jsonify({"error": f"Market data failed: {type(e).__name__}: {str(e)[:150]}"}), 500
+
         if df.empty or len(df) < 50:
             return jsonify({"error": f"No data found for '{ticker}'. Check the symbol and try again."}), 404
 
-        ind      = calculate_indicators(df)
-        analysis = get_analysis(ticker, asset_type, ind)
+        ind = calculate_indicators(df)
+
+        try:
+            analysis = get_analysis(ticker, asset_type, ind)
+        except Exception as e:
+            return jsonify({"error": f"AI analysis failed: {type(e).__name__}: {str(e)[:150]}"}), 500
 
         return jsonify({
             "ticker":     ticker,
