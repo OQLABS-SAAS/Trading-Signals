@@ -75,4 +75,165 @@ def calculate_indicators(df):
                      (low  - close.shift()).abs()], axis=1).max(axis=1)
     atr = float(rma(tr, 14).iloc[-1])
 
-    vol_avg
+    vol_avg   = float(vol.rolling(20).mean().iloc[-1])
+    vol_ratio = round(float(vol.iloc[-1]) / vol_avg, 2) if vol_avg > 0 else 1.0
+
+    atr10  = rma(tr, 10).values
+    hl2    = ((high + low) / 2).values
+    cv     = close.values
+    n      = len(cv)
+    bu, bl = hl2 + 3.0 * atr10, hl2 - 3.0 * atr10
+    fu, fl = bu.copy(), bl.copy()
+    dirn   = np.zeros(n)
+    for i in range(1, n):
+        fu[i] = bu[i] if (bu[i] < fu[i-1] or cv[i-1] > fu[i-1]) else fu[i-1]
+        fl[i] = bl[i] if (bl[i] > fl[i-1] or cv[i-1] < fl[i-1]) else fl[i-1]
+        if   cv[i] > fu[i-1]: dirn[i] =  1
+        elif cv[i] < fl[i-1]: dirn[i] = -1
+        else:                  dirn[i] =  dirn[i-1]
+    st_dir = dirn[-1]
+
+    p  = float(close.iloc[-1])
+    p1 = float(close.iloc[-2])  if len(close) > 1  else p
+    pw = float(close.iloc[-6])  if len(close) > 6  else float(close.iloc[0])
+    pm = float(close.iloc[-22]) if len(close) > 22 else float(close.iloc[0])
+
+    high52 = float(high.iloc[-252:].max()) if len(high) >= 252 else float(high.max())
+    low52  = float(low.iloc[-252:].min())  if len(low)  >= 252 else float(low.min())
+
+    res = float(high.rolling(10).max().iloc[-1])
+    sup = float(low.rolling(10).min().iloc[-1])
+
+    ema_trend = (
+        "STRONG BULL" if p > e20 > e50 > e200 else
+        "BULL"        if p > e50 and e50 > e200 else
+        "STRONG BEAR" if p < e20 < e50 < e200 else
+        "BEAR"        if p < e50 and e50 < e200 else
+        "MIXED"
+    )
+
+    return {
+        "price":      round(p, 4),
+        "chg_1d":     round((p / p1 - 1) * 100, 2),
+        "chg_1w":     round((p / pw - 1) * 100, 2),
+        "chg_1m":     round((p / pm - 1) * 100, 2),
+        "high_52w":   round(high52, 4),
+        "low_52w":    round(low52, 4),
+        "rsi":        round(float(rsi), 1),
+        "ema20":      round(float(e20), 4),
+        "ema50":      round(float(e50), 4),
+        "ema200":     round(float(e200), 4),
+        "ema_trend":  ema_trend,
+        "macd_hist":  round(float(macd_hist), 6),
+        "bb_pos":     round(bb_pos, 3),
+        "bb_width":   round(bb_width, 3),
+        "atr":        round(atr, 4),
+        "vol_ratio":  vol_ratio,
+        "supertrend": "BULLISH" if st_dir > 0 else ("BEARISH" if st_dir < 0 else "NEUTRAL"),
+        "resistance": round(res, 4),
+        "support":    round(sup, 4),
+    }
+
+def get_analysis(ticker, asset_type, ind):
+    client = anthropic.Anthropic()
+
+    rsi_tag  = "[OVERSOLD]" if ind["rsi"] < 30 else "[OVERBOUGHT]" if ind["rsi"] > 70 else "[NEUTRAL]"
+    macd_tag = "[BULLISH MOMENTUM]" if ind["macd_hist"] > 0 else "[BEARISH MOMENTUM]"
+    bb_tag   = "near lower band" if ind["bb_pos"] < 0.2 else "near upper band" if ind["bb_pos"] > 0.8 else "mid-range"
+
+    prompt = f"""You are a professional quantitative analyst. Analyze {ticker} ({asset_type}) using the indicator data below and return ONLY a valid JSON object — no markdown, no explanation outside the JSON.
+
+INDICATOR DATA:
+Price: {ind['price']} | 1D: {ind['chg_1d']:+}% | 1W: {ind['chg_1w']:+}% | 1M: {ind['chg_1m']:+}%
+52W Range: {ind['low_52w']} – {ind['high_52w']}
+RSI(14): {ind['rsi']} {rsi_tag}
+EMA Trend: {ind['ema_trend']} | EMA20={ind['ema20']} | EMA50={ind['ema50']} | EMA200={ind['ema200']}
+MACD Histogram: {ind['macd_hist']} {macd_tag}
+Bollinger Position: {ind['bb_pos']:.2f} ({bb_tag}) | BB Width: {ind['bb_width']:.3f}
+ATR(14): {ind['atr']} | Volume: {ind['vol_ratio']}x 20-day average
+Supertrend: {ind['supertrend']}
+10-day Support: {ind['support']} | Resistance: {ind['resistance']}
+
+Return this exact JSON structure:
+{{
+  "signal": "BUY" or "HOLD" or "SELL",
+  "confidence": "HIGH" or "MEDIUM" or "LOW",
+  "summary": "2-3 sentence plain English signal explanation",
+  "bull_scenario": "What happens if bulls take control (1-2 sentences)",
+  "base_scenario": "Most likely scenario (1-2 sentences)",
+  "bear_scenario": "What happens if bears take control (1-2 sentences)",
+  "entry": <suggested entry price as number>,
+  "stop_loss": <stop loss price as number>,
+  "take_profit": <take profit price as number>,
+  "risk_reward": <risk/reward ratio rounded to 1dp>,
+  "rsi_assessment": "one line RSI interpretation",
+  "trend_assessment": "one line trend interpretation",
+  "macd_assessment": "one line MACD interpretation",
+  "volume_assessment": "one line volume interpretation",
+  "supertrend_assessment": "one line supertrend interpretation"
+}}"""
+
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    text = msg.content[0].text.strip()
+    if "```" in text:
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text.strip())
+
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
+@app.route("/api/analyze", methods=["POST"])
+def analyze():
+    try:
+        body       = request.json or {}
+        ticker     = body.get("ticker", "").upper().strip()
+        asset_type = body.get("asset_type", "stock")
+
+        if not ticker:
+            return jsonify({"error": "Ticker symbol is required"}), 400
+
+        if asset_type == "crypto" and "-USD" not in ticker:
+            ticker = ticker.replace("/", "-")
+            if not ticker.endswith("-USD"):
+                ticker += "-USD"
+        elif asset_type == "forex":
+            ticker = ticker.replace("/", "").replace("-", "")
+            if not ticker.endswith("=X"):
+                ticker += "=X"
+
+        df = yf.download(ticker, period="1y", interval="1d",
+                         progress=False, auto_adjust=True)
+        if df.empty or len(df) < 50:
+            return jsonify({"error": f"No data found for '{ticker}'. Check the symbol and try again."}), 404
+
+        ind      = calculate_indicators(df)
+        analysis = get_analysis(ticker, asset_type, ind)
+
+        return jsonify({
+            "ticker":     ticker,
+            "asset_type": asset_type,
+            "timestamp":  datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+            **ind,
+            **analysis,
+        })
+
+    except json.JSONDecodeError:
+        return jsonify({"error": "Analysis generation failed. Please try again."}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat()})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
