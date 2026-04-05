@@ -371,6 +371,12 @@ header{height:var(--header-h);background:rgba(8,8,8,.92);border-bottom:1px solid
 .risk-result-val{font-family:var(--mono);font-size:17px;font-weight:700;color:var(--orange);margin-top:2px;}
 .risk-calc-btn{background:linear-gradient(135deg,var(--orange),#ff8800);border:none;color:#000;padding:9px;border-radius:var(--radius-sm);font-size:12px;font-weight:800;transition:all .15s;width:100%;margin-top:7px;letter-spacing:.3px;}
 .risk-calc-btn:hover{opacity:.9;transform:translateY(-1px);box-shadow:0 4px 16px rgba(245,166,35,.35);}
+/* Direction selector */
+.calc-dir-row{display:flex;gap:6px;margin-bottom:10px;}
+.calc-dir-btn{flex:1;padding:7px 0;border-radius:var(--radius-sm);border:1.5px solid rgba(255,255,255,.1);background:var(--card);font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;letter-spacing:.4px;color:var(--muted);}
+.calc-dir-btn.buy.active{background:rgba(245,166,35,.18);border-color:var(--orange);color:var(--orange);}
+.calc-dir-btn.sell.active{background:rgba(255,82,74,.18);border-color:#ff524a;color:#ff524a;}
+.calc-dir-btn:not(.active):hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.7);}
 
 /* ── ENHANCED CALCULATOR ── */
 .calc-row{display:flex;gap:7px;margin-bottom:7px;}
@@ -2256,6 +2262,12 @@ header {
   <div class="panel-card">
     <div class="panel-title">Position Size Calculator</div>
 
+    <!-- Direction selector — auto-syncs with signal -->
+    <div class="calc-dir-row" id="calcDirRow">
+      <button class="calc-dir-btn buy active" id="calcDirBuy"  onclick="setCalcDir('BUY')">▲ BUY</button>
+      <button class="calc-dir-btn sell"       id="calcDirSell" onclick="setCalcDir('SELL')">▼ SELL</button>
+    </div>
+
     <!-- Account + Currency -->
     <div class="calc-row">
       <div class="calc-field half">
@@ -3981,6 +3993,17 @@ function getLiveCommentaryBadge(w) {
 ════════════════════════════════════════════ */
 /* ── Position Size Calculator AUTO logic ── */
 const riskAutoState = { entry: true, sl: true };
+let calcDirection = 'BUY'; // tracks BUY or SELL for the calculator
+
+function setCalcDir(dir) {
+  calcDirection = dir;
+  const buyBtn  = document.getElementById('calcDirBuy');
+  const sellBtn = document.getElementById('calcDirSell');
+  if (buyBtn && sellBtn) {
+    buyBtn.classList.toggle('active',  dir === 'BUY');
+    sellBtn.classList.toggle('active', dir === 'SELL');
+  }
+}
 
 function updateRiskAutoValues(d) {
   // Called whenever a new signal renders — updates the stored auto values.
@@ -3988,6 +4011,11 @@ function updateRiskAutoValues(d) {
   // current price for entry and price ± 1.5×ATR for stop loss (same formula
   // the backend uses for BUY/SELL trade levels).
   const fmtP = v => parseFloat(v).toPrecision(7).replace(/\.?0+$/, '');
+
+  // Auto-set direction from signal (BUY/SELL only; ignore HOLD)
+  if (d.signal === 'BUY' || d.signal === 'SELL') {
+    setCalcDir(d.signal);
+  }
 
   // Resolve entry: AI value → current price
   const resolvedEntry = (d.entry != null) ? d.entry : d.price;
@@ -4117,7 +4145,7 @@ function calcRisk() {
   const riskPerUnit = Math.abs(entry - sl);
   if (!riskPerUnit) { showToast('Entry and SL must differ'); return; }
 
-  const isBuy  = entry > sl; // SL below entry = long trade
+  const isBuy  = calcDirection === 'BUY'; // use explicit direction toggle
   const units  = riskAmt / riskPerUnit;
   const posVal = units * entry;
 
@@ -4160,11 +4188,15 @@ function calcRisk() {
   document.getElementById('riskDollar').textContent = sym + riskAmt.toFixed(2);
 
   // ── TP Profit + R/R rows ──
+  // TPs apply to both BUY and SELL — profit = distance from entry regardless of direction
   const tps = [
     { label:'TP1', val: currentData?.tp1, rr: currentData?.rr1 },
     { label:'TP2', val: currentData?.tp2, rr: currentData?.rr2 },
     { label:'TP3', val: currentData?.tp3, rr: currentData?.rr3 },
   ];
+
+  const dirColor = isBuy ? '#f5a623' : '#ff524a';
+  const dirTag   = isBuy ? '▲ BUY'  : '▼ SELL';
 
   const tpHtml = tps.map(tp => {
     if (!tp.val) return '';
@@ -4173,8 +4205,11 @@ function calcRisk() {
     const rr     = tp.rr != null
       ? parseFloat(tp.rr).toFixed(1)
       : (profitPerUnit / riskPerUnit).toFixed(1);
+    // Verify TP is in the correct direction (warn if not)
+    const tpOk = isBuy ? tp.val > entry : tp.val < entry;
+    const tpWarning = !tpOk ? ' ⚠️' : '';
     return `<div class="calc-tp-row">
-      <span class="calc-tp-name">${tp.label}</span>
+      <span class="calc-tp-name" style="color:${dirColor};">${tp.label}${tpWarning}</span>
       <span class="calc-tp-rr">${rr}:1 R/R</span>
       <span class="calc-tp-profit">+${sym}${profit.toLocaleString(undefined,{maximumFractionDigits:2})}</span>
     </div>`;
@@ -4407,6 +4442,10 @@ function showMobileTab(tab) {
     showHandle('R', 'Position Calculator');
     rSide.classList.add('drawer-open');
     backdrop.classList.add('open');
+    // Sync direction from current signal when opening calculator
+    if (currentData && (currentData.signal === 'BUY' || currentData.signal === 'SELL')) {
+      setCalcDir(currentData.signal);
+    }
     setTimeout(() => {
       const calc = document.getElementById('mktPulsePanel');
       if (calc) calc.nextElementSibling?.scrollIntoView({behavior:'smooth', block:'start'});
