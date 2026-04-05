@@ -235,6 +235,11 @@ header{height:var(--header-h);background:rgba(8,8,8,.92);border-bottom:1px solid
 .win-rate-badge{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:9px;}
 .win-rate-badge .wr-val{font-family:var(--mono);font-size:13px;font-weight:700;color:#f5a623;line-height:1;}
 .win-rate-badge .wr-label{font-size:8px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(245,190,80,0.48);}
+/* Chart overlay toggle buttons */
+.chart-ovr-row{display:flex;gap:5px;margin-bottom:8px;flex-wrap:wrap;}
+.chart-ovr-btn{padding:3px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;border-radius:4px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.35);cursor:pointer;transition:all .15s;text-transform:uppercase;}
+.chart-ovr-btn.active{background:rgba(245,166,35,.12);border-color:rgba(245,166,35,.3);color:rgba(245,166,35,.8);}
+.chart-ovr-btn:hover:not(.active){background:rgba(255,255,255,.08);color:rgba(255,255,255,.6);}
 /* TradingView cross-verification panel */
 .tv-panel{margin-top:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:11px 15px;display:flex;align-items:center;flex-wrap:wrap;gap:14px;}
 .tv-logo{font-size:9px;font-weight:700;letter-spacing:1.4px;color:rgba(245,190,80,0.45);text-transform:uppercase;white-space:nowrap;flex-shrink:0;}
@@ -1952,8 +1957,19 @@ header {
           <div class="legend-item" id="legendTP" style="display:none"><div class="legend-line" style="background:var(--green);border-top:1px dashed var(--green);height:0;width:14px;margin:0;"></div>TP</div>
         </div>
       </div>
+      <!-- Overlay toggle buttons -->
+      <div class="chart-ovr-row" id="chartOvrRow" style="display:none;">
+        <button class="chart-ovr-btn active" id="ovrBB"  onclick="toggleChartOverlay('BB')">BB Bands</button>
+        <button class="chart-ovr-btn active" id="ovrRSI" onclick="toggleChartOverlay('RSI')">RSI</button>
+        <button class="chart-ovr-btn active" id="ovrSIG" onclick="toggleChartOverlay('SIG')">Signals</button>
+      </div>
       <div class="chart-container"><canvas id="priceChart"></canvas></div>
       <div class="vol-container"><canvas id="volChart"></canvas></div>
+      <!-- RSI sub-chart -->
+      <div id="rsiChartWrap" style="display:none;position:relative;margin-top:2px;">
+        <div style="position:absolute;top:4px;left:6px;font-size:8px;font-weight:700;letter-spacing:.8px;color:rgba(255,255,255,.28);text-transform:uppercase;z-index:1;">RSI(14)</div>
+        <canvas id="rsiChart" height="72"></canvas>
+      </div>
       <!-- TradingView embed: shown when OHLC history is unavailable -->
       <div id="tvChartEmbed" style="display:none;border-radius:8px;overflow:hidden;margin-top:4px;"></div>
     </div>
@@ -3293,50 +3309,120 @@ function renderTVPanel(tv, signal) {
 /* ════════════════════════════════════════════
    CHART — LEVEL-LINES + CROSSHAIR PLUGINS
 ════════════════════════════════════════════ */
-let chartLevels = null; // set by renderChart(), read by plugin
+let chartLevels      = null; // set by renderChart(), read by plugin
+let chartSignals     = null; // { buys:[], sells:[], prices:[] } for arrow markers
+let chartOverlays    = { BB: true, RSI: true, SIG: true };
+let rsiChartInst     = null;
+
+function toggleChartOverlay(key) {
+  chartOverlays[key] = !chartOverlays[key];
+  const btn = document.getElementById('ovr' + key);
+  if (btn) btn.classList.toggle('active', chartOverlays[key]);
+
+  if (key === 'BB' && priceChartInst) {
+    // datasets: 0=Price, 1=EMA20, 2=EMA50, 3=BB Upper, 4=BB Lower
+    [3, 4].forEach(i => {
+      const ds = priceChartInst.data.datasets[i];
+      if (ds) { ds.hidden = !chartOverlays.BB; }
+    });
+    priceChartInst.update();
+  }
+  if (key === 'RSI') {
+    const wrap = document.getElementById('rsiChartWrap');
+    if (wrap) wrap.style.display = chartOverlays.RSI ? '' : 'none';
+  }
+  if (key === 'SIG') {
+    // Redraw price chart to show/hide signal arrows
+    if (priceChartInst) priceChartInst.update();
+  }
+}
 
 const levelLinesPlugin = {
   id: 'levelLines',
   afterDraw(chart) {
-    if (!chartLevels) return;
     const ctx  = chart.ctx;
     const yAx  = chart.scales.y;
     const xAx  = chart.scales.x;
     if (!yAx || !xAx) return;
-    const lvls = [
-      { val: chartLevels.entry,     color: '#f5a623', label: 'Entry', dash: [7,3] },
-      { val: chartLevels.stop_loss, color: '#ff4459', label: 'SL',    dash: [4,4] },
-      { val: chartLevels.tp1,       color: '#00c98d', label: 'TP1',   dash: [6,3] },
-      { val: chartLevels.tp2,       color: '#009d6f', label: 'TP2',   dash: [6,3] },
-      { val: chartLevels.tp3,       color: '#006e4e', label: 'TP3',   dash: [6,3] },
-    ];
-    ctx.save();
-    lvls.forEach(({ val, color, label, dash }) => {
-      if (val == null) return;
-      const y = yAx.getPixelForValue(val);
-      if (y < yAx.top - 2 || y > yAx.bottom + 2) return;
-      // Dashed horizontal line
-      ctx.beginPath();
-      ctx.setLineDash(dash);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.3;
-      ctx.globalAlpha = 0.72;
-      ctx.moveTo(xAx.left, y);
-      ctx.lineTo(xAx.right, y);
-      ctx.stroke();
-      // Price label on right edge
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 1;
-      const txt = `${label} ${fmt(val)}`;
-      ctx.font = 'bold 9px JetBrains Mono,monospace';
-      const tw  = ctx.measureText(txt).width;
-      ctx.fillStyle = 'rgba(8,8,8,0.85)';
-      ctx.fillRect(xAx.right - tw - 10, y - 9, tw + 8, 14);
-      ctx.fillStyle = color;
-      ctx.textAlign = 'right';
-      ctx.fillText(txt, xAx.right - 3, y + 3.5);
-    });
-    ctx.restore();
+
+    // ── Level lines (Entry / SL / TPs) ──
+    if (chartLevels) {
+      const lvls = [
+        { val: chartLevels.entry,     color: '#f5a623', label: 'Entry', dash: [7,3] },
+        { val: chartLevels.stop_loss, color: '#ff4459', label: 'SL',    dash: [4,4] },
+        { val: chartLevels.tp1,       color: '#00c98d', label: 'TP1',   dash: [6,3] },
+        { val: chartLevels.tp2,       color: '#009d6f', label: 'TP2',   dash: [6,3] },
+        { val: chartLevels.tp3,       color: '#006e4e', label: 'TP3',   dash: [6,3] },
+      ];
+      ctx.save();
+      lvls.forEach(({ val, color, label, dash }) => {
+        if (val == null) return;
+        const y = yAx.getPixelForValue(val);
+        if (y < yAx.top - 2 || y > yAx.bottom + 2) return;
+        ctx.beginPath();
+        ctx.setLineDash(dash);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.3;
+        ctx.globalAlpha = 0.72;
+        ctx.moveTo(xAx.left, y);
+        ctx.lineTo(xAx.right, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        const txt = `${label} ${fmt(val)}`;
+        ctx.font = 'bold 9px JetBrains Mono,monospace';
+        const tw  = ctx.measureText(txt).width;
+        ctx.fillStyle = 'rgba(8,8,8,0.85)';
+        ctx.fillRect(xAx.right - tw - 10, y - 9, tw + 8, 14);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'right';
+        ctx.fillText(txt, xAx.right - 3, y + 3.5);
+      });
+      ctx.restore();
+    }
+
+    // ── Signal arrows (RSI crossover/under markers) ──
+    if (chartSignals && chartOverlays.SIG) {
+      const prices = chartSignals.prices || [];
+      ctx.save();
+
+      const drawArrow = (barIdx, price, isBuy) => {
+        if (barIdx < 0 || barIdx >= prices.length) return;
+        const x = xAx.getPixelForValue(barIdx);
+        const y = yAx.getPixelForValue(price);
+        if (x == null || y == null) return;
+        const color  = isBuy ? '#f5a623' : '#ff524a';
+        const offset = isBuy ? 18 : -18;   // below for BUY, above for SELL
+        const ay     = y + offset;
+
+        // Triangle arrow
+        ctx.beginPath();
+        if (isBuy) {
+          ctx.moveTo(x,     ay - 8);
+          ctx.lineTo(x - 5, ay);
+          ctx.lineTo(x + 5, ay);
+        } else {
+          ctx.moveTo(x,     ay + 8);
+          ctx.lineTo(x - 5, ay);
+          ctx.lineTo(x + 5, ay);
+        }
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.9;
+        ctx.fill();
+
+        // Label
+        ctx.globalAlpha = 1;
+        ctx.font = 'bold 8px JetBrains Mono,monospace';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.fillText(isBuy ? 'B' : 'S', x, isBuy ? ay + 12 : ay - 4);
+      };
+
+      (chartSignals.buys  || []).forEach(i => drawArrow(i, prices[i], true));
+      (chartSignals.sells || []).forEach(i => drawArrow(i, prices[i], false));
+      ctx.restore();
+    }
   }
 };
 
@@ -3372,25 +3458,37 @@ function renderChart(d) {
     ? { entry: d.entry, stop_loss: d.stop_loss, tp1: d.tp1, tp2: d.tp2, tp3: d.tp3 }
     : null;
 
+  // Store signal bars for arrow markers
+  chartSignals = (d.chart_prices && d.chart_prices.length)
+    ? { buys: d.chart_buy_signals || [], sells: d.chart_sell_signals || [], prices: d.chart_prices }
+    : null;
+
   // Show/hide legend level indicators
   document.getElementById('legendEntry').style.display = d.entry     ? '' : 'none';
   document.getElementById('legendSL').style.display    = d.stop_loss ? '' : 'none';
   document.getElementById('legendTP').style.display    = d.tp1       ? '' : 'none';
 
-  const labels = d.chart_dates || [], prices = d.chart_prices || [];
-  const ema20  = d.chart_ema20 || [],  ema50 = d.chart_ema50  || [];
-  const vols   = d.chart_volumes || [];
+  const labels  = d.chart_dates    || [], prices = d.chart_prices || [];
+  const ema20   = d.chart_ema20    || [], ema50  = d.chart_ema50  || [];
+  const vols    = d.chart_volumes  || [];
+  const bbUpper = d.chart_bb_upper || [], bbLower = d.chart_bb_lower || [];
+  const rsiData = d.chart_rsi      || [];
 
   const tvEmbed   = document.getElementById('tvChartEmbed');
   const canvasPC  = document.getElementById('priceChart');
   const canvasVC  = document.getElementById('volChart');
+  const ovrRow    = document.getElementById('chartOvrRow');
+  const rsiWrap   = document.getElementById('rsiChartWrap');
 
   // ── When no OHLC history: fall back to TradingView embed widget ──
   if (prices.length === 0) {
     if (priceChartInst) { priceChartInst.destroy(); priceChartInst = null; }
     if (volChartInst)   { volChartInst.destroy();   volChartInst   = null; }
+    if (rsiChartInst)   { rsiChartInst.destroy();   rsiChartInst   = null; }
     canvasPC.parentElement.style.display = 'none';
     canvasVC.parentElement.style.display = 'none';
+    if (rsiWrap) rsiWrap.style.display = 'none';
+    if (ovrRow)  ovrRow.style.display  = 'none';
 
     const tvSym  = (d.tv && d.tv.tv_symbol) ? d.tv.tv_symbol : d.ticker;
     const tfMap  = {"5m":"5","15m":"15","30m":"30","1h":"60","4h":"240","1d":"D","1w":"W"};
@@ -3413,6 +3511,7 @@ function renderChart(d) {
   tvEmbed.style.display = 'none';
   canvasPC.parentElement.style.display = '';
   canvasVC.parentElement.style.display = '';
+  if (ovrRow) ovrRow.style.display = 'flex';
 
   const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
   const gridColor  = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
@@ -3423,29 +3522,128 @@ function renderChart(d) {
   const grad = pCtx.createLinearGradient(0, 0, 0, 240);
   grad.addColorStop(0, 'rgba(77,159,255,0.18)');
   grad.addColorStop(1, 'rgba(77,159,255,0.00)');
+  const bbGrad = pCtx.createLinearGradient(0, 0, 0, 240);
+  bbGrad.addColorStop(0, 'rgba(255,255,255,0.04)');
+  bbGrad.addColorStop(1, 'rgba(255,255,255,0.04)');
 
   priceChartInst = new Chart(pCtx, {
     type:'line',
     plugins:[levelLinesPlugin, crosshairPlugin],
     data:{labels,datasets:[
-      {label:'Price',data:prices,borderColor:'#4d9fff',backgroundColor:grad,borderWidth:2,pointRadius:0,fill:true,tension:0.1,order:1},
-      {label:'EMA20',data:ema20, borderColor:'#ffc947',borderWidth:1.5,pointRadius:0,fill:false,tension:0.1,order:2},
-      {label:'EMA50',data:ema50, borderColor:'#a78bfa',borderWidth:1.5,pointRadius:0,fill:false,tension:0.1,order:3},
+      // 0 — Price
+      {label:'Price', data:prices, borderColor:'#4d9fff', backgroundColor:grad,
+       borderWidth:2, pointRadius:0, fill:true, tension:0.1, order:1},
+      // 1 — EMA20
+      {label:'EMA20', data:ema20, borderColor:'#ffc947',
+       borderWidth:1.5, pointRadius:0, fill:false, tension:0.1, order:2},
+      // 2 — EMA50
+      {label:'EMA50', data:ema50, borderColor:'#a78bfa',
+       borderWidth:1.5, pointRadius:0, fill:false, tension:0.1, order:3},
+      // 3 — BB Upper
+      {label:'BB Upper', data:bbUpper, borderColor:'rgba(255,255,255,0.18)',
+       borderWidth:1, borderDash:[3,3], pointRadius:0, fill:'+1',
+       backgroundColor:'rgba(255,255,255,0.04)', tension:0.1, order:4,
+       hidden:!chartOverlays.BB},
+      // 4 — BB Lower
+      {label:'BB Lower', data:bbLower, borderColor:'rgba(255,255,255,0.18)',
+       borderWidth:1, borderDash:[3,3], pointRadius:0, fill:false,
+       tension:0.1, order:5, hidden:!chartOverlays.BB},
     ]},
     options:{
-      responsive:true,maintainAspectRatio:false,
+      responsive:true, maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},tooltip:{
-        backgroundColor:'rgba(20,20,20,.96)',borderColor:'rgba(245,166,35,.2)',borderWidth:1,
-        titleColor:'#888',bodyColor:'#f2f2f2',padding:12,
+      plugins:{legend:{display:false}, tooltip:{
+        backgroundColor:'rgba(20,20,20,.96)', borderColor:'rgba(245,166,35,.2)', borderWidth:1,
+        titleColor:'#888', bodyColor:'#f2f2f2', padding:12,
+        filter: item => item.dataset.label !== 'BB Upper' && item.dataset.label !== 'BB Lower',
         callbacks:{label:ctx=>` ${ctx.dataset.label}: ${fmt(ctx.raw)}`}
       }},
       scales:{
-        x:{grid:{color:gridColor},ticks:{color:labelColor,maxTicksLimit:8,font:{size:10}}},
-        y:{grid:{color:gridColor},ticks:{color:labelColor,font:{size:10},callback:v=>fmt(v)},position:'right'}
+        x:{grid:{color:gridColor}, ticks:{color:labelColor,maxTicksLimit:8,font:{size:10}}},
+        y:{grid:{color:gridColor}, ticks:{color:labelColor,font:{size:10},callback:v=>fmt(v)}, position:'right'}
       }
     }
   });
+
+  // ── RSI sub-chart ──
+  if (rsiWrap) rsiWrap.style.display = chartOverlays.RSI && rsiData.length ? '' : 'none';
+  if (rsiData.length) {
+    const rCtx = document.getElementById('rsiChart').getContext('2d');
+    if (rsiChartInst) rsiChartInst.destroy();
+
+    // Colour RSI line: green when < 40, red when > 60, else muted
+    const rsiColors = rsiData.map(v => v == null ? '#888' : v < 40 ? '#00c98d' : v > 60 ? '#ff524a' : '#aaa');
+    const rsiGrad   = rCtx.createLinearGradient(0, 0, 0, 72);
+    rsiGrad.addColorStop(0, 'rgba(255,82,74,0.12)');
+    rsiGrad.addColorStop(0.5, 'rgba(255,255,255,0.0)');
+    rsiGrad.addColorStop(1, 'rgba(0,201,141,0.12)');
+
+    rsiChartInst = new Chart(rCtx, {
+      type: 'line',
+      plugins: [crosshairPlugin, {
+        id: 'rsiZones',
+        beforeDraw(chart) {
+          const { ctx, chartArea: {left,right,top,bottom}, scales:{y} } = chart;
+          if (!y) return;
+          ctx.save();
+          // Overbought zone (60–100) — red tint
+          const y60 = y.getPixelForValue(60), y100 = y.getPixelForValue(100);
+          ctx.fillStyle = 'rgba(255,82,74,0.06)';
+          ctx.fillRect(left, Math.min(y60,y100), right-left, Math.abs(y100-y60));
+          // Oversold zone (0–40) — green tint
+          const y0  = y.getPixelForValue(0),  y40  = y.getPixelForValue(40);
+          ctx.fillStyle = 'rgba(0,201,141,0.06)';
+          ctx.fillRect(left, Math.min(y0,y40), right-left, Math.abs(y40-y0));
+          // Reference lines at 30, 40, 60, 70
+          [[70,'rgba(255,82,74,0.3)'],[60,'rgba(255,82,74,0.5)'],
+           [40,'rgba(0,201,141,0.5)'],[30,'rgba(0,201,141,0.3)']].forEach(([v,c]) => {
+            const yp = y.getPixelForValue(v);
+            ctx.beginPath();
+            ctx.setLineDash([3,3]);
+            ctx.strokeStyle = c;
+            ctx.lineWidth = 0.8;
+            ctx.moveTo(left, yp); ctx.lineTo(right, yp);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.font = '7px monospace';
+            ctx.fillStyle = c;
+            ctx.textAlign = 'right';
+            ctx.fillText(v, right - 2, yp - 2);
+          });
+          ctx.restore();
+        }
+      }],
+      data:{
+        labels,
+        datasets:[{
+          label:'RSI', data:rsiData,
+          borderColor: '#aaaaaa',
+          segment:{ borderColor: ctx => {
+            const v = ctx.p1.parsed.y;
+            return v < 40 ? '#00c98d' : v > 60 ? '#ff524a' : 'rgba(255,255,255,0.35)';
+          }},
+          borderWidth:1.5, pointRadius:0, fill:false, tension:0.2,
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        animation:{duration:0},
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:false}, tooltip:{
+          backgroundColor:'rgba(20,20,20,.96)', borderColor:'rgba(245,166,35,.2)', borderWidth:1,
+          titleColor:'#888', bodyColor:'#f2f2f2', padding:8,
+          callbacks:{label:ctx=>`RSI: ${ctx.raw != null ? ctx.raw.toFixed(1) : '—'}`}
+        }},
+        scales:{
+          x:{display:false},
+          y:{min:0, max:100, position:'right',
+             grid:{color:gridColor},
+             ticks:{color:labelColor, font:{size:8}, maxTicksLimit:3,
+                    callback:v => v===50?'50':''}}
+        }
+      }
+    });
+  }
 
   const vCtx = document.getElementById('volChart').getContext('2d');
   if (volChartInst) volChartInst.destroy();

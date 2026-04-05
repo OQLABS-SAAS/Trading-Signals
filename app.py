@@ -420,6 +420,33 @@ def calculate_indicators(df, timeframe="1d"):
     chart_ema50  = [None if np.isnan(v) else round(float(v), 4) for v in ema50_series]
     chart_volumes = [0 if np.isnan(v) else int(float(v)) for v in chart_vol]
 
+    # Bollinger Bands for chart window
+    bb_upper_series = bb_upper.iloc[-n_bars:]
+    bb_lower_series = bb_lower.iloc[-n_bars:]
+    chart_bb_upper = [None if np.isnan(v) else round(float(v), 4) for v in bb_upper_series]
+    chart_bb_lower = [None if np.isnan(v) else round(float(v), 4) for v in bb_lower_series]
+
+    # RSI series for chart window
+    rsi_chart_series = rsi_series.iloc[-n_bars:]
+    chart_rsi = [None if np.isnan(v) else round(float(v), 2) for v in rsi_chart_series]
+
+    # RSI signal bars within chart window (crossunder 40 = BUY, crossover 60 = SELL)
+    rsi_arr = rsi_series.values
+    full_n  = len(rsi_arr)
+    chart_start_idx = max(0, full_n - n_bars)
+    chart_buy_signals  = []
+    chart_sell_signals = []
+    for i in range(max(1, chart_start_idx), full_n):
+        prev_r = rsi_arr[i-1]
+        curr_r = rsi_arr[i]
+        if np.isnan(prev_r) or np.isnan(curr_r):
+            continue
+        chart_i = i - chart_start_idx  # position within chart window
+        if prev_r >= 40 and curr_r < 40:
+            chart_buy_signals.append(chart_i)
+        elif prev_r <= 60 and curr_r > 60:
+            chart_sell_signals.append(chart_i)
+
     return {
         "price":        round(p, 4),
         "chg_1d":       round((p / p1 - 1) * 100, 2),
@@ -441,11 +468,16 @@ def calculate_indicators(df, timeframe="1d"):
         "supertrend":   "BULLISH" if st_dir > 0 else ("BEARISH" if st_dir < 0 else "NEUTRAL"),
         "resistance":   round(res, 4),
         "support":      round(sup, 4),
-        "chart_dates":   chart_dates,
-        "chart_prices":  chart_prices,
-        "chart_ema20":   chart_ema20,
-        "chart_ema50":   chart_ema50,
-        "chart_volumes": chart_volumes,
+        "chart_dates":        chart_dates,
+        "chart_prices":       chart_prices,
+        "chart_ema20":        chart_ema20,
+        "chart_ema50":        chart_ema50,
+        "chart_volumes":      chart_volumes,
+        "chart_bb_upper":     chart_bb_upper,
+        "chart_bb_lower":     chart_bb_lower,
+        "chart_rsi":          chart_rsi,
+        "chart_buy_signals":  chart_buy_signals,
+        "chart_sell_signals": chart_sell_signals,
     }
 
 # ─── INDICATOR BUILDER FROM TV DATA ──────────────────────────
@@ -498,11 +530,16 @@ def build_ind_from_tv(tv):
         "supertrend":     "NEUTRAL",
         "resistance":     round(bbu, 4),
         "support":        round(bbl, 4),
-        "chart_dates":    [],
-        "chart_prices":   [],
-        "chart_ema20":    [],
-        "chart_ema50":    [],
-        "chart_volumes":  [],
+        "chart_dates":        [],
+        "chart_prices":       [],
+        "chart_ema20":        [],
+        "chart_ema50":        [],
+        "chart_volumes":      [],
+        "chart_bb_upper":     [],
+        "chart_bb_lower":     [],
+        "chart_rsi":          [],
+        "chart_buy_signals":  [],
+        "chart_sell_signals": [],
     }
 
 # ─── MULTI-SOURCE CHART DATA ──────────────────────────────────
@@ -1632,11 +1669,10 @@ def analyze():
                 ind_full = calculate_indicators(df, timeframe)
                 if tv_ok:
                     # TV is primary — only take chart arrays + win rate from yfinance
-                    ind["chart_dates"]   = ind_full.get("chart_dates",   [])
-                    ind["chart_prices"]  = ind_full.get("chart_prices",  [])
-                    ind["chart_ema20"]   = ind_full.get("chart_ema20",   [])
-                    ind["chart_ema50"]   = ind_full.get("chart_ema50",   [])
-                    ind["chart_volumes"] = ind_full.get("chart_volumes", [])
+                    for k in ("chart_dates","chart_prices","chart_ema20","chart_ema50",
+                              "chart_volumes","chart_bb_upper","chart_bb_lower",
+                              "chart_rsi","chart_buy_signals","chart_sell_signals"):
+                        ind[k] = ind_full.get(k, [])
                 else:
                     # TV failed — yfinance is primary; use full indicator set
                     ind = ind_full
