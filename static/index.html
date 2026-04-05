@@ -419,15 +419,39 @@ header{height:var(--header-h);background:rgba(8,8,8,.92);border-bottom:1px solid
 .calc-result-row.main{margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border);}
 .calc-result-row>div{flex:1;min-width:0;}
 .calc-result-label{font-size:9px;color:rgba(245,190,80,0.52);font-weight:700;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:2px;}
-.calc-result-val{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text);word-break:break-all;}
+.calc-result-val{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .calc-result-val.orange{color:var(--orange);}
 .calc-result-val.red{color:var(--red);}
 .calc-tp-title{font-size:10px;font-weight:700;letter-spacing:1.3px;color:rgba(245,190,80,0.55);text-transform:uppercase;margin-bottom:6px;}
-.calc-tp-table{display:flex;flex-direction:column;gap:4px;}
-.calc-tp-row{display:grid;grid-template-columns:30px 1fr auto;gap:6px;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;}
-.calc-tp-name{font-size:11px;font-weight:800;color:var(--green);}
+.calc-tp-table{display:flex;flex-direction:column;gap:5px;}
+/* Redesigned TP rows — price level + expandable detail */
+.calc-tp-row{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;cursor:pointer;transition:border-color .15s;}
+.calc-tp-row:hover{border-color:rgba(255,255,255,.18);}
+.calc-tp-row-main{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;}
+.calc-tp-lhs{display:flex;flex-direction:column;gap:2px;}
+.calc-tp-name{font-size:11px;font-weight:800;}
+.calc-tp-price{font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.38);letter-spacing:.2px;}
+.calc-tp-mid{display:flex;flex-direction:column;gap:1px;}
 .calc-tp-rr{font-family:var(--mono);font-size:10px;color:var(--text2);}
-.calc-tp-profit{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--green);}
+.calc-tp-rr-hint{font-size:9px;color:var(--muted);}
+.calc-tp-profit{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green);text-align:right;}
+.calc-tp-expand-hint{font-size:9px;color:rgba(255,255,255,.22);text-align:right;margin-top:1px;}
+/* Expanded detail */
+.calc-tp-detail{display:none;flex-direction:column;gap:4px;padding-top:8px;margin-top:8px;border-top:1px solid rgba(255,255,255,.07);}
+.calc-tp-detail-row{display:flex;justify-content:space-between;align-items:center;font-size:10px;}
+.calc-tp-detail-label{color:var(--muted);}
+.calc-tp-detail-val{font-family:var(--mono);color:var(--text);font-weight:600;}
+.calc-tp-row.expanded .calc-tp-detail{display:flex;}
+.calc-tp-row.expanded{border-color:rgba(255,255,255,.22);}
+/* Pips breakdown block */
+.calc-pips-block{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 10px;margin-bottom:8px;}
+.calc-pips-title{font-size:9px;font-weight:700;letter-spacing:1.3px;color:rgba(245,190,80,0.55);text-transform:uppercase;margin-bottom:7px;}
+.calc-pips-row{display:flex;align-items:center;gap:7px;padding:4px 0;}
+.calc-pips-row+.calc-pips-row{border-top:1px solid rgba(255,255,255,.05);}
+.calc-pips-label{width:30px;font-size:9px;font-weight:700;flex-shrink:0;letter-spacing:.3px;}
+.calc-pips-bar-wrap{flex:1;height:4px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden;}
+.calc-pips-bar{height:100%;border-radius:2px;}
+.calc-pips-val{font-family:var(--mono);font-size:10px;text-align:right;min-width:58px;flex-shrink:0;}
 
 /* UTILS */
 .up{color:var(--green)!important;}.down{color:var(--red)!important;}
@@ -2382,7 +2406,7 @@ header {
         </div>
         <div class="calc-result-row">
           <div>
-            <div class="calc-result-label">Pips / Points</div>
+            <div class="calc-result-label">Entry → SL</div>
             <div class="calc-result-val" id="riskPips">—</div>
           </div>
           <div>
@@ -2390,6 +2414,12 @@ header {
             <div class="calc-result-val red" id="riskDollar">—</div>
           </div>
         </div>
+      </div>
+
+      <!-- Pips/Points full breakdown -->
+      <div class="calc-pips-block" id="calcPipsBlock" style="display:none;">
+        <div class="calc-pips-title">Distance from Entry (pts)</div>
+        <div id="calcPipsRows"></div>
       </div>
 
       <!-- TP Profit targets -->
@@ -4304,7 +4334,6 @@ function calcRisk() {
   document.getElementById('riskDollar').textContent = sym + riskAmt.toFixed(2);
 
   // ── TP Profit + R/R rows ──
-  // TPs apply to both BUY and SELL — profit = distance from entry regardless of direction
   const tps = [
     { label:'TP1', val: currentData?.tp1, rr: currentData?.rr1 },
     { label:'TP2', val: currentData?.tp2, rr: currentData?.rr2 },
@@ -4312,22 +4341,62 @@ function calcRisk() {
   ];
 
   const dirColor = isBuy ? '#f5a623' : '#ff524a';
-  const dirTag   = isBuy ? '▲ BUY'  : '▼ SELL';
+  const isCrypto = assetType === 'crypto';
 
   const tpHtml = tps.map(tp => {
     if (!tp.val) return '';
-    const profitPerUnit = Math.abs(tp.val - entry);
-    const profit = units * profitPerUnit;
-    const rr     = tp.rr != null
+    const tpPrice      = parseFloat(tp.val);
+    const profitPerUnit = Math.abs(tpPrice - entry);
+    const profit       = units * profitPerUnit;
+    const profitPct    = ((profit / acct) * 100).toFixed(2);
+    const rrVal        = tp.rr != null
       ? parseFloat(tp.rr).toFixed(1)
       : (profitPerUnit / riskPerUnit).toFixed(1);
-    // Verify TP is in the correct direction (warn if not)
-    const tpOk = isBuy ? tp.val > entry : tp.val < entry;
-    const tpWarning = !tpOk ? ' ⚠️' : '';
-    return `<div class="calc-tp-row">
-      <span class="calc-tp-name" style="color:${dirColor};">${tp.label}${tpWarning}</span>
-      <span class="calc-tp-rr">${rr}:1 R/R</span>
-      <span class="calc-tp-profit">+${sym}${profit.toLocaleString(undefined,{maximumFractionDigits:2})}</span>
+    const tpOk         = isBuy ? tpPrice > entry : tpPrice < entry;
+    const tpWarning    = !tpOk ? ' ⚠️' : '';
+    const unitStr      = isCrypto
+      ? (units < 1 ? units.toFixed(6) : units.toFixed(4)) + ' coins'
+      : assetType === 'forex'
+        ? (units / 100000).toFixed(2) + ' lots'
+        : units.toFixed(2) + ' units';
+    const dirArrow     = isBuy ? '▲' : '▼';
+    return `<div class="calc-tp-row" onclick="this.classList.toggle('expanded')">
+      <div class="calc-tp-row-main">
+        <div class="calc-tp-lhs">
+          <span class="calc-tp-name" style="color:${dirColor};">${tp.label}${tpWarning}</span>
+          <span class="calc-tp-price">${dirArrow} ${fmt(tpPrice)}</span>
+        </div>
+        <div class="calc-tp-mid">
+          <span class="calc-tp-rr">${rrVal}:1 R/R</span>
+          <span class="calc-tp-rr-hint">tap for detail</span>
+        </div>
+        <div>
+          <div class="calc-tp-profit">+${sym}${profit.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+          <div class="calc-tp-expand-hint">+${profitPct}%</div>
+        </div>
+      </div>
+      <div class="calc-tp-detail">
+        <div class="calc-tp-detail-row">
+          <span class="calc-tp-detail-label">Target price</span>
+          <span class="calc-tp-detail-val" style="color:${dirColor};">${fmt(tpPrice)}</span>
+        </div>
+        <div class="calc-tp-detail-row">
+          <span class="calc-tp-detail-label">Profit (USD)</span>
+          <span class="calc-tp-detail-val" style="color:var(--green);">+${sym}${profit.toLocaleString(undefined,{maximumFractionDigits:2})}</span>
+        </div>
+        <div class="calc-tp-detail-row">
+          <span class="calc-tp-detail-label">% of account</span>
+          <span class="calc-tp-detail-val" style="color:var(--green);">+${profitPct}%</span>
+        </div>
+        <div class="calc-tp-detail-row">
+          <span class="calc-tp-detail-label">Position</span>
+          <span class="calc-tp-detail-val">${unitStr}</span>
+        </div>
+        <div class="calc-tp-detail-row">
+          <span class="calc-tp-detail-label">Distance</span>
+          <span class="calc-tp-detail-val">${fmt(profitPerUnit)} ${pipLabel}</span>
+        </div>
+      </div>
     </div>`;
   }).join('');
 
@@ -4335,6 +4404,38 @@ function calcRisk() {
     `<div style="font-size:11px;color:var(--muted);padding:6px 0;">
        Run a BUY/SELL signal to see TP profit targets.
      </div>`;
+
+  // ── Pips / Points full breakdown ──
+  const allLevels = [
+    { label:'SL',  val: sl,                color:'#ff524a', isSL: true },
+    { label:'TP1', val: currentData?.tp1,  color:dirColor },
+    { label:'TP2', val: currentData?.tp2,  color:dirColor },
+    { label:'TP3', val: currentData?.tp3,  color:dirColor },
+  ].filter(l => l.val != null);
+
+  const pipsBlock = document.getElementById('calcPipsBlock');
+  const pipsRows  = document.getElementById('calcPipsRows');
+  if (allLevels.length > 1) {
+    pipsBlock.style.display = 'block';
+    const maxDist = Math.max(...allLevels.map(l => Math.abs(parseFloat(l.val) - entry) / pipSize));
+    pipsRows.innerHTML = allLevels.map(l => {
+      const dist   = Math.abs(parseFloat(l.val) - entry) / pipSize;
+      const barPct = maxDist > 0 ? (dist / maxDist * 100).toFixed(1) : 0;
+      const distFmt = dist >= 10 ? dist.toFixed(1) : dist.toFixed(3);
+      const dir    = l.isSL
+        ? (isBuy ? '↓' : '↑')
+        : (isBuy ? '↑' : '↓');
+      return `<div class="calc-pips-row">
+        <span class="calc-pips-label" style="color:${l.color};">${l.label}</span>
+        <div class="calc-pips-bar-wrap">
+          <div class="calc-pips-bar" style="width:${barPct}%;background:${l.color};opacity:${l.isSL ? 0.7 : 0.85};"></div>
+        </div>
+        <span class="calc-pips-val" style="color:${l.color};">${dir} ${distFmt} ${pipLabel}</span>
+      </div>`;
+    }).join('');
+  } else {
+    pipsBlock.style.display = 'none';
+  }
 }
 
 /* ════════════════════════════════════════════
