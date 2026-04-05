@@ -2201,15 +2201,19 @@ header {
     <div class="hold-msg hidden" id="holdMsg">⏸ Market consolidating — no clear setup. Wait for RSI extremes, a Supertrend flip, or a MACD crossover before entering.</div>
 
     <!-- SCENARIOS -->
+    <div class="card-title" style="margin-bottom:14px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,180,50,.75)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      What could happen next
+    </div>
     <div class="scenarios-grid">
-      <div class="scenario-card bull"><div class="scenario-label">Bull</div><div class="scenario-text" id="scenBull">—</div></div>
-      <div class="scenario-card base"><div class="scenario-label">Base</div><div class="scenario-text" id="scenBase">—</div></div>
-      <div class="scenario-card bear"><div class="scenario-label">Bear</div><div class="scenario-text" id="scenBear">—</div></div>
+      <div class="scenario-card bull"><div class="scenario-label"><span style="color:#f5a623;margin-right:5px;">●</span>Bull Case</div><div class="scenario-text" id="scenBull">—</div></div>
+      <div class="scenario-card base"><div class="scenario-label"><span style="color:rgba(48,209,88,0.90);margin-right:5px;">●</span>Base Case</div><div class="scenario-text" id="scenBase">—</div></div>
+      <div class="scenario-card bear"><div class="scenario-label"><span style="color:rgba(255,110,100,0.88);margin-right:5px;">●</span>Bear Case</div><div class="scenario-text" id="scenBear">—</div></div>
     </div>
 
     <!-- TRADE LEVELS -->
     <div class="levels-card hidden" id="levelsCard">
-      <div class="card-title">Trade Levels</div>
+      <div class="card-title"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,180,50,.75)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Trade Levels</div>
       <table class="levels-table">
         <thead><tr><th>Level</th><th>Price</th><th>R/R</th><th>Distance</th><th style="width:90px;"></th></tr></thead>
         <tbody id="levelsTbody"></tbody>
@@ -2229,7 +2233,10 @@ header {
     </div>
 
     <!-- INDICATORS -->
-    <div class="card-title" style="padding:2px 0;">Indicator Breakdown</div>
+    <div class="card-title" style="padding:2px 0;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,180,50,.75)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      What the indicators say
+    </div>
     <div class="indicators-grid" id="indicatorsGrid"></div>
 
     <!-- PINE SCRIPT & SHARE PANEL -->
@@ -4375,49 +4382,59 @@ function renderIndicators(d) {
     return typeRow + strBar + strLbl;
   };
 
+  const metricRow = (label, val, color) =>
+    `<div style="font-size:10px;font-weight:700;font-family:var(--mono);margin:5px 0 7px;letter-spacing:.3px;">${label}: <span style="color:${color};">${val}</span></div>`;
+
   const cards = [
     {
       name:'RSI(14)', val:rsi.toFixed(1), badge:rsiBadge, bl:rsiLabel,
-      body: rsiGauge() + `<div class="ind-desc">${d.rsi_assessment||''}</div>`
+      body: rsiGauge() +
+            metricRow('Value', rsi.toFixed(1), rsiColor) +
+            `<div class="ind-desc">${colorizeNumbers(d.rsi_assessment||'')}</div>`
     },
     {
       name:'RSI Divergence', val: divType === 'none' ? '—' : divLabel,
       valColor: divColor,
       badge: divBadge, bl: divBl,
-      body: divGauge() + `<div class="ind-desc" style="margin-top:6px;">${div.desc||'No divergence between price pivots and RSI pivots in the current lookback window.'}</div>`
+      body: divGauge() + `<div class="ind-desc" style="margin-top:6px;">${colorizeNumbers(div.desc||'No divergence between price pivots and RSI pivots in the current lookback window.')}</div>`
     },
     {
       name:'EMA Trend', val:d.ema_trend,
-      valColor: etBull?'var(--green)':etBear?'var(--red)':'var(--muted)',
+      valColor: etBull?'var(--green)':etBear?'var(--red)':'rgba(255,255,255,0.55)',
       badge: etBull?'bull':etBear?'bear':'neut', bl: etBull?'BULLISH':etBear?'BEARISH':'MIXED',
       body: bar(d.price>d.ema20?80:20, etBull?'var(--green)':'var(--red)') +
-            `<div class="ind-desc">${d.trend_assessment||''}</div>`
+            (d.ema20 ? `<div style="font-size:10px;font-weight:700;font-family:var(--mono);margin:5px 0 7px;"><span style="color:var(--orange);">EMA20: ${fmt(d.ema20)}</span> · <span style="color:rgba(245,190,80,0.55);">EMA50: ${fmt(d.ema50)}</span></div>` : '') +
+            `<div class="ind-desc">${colorizeNumbers(d.trend_assessment||'')}</div>`
     },
     {
       name:'MACD', val: macdBull ? '▲ Bullish' : '▼ Bearish',
       badge: macdBull?'bull':'bear', bl: macdBull?'RISING':'FALLING',
       body: bar(Math.min(Math.abs(d.macd_hist)*10000+50,100), macdBull?'var(--green)':'var(--red)') +
-            `<div class="ind-desc">${d.macd_assessment||''}</div>`
+            metricRow('Histogram', (d.macd_hist>=0?'+':'')+d.macd_hist.toFixed(3), macdBull?'var(--green)':'var(--red)') +
+            `<div class="ind-desc">${colorizeNumbers(d.macd_assessment||'')}</div>`
     },
     {
       name:'Bollinger', val:`${bbPct}%`,
       badge: d.bb_pos<0.2?'bull':d.bb_pos>0.8?'bear':'neut', bl:bbLabel,
       body:`<div style="position:relative;height:5px;background:linear-gradient(90deg,var(--green),var(--yellow),var(--red));border-radius:4px;margin:8px 0;">
               <div style="position:absolute;top:-3px;left:${bbPct}%;width:4px;height:11px;background:white;border-radius:2px;transform:translateX(-50%);"></div>
-            </div>
-            <div class="ind-desc">${d.bb_pos<0.2?'Near lower band — potential reversal zone':d.bb_pos>0.8?'Near upper band — potential resistance':'Trading in the middle of the BB channel'}</div>`
+            </div>` +
+            metricRow('Position', bbPct+'%', d.bb_pos<0.2?'var(--green)':d.bb_pos>0.8?'var(--red)':'var(--orange)') +
+            `<div class="ind-desc">${colorizeNumbers(d.bb_pos<0.2?'Near lower band — potential reversal zone':d.bb_pos>0.8?'Near upper band — potential resistance':'Trading in the middle of the BB channel')}</div>`
     },
     {
       name:'Supertrend', val: d.supertrend,
       badge: stBull?'bull':'bear', bl: stBull?'UPTREND':'DOWNTREND',
-      body:`<div class="ind-desc" style="margin-top:6px;">${d.supertrend_assessment||(stBull?'Price above Supertrend — bullish bias':'Price below Supertrend — bearish bias')}</div>`
+      body: metricRow('Status', d.supertrend||'—', stBull?'var(--green)':'var(--red)') +
+            `<div class="ind-desc">${colorizeNumbers(d.supertrend_assessment||(stBull?'Price above Supertrend — bullish bias':'Price below Supertrend — bearish bias'))}</div>`
     },
     {
       name:'Volume', val:`${d.vol_ratio}x avg`,
       badge: volBull?'bull':d.vol_ratio<0.7?'warn':'neut',
       bl: volBull?'HIGH VOL':d.vol_ratio<0.7?'LOW VOL':'NORMAL',
       body: bar(Math.min(d.vol_ratio*50,100), volBull?'var(--green)':'var(--orange)') +
-            `<div class="ind-desc">${d.volume_assessment||''}</div>`
+            metricRow('Ratio', d.vol_ratio+'x avg', volBull?'var(--green)':'var(--orange)') +
+            `<div class="ind-desc">${colorizeNumbers(d.volume_assessment||'')}</div>`
     },
   ];
 
