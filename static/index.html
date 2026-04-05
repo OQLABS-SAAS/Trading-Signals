@@ -377,6 +377,7 @@ header{height:var(--header-h);background:rgba(8,8,8,.92);border-bottom:1px solid
 .calc-dir-btn.buy.active{background:rgba(245,166,35,.18);border-color:var(--orange);color:var(--orange);}
 .calc-dir-btn.sell.active{background:rgba(255,82,74,.18);border-color:#ff524a;color:#ff524a;}
 .calc-dir-btn:not(.active):hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.7);}
+.calc-dir-btn.dim{opacity:.35;pointer-events:auto;} /* HOLD neutral state — still clickable */
 /* Calculate Position CTA (in signal card) */
 .calc-pos-cta{display:flex;align-items:center;gap:10px;width:100%;margin:10px 0 0;padding:11px 14px;border-radius:var(--radius-sm);background:rgba(245,166,35,.07);border:1.5px solid rgba(245,166,35,.22);cursor:pointer;transition:all .2s;text-align:left;}
 .calc-pos-cta:hover{background:rgba(245,166,35,.14);border-color:rgba(245,166,35,.4);transform:translateY(-1px);}
@@ -2299,8 +2300,11 @@ header {
 
     <!-- Direction selector — auto-syncs with signal -->
     <div class="calc-dir-row" id="calcDirRow">
-      <button class="calc-dir-btn buy active" id="calcDirBuy"  onclick="setCalcDir('BUY')">▲ BUY</button>
-      <button class="calc-dir-btn sell"       id="calcDirSell" onclick="setCalcDir('SELL')">▼ SELL</button>
+      <button class="calc-dir-btn buy" id="calcDirBuy"  onclick="setCalcDir('BUY')">▲ BUY</button>
+      <button class="calc-dir-btn sell" id="calcDirSell" onclick="setCalcDir('SELL')">▼ SELL</button>
+    </div>
+    <div id="calcDirHoldNote" style="display:none;font-size:10px;color:rgba(255,190,50,.65);background:rgba(255,190,50,.07);border:1px solid rgba(255,190,50,.18);border-radius:5px;padding:5px 9px;margin-bottom:8px;line-height:1.4;">
+      ⏸ Signal is <strong>HOLD</strong> — no trade direction yet. Choose BUY or SELL manually if you want to plan ahead.
     </div>
 
     <!-- Account + Currency -->
@@ -4046,13 +4050,19 @@ const riskAutoState = { entry: true, sl: true };
 let calcDirection = 'BUY'; // tracks BUY or SELL for the calculator
 
 function setCalcDir(dir) {
+  // dir = 'BUY' | 'SELL' | null (null = HOLD / neutral — user must choose)
   calcDirection = dir;
   const buyBtn  = document.getElementById('calcDirBuy');
   const sellBtn = document.getElementById('calcDirSell');
+  const holdNote = document.getElementById('calcDirHoldNote');
   if (buyBtn && sellBtn) {
     buyBtn.classList.toggle('active',  dir === 'BUY');
     sellBtn.classList.toggle('active', dir === 'SELL');
+    // Dim both when neutral (HOLD)
+    buyBtn.classList.toggle('dim',  dir === null);
+    sellBtn.classList.toggle('dim', dir === null);
   }
+  if (holdNote) holdNote.style.display = (dir === null) ? 'block' : 'none';
 }
 
 function updateRiskAutoValues(d) {
@@ -4062,9 +4072,11 @@ function updateRiskAutoValues(d) {
   // the backend uses for BUY/SELL trade levels).
   const fmtP = v => parseFloat(v).toPrecision(7).replace(/\.?0+$/, '');
 
-  // Auto-set direction from signal (BUY/SELL only; ignore HOLD)
+  // Auto-set direction from signal — neutral (null) for HOLD
   if (d.signal === 'BUY' || d.signal === 'SELL') {
     setCalcDir(d.signal);
+  } else {
+    setCalcDir(null); // HOLD → dim both buttons, show manual note
   }
 
   // Resolve entry: AI value → current price
@@ -4243,6 +4255,7 @@ function calcRisk() {
   if (!acct || !pct)        { showToast('Enter account size and risk %'); return; }
   if (isNaN(entry)||!entry) { showToast('Entry price missing'); return; }
   if (isNaN(sl)   || !sl)  { showToast('Stop loss price missing'); return; }
+  if (calcDirection === null) { showToast('Select BUY or SELL direction first'); return; }
 
   const riskAmt    = acct * pct;
   const riskPerUnit = Math.abs(entry - sl);
