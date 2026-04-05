@@ -377,6 +377,28 @@ header{height:var(--header-h);background:rgba(8,8,8,.92);border-bottom:1px solid
 .calc-dir-btn.buy.active{background:rgba(245,166,35,.18);border-color:var(--orange);color:var(--orange);}
 .calc-dir-btn.sell.active{background:rgba(255,82,74,.18);border-color:#ff524a;color:#ff524a;}
 .calc-dir-btn:not(.active):hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.7);}
+/* Calculate Position CTA (in signal card) */
+.calc-pos-cta{display:flex;align-items:center;gap:10px;width:100%;margin:10px 0 0;padding:11px 14px;border-radius:var(--radius-sm);background:rgba(245,166,35,.07);border:1.5px solid rgba(245,166,35,.22);cursor:pointer;transition:all .2s;text-align:left;}
+.calc-pos-cta:hover{background:rgba(245,166,35,.14);border-color:rgba(245,166,35,.4);transform:translateY(-1px);}
+.calc-pos-cta.sell-mode{background:rgba(255,82,74,.07);border-color:rgba(255,82,74,.22);}
+.calc-pos-cta.sell-mode:hover{background:rgba(255,82,74,.14);border-color:rgba(255,82,74,.4);}
+.calc-pos-icon{font-size:18px;flex-shrink:0;}
+.calc-pos-text{flex:1;display:flex;flex-direction:column;gap:1px;}
+.calc-pos-main{font-size:12px;font-weight:700;color:var(--orange);letter-spacing:.2px;}
+.calc-pos-cta.sell-mode .calc-pos-main{color:#ff6e66;}
+.calc-pos-sub{font-size:10px;color:var(--muted);}
+.calc-pos-arrow{font-size:16px;color:var(--orange);opacity:.7;font-weight:700;}
+.calc-pos-cta.sell-mode .calc-pos-arrow{color:#ff6e66;}
+/* Signal context badge (in calculator) */
+.calc-signal-badge{display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:6px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);margin-bottom:10px;font-size:11px;}
+.calc-badge-pill{padding:2px 7px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;}
+.calc-badge-pill.BUY{background:rgba(245,166,35,.15);color:#f5a623;border:1px solid rgba(245,166,35,.3);}
+.calc-badge-pill.SELL{background:rgba(255,82,74,.13);color:#ff6e66;border:1px solid rgba(255,82,74,.28);}
+.calc-badge-ticker{font-weight:700;color:var(--text);font-family:var(--mono);}
+.calc-badge-tf{color:var(--muted);font-size:10px;}
+.calc-badge-dot{color:rgba(255,255,255,.2);}
+.calc-badge-clear{margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0;opacity:.6;}
+.calc-badge-clear:hover{opacity:1;color:var(--text);}
 
 /* ── ENHANCED CALCULATOR ── */
 .calc-row{display:flex;gap:7px;margin-bottom:7px;}
@@ -2038,6 +2060,16 @@ header {
       </table>
       <!-- Trade Management Plan -->
       <div class="mgmt-plan" id="mgmtPlan" style="display:none;"></div>
+
+      <!-- Calculate Position CTA — shown only for BUY/SELL -->
+      <button class="calc-pos-cta" id="calcPosCta" style="display:none;" onclick="useSignalForCalc()">
+        <span class="calc-pos-icon">🧮</span>
+        <span class="calc-pos-text">
+          <span class="calc-pos-main">Calculate Position Size</span>
+          <span class="calc-pos-sub" id="calcPosCtaSub">Auto-fills entry, SL &amp; TPs</span>
+        </span>
+        <span class="calc-pos-arrow">→</span>
+      </button>
     </div>
 
     <!-- INDICATORS -->
@@ -2259,8 +2291,11 @@ header {
     <div id="mktPulseContent"><div class="pulse-loading">Loading…</div></div>
   </div>
 
-  <div class="panel-card">
+  <div class="panel-card" id="calcPanelCard">
     <div class="panel-title">Position Size Calculator</div>
+
+    <!-- Signal context badge — appears when linked to a signal -->
+    <div class="calc-signal-badge" id="calcSignalBadge" style="display:none;"></div>
 
     <!-- Direction selector — auto-syncs with signal -->
     <div class="calc-dir-row" id="calcDirRow">
@@ -3074,6 +3109,21 @@ function renderResults(d) {
   // ── Strategy Report button — only meaningful for BUY / SELL ──
   const btBtn = document.getElementById('runBacktestBtn');
   if (btBtn) btBtn.style.display = (sig !== 'HOLD' && d.entry != null) ? '' : 'none';
+
+  // ── Calculate Position CTA — shown for BUY/SELL with entry ──
+  const calcCta = document.getElementById('calcPosCta');
+  if (calcCta) {
+    const showCta = (sig === 'BUY' || sig === 'SELL') && d.entry != null;
+    calcCta.style.display = showCta ? 'flex' : 'none';
+    if (showCta) {
+      calcCta.classList.toggle('sell-mode', sig === 'SELL');
+      const ctaSub = document.getElementById('calcPosCtaSub');
+      if (ctaSub) {
+        const dir = sig === 'BUY' ? '▲ BUY' : '▼ SELL';
+        ctaSub.textContent = `${d.ticker} · ${dir} · Entry ${fmt(d.entry)}`;
+      }
+    }
+  }
 
   // ── FEATURE E: Micro lesson ──
   const microLesson = document.getElementById('microLesson');
@@ -4084,6 +4134,59 @@ function toggleRiskAuto(field) {
     input.style.display   = '';
     input.focus();
   }
+}
+
+/* ── Use current signal in calculator ── */
+function useSignalForCalc() {
+  const d = currentData;
+  if (!d || (d.signal !== 'BUY' && d.signal !== 'SELL') || d.entry == null) return;
+
+  // 1. Set direction
+  setCalcDir(d.signal);
+
+  // 2. Ensure auto mode is ON for both entry and SL
+  if (!riskAutoState.entry) toggleRiskAuto('entry');
+  if (!riskAutoState.sl)    toggleRiskAuto('sl');
+
+  // 3. Refresh auto values from signal
+  updateRiskAutoValues(d);
+
+  // 4. Show the signal context badge in the calculator
+  const badge = document.getElementById('calcSignalBadge');
+  if (badge) {
+    const tf  = (d.timeframe || '').toUpperCase();
+    const dir = d.signal === 'BUY' ? '▲ BUY' : '▼ SELL';
+    badge.style.display = 'flex';
+    badge.innerHTML = `
+      <span class="calc-badge-pill ${d.signal}">${d.signal}</span>
+      <span class="calc-badge-ticker">${d.ticker || ''}</span>
+      <span class="calc-badge-dot">·</span>
+      <span class="calc-badge-tf">${tf}</span>
+      <span class="calc-badge-dot">·</span>
+      <span style="font-size:10px;color:var(--muted);">Entry ${fmt(d.entry)}</span>
+      <button class="calc-badge-clear" title="Clear signal link" onclick="clearCalcSignal()">✕</button>`;
+  }
+
+  // 5. Navigate to calculator — open drawer on mobile, scroll on desktop
+  if (isMobile()) {
+    showMobileTab('calculator');
+  } else {
+    const panel = document.getElementById('calcPanelCard');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // 6. Auto-calculate so results show immediately
+  setTimeout(() => {
+    const acct = parseFloat(document.getElementById('riskAccount').value);
+    if (acct > 0) calcRisk();
+  }, 80);
+
+  showToast(`📐 Calculator loaded — ${d.ticker} ${d.signal}`);
+}
+
+function clearCalcSignal() {
+  const badge = document.getElementById('calcSignalBadge');
+  if (badge) badge.style.display = 'none';
 }
 
 /* ── currency symbol helper ── */
