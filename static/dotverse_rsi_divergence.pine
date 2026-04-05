@@ -1,0 +1,391 @@
+// ===============================================================
+// DotVerse - RSI Divergence Indicator  Pine Script v5
+//
+// Detects all four divergence types:
+//   Regular Bullish  - price LL, RSI HL  -> reversal up
+//   Regular Bearish  - price HH, RSI LH  -> reversal down
+//   Hidden  Bullish  - price HL, RSI LL  -> trend continuation up
+//   Hidden  Bearish  - price LH, RSI HH  -> trend continuation down
+//
+// Paste into TradingView Pine Editor -> Add to chart.
+// ===============================================================
+//@version=5
+indicator("DotVerse - RSI Divergence", shorttitle="DV RSI Div",
+    overlay=false, max_lines_count=500, max_labels_count=500)
+
+
+// ===============================================================
+// INPUTS
+// ===============================================================
+rsiLen      = input.int(14,  "RSI Length",              minval=1,  group=" RSI")
+rsiOB       = input.float(70,"Overbought Level",        group=" RSI")
+rsiOS       = input.float(30,"Oversold Level",          group=" RSI")
+pivLen      = input.int(5,   "Pivot Lookback (bars each side)", minval=2, maxval=20, group=" Pivot Detection")
+lookback    = input.int(60,  "Max Divergence Lookback (bars)", minval=10, maxval=300, group=" Pivot Detection")
+
+showRegBull = input.bool(true, "Regular Bullish",   group="[BUY] Show Divergences")
+showRegBear = input.bool(true, "Regular Bearish",   group="[BUY] Show Divergences")
+showHidBull = input.bool(true, "Hidden Bullish",    group="[BUY] Show Divergences")
+showHidBear = input.bool(true, "Hidden Bearish",    group="[BUY] Show Divergences")
+
+lineWidth   = input.int(2,    "Line Width",          minval=1, maxval=4, group=" Style")
+showLabels  = input.bool(true,"Show Labels",         group=" Style")
+showStrength= input.bool(true,"Show Strength Label", group=" Style")
+showDash    = input.bool(true,"Show Info Panel",     group=" Style")
+
+
+// ===============================================================
+// COLORS
+// ===============================================================
+C_REG_BULL  = color.new(#f5a623, 0)    // Regular bullish  - amber
+C_REG_BEAR  = color.new(#ff524a, 0)    // Regular bearish  - red
+C_HID_BULL  = color.new(#30d158, 0)    // Hidden bullish   - green
+C_HID_BEAR  = color.new(#ff524a, 55)   // Hidden bearish   - dim red
+C_RSI       = color.new(#f5a623, 0)    // RSI line
+C_OB        = color.new(#ff524a, 75)   // Overbought fill
+C_OS        = color.new(#30d158, 75)   // Oversold fill
+C_MID       = color.new(#ffffff, 88)   // Midline
+C_MUTED     = color.new(#ffffff, 60)
+C_BG        = color.new(#0d1117, 10)
+
+
+// ===============================================================
+// RSI CALCULATION
+// ===============================================================
+rsi = ta.rsi(close, rsiLen)
+
+// RSI plot
+rsiPlot = plot(rsi, "RSI", color=C_RSI, linewidth=2)
+obPlot  = plot(rsiOB, "OB", color=color.new(#ff524a, 80), linewidth=1, style=plot.style_line)
+osPlot  = plot(rsiOS, "OS", color=color.new(#30d158, 80), linewidth=1, style=plot.style_line)
+midPlot = plot(50,   "Mid", color=C_MID, linewidth=1, style=plot.style_line)
+
+fill(rsiPlot, obPlot, rsi > rsiOB ? C_OB : na, title="OB Fill")
+fill(rsiPlot, osPlot, rsi < rsiOS ? C_OS : na, title="OS Fill")
+
+// OB/OS background zones
+bgcolor(rsi > rsiOB ? color.new(#ff524a, 93) : rsi < rsiOS ? color.new(#30d158, 93) : na, title="Zone BG")
+
+
+// ===============================================================
+// PIVOT DETECTION
+// ===============================================================
+// Price pivots (using high/low)
+priceHigh = ta.pivothigh(high, pivLen, pivLen)  // Returns price value at swing high, na otherwise
+priceLow  = ta.pivotlow(low,   pivLen, pivLen)
+
+// RSI pivots (using RSI series)
+rsiHigh   = ta.pivothigh(rsi,  pivLen, pivLen)
+rsiLow    = ta.pivotlow(rsi,   pivLen, pivLen)
+
+// Plot pivot dots on RSI
+plotshape(not na(rsiHigh), title="RSI Pivot High", location=location.absolute,
+    style=shape.circle, size=size.tiny, color=color.new(#ff524a, 30), offset=-pivLen)
+plotshape(not na(rsiLow),  title="RSI Pivot Low",  location=location.absolute,
+    style=shape.circle, size=size.tiny, color=color.new(#30d158, 30), offset=-pivLen)
+
+
+// ===============================================================
+// DIVERGENCE ENGINE
+// Looks back up to `lookback` bars for the most recent pair of
+// confirmed pivot highs/lows and compares price vs RSI direction.
+// ===============================================================
+
+// Find most recent pivot in a series within `lookback` bars
+// Returns [bar_index, value] or [na, na]
+findLastPivot(src, maxBars) =>
+    foundIdx = int(na)
+    foundVal = float(na)
+    for i = 1 to maxBars
+        if not na(src[i])
+            foundIdx := bar_index - i
+            foundVal := src[i]
+            break
+    [foundIdx, foundVal]
+
+findPrevPivot(src, afterIdx, maxBars) =>
+    foundIdx = int(na)
+    foundVal = float(na)
+    if not na(afterIdx)
+        barsBack = bar_index - afterIdx + 1
+        for i = barsBack to maxBars
+            if not na(src[i])
+                foundIdx := bar_index - i
+                foundVal := src[i]
+                break
+    [foundIdx, foundVal]
+
+
+// --- Latest two RSI / Price pivot pairs -------------------------
+[rPH1_idx, rPH1_val] = findLastPivot(rsiHigh,   lookback)
+[rPH2_idx, rPH2_val] = findPrevPivot(rsiHigh,   rPH1_idx, lookback)
+[rPL1_idx, rPL1_val] = findLastPivot(rsiLow,    lookback)
+[rPL2_idx, rPL2_val] = findPrevPivot(rsiLow,    rPL1_idx, lookback)
+
+[pPH1_idx, pPH1_val] = findLastPivot(priceHigh, lookback)
+[pPH2_idx, pPH2_val] = findPrevPivot(priceHigh, pPH1_idx, lookback)
+[pPL1_idx, pPL1_val] = findLastPivot(priceLow,  lookback)
+[pPL2_idx, pPL2_val] = findPrevPivot(priceLow,  pPL1_idx, lookback)
+
+
+// --- Divergence detection ----------------------------------------
+// Use RSI pivot indices to anchor divergence lines on RSI pane
+// Tolerance: price pivot must be within pivLen*3 bars of RSI pivot
+
+tol = pivLen * 3
+
+// REGULAR BULLISH: price LL, RSI HL (compare lows)
+regBullOk = not na(pPL1_val) and not na(pPL2_val) and
+            not na(rPL1_val) and not na(rPL2_val) and
+            pPL1_val < pPL2_val and    // price: lower low
+            rPL1_val > rPL2_val and    // RSI:   higher low
+            math.abs(pPL1_idx - rPL1_idx) <= tol
+
+// REGULAR BEARISH: price HH, RSI LH (compare highs)
+regBearOk = not na(pPH1_val) and not na(pPH2_val) and
+            not na(rPH1_val) and not na(rPH2_val) and
+            pPH1_val > pPH2_val and    // price: higher high
+            rPH1_val < rPH2_val and    // RSI:   lower high
+            math.abs(pPH1_idx - rPH1_idx) <= tol
+
+// HIDDEN BULLISH: price HL, RSI LL (compare lows)
+hidBullOk = not na(pPL1_val) and not na(pPL2_val) and
+            not na(rPL1_val) and not na(rPL2_val) and
+            pPL1_val > pPL2_val and    // price: higher low
+            rPL1_val < rPL2_val and    // RSI:   lower low
+            math.abs(pPL1_idx - rPL1_idx) <= tol
+
+// HIDDEN BEARISH: price LH, RSI HH (compare highs)
+hidBearOk = not na(pPH1_val) and not na(pPH2_val) and
+            not na(rPH1_val) and not na(rPH2_val) and
+            pPH1_val < pPH2_val and    // price: lower high
+            rPH1_val > rPH2_val and    // RSI:   higher high
+            math.abs(pPH1_idx - rPH1_idx) <= tol
+
+// Strength: distance between RSI pivots (normalised)
+regBullStr = regBullOk ? math.min(math.round(math.abs(rPL1_val - rPL2_val) * 2.5), 100) : 0
+regBearStr = regBearOk ? math.min(math.round(math.abs(rPH1_val - rPH2_val) * 2.5), 100) : 0
+hidBullStr = hidBullOk ? math.min(math.round(math.abs(rPL1_val - rPL2_val) * 2.5), 100) : 0
+hidBearStr = hidBearOk ? math.min(math.round(math.abs(rPH1_val - rPH2_val) * 2.5), 100) : 0
+
+
+// ===============================================================
+// DRAW DIVERGENCE LINES ON RSI PANE
+// Lines connect the two RSI pivot points.
+// ===============================================================
+var line divLine1 = na
+var line divLine2 = na
+var line divLine3 = na
+var line divLine4 = na
+
+if barstate.islast
+    line.delete(divLine1)
+    line.delete(divLine2)
+    line.delete(divLine3)
+    line.delete(divLine4)
+
+    if showRegBull and regBullOk
+        divLine1 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+            color=C_REG_BULL, width=lineWidth, style=line.style_solid,
+            extend=extend.none)
+
+    if showRegBear and regBearOk
+        divLine2 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+            color=C_REG_BEAR, width=lineWidth, style=line.style_solid,
+            extend=extend.none)
+
+    if showHidBull and hidBullOk
+        divLine3 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+            color=C_HID_BULL, width=lineWidth, style=line.style_dashed,
+            extend=extend.none)
+
+    if showHidBear and hidBearOk
+        divLine4 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+            color=C_HID_BEAR, width=lineWidth, style=line.style_dashed,
+            extend=extend.none)
+
+
+// ===============================================================
+// LABELS AT SIGNAL BAR
+// ===============================================================
+var label divLbl = na
+
+if barstate.islast and showLabels
+    label.delete(divLbl)
+
+    if showRegBull and regBullOk
+        divLbl := label.new(rPL1_idx, rPL1_val - 4,
+            "[BUY] REG BULL DIV\nPrice LL . RSI HL\nStrength " + str.tostring(regBullStr) + "%",
+            style=label.style_label_up,
+            color=color.new(#f5a623, 10),
+            textcolor=color.white,
+            size=size.small)
+
+    else if showRegBear and regBearOk
+        divLbl := label.new(rPH1_idx, rPH1_val + 4,
+            "[SELL] REG BEAR DIV\nPrice HH . RSI LH\nStrength " + str.tostring(regBearStr) + "%",
+            style=label.style_label_down,
+            color=color.new(#ff524a, 10),
+            textcolor=color.white,
+            size=size.small)
+
+    else if showHidBull and hidBullOk
+        divLbl := label.new(rPL1_idx, rPL1_val - 4,
+            "[HOLD] HIDDEN BULL\nPrice HL . RSI LL\nStrength " + str.tostring(hidBullStr) + "%",
+            style=label.style_label_up,
+            color=color.new(#30d158, 10),
+            textcolor=color.white,
+            size=size.small)
+
+    else if showHidBear and hidBearOk
+        divLbl := label.new(rPH1_idx, rPH1_val + 4,
+            "[BEAR] HIDDEN BEAR\nPrice LH . RSI HH\nStrength " + str.tostring(hidBearStr) + "%",
+            style=label.style_label_down,
+            color=color.new(#ff524a, 40),
+            textcolor=color.white,
+            size=size.small)
+
+
+// ===============================================================
+// SIGNAL SHAPES ON RSI (fire on the bar divergence is confirmed)
+// ===============================================================
+newRegBull = regBullOk and not regBullOk[1]
+newRegBear = regBearOk and not regBearOk[1]
+newHidBull = hidBullOk and not hidBullOk[1]
+newHidBear = hidBearOk and not hidBearOk[1]
+
+plotshape(showRegBull and newRegBull, title="Reg Bull Signal",
+    location=location.absolute, y=rsi - 5,
+    style=shape.triangleup, size=size.small,
+    color=C_REG_BULL, textcolor=C_REG_BULL, text="DIV^")
+
+plotshape(showRegBear and newRegBear, title="Reg Bear Signal",
+    location=location.absolute, y=rsi + 5,
+    style=shape.triangledown, size=size.small,
+    color=C_REG_BEAR, textcolor=C_REG_BEAR, text="DIVv")
+
+plotshape(showHidBull and newHidBull, title="Hid Bull Signal",
+    location=location.absolute, y=rsi - 5,
+    style=shape.triangleup, size=size.tiny,
+    color=color.new(C_HID_BULL, 30), text="H^")
+
+plotshape(showHidBear and newHidBear, title="Hid Bear Signal",
+    location=location.absolute, y=rsi + 5,
+    style=shape.triangledown, size=size.tiny,
+    color=color.new(C_HID_BEAR, 30), text="Hv")
+
+
+// ===============================================================
+// INFO PANEL
+// ===============================================================
+C_HEAD = color.new(#f5a623, 88)
+
+activeDivType =
+    regBullOk ? "Regular Bullish" :
+    regBearOk ? "Regular Bearish" :
+    hidBullOk ? "Hidden Bullish"  :
+    hidBearOk ? "Hidden Bearish"  : "None"
+
+activeDivCol =
+    regBullOk ? C_REG_BULL :
+    regBearOk ? C_REG_BEAR :
+    hidBullOk ? C_HID_BULL :
+    hidBearOk ? C_HID_BEAR : C_MUTED
+
+activeStr =
+    regBullOk ? regBullStr :
+    regBearOk ? regBearStr :
+    hidBullOk ? hidBullStr :
+    hidBearOk ? hidBearStr : 0
+
+var table dash = table.new(position.top_right, columns=2, rows=14,
+    bgcolor=C_BG, border_color=color.new(#ffffff, 80), border_width=1,
+    frame_color=color.new(#ffffff, 60), frame_width=1)
+
+if barstate.islast and showDash
+    // Header
+    table.cell(dash, 0, 0, "DotVerse",         text_color=color.new(#f5a623,0), bgcolor=C_HEAD, text_size=size.small)
+    table.cell(dash, 1, 0, "RSI Divergence",   text_color=color.new(#f5a623,0), bgcolor=C_HEAD, text_size=size.small)
+
+    // Current RSI
+    rsiZone = rsi >= rsiOB ? "Overbought" : rsi <= rsiOS ? "Oversold" :
+              rsi >= 55    ? "Bullish"    : rsi <= 45    ? "Bearish"  : "Neutral"
+    rsiCol  = rsi >= rsiOB ? C_REG_BEAR  : rsi <= rsiOS ? C_HID_BULL :
+              rsi >= 55    ? C_REG_BULL  : rsi <= 45    ? C_REG_BEAR : C_MUTED
+    table.cell(dash, 0, 1, "RSI(" + str.tostring(rsiLen) + ")", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 1, str.tostring(math.round(rsi, 1)) + "  " + rsiZone, text_color=rsiCol, text_size=size.small, text_halign=text.align_right)
+
+    // Active divergence
+    table.cell(dash, 0, 2, "Divergence",        text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 2, activeDivType,        text_color=activeDivCol, text_size=size.small, text_halign=text.align_right)
+
+    // Strength
+    table.cell(dash, 0, 3, "Strength",           text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 3, str.tostring(activeStr) + "%", text_color=activeDivCol, text_size=size.small, text_halign=text.align_right)
+
+    // Pivot settings
+    table.cell(dash, 0, 4, "Pivot Len",          text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 4, str.tostring(pivLen) + " bars each side", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_right)
+
+    // Divider
+    table.cell(dash, 0, 5, "-- LEGEND -------------", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 5, "",                   bgcolor=C_BG)
+
+    // Legend rows
+    table.cell(dash, 0, 6,  "* Reg Bullish",  text_color=C_REG_BULL, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 6,  "Price LL . RSI HL", text_color=C_MUTED,  text_size=size.tiny, text_halign=text.align_right)
+
+    table.cell(dash, 0, 7,  "* Reg Bearish",  text_color=C_REG_BEAR, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 7,  "Price HH . RSI LH", text_color=C_MUTED,  text_size=size.tiny, text_halign=text.align_right)
+
+    table.cell(dash, 0, 8,  "* Hid Bullish",  text_color=C_HID_BULL, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 8,  "Price HL . RSI LL", text_color=C_MUTED,  text_size=size.tiny, text_halign=text.align_right)
+
+    table.cell(dash, 0, 9,  "* Hid Bearish",  text_color=C_HID_BEAR, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 9,  "Price LH . RSI HH", text_color=C_MUTED,  text_size=size.tiny, text_halign=text.align_right)
+
+    // Line style legend
+    table.cell(dash, 0, 10, "-- LINE STYLE ----------", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 10, "",                  bgcolor=C_BG)
+
+    table.cell(dash, 0, 11, "--- Solid",        text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 11, "Regular divergence", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_right)
+
+    table.cell(dash, 0, 12, "- - Dashed",       text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 12, "Hidden divergence", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_right)
+
+    // Ticker
+    table.cell(dash, 0, 13, syminfo.ticker,      text_color=color.new(#ffffff,50), text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 13, timeframe.period,    text_color=color.new(#ffffff,50), text_size=size.tiny, text_halign=text.align_right)
+
+
+// ===============================================================
+// ALERT CONDITIONS
+// ===============================================================
+alertcondition(newRegBull, title="[BUY] Regular Bullish Divergence",
+    message="[BUY] REGULAR BULLISH DIVERGENCE - {{ticker}} ({{interval}})\n" +
+            "Price: Lower Low . RSI: Higher Low\n" +
+            "RSI: {{plot_0}}\n" +
+            "Potential reversal to the upside.\n- DotVerse Signals")
+
+alertcondition(newRegBear, title="[SELL] Regular Bearish Divergence",
+    message="[SELL] REGULAR BEARISH DIVERGENCE - {{ticker}} ({{interval}})\n" +
+            "Price: Higher High . RSI: Lower High\n" +
+            "RSI: {{plot_0}}\n" +
+            "Momentum weakening - watch for reversal down.\n- DotVerse Signals")
+
+alertcondition(newHidBull, title="[HOLD] Hidden Bullish Divergence",
+    message="[HOLD] HIDDEN BULLISH DIVERGENCE - {{ticker}} ({{interval}})\n" +
+            "Price: Higher Low . RSI: Lower Low\n" +
+            "RSI: {{plot_0}}\n" +
+            "Bullish trend continuation - dip buy opportunity.\n- DotVerse Signals")
+
+alertcondition(newHidBear, title="[BEAR] Hidden Bearish Divergence",
+    message="[BEAR] HIDDEN BEARISH DIVERGENCE - {{ticker}} ({{interval}})\n" +
+            "Price: Lower High . RSI: Higher High\n" +
+            "RSI: {{plot_0}}\n" +
+            "Bearish trend continuation - bounce sell opportunity.\n- DotVerse Signals")
+
+alertcondition(newRegBull or newRegBear or newHidBull or newHidBear,
+    title="Any RSI Divergence",
+    message="[!] RSI DIVERGENCE - {{ticker}} ({{interval}})\nRSI: {{plot_0}}\n- DotVerse Signals")

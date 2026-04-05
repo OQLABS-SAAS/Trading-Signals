@@ -1,0 +1,234 @@
+//@version=5
+strategy("DotVerse Strategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, max_labels_count=500, max_lines_count=500)
+
+// ---- INPUTS ----
+emaFast  = input.int(20,    "EMA Fast",          group="EMAs")
+emaMid   = input.int(50,    "EMA Mid",           group="EMAs")
+emaSlow  = input.int(200,   "EMA Slow",          group="EMAs")
+rsiLen   = input.int(14,    "RSI Length",        group="RSI")
+rsiBuyLo = input.float(40,  "RSI Buy Min",       group="RSI")
+rsiBuyHi = input.float(70,  "RSI Buy Max",       group="RSI")
+rsiSlLo  = input.float(30,  "RSI Sell Min",      group="RSI")
+rsiSlHi  = input.float(60,  "RSI Sell Max",      group="RSI")
+stFactor = input.float(3.0, "ST Factor",         group="Supertrend")
+stLen    = input.int(10,    "ST ATR Length",     group="Supertrend")
+macdFast = input.int(12,    "MACD Fast",         group="MACD")
+macdSlow = input.int(26,    "MACD Slow",         group="MACD")
+macdSig  = input.int(9,     "MACD Signal",       group="MACD")
+adxLen   = input.int(14,    "ADX Length",        group="ADX")
+adxMin   = input.float(20,  "ADX Min Strength",  group="ADX")
+slMult   = input.float(1.5, "SL (x ATR)",        group="Trade Management")
+tp1Mult  = input.float(2.0, "TP1 50% (x ATR)",   group="Trade Management")
+tp2Mult  = input.float(3.5, "TP2 25% (x ATR)",   group="Trade Management")
+tp3Mult  = input.float(5.0, "TP3 25% (x ATR)",   group="Trade Management")
+showDash = input.bool(true,  "Show Dashboard",   group="Display")
+
+// ---- INDICATORS ----
+e20  = ta.ema(close, emaFast)
+e50  = ta.ema(close, emaMid)
+e200 = ta.ema(close, emaSlow)
+rsi  = ta.rsi(close, rsiLen)
+atr  = ta.atr(stLen)
+[macdLine, sigLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
+[supertrend, stDir]           = ta.supertrend(stFactor, stLen)
+[diPlus, diMinus, adx]        = ta.dmi(adxLen, adxLen)
+
+// ---- CONDITIONS ----
+emaBull   = e20 > e50
+emaBear   = e20 < e50
+stBull    = stDir < 0
+stBear    = stDir > 0
+macdBull  = macdHist > 0 and macdHist > macdHist[1]
+macdBear  = macdHist < 0 and macdHist < macdHist[1]
+trendStr  = adx >= adxMin
+rsiBuy    = rsi >= rsiBuyLo and rsi <= rsiBuyHi
+rsiSell   = rsi >= rsiSlLo  and rsi <= rsiSlHi
+
+buySignal  = emaBull and stBull and macdBull and trendStr and rsiBuy
+sellSignal = emaBear and stBear and macdBear and trendStr and rsiSell
+canBuy     = buySignal  and strategy.position_size == 0
+canSell    = sellSignal and strategy.position_size == 0
+
+// ---- TRADE STATE ----
+var float entryRef = na
+var float slRef    = na
+var float tp1Ref   = na
+var float tp2Ref   = na
+var float tp3Ref   = na
+var int   posPhase = 0
+var int   posDir   = 0
+var bool  tp1Hit   = false
+var bool  tp2Hit   = false
+var bool  tp3Hit   = false
+
+// ---- ENTRIES ----
+if canBuy
+    strategy.entry("Long", strategy.long)
+    entryRef := close
+    slRef    := close - atr * slMult
+    tp1Ref   := close + atr * tp1Mult
+    tp2Ref   := close + atr * tp2Mult
+    tp3Ref   := close + atr * tp3Mult
+    posPhase := 1
+    posDir   := 1
+    tp1Hit   := false
+    tp2Hit   := false
+    tp3Hit   := false
+
+if canSell
+    strategy.entry("Short", strategy.short)
+    entryRef := close
+    slRef    := close + atr * slMult
+    tp1Ref   := close - atr * tp1Mult
+    tp2Ref   := close - atr * tp2Mult
+    tp3Ref   := close - atr * tp3Mult
+    posPhase := 1
+    posDir   := -1
+    tp1Hit   := false
+    tp2Hit   := false
+    tp3Hit   := false
+
+// ---- PHASE 1: full position, original SL, 50% out at TP1 ----
+if posPhase == 1
+    if posDir == 1
+        strategy.exit("TP1-L", from_entry="Long",  qty_percent=50, limit=tp1Ref, stop=slRef)
+    if posDir == -1
+        strategy.exit("TP1-S", from_entry="Short", qty_percent=50, limit=tp1Ref, stop=slRef)
+    p1hit = posDir == 1 ? high >= tp1Ref : low <= tp1Ref
+    if p1hit and not tp1Hit
+        strategy.cancel("TP1-L")
+        strategy.cancel("TP1-S")
+        slRef    := entryRef
+        posPhase := 2
+        tp1Hit   := true
+
+// ---- PHASE 2: 50% remains, SL at breakeven, TP2 + TP3 ----
+if posPhase == 2
+    if posDir == 1
+        strategy.exit("TP2-L", from_entry="Long",  qty_percent=50, limit=tp2Ref, stop=entryRef)
+        strategy.exit("TP3-L", from_entry="Long",  limit=tp3Ref, stop=entryRef)
+    if posDir == -1
+        strategy.exit("TP2-S", from_entry="Short", qty_percent=50, limit=tp2Ref, stop=entryRef)
+        strategy.exit("TP3-S", from_entry="Short", limit=tp3Ref, stop=entryRef)
+    if (posDir == 1 ? high >= tp2Ref : low <= tp2Ref) and not tp2Hit
+        tp2Hit := true
+    if (posDir == 1 ? high >= tp3Ref : low <= tp3Ref) and not tp3Hit
+        tp3Hit := true
+
+// ---- RESET WHEN FLAT ----
+if strategy.position_size == 0 and posPhase != 0
+    posPhase := 0
+    posDir   := 0
+    entryRef := na
+    slRef    := na
+    tp1Ref   := na
+    tp2Ref   := na
+    tp3Ref   := na
+
+// ---- PLOTS ----
+p20 = plot(e20,  "EMA 20",  color=color.new(#f5a623, 0),  linewidth=1)
+p50 = plot(e50,  "EMA 50",  color=color.new(#f5a623, 55), linewidth=1)
+plot(e200, "EMA 200", color=color.new(#ffffff, 65), linewidth=1)
+fill(p20, p50, emaBull ? color.new(#f5a623, 90) : color.new(#ff524a, 92))
+plot(supertrend, "Supertrend", color=stBull ? color.new(#30d158, 0) : color.new(#ff524a, 0), linewidth=2)
+plotshape(canBuy,  location=location.belowbar, style=shape.triangleup,   size=size.normal, color=color.new(#f5a623, 0), text="BUY",  textcolor=color.new(#f5a623, 0))
+plotshape(canSell, location=location.abovebar, style=shape.triangledown, size=size.normal, color=color.new(#ff524a, 0), text="SELL", textcolor=color.new(#ff524a, 0))
+bgcolor(canBuy ? color.new(#f5a623, 88) : canSell ? color.new(#ff524a, 88) : na)
+
+// ---- TP/SL LINES ----
+var line lineE  = na
+var line lineSL = na
+var line lineT1 = na
+var line lineT2 = na
+var line lineT3 = na
+
+if canBuy or canSell
+    line.delete(lineE)
+    line.delete(lineSL)
+    line.delete(lineT1)
+    line.delete(lineT2)
+    line.delete(lineT3)
+    sl = canBuy ? close - atr*slMult : close + atr*slMult
+    t1 = canBuy ? close + atr*tp1Mult : close - atr*tp1Mult
+    t2 = canBuy ? close + atr*tp2Mult : close - atr*tp2Mult
+    t3 = canBuy ? close + atr*tp3Mult : close - atr*tp3Mult
+    lineE  := line.new(bar_index, close, bar_index+50, close, color=color.new(#f5a623, 0),  width=1, style=line.style_solid)
+    lineSL := line.new(bar_index, sl,    bar_index+50, sl,    color=color.new(#ff524a, 0),  width=1, style=line.style_dashed)
+    lineT1 := line.new(bar_index, t1,    bar_index+50, t1,    color=color.new(#30d158, 40), width=1, style=line.style_dashed)
+    lineT2 := line.new(bar_index, t2,    bar_index+50, t2,    color=color.new(#30d158, 20), width=1, style=line.style_dashed)
+    lineT3 := line.new(bar_index, t3,    bar_index+50, t3,    color=color.new(#30d158, 0),  width=2, style=line.style_dashed)
+
+// ---- LABELS ----
+if canBuy
+    label.new(bar_index, low - atr, "BUY | Entry: " + str.tostring(close, format.mintick) + " | SL: " + str.tostring(math.round(close - atr*slMult, 4)) + " | TP1: " + str.tostring(math.round(close + atr*tp1Mult, 4)), style=label.style_label_up,   color=color.new(#f5a623, 8), textcolor=color.white, size=size.small)
+if canSell
+    label.new(bar_index, high + atr, "SELL | Entry: " + str.tostring(close, format.mintick) + " | SL: " + str.tostring(math.round(close + atr*slMult, 4)) + " | TP1: " + str.tostring(math.round(close - atr*tp1Mult, 4)), style=label.style_label_down, color=color.new(#ff524a, 8), textcolor=color.white, size=size.small)
+if tp1Hit and not tp1Hit[1]
+    label.new(bar_index, tp1Ref, "TP1 hit | SL -> BE", style=label.style_label_down, color=color.new(#30d158, 10), textcolor=color.white, size=size.tiny)
+if tp2Hit and not tp2Hit[1]
+    label.new(bar_index, tp2Ref, "TP2 hit | 25% closed", style=label.style_label_down, color=color.new(#30d158, 10), textcolor=color.white, size=size.tiny)
+if tp3Hit and not tp3Hit[1]
+    label.new(bar_index, tp3Ref, "TP3 hit | Full exit", style=label.style_label_down, color=color.new(#30d158, 5), textcolor=color.white, size=size.tiny)
+
+// ---- DASHBOARD ----
+C_BG    = color.new(#0d1117, 10)
+C_AMBER = color.new(#f5a623, 0)
+C_GREEN = color.new(#30d158, 0)
+C_RED   = color.new(#ff524a, 0)
+C_MUTED = color.new(#ffffff, 55)
+
+var table dash = table.new(position.top_right, 3, 12, bgcolor=C_BG, border_color=color.new(#ffffff, 80), border_width=1)
+
+if barstate.islast and showDash
+    table.cell(dash, 0, 0, "DotVerse",  text_color=C_AMBER, bgcolor=color.new(#f5a623, 88), text_size=size.small)
+    table.cell(dash, 1, 0, "STRATEGY",  text_color=C_AMBER, bgcolor=color.new(#f5a623, 88), text_size=size.small)
+    table.cell(dash, 2, 0, syminfo.ticker, text_color=color.new(#ffffff, 60), bgcolor=color.new(#f5a623, 88), text_size=size.tiny)
+    posLabel = posPhase == 0 ? "FLAT" : posDir == 1 ? "LONG" : "SHORT"
+    posCol   = posPhase == 0 ? C_MUTED : posDir == 1 ? C_AMBER : C_RED
+    phLabel  = posPhase == 0 ? "-" : posPhase == 1 ? "Phase 1" : "Phase 2"
+    table.cell(dash, 0, 1, "Position", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 1, posLabel,   text_color=posCol,  text_size=size.small)
+    table.cell(dash, 2, 1, phLabel,    text_color=posCol,  text_size=size.tiny, text_halign=text.align_right)
+    slDisplay = na(slRef) ? "-" : posPhase == 2 ? str.tostring(entryRef, format.mintick) + " (BE)" : str.tostring(slRef, format.mintick)
+    slCol     = posPhase == 2 ? C_GREEN : C_RED
+    table.cell(dash, 0, 2, "SL",       text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 2, slDisplay,  text_color=slCol,   text_size=size.small)
+    table.cell(dash, 2, 2, posPhase == 2 ? "Protected" : "", text_color=C_GREEN, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 3, "TP1 50%",  text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 3, na(tp1Ref) ? "-" : str.tostring(tp1Ref, format.mintick), text_color=tp1Hit ? C_GREEN : C_MUTED, text_size=size.small)
+    table.cell(dash, 2, 3, tp1Hit ? "HIT -> BE" : "SL to BE", text_color=tp1Hit ? C_GREEN : C_MUTED, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 4, "TP2 25%",  text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 4, na(tp2Ref) ? "-" : str.tostring(tp2Ref, format.mintick), text_color=tp2Hit ? C_GREEN : C_MUTED, text_size=size.small)
+    table.cell(dash, 2, 4, tp2Hit ? "HIT" : "SL at BE", text_color=tp2Hit ? C_GREEN : C_MUTED, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 5, "TP3 25%",  text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 5, na(tp3Ref) ? "-" : str.tostring(tp3Ref, format.mintick), text_color=tp3Hit ? C_GREEN : C_MUTED, text_size=size.small)
+    table.cell(dash, 2, 5, tp3Hit ? "HIT" : "SL at BE", text_color=tp3Hit ? C_GREEN : C_MUTED, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 6, "--- PERFORMANCE ---", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 6, "", bgcolor=C_BG)
+    table.cell(dash, 2, 6, "", bgcolor=C_BG)
+    netPnl  = strategy.netprofit
+    winPct  = strategy.wintrades / math.max(strategy.closedtrades, 1) * 100
+    table.cell(dash, 0, 7, "Net P&L",    text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 7, str.tostring(math.round(netPnl, 2)), text_color=netPnl >= 0 ? C_GREEN : C_RED, text_size=size.small)
+    table.cell(dash, 2, 7, str.tostring(math.round(netPnl / math.max(strategy.initial_capital, 1) * 100, 1)) + "%", text_color=netPnl >= 0 ? C_GREEN : C_RED, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 8, "Win Rate",   text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 8, str.tostring(math.round(winPct, 1)) + "%", text_color=winPct >= 50 ? C_GREEN : C_RED, text_size=size.small)
+    table.cell(dash, 2, 8, str.tostring(strategy.wintrades) + "/" + str.tostring(strategy.closedtrades), text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_right)
+    pf = strategy.grossprofit / math.max(math.abs(strategy.grossloss), 1)
+    table.cell(dash, 0, 9,  "Prof Factor", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 9,  str.tostring(math.round(pf, 2)), text_color=pf >= 1.5 ? C_GREEN : C_RED, text_size=size.small)
+    table.cell(dash, 2, 9,  "", bgcolor=C_BG)
+    table.cell(dash, 0, 10, "Max DD",     text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 10, str.tostring(math.round(strategy.max_drawdown, 2)), text_color=C_RED, text_size=size.small)
+    table.cell(dash, 2, 10, "", bgcolor=C_BG)
+    avgT = strategy.netprofit / math.max(strategy.closedtrades, 1)
+    table.cell(dash, 0, 11, "Avg Trade",  text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 11, str.tostring(math.round(avgT, 2)), text_color=avgT >= 0 ? C_GREEN : C_RED, text_size=size.small)
+    table.cell(dash, 2, 11, str.tostring(strategy.closedtrades) + " trades", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_right)
+
+// ---- ALERTS ----
+alertcondition(canBuy,  title="DotVerse BUY",  message="BUY - {{ticker}} ({{interval}}) - Entry: {{close}} - DotVerse Strategy")
+alertcondition(canSell, title="DotVerse SELL", message="SELL - {{ticker}} ({{interval}}) - Entry: {{close}} - DotVerse Strategy")
+alertcondition(tp1Hit and not tp1Hit[1], title="TP1 Hit - SL to BE", message="TP1 HIT - {{ticker}} - 50% closed - SL moved to BE - DotVerse")
+alertcondition(tp2Hit and not tp2Hit[1], title="TP2 Hit",            message="TP2 HIT - {{ticker}} - 25% closed - DotVerse")
+alertcondition(tp3Hit and not tp3Hit[1], title="TP3 Hit - Full Exit",message="TP3 HIT - {{ticker}} - Full exit - DotVerse")

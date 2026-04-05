@@ -1,0 +1,168 @@
+//@version=5
+indicator("DotVerse Signals", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// ---- INPUTS ----
+emaFast  = input.int(20,    "EMA Fast",         group="EMAs")
+emaMid   = input.int(50,    "EMA Mid",          group="EMAs")
+emaSlow  = input.int(200,   "EMA Slow",         group="EMAs")
+rsiLen   = input.int(14,    "RSI Length",       group="RSI")
+rsiBuyLo = input.float(40,  "RSI Buy Min",      group="RSI")
+rsiBuyHi = input.float(70,  "RSI Buy Max",      group="RSI")
+rsiSlLo  = input.float(30,  "RSI Sell Min",     group="RSI")
+rsiSlHi  = input.float(60,  "RSI Sell Max",     group="RSI")
+stFactor = input.float(3.0, "ST Factor",        group="Supertrend")
+stLen    = input.int(10,    "ST ATR Length",    group="Supertrend")
+macdFast = input.int(12,    "MACD Fast",        group="MACD")
+macdSlow = input.int(26,    "MACD Slow",        group="MACD")
+macdSig  = input.int(9,     "MACD Signal",      group="MACD")
+adxLen   = input.int(14,    "ADX Length",       group="ADX")
+adxMin   = input.float(20,  "ADX Min Strength", group="ADX")
+slMult   = input.float(1.5, "SL (x ATR)",       group="Levels")
+tp1Mult  = input.float(2.0, "TP1 (x ATR)",      group="Levels")
+tp2Mult  = input.float(3.5, "TP2 (x ATR)",      group="Levels")
+showDash = input.bool(true, "Show Dashboard",   group="Display")
+
+// ---- INDICATORS ----
+e20  = ta.ema(close, emaFast)
+e50  = ta.ema(close, emaMid)
+e200 = ta.ema(close, emaSlow)
+rsi  = ta.rsi(close, rsiLen)
+atr  = ta.atr(stLen)
+[macdLine, sigLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
+[supertrend, stDir]           = ta.supertrend(stFactor, stLen)
+[diPlus, diMinus, adx]        = ta.dmi(adxLen, adxLen)
+bb_basis = ta.sma(close, 20)
+bb_dev   = ta.stdev(close, 20)
+bbUpper  = bb_basis + 2 * bb_dev
+bbLower  = bb_basis - 2 * bb_dev
+
+// ---- CONDITIONS ----
+emaBull  = e20 > e50
+emaBear  = e20 < e50
+stBull   = stDir < 0
+stBear   = stDir > 0
+macdBull = macdHist > 0 and macdHist > macdHist[1]
+macdBear = macdHist < 0 and macdHist < macdHist[1]
+trendStr = adx >= adxMin
+rsiBuy   = rsi >= rsiBuyLo and rsi <= rsiBuyHi
+rsiSell  = rsi >= rsiSlLo  and rsi <= rsiSlHi
+
+buySignal  = emaBull and stBull and macdBull and trendStr and rsiBuy
+sellSignal = emaBear and stBear and macdBear and trendStr and rsiSell
+
+var int lastSig = 0
+newBuy  = buySignal  and lastSig != 1
+newSell = sellSignal and lastSig != -1
+if newBuy
+    lastSig := 1
+if newSell
+    lastSig := -1
+if not buySignal and not sellSignal
+    lastSig := 0
+
+currentSig    = newBuy ? "BUY" : newSell ? "SELL" : buySignal ? "BUY" : sellSignal ? "SELL" : "HOLD"
+currentSigCol = currentSig == "BUY" ? color.new(#f5a623, 0) : currentSig == "SELL" ? color.new(#ff524a, 0) : color.new(#30d158, 0)
+
+// ---- PLOTS ----
+p20 = plot(e20,  "EMA 20",  color=color.new(#f5a623, 0),  linewidth=1)
+p50 = plot(e50,  "EMA 50",  color=color.new(#f5a623, 55), linewidth=1)
+plot(e200, "EMA 200", color=color.new(#ffffff, 65), linewidth=1)
+fill(p20, p50, emaBull ? color.new(#f5a623, 90) : color.new(#ff524a, 92))
+plot(supertrend, "Supertrend", color=stBull ? color.new(#30d158, 0) : color.new(#ff524a, 0), linewidth=2)
+plot(bbUpper, "BB Upper", color=color.new(#ffffff, 80))
+plot(bbLower, "BB Lower", color=color.new(#ffffff, 80))
+plotshape(newBuy,  location=location.belowbar, style=shape.triangleup,   size=size.normal, color=color.new(#f5a623, 0), text="BUY",  textcolor=color.new(#f5a623, 0))
+plotshape(newSell, location=location.abovebar, style=shape.triangledown, size=size.normal, color=color.new(#ff524a, 0), text="SELL", textcolor=color.new(#ff524a, 0))
+bgcolor(newBuy ? color.new(#f5a623, 88) : newSell ? color.new(#ff524a, 88) : na)
+
+// ---- LEVELS ----
+var line lineE  = na
+var line lineSL = na
+var line lineT1 = na
+var line lineT2 = na
+
+if newBuy or newSell
+    line.delete(lineE)
+    line.delete(lineSL)
+    line.delete(lineT1)
+    line.delete(lineT2)
+    sl = newBuy ? close - atr*slMult : close + atr*slMult
+    t1 = newBuy ? close + atr*tp1Mult : close - atr*tp1Mult
+    t2 = newBuy ? close + atr*tp2Mult : close - atr*tp2Mult
+    lineE  := line.new(bar_index, close, bar_index+40, close, color=color.new(#f5a623, 0),  width=1, style=line.style_solid)
+    lineSL := line.new(bar_index, sl,    bar_index+40, sl,    color=color.new(#ff524a, 0),  width=1, style=line.style_dashed)
+    lineT1 := line.new(bar_index, t1,    bar_index+40, t1,    color=color.new(#30d158, 40), width=1, style=line.style_dashed)
+    lineT2 := line.new(bar_index, t2,    bar_index+40, t2,    color=color.new(#30d158, 0),  width=2, style=line.style_dashed)
+
+// ---- LABELS ----
+if newBuy
+    label.new(bar_index, low - atr*0.8, "BUY | RSI: " + str.tostring(math.round(rsi, 1)) + " | ADX: " + str.tostring(math.round(adx, 1)) + " | Entry: " + str.tostring(close, format.mintick), style=label.style_label_up,   color=color.new(#f5a623, 8), textcolor=color.white, size=size.small)
+if newSell
+    label.new(bar_index, high + atr*0.8, "SELL | RSI: " + str.tostring(math.round(rsi, 1)) + " | ADX: " + str.tostring(math.round(adx, 1)) + " | Entry: " + str.tostring(close, format.mintick), style=label.style_label_down, color=color.new(#ff524a, 8), textcolor=color.white, size=size.small)
+
+// ---- DASHBOARD ----
+C_BG    = color.new(#0d1117, 10)
+C_AMBER = color.new(#f5a623, 0)
+C_GREEN = color.new(#30d158, 0)
+C_RED   = color.new(#ff524a, 0)
+C_MUTED = color.new(#ffffff, 55)
+
+rsiZone    = rsi >= 70 ? "Overbought" : rsi <= 30 ? "Oversold" : rsi >= 55 ? "Bullish" : rsi <= 45 ? "Bearish" : "Neutral"
+rsiZoneCol = rsi >= 70 ? C_RED : rsi <= 30 ? C_RED : rsi >= 55 ? C_AMBER : rsi <= 45 ? C_RED : C_GREEN
+adxZone    = adx >= 40 ? "Very Strong" : adx >= 25 ? "Strong" : adx >= 20 ? "Moderate" : "Weak"
+adxZoneCol = adx >= 25 ? C_AMBER : adx >= 20 ? C_GREEN : C_RED
+
+var table dash = table.new(position.top_right, 3, 14, bgcolor=C_BG, border_color=color.new(#ffffff, 80), border_width=1)
+
+if barstate.islast and showDash
+    table.cell(dash, 0, 0, "DotVerse", text_color=C_AMBER, bgcolor=color.new(#f5a623, 88), text_size=size.small)
+    table.cell(dash, 1, 0, "SIGNALS",  text_color=C_AMBER, bgcolor=color.new(#f5a623, 88), text_size=size.small)
+    table.cell(dash, 2, 0, syminfo.ticker + " " + timeframe.period, text_color=color.new(#ffffff, 60), bgcolor=color.new(#f5a623, 88), text_size=size.tiny)
+    table.cell(dash, 0, 1, "SIGNAL",   text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 1, currentSig, text_color=currentSigCol, text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 1, "",         bgcolor=C_BG)
+    table.cell(dash, 0, 2, "--- INDICATORS ---", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 2, "", bgcolor=C_BG)
+    table.cell(dash, 2, 2, "", bgcolor=C_BG)
+    table.cell(dash, 0, 3, "RSI " + str.tostring(rsiLen), text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 3, str.tostring(math.round(rsi, 1)), text_color=rsiZoneCol, text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 3, rsiZone, text_color=rsiZoneCol, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 4, "ADX " + str.tostring(adxLen), text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 4, str.tostring(math.round(adx, 1)), text_color=adxZoneCol, text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 4, adxZone, text_color=adxZoneCol, text_size=size.tiny, text_halign=text.align_right)
+    macdCol = macdHist > 0 ? C_AMBER : C_RED
+    table.cell(dash, 0, 5, "MACD Hist", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 5, str.tostring(math.round(macdHist, 5)), text_color=macdCol, text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 5, macdHist > macdHist[1] ? "Rising" : "Falling", text_color=macdCol, text_size=size.tiny, text_halign=text.align_right)
+    stCol = stBull ? C_GREEN : C_RED
+    table.cell(dash, 0, 6, "Supertrend", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 6, str.tostring(math.round(supertrend, 4)), text_color=stCol, text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 6, stBull ? "Bullish" : "Bearish", text_color=stCol, text_size=size.tiny, text_halign=text.align_right)
+    emaCol = emaBull ? C_AMBER : C_RED
+    table.cell(dash, 0, 7, "EMA 20/50", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 7, str.tostring(math.round(e20, 4)), text_color=emaCol, text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 7, emaBull ? "Bullish" : "Bearish", text_color=emaCol, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 8, "--- CONDITIONS ---", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 8, "", bgcolor=C_BG)
+    table.cell(dash, 2, 8, "", bgcolor=C_BG)
+    chk(c) => c ? "[Y]" : "[N]"
+    chkC(c) => c ? C_GREEN : C_RED
+    table.cell(dash, 0, 9,  "EMA Trend",  text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 9,  chk(emaBull or emaBear), text_color=chkC(emaBull or emaBear), text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 9,  emaBull ? "Up" : "Down", text_color=chkC(emaBull), text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 10, "Supertrend", text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 10, chk(stBull or stBear), text_color=chkC(stBull or stBear), text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 10, stBull ? "Up" : "Down", text_color=chkC(stBull), text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 11, "MACD Dir",   text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 11, chk(macdBull or macdBear), text_color=chkC(macdBull or macdBear), text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 11, macdBull ? "Bull" : "Bear", text_color=chkC(macdBull), text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 12, "ADX >= " + str.tostring(adxMin), text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 12, chk(trendStr), text_color=chkC(trendStr), text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 12, str.tostring(math.round(adx, 1)), text_color=adxZoneCol, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(dash, 0, 13, "RSI Zone",   text_color=C_MUTED, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 13, chk(rsiBuy or rsiSell), text_color=chkC(rsiBuy or rsiSell), text_size=size.small, text_halign=text.align_center)
+    table.cell(dash, 2, 13, str.tostring(math.round(rsi, 1)), text_color=rsiZoneCol, text_size=size.tiny, text_halign=text.align_right)
+
+// ---- ALERTS ----
+alertcondition(newBuy,  title="DotVerse BUY",  message="BUY - {{ticker}} ({{interval}}) - Entry: {{close}} - DotVerse Signals")
+alertcondition(newSell, title="DotVerse SELL", message="SELL - {{ticker}} ({{interval}}) - Entry: {{close}} - DotVerse Signals")
