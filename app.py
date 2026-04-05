@@ -150,6 +150,84 @@ def ema_tv(series, span):
             result[i] = alpha * vals[i] + (1 - alpha) * result[i - 1]
     return pd.Series(result, index=getattr(series, "index", None))
 
+# ─── BINANCE OHLCV FALLBACK ───────────────────────────────────
+# Used when Yahoo Finance blocks cloud-server IPs for crypto tickers.
+# Binance public REST API requires no auth and works reliably from any IP.
+_BINANCE_SYMBOL_MAP = {
+    "BTC-USD":  "BTCUSDT",  "ETH-USD":  "ETHUSDT",  "SOL-USD":  "SOLUSDT",
+    "BNB-USD":  "BNBUSDT",  "XRP-USD":  "XRPUSDT",  "ADA-USD":  "ADAUSDT",
+    "DOGE-USD": "DOGEUSDT", "LTC-USD":  "LTCUSDT",  "AVAX-USD": "AVAXUSDT",
+    "DOT-USD":  "DOTUSDT",  "LINK-USD": "LINKUSDT",  "MATIC-USD":"MATICUSDT",
+    "UNI-USD":  "UNIUSDT",  "ATOM-USD": "ATOMUSDT",  "TRX-USD":  "TRXUSDT",
+    "SHIB-USD": "SHIBUSDT", "TON-USD":  "TONUSDT",   "SUI-USD":  "SUIUSDT",
+    "APT-USD":  "APTUSDT",  "OP-USD":   "OPUSDT",    "ARB-USD":  "ARBUSDT",
+    "INJ-USD":  "INJUSDT",  "FET-USD":  "FETUSDT",   "WLD-USD":  "WLDUSDT",
+    "NEAR-USD": "NEARUSDT", "FIL-USD":  "FILUSDT",   "ICP-USD":  "ICPUSDT",
+    "VET-USD":  "VETUSDT",  "ALGO-USD": "ALGOUSDT",  "SAND-USD": "SANDUSDT",
+    "MANA-USD": "MANAUSDT", "HBAR-USD": "HBARUSDT",  "PEPE-USD": "PEPEUSDT",
+    "FLOKI-USD":"FLOKIUSDT","BONK-USD": "BONKUSDT",  "WIF-USD":  "WIFUSDT",
+}
+
+def _to_binance_symbol(ticker):
+    """Convert app ticker (BTC-USD) to Binance pair (BTCUSDT). Returns None if not a known crypto."""
+    if ticker in _BINANCE_SYMBOL_MAP:
+        return _BINANCE_SYMBOL_MAP[ticker]
+    # Auto-convert: BTC-USD → BTCUSDT, ETH-USDT → ETHUSDT
+    t = ticker.replace("-USD","USDT").replace("-USDT","USDT").replace("/","")
+    if t.endswith("USDT") and len(t) >= 5:
+        return t
+    return None
+
+def fetch_binance_ohlcv(ticker, interval="1d", period="1y"):
+    """Fetch OHLCV from Binance public klines endpoint. No auth required.
+    Returns a DataFrame identical in format to safe_download() output.
+    """
+    sym = _to_binance_symbol(ticker)
+    if not sym:
+        return pd.DataFrame()
+
+    cache_key = f"binance:{sym}:{interval}:{period}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        print(f"[binance] Cache hit for {cache_key}")
+        return cached
+
+    # Interval mapping: yfinance → Binance
+    ivl_map = {"5m":"5m","15m":"15m","30m":"30m","1h":"1h","4h":"4h","1d":"1d","1w":"1w"}
+    b_interval = ivl_map.get(interval, "1d")
+
+    # Limit: how many bars to request based on period
+    limit_map = {"5d":500,"1mo":750,"30d":750,"60d":1000,"3mo":1000,"6mo":1000,"1y":400,"2y":730}
+    limit = limit_map.get(period, 400)
+
+    try:
+        url = "https://api.binance.com/api/v3/klines"
+        resp = _browser_session.get(url, params={
+            "symbol": sym, "interval": b_interval, "limit": limit
+        }, timeout=10)
+        if resp.status_code != 200:
+            print(f"[binance] HTTP {resp.status_code} for {sym}")
+            return pd.DataFrame()
+        raw = resp.json()
+        if not raw:
+            return pd.DataFrame()
+        # Binance kline format: [open_time, open, high, low, close, volume, ...]
+        df = pd.DataFrame(raw, columns=[
+            "ts","Open","High","Low","Close","Volume",
+            "close_time","qav","num_trades","taker_base","taker_quote","ignore"
+        ])
+        df["ts"] = pd.to_datetime(df["ts"], unit="ms")
+        df = df.set_index("ts")[["Open","High","Low","Close","Volume"]]
+        df = df.astype(float)
+        df = df.dropna(how="all")
+        print(f"[binance] Fetched {len(df)} bars for {sym} ({b_interval})")
+        cache_set(cache_key, df)
+        return df
+    except Exception as e:
+        print(f"[binance] Error for {sym}: {e}")
+        return pd.DataFrame()
+
+
 def safe_download(ticker, period="1y", interval="1d", **kwargs):
     """Fetch OHLCV data directly from Yahoo Finance chart API using browser headers.
 
@@ -229,6 +307,14 @@ def safe_download(ticker, period="1y", interval="1d", **kwargs):
         cache_set(cache_key, df)
     else:
         print(f"[yahoo] No data for {ticker} period={period} interval={interval}")
+        # ── Binance fallback for crypto tickers ──────────────────
+        # Yahoo Finance often blocks cloud server IPs for crypto OHLCV.
+        # Try Binance public API instead (no auth required, very reliable).
+        b_df = fetch_binance_ohlcv(ticker, interval=interval, period=period)
+        if not b_df.empty:
+            print(f"[binance] Fallback succeeded for {ticker}")
+            cache_set(cache_key, b_df)
+            return b_df
 
     return df
 
@@ -291,6 +377,9 @@ def detect_rsi_divergence(high, low, rsi_series, pivot_len=5, lookback=60):
                 result = {
                     "type": "bearish", "label": "Regular Bearish", "strength": strength,
                     "rsi_pivots": [round(r[rh1],1), round(r[rh2],1)],
+                    "price_pivot_bars": [ph1, ph2],
+                    "price_pivot_vals": [round(float(h[ph1]),4), round(float(h[ph2]),4)],
+                    "rsi_pivot_bars":   [rh1, rh2],
                     "desc": (f"Price made higher high ({h[ph2]:.5g} > {h[ph1]:.5g}) "
                              f"but RSI made lower high ({r[rh2]:.1f} < {r[rh1]:.1f}). "
                              f"Momentum weakening — watch for reversal or pullback.")
@@ -300,6 +389,9 @@ def detect_rsi_divergence(high, low, rsi_series, pivot_len=5, lookback=60):
                 result = {
                     "type": "hidden_bearish", "label": "Hidden Bearish", "strength": strength,
                     "rsi_pivots": [round(r[rh1],1), round(r[rh2],1)],
+                    "price_pivot_bars": [ph1, ph2],
+                    "price_pivot_vals": [round(float(h[ph1]),4), round(float(h[ph2]),4)],
+                    "rsi_pivot_bars":   [rh1, rh2],
                     "desc": (f"Price made lower high ({h[ph2]:.5g} < {h[ph1]:.5g}) "
                              f"but RSI made higher high ({r[rh2]:.1f} > {r[rh1]:.1f}). "
                              f"Bearish trend continuation signal — downtrend likely resuming.")
@@ -318,6 +410,9 @@ def detect_rsi_divergence(high, low, rsi_series, pivot_len=5, lookback=60):
                 result = {
                     "type": "bullish", "label": "Regular Bullish", "strength": strength,
                     "rsi_pivots": [round(r[rl1],1), round(r[rl2],1)],
+                    "price_pivot_bars": [pl1, pl2],
+                    "price_pivot_vals": [round(float(l[pl1]),4), round(float(l[pl2]),4)],
+                    "rsi_pivot_bars":   [rl1, rl2],
                     "desc": (f"Price made lower low ({l[pl2]:.5g} < {l[pl1]:.5g}) "
                              f"but RSI made higher low ({r[rl2]:.1f} > {r[rl1]:.1f}). "
                              f"Selling pressure fading — potential reversal higher.")
@@ -327,6 +422,9 @@ def detect_rsi_divergence(high, low, rsi_series, pivot_len=5, lookback=60):
                 result = {
                     "type": "hidden_bullish", "label": "Hidden Bullish", "strength": strength,
                     "rsi_pivots": [round(r[rl1],1), round(r[rl2],1)],
+                    "price_pivot_bars": [pl1, pl2],
+                    "price_pivot_vals": [round(float(l[pl1]),4), round(float(l[pl2]),4)],
+                    "rsi_pivot_bars":   [rl1, rl2],
                     "desc": (f"Price made higher low ({l[pl2]:.5g} > {l[pl1]:.5g}) "
                              f"but RSI made lower low ({r[rl2]:.1f} < {r[rl1]:.1f}). "
                              f"Bullish trend continuation — dip buying opportunity.")
@@ -411,11 +509,17 @@ def calculate_indicators(df, timeframe="1d"):
     n_bars    = cfg["chart_bars"]
     date_fmt  = cfg["date_fmt"]
     chart_close  = close.iloc[-n_bars:]
+    chart_open   = df["Open"].squeeze().iloc[-n_bars:]
+    chart_high   = df["High"].squeeze().iloc[-n_bars:]
+    chart_low    = df["Low"].squeeze().iloc[-n_bars:]
     chart_vol    = vol.iloc[-n_bars:]
     ema20_series = ema_tv(close, 20).iloc[-n_bars:]
     ema50_series = ema_tv(close, 50).iloc[-n_bars:] if len(close) >= 50 else ema_tv(close, 20).iloc[-n_bars:]
     chart_dates  = [d.strftime(date_fmt) for d in chart_close.index]
     chart_prices = [round(float(v), 4) for v in chart_close]
+    chart_opens  = [None if np.isnan(v) else round(float(v), 4) for v in chart_open]
+    chart_highs  = [None if np.isnan(v) else round(float(v), 4) for v in chart_high]
+    chart_lows   = [None if np.isnan(v) else round(float(v), 4) for v in chart_low]
     chart_ema20  = [None if np.isnan(v) else round(float(v), 4) for v in ema20_series]
     chart_ema50  = [None if np.isnan(v) else round(float(v), 4) for v in ema50_series]
     chart_volumes = [0 if np.isnan(v) else int(float(v)) for v in chart_vol]
@@ -447,6 +551,17 @@ def calculate_indicators(df, timeframe="1d"):
         elif prev_r <= 60 and curr_r > 60:
             chart_sell_signals.append(chart_i)
 
+    # Convert divergence pivot bar indices → chart-window coordinates
+    # (only include if the pivot falls within the visible chart window)
+    if rsi_div.get("price_pivot_bars"):
+        pb = rsi_div["price_pivot_bars"]
+        rb = rsi_div["rsi_pivot_bars"]
+        rsi_div["chart_price_pivot_bars"] = [b - chart_start_idx for b in pb if b >= chart_start_idx]
+        rsi_div["chart_rsi_pivot_bars"]   = [b - chart_start_idx for b in rb if b >= chart_start_idx]
+    else:
+        rsi_div["chart_price_pivot_bars"] = []
+        rsi_div["chart_rsi_pivot_bars"]   = []
+
     return {
         "price":        round(p, 4),
         "chg_1d":       round((p / p1 - 1) * 100, 2),
@@ -470,6 +585,9 @@ def calculate_indicators(df, timeframe="1d"):
         "support":      round(sup, 4),
         "chart_dates":        chart_dates,
         "chart_prices":       chart_prices,
+        "chart_opens":        chart_opens,
+        "chart_highs":        chart_highs,
+        "chart_lows":         chart_lows,
         "chart_ema20":        chart_ema20,
         "chart_ema50":        chart_ema50,
         "chart_volumes":      chart_volumes,
