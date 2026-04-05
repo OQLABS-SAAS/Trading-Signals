@@ -3314,6 +3314,34 @@ let chartSignals     = null; // { buys:[], sells:[], prices:[] } for arrow marke
 let chartOverlays    = { BB: true, RSI: true, SIG: true };
 let rsiChartInst     = null;
 
+/* ── Scroll to chart + pulse + ensure overlays are on ── */
+function highlightChart(overlayKeys) {
+  // 1. Scroll to chart card
+  const card = document.querySelector('.chart-card');
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // 2. If Chart.js is visible, turn on requested overlays and flash border
+  if (priceChartInst) {
+    (overlayKeys || ['BB','RSI','SIG']).forEach(k => {
+      if (!chartOverlays[k]) toggleChartOverlay(k);
+    });
+    // Pulse animation on chart card
+    if (card) {
+      card.style.transition = 'box-shadow .15s';
+      card.style.boxShadow  = '0 0 0 2px rgba(245,166,35,.7), 0 0 20px rgba(245,166,35,.25)';
+      setTimeout(() => { card.style.boxShadow = ''; }, 800);
+    }
+  }
+
+  // 3. If TV embed is showing, flash its border
+  const tvEmbed = document.getElementById('tvChartEmbed');
+  if (tvEmbed && tvEmbed.style.display !== 'none') {
+    tvEmbed.style.transition = 'box-shadow .15s';
+    tvEmbed.style.boxShadow  = '0 0 0 2px rgba(245,166,35,.7), 0 0 20px rgba(245,166,35,.25)';
+    setTimeout(() => { tvEmbed.style.boxShadow = ''; }, 800);
+  }
+}
+
 function toggleChartOverlay(key) {
   chartOverlays[key] = !chartOverlays[key];
   const btn = document.getElementById('ovr' + key);
@@ -3494,13 +3522,17 @@ function renderChart(d) {
     const tfMap  = {"5m":"5","15m":"15","30m":"30","1h":"60","4h":"240","1d":"D","1w":"W"};
     const ivl    = tfMap[d.timeframe] || 'D';
     const theme  = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    // Always include BB and RSI studies so indicators are visible on the TV embed chart
     const src    = 'https://s.tradingview.com/widgetembed/?frameElementId=tv_embed' +
                    '&symbol=' + encodeURIComponent(tvSym) +
                    '&interval=' + ivl +
                    '&theme=' + theme +
-                   '&style=1&locale=en&hide_top_toolbar=0&hide_legend=1&save_image=0&allow_symbol_change=0' +
-                   '&hide_volume=1&no_timeframe_change=1';
-    tvEmbed.innerHTML = '<iframe src="' + src + '" style="width:100%;height:320px;border:none;border-radius:8px;" ' +
+                   '&style=1&locale=en&hide_top_toolbar=0&hide_legend=0&save_image=0&allow_symbol_change=0' +
+                   '&hide_volume=0&no_timeframe_change=1' +
+                   '&studies[]=BB%40tv-basicstudies' +
+                   '&studies[]=RSI%40tv-basicstudies' +
+                   '&studies[]=MACD%40tv-basicstudies';
+    tvEmbed.innerHTML = '<iframe src="' + src + '" style="width:100%;height:420px;border:none;border-radius:8px;" ' +
                         'allowtransparency="true" scrolling="no"></iframe>';
     tvEmbed.style.display = 'block';
     document.getElementById('chartTitle').textContent = d.ticker + ' \u00b7 ' + d.timeframe.toUpperCase() + ' \u00b7 ' + (d.ema_trend || '');
@@ -6425,8 +6457,11 @@ function copyPineScript() {
   if (btn2) btn2.textContent = 'Hide Indicator \u25b2';
 
   _clipWrite(pine);
-  _btnFeedback('copyPineBtn', '\u2713 Copied!', '\ud83d\udccb Buy/Sell Indicator');
+  _btnFeedback('copyPineBtn', '\u2713 On Chart + Copied!', '\ud83d\udccb Buy/Sell Indicator');
   showCopyCheck();
+  // Show indicator signals on the in-app chart
+  highlightChart(['SIG','BB','RSI']);
+  showToast('📊 Signals shown on chart · Pine Script copied to clipboard');
 }
 
 /* ════════════════════════════════════════════
@@ -6528,8 +6563,10 @@ function copyStrategy() {
   if (btn2) btn2.textContent = 'Hide Indicator \u25b2';
 
   _clipWrite(pine);
-  _btnFeedback('copyStratBtn', '\u2713 Copied!', '\u26a1 TP/SL Backtest Strategy');
+  _btnFeedback('copyStratBtn', '\u2713 On Chart + Copied!', '\u26a1 TP/SL Backtest Strategy');
   showCopyCheck();
+  highlightChart(['SIG','BB','RSI']);
+  showToast('\ud83d\udcca Levels shown on chart \u00b7 Pine Script copied to clipboard');
 }
 
 /* ════════════════════════════════════════════
@@ -6592,8 +6629,10 @@ function copyDivergence() {
   if (btn2) btn2.textContent = 'Hide Indicator \u25b2';
 
   _clipWrite(pine);
-  _btnFeedback('copyDivBtn', '\u2713 Copied!', '\ud83d\udcc9 Copy RSI Div');
+  _btnFeedback('copyDivBtn', '\u2713 On Chart + Copied!', '\ud83d\udcc9 Copy RSI Div');
   showCopyCheck();
+  highlightChart(['RSI','SIG']);
+  showToast('\ud83d\udcca RSI divergence shown on chart \u00b7 Pine Script copied');
 }
 </script>
 </body>
