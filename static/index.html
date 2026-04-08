@@ -349,10 +349,10 @@ body::before{
 /* ═══════════════════════════════════════════════
    INFO STRIP
 ═══════════════════════════════════════════════ */
-.info-strip{
-  display:flex;gap:0;
+.info-strip{position:relative;
+  display:flex;gap:0;flex-wrap:wrap;
   border-bottom:1px solid var(--border);
-  overflow-x:auto;
+  overflow:visible;
 }
 .info-cell{
   flex:1;min-width:100px;
@@ -474,7 +474,7 @@ body::before{
 ═══════════════════════════════════════════════ */
 .alignment-wrap{padding:0 20px 16px;}
 .alignment-rows{}
-.align-row{
+.align-row{flex-wrap:wrap;
   display:flex;align-items:center;justify-content:space-between;
   padding:9px 0;border-bottom:1px solid rgba(245,166,35,.06);
   font-size:13px;
@@ -1210,7 +1210,7 @@ body::before{
 .info-cell:hover{background:var(--bg2);}
 .info-cell.expanded{background:var(--bg2);border-bottom:2px solid var(--amber);}
 .expand-panel{
-  display:none;position:absolute;top:100%;left:0;right:0;z-index:100;
+  display:none;position:absolute;top:calc(100% + 2px);left:-1px;z-index:200;width:260px;
   background:var(--bg1);border:1px solid var(--border2);border-radius:0 0 var(--r2) var(--r2);
   padding:14px 16px;min-width:220px;box-shadow:0 8px 24px rgba(0,0,0,.5);
   font-family:var(--mono);font-size:11px;line-height:1.7;
@@ -1228,6 +1228,25 @@ body::before{
 .ind-card.expanded{border-color:var(--amber);background:var(--bg2);}
 .ind-expand{display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;line-height:1.7;font-family:var(--mono);}
 .ind-card.expanded .ind-expand{display:block;}
+
+/* Expandable fp-card, mtf-cell, align-row */
+.fp-card{cursor:pointer;transition:border-color .15s,background .15s;position:relative;}
+.fp-card:hover{border-color:var(--amber);}
+.fp-card.expanded{border-color:var(--amber);background:var(--bg2);}
+.fp-card .fp-expand{display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;line-height:1.7;font-family:var(--mono);}
+.fp-card.expanded .fp-expand{display:block;}
+
+.mtf-cell{cursor:pointer;transition:border-color .15s,background .15s;position:relative;}
+.mtf-cell:hover{border-color:var(--amber);background:var(--bg2);}
+.mtf-cell.expanded{border-color:var(--amber);background:var(--bg2);grid-column:1/-1;padding:16px;}
+.mtf-cell .mtf-expand{display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;line-height:1.7;font-family:var(--mono);}
+.mtf-cell.expanded .mtf-expand{display:block;}
+
+.align-row{cursor:pointer;transition:background .15s;}
+.align-row:hover{background:var(--bg2);}
+.align-row.expanded{background:var(--bg2);border-left:2px solid var(--amber);padding-left:12px;}
+.align-row .align-expand{display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;line-height:1.7;font-family:var(--mono);}
+.align-row.expanded .align-expand{display:block;}
 
 </style>
 </head>
@@ -1359,7 +1378,7 @@ body::before{
           </div>
           <div class="win-badge" data-tip="<div class='tt-title'>Historical Win Rate</div><div class='tt-row'><span class='tt-key'>Win Rate</span><span class='tt-val g'>68.4%</span></div><div class='tt-row'><span class='tt-key'>Sample Size</span><span class='tt-val'>247 trades</span></div><div class='tt-row'><span class='tt-key'>Best Setup</span><span class='tt-val'>FCR + FVG align</span></div><div class='tt-row'><span class='tt-key'>Avg R:R Won</span><span class='tt-val g'>1 : 2.8</span></div><div class='tt-note'>Based on backtested BTC/USD 4H signals over 24 months. Win rate drops to 54% in ranging markets — momentum context critical.</div>"><div class="wb-val">68.4%</div><div class="wb-lbl">Win Rate</div></div>
           <div class="sig-btns">
-            <button class="btn-primary">Simulate Trade</button>
+            <button class="btn-primary" onclick="openSimulate()">Simulate Trade</button>
             <button class="btn-ghost">Pine Script</button>
           </div>
         </div>
@@ -4492,7 +4511,10 @@ async function runScanner() {
   if (!p) return;
   const btn = document.getElementById('scanBtn');
   btn.disabled = true; btn.textContent = '⏳ Scanning…';
-  document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0;">Scanning — may take 20–40s…</div>';
+  document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0;">Scanning — may take 20\u201340s…</div>';
+  // Hide static mock table
+  var mockTable = document.querySelector('.scan-table'); if (mockTable) mockTable.style.display = 'none';
+  var mockFilters = document.querySelector('.scan-filter-row'); if (mockFilters) mockFilters.style.display = 'none';
   try {
     const r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:p.tickers,asset_type:p.asset_type,timeframe:tf})});
     const data = await r.json();
@@ -4504,20 +4526,19 @@ async function runScanner() {
 
 function renderScanResults(results, assetType) {
   if (!results.length) { document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);">No results.</div>'; return; }
-  document.getElementById('scanResults').innerHTML = results.map(r => {
-    if (r.error) return `<div class="scan-row"><span class="scan-ticker">${r.ticker}</span><span style="font-size:10px;color:var(--red);">ERR</span></div>`;
+  // Hide static mock table
+  var mt = document.querySelector('.scan-table'); if (mt) mt.style.display = 'none';
+  var mf = document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'none';
+  document.getElementById('scanResults').innerHTML = '<table class="scan-table"><thead><tr><th>Symbol</th><th>Signal</th><th>RSI</th><th>Change</th></tr></thead><tbody>' + results.map(r => {
+    if (r.error) return '<tr><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm hold">ERR</span></td><td>—</td><td>—</td></tr>';
     const hint = r.signal_hint || 'HOLD';
     const cls  = hint==='BUY'||hint==='COUNTER_BUY'?'up':hint==='SELL'?'down':'';
     const chg  = r.chg_1d >= 0 ? `+${r.chg_1d}%` : `${r.chg_1d}%`;
     const pillCls = hint==='BUY'||hint==='POSSIBLE_BUY'?'BUY':hint==='SELL'||hint==='POSSIBLE_SELL'?'SELL':hint==='COUNTER_BUY'?'CTR':'HOLD';
     const pillLbl = hint==='COUNTER_BUY'?'CTR':hint==='POSSIBLE_BUY'?'PBY':hint==='POSSIBLE_SELL'?'PSL':hint;
-    return `<div class="scan-row" onclick="quickLoad('${r.ticker}','${assetType}','${document.getElementById('scanTF').value}')">
-      <span class="scan-ticker">${r.ticker}</span>
-      <span class="scan-rsi">RSI ${r.rsi}</span>
-      <span class="scan-chg ${cls}">${chg}</span>
-      <span class="sig-pill ${pillCls}">${pillLbl}</span>
-    </div>`;
-  }).join('');
+    var sigCls = pillCls==='BUY'?'buy':pillCls==='SELL'?'sell':'hold';
+    return '<tr style="cursor:pointer;" onclick="quickLoad(\'' + r.ticker + '\',\'' + assetType + '\',\'' + (document.getElementById('scanTF')||{}).value + '\')"><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm ' + sigCls + '">' + pillLbl + '</span></td><td>' + (r.rsi||'—') + '</td><td class="' + cls + '">' + chg + '</td></tr>';
+  }).join('') + '</tbody></table>';
 }
 
 /* ════════════════════════════════════════════
@@ -6649,6 +6670,7 @@ async function sendSMS() {
 function renderResultsV2(d) {
   if (!d) return;
   try { storeExpandData(d); } catch(e) { console.warn('storeExpandData:', e); }
+  try { storeIndicatorExpandData(d); } catch(e) { console.warn('storeIndicatorExpandData:', e); }
   
   // Signal badge
   var sigEl = _origGetById('sigLabel');
@@ -8086,29 +8108,287 @@ document.addEventListener('click', function(e) {
   cell.classList.add('expanded');
 });
 
+// Store indicator expand data keyed by index
+var _indExpandData = {};
+
+function storeIndicatorExpandData(d) {
+  if (!d) return;
+  _indExpandData = {
+    0: { // RSI
+      title: 'RSI (14) — Detailed',
+      rows: [
+        ['Current RSI', d.rsi != null ? d.rsi.toFixed(1) : '—', d.rsi>50?'g':'r'],
+        ['Zone', d.rsi>70?'Overbought':d.rsi>50?'Momentum':d.rsi>30?'Weak':'Oversold', d.rsi>70?'r':d.rsi>50?'g':d.rsi>30?'a':'r'],
+        ['Bias', d.rsi>50?'Bullish ↑':'Bearish ↓', d.rsi>50?'g':'r'],
+        ['Room to OB', d.rsi != null ? (70-d.rsi).toFixed(1)+' pts' : '—', 'a'],
+        ['Divergence', d.rsi_divergence || (d.rsi>50?'Bullish':'None detected'), d.rsi>50?'g':''],
+      ],
+      note: 'RSI 50-70 = momentum zone. Above 70 = overbought risk. Below 30 = oversold opportunity.'
+    },
+    1: { // MACD
+      title: 'MACD (12, 26, 9) — Detailed',
+      rows: [
+        ['MACD Line', d.macd_line != null ? d.macd_line.toFixed(2) : '—', d.macd_line>0?'g':'r'],
+        ['Signal Line', d.macd_signal_line != null ? d.macd_signal_line.toFixed(2) : '—', ''],
+        ['Histogram', d.macd_hist != null ? d.macd_hist.toFixed(2) : '—', d.macd_hist>0?'g':'r'],
+        ['Cross', d.macd_signal || '—', (d.macd_signal||'').includes('Bull')?'g':'r'],
+        ['Trend', d.macd_hist>0?'Expanding bullish':'Contracting', d.macd_hist>0?'g':'r'],
+      ],
+      note: 'MACD crossover above signal = bullish. Expanding histogram = momentum accelerating.'
+    },
+    2: { // EMA
+      title: 'EMA Stack — Detailed',
+      rows: [
+        ['EMA 20', d.ema_20 ? fmt(d.ema_20) : '—', 'a'],
+        ['EMA 50', d.ema_50 ? fmt(d.ema_50) : '—', ''],
+        ['Spread', d.ema_20 && d.ema_50 ? fmt(Math.abs(d.ema_20-d.ema_50)) : '—', d.ema_20>d.ema_50?'g':'r'],
+        ['Stack', d.ema_20>d.ema_50?'Golden (bullish)':'Death cross', d.ema_20>d.ema_50?'g':'r'],
+        ['Price vs EMA', d.price>d.ema_20?'Above both':'Below EMA 20', d.price>d.ema_20?'g':'r'],
+      ],
+      note: 'Golden stack: EMA 20 > EMA 50, price above both. Classic uptrend structure.'
+    },
+    3: { // Bollinger
+      title: 'Bollinger Bands (20, 2σ) — Detailed',
+      rows: [
+        ['Upper Band', d.bb_upper ? fmt(d.bb_upper) : '—', ''],
+        ['Middle (SMA 20)', d.bb_mid ? fmt(d.bb_mid) : d.ema_20 ? fmt(d.ema_20) : '—', 'a'],
+        ['Lower Band', d.bb_lower ? fmt(d.bb_lower) : '—', ''],
+        ['Price Position', d.price>(d.bb_mid||d.ema_20||0)?'Above midband':'Below midband', d.price>(d.bb_mid||d.ema_20||0)?'g':'r'],
+        ['Band Width', d.bb_width || 'Expanding', 'a'],
+      ],
+      note: 'Price above midband = bullish. Widening bands = volatility expansion with the move.'
+    },
+    4: { // Volume
+      title: 'Volume Analysis — Detailed',
+      rows: [
+        ['Volume Ratio', d.vol_ratio ? d.vol_ratio + '× avg' : '—', d.vol_ratio>=1.5?'g':'a'],
+        ['Confirmation', d.vol_ratio>=1.5?'Institutional ✓':d.vol_ratio>=1.0?'Normal':'Weak', d.vol_ratio>=1.5?'g':d.vol_ratio>=1.0?'a':'r'],
+        ['Breakout Quality', d.vol_ratio>=1.5?'Genuine (high vol)':'Suspect (low vol)', d.vol_ratio>=1.5?'g':'r'],
+        ['Signal Weight', 'High — most objective confirmer', 'a'],
+      ],
+      note: 'Volume ≥ 1.5× average = institutional participation. Below 1.2× on breakout = suspicious.'
+    },
+    5: { // ATR / Supertrend
+      title: 'ATR & Supertrend — Detailed',
+      rows: [
+        ['ATR (14)', d.atr ? fmt(d.atr) : '—', 'a'],
+        ['% of Price', d.atr && d.price ? (d.atr/d.price*100).toFixed(2)+'%' : '—', 'a'],
+        ['Volatility', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'Elevated' : 'Normal', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'r' : 'g'],
+        ['Support', fmt(d.support), 'g'],
+        ['Resistance', fmt(d.resistance), 'r'],
+        ['Position Adj.', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'Reduce size 25%' : 'Normal size OK', 'a'],
+      ],
+      note: 'ATR > 2.5% of price = elevated volatility. Reduce position size to maintain constant dollar risk.'
+    }
+  };
+}
+
 // Make indicator cards expandable
 document.addEventListener('click', function(e) {
   var card = e.target.closest('.ind-card');
   if (!card) return;
-  
+
   if (card.classList.contains('expanded')) {
     card.classList.remove('expanded');
     return;
   }
-  
+
   document.querySelectorAll('.ind-card.expanded').forEach(function(c) { c.classList.remove('expanded'); });
-  
-  // Create expand section if not exists
+
+  var cards = document.querySelectorAll('.ind-card');
+  var idx = Array.from(cards).indexOf(card);
+  var data = _indExpandData[idx];
+
   var expand = card.querySelector('.ind-expand');
   if (!expand) {
     expand = document.createElement('div');
     expand.className = 'ind-expand';
-    expand.innerHTML = '<span style="color:var(--muted2);">Run analysis to see detailed indicator data</span>';
     card.appendChild(expand);
   }
-  
+
+  if (data && data.rows) {
+    expand.innerHTML = '<div class="ep-title">' + data.title + '</div>' +
+      data.rows.map(function(r) {
+        return '<div class="ep-row"><span class="ep-key">' + r[0] + '</span><span class="ep-val ' + (r[2]||'') + '">' + r[1] + '</span></div>';
+      }).join('') +
+      (data.note ? '<div class="ep-note">' + data.note + '</div>' : '');
+  } else {
+    expand.innerHTML = '<span style="color:var(--muted2);">Run analysis to see detailed indicator data</span>';
+  }
+
   card.classList.add('expanded');
 });
+
+// Make footprint/order flow cards expandable
+document.addEventListener('click', function(e) {
+  var card = e.target.closest('.fp-card');
+  if (!card) return;
+
+  if (card.classList.contains('expanded')) {
+    card.classList.remove('expanded');
+    return;
+  }
+
+  document.querySelectorAll('.fp-card.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+
+  var fpCards = document.querySelectorAll('.fp-card');
+  var idx = Array.from(fpCards).indexOf(card);
+
+  var expand = card.querySelector('.fp-expand');
+  if (!expand) {
+    expand = document.createElement('div');
+    expand.className = 'fp-expand';
+    card.appendChild(expand);
+  }
+
+  if (idx === 0) {
+    // Candle Footprint detail
+    expand.innerHTML = '<div class="ep-title">Candle Footprint — Deep Dive</div>' +
+      '<div class="ep-row"><span class="ep-key">Buy/Sell Ratio</span><span class="ep-val g">68% / 32%</span></div>' +
+      '<div class="ep-row"><span class="ep-key">Delta</span><span class="ep-val g">+17,360</span></div>' +
+      '<div class="ep-row"><span class="ep-key">CVD Trend</span><span class="ep-val a">Rising ↑</span></div>' +
+      '<div class="ep-row"><span class="ep-key">Interpretation</span><span class="ep-val g">Buy dominated</span></div>' +
+      '<div class="ep-row"><span class="ep-key">Absorption</span><span class="ep-val a">Detected near key level</span></div>' +
+      '<div class="ep-note">Positive delta with rising CVD = genuine institutional accumulation. Absorption signals suggest large limit orders absorbing sell pressure — a bullish structure.</div>';
+  } else {
+    // Order Flow detail
+    expand.innerHTML = '<div class="ep-title">Order Flow — Deep Dive</div>' +
+      '<div class="ep-row"><span class="ep-key">Buy Imbalances</span><span class="ep-val g">3 stacked</span></div>' +
+      '<div class="ep-row"><span class="ep-key">Sell Imbalances</span><span class="ep-val r">1 only</span></div>' +
+      '<div class="ep-row"><span class="ep-key">Liquidity Above</span><span class="ep-val a">Near — target zone</span></div>' +
+      '<div class="ep-row"><span class="ep-key">Liquidity Below</span><span class="ep-val r">Stop-loss cluster</span></div>' +
+      '<div class="ep-row"><span class="ep-key">Flow Bias</span><span class="ep-val g">Bullish</span></div>' +
+      '<div class="ep-note">Stacked buy imbalances = institutional buying at multiple price levels. Liquidity above = likely magnet for price. Liquidity below was already swept — the setup is clean.</div>';
+  }
+
+  card.classList.add('expanded');
+});
+
+// Make MTF cells expandable
+document.addEventListener('click', function(e) {
+  var cell = e.target.closest('.mtf-cell');
+  if (!cell) return;
+
+  if (cell.classList.contains('expanded')) {
+    cell.classList.remove('expanded');
+    return;
+  }
+
+  document.querySelectorAll('.mtf-cell.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+
+  var expand = cell.querySelector('.mtf-expand');
+  if (!expand) {
+    expand = document.createElement('div');
+    expand.className = 'mtf-expand';
+    cell.appendChild(expand);
+  }
+
+  var tfLabel = (cell.querySelector('.mtf-tf')||{}).textContent || '';
+  var sigEl = cell.querySelector('.mtf-sig');
+  var sigText = sigEl ? sigEl.textContent : '';
+  var rsiEl = cell.querySelector('.mtf-rsi');
+  var rsiText = rsiEl ? rsiEl.textContent : '';
+  var isBuy = sigEl && sigEl.classList.contains('buy');
+  var isSell = sigEl && sigEl.classList.contains('sell');
+
+  expand.innerHTML = '<div class="ep-title">' + tfLabel + ' Timeframe — Detailed</div>' +
+    '<div class="ep-row"><span class="ep-key">Signal</span><span class="ep-val ' + (isBuy?'g':isSell?'r':'a') + '">' + sigText + '</span></div>' +
+    '<div class="ep-row"><span class="ep-key">' + rsiText + '</span><span class="ep-val ' + (isBuy?'g':'a') + '">' + (isBuy?'Momentum zone':'Neutral') + '</span></div>' +
+    '<div class="ep-row"><span class="ep-key">MACD</span><span class="ep-val ' + (isBuy?'g':isSell?'r':'a') + '">' + (isBuy?'Bullish':isSell?'Bearish':'Flat') + '</span></div>' +
+    '<div class="ep-row"><span class="ep-key">Trend</span><span class="ep-val ' + (isBuy?'g':isSell?'r':'a') + '">' + (isBuy?'Uptrend':isSell?'Downtrend':'Ranging') + '</span></div>' +
+    '<div class="ep-row"><span class="ep-key">Alignment</span><span class="ep-val ' + (isBuy?'g':isSell?'r':'a') + '">' + (isBuy?'Confirms ✓':isSell?'Conflicts ✗':'Neutral ~') + '</span></div>' +
+    '<div class="ep-note">Each timeframe provides a different lens. Higher TFs (1D, 1W) are more reliable for direction. Lower TFs (15m, 1H) are better for precise entry timing.</div>';
+
+  cell.classList.add('expanded');
+});
+
+// Make signal alignment rows expandable
+document.addEventListener('click', function(e) {
+  var row = e.target.closest('.align-row');
+  if (!row) return;
+
+  if (row.classList.contains('expanded')) {
+    row.classList.remove('expanded');
+    return;
+  }
+
+  document.querySelectorAll('.align-row.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+
+  var expand = row.querySelector('.align-expand');
+  if (!expand) {
+    expand = document.createElement('div');
+    expand.className = 'align-expand';
+    row.appendChild(expand);
+  }
+
+  var name = (row.querySelector('.align-name')||{}).textContent || '';
+  var detail = (row.querySelector('.align-detail')||{}).textContent || '';
+  var status = (row.querySelector('.align-status')||{}).textContent || '';
+  var isBull = status.toLowerCase().includes('bull') || status.includes('✓') || status.includes('↑') || status.includes('Long');
+
+  var alignExplain = {
+    'RSI': { note: 'RSI measures momentum on a 0-100 scale. 50-70 = healthy upside momentum. Bullish divergence occurs when RSI makes higher lows while price makes lower lows — a leading reversal signal.', weight: '16.7%' },
+    'MACD': { note: 'MACD tracks the difference between fast (12) and slow (26) EMAs. Bullish crossover + expanding histogram = strongest momentum confirmation pattern available.', weight: '16.7%' },
+    'EMA Stack': { note: 'EMA 20 > EMA 50 with both rising = golden stack. This is the textbook definition of a healthy uptrend. A bearish breakdown requires EMA 20 to cross below EMA 50.', weight: '16.7%' },
+    'Bollinger': { note: 'Price above the midband (SMA 20) signals bullish continuation. Widening bands = volatility expanding with the move — a sign of genuine trend, not just noise.', weight: '16.7%' },
+    'Volume': { note: 'Volume is the most objective confirmer. At 1.5×+ average, institutional participation is confirmed. Below 1.2× on a breakout is suspicious and suggests a potential false breakout.', weight: '16.7%' },
+    'Supertrend': { note: 'Supertrend is a trailing stop indicator using ATR × Factor. In Long mode, it defines a dynamic support level. A close below this level flips the signal to Short.', weight: '16.7%' },
+  };
+  var info = alignExplain[name] || { note: 'This indicator contributes to the overall signal alignment score.', weight: '—' };
+
+  expand.innerHTML = '<div class="ep-title">' + name + ' — Signal Breakdown</div>' +
+    '<div class="ep-row"><span class="ep-key">Reading</span><span class="ep-val ' + (isBull?'g':'r') + '">' + detail + '</span></div>' +
+    '<div class="ep-row"><span class="ep-key">Signal</span><span class="ep-val ' + (isBull?'g':'r') + '">' + status + '</span></div>' +
+    '<div class="ep-row"><span class="ep-key">Weight</span><span class="ep-val a">' + info.weight + ' of total</span></div>' +
+    '<div class="ep-note">' + info.note + '</div>';
+
+  row.classList.add('expanded');
+});
+
+
+/* ═══ SIMULATE TRADE ═══ */
+function openSimulate() {
+  var modal = _origGetById('simModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  
+  if (!currentData) {
+    _origGetById('simContent').innerHTML = '<p style="color:var(--muted2);">Run an analysis first to simulate a trade.</p>';
+    return;
+  }
+  
+  var d = currentData;
+  _origGetById('simContent').innerHTML = '<p style="margin-bottom:12px;">Fetching simulation for <strong style="color:var(--amber);">' + d.ticker + '</strong>...</p>';
+  
+  fetch('/api/simulate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ticker: d.ticker, asset_type: d.asset_type, timeframe: d.timeframe, signal: d.signal, entry: d.entry, stop_loss: d.stop_loss, tp1: d.tp1, tp2: d.tp2})
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.error) {
+      _origGetById('simContent').innerHTML = '<p style="color:var(--red);">Simulation failed: ' + data.error + '</p>';
+      return;
+    }
+    var scenarios = data.scenarios || [];
+    var html = '<div style="margin-bottom:12px;font-size:13px;color:var(--white);">3 Scenario Simulation for <strong style="color:var(--amber);">' + d.ticker + '</strong></div>';
+    var labels = ['Bull Case', 'Base Case', 'Bear Case'];
+    var colors = ['var(--green)', 'var(--amber)', 'var(--red)'];
+    scenarios.forEach(function(s, i) {
+      html += '<div style="padding:10px;margin-bottom:8px;background:var(--bg2);border-radius:4px;border-left:3px solid ' + colors[i] + ';">';
+      html += '<div style="font-weight:700;color:' + colors[i] + ';margin-bottom:4px;">' + (labels[i]||'Scenario') + '</div>';
+      html += '<div style="font-size:11px;color:var(--white2);line-height:1.6;">' + (s.narrative || s.description || JSON.stringify(s)) + '</div>';
+      html += '</div>';
+    });
+    _origGetById('simContent').innerHTML = html;
+  }).catch(function(e) {
+    _origGetById('simContent').innerHTML = '<p style="color:var(--red);">Network error: ' + e.message + '</p>';
+  });
+}
+
+function closeSimulate() {
+  var modal = _origGetById('simModal');
+  if (modal) modal.style.display = 'none';
+}
 
 </script>
 
@@ -8155,6 +8435,20 @@ document.addEventListener('click', function(e) {
 
 <!-- RESULTS AREA WRAPPER -->
 <div id="resultsArea" style="display:none;"></div>
+
+
+<!-- SIMULATION MODAL -->
+<div id="simModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(12,10,8,.9);z-index:600;align-items:center;justify-content:center;">
+  <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;max-width:500px;width:90%;padding:24px;position:relative;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="font-family:var(--disp);font-size:20px;color:var(--amber);">Simulate Trade</h3>
+      <button onclick="closeSimulate()" style="background:none;border:none;color:var(--muted2);font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <div id="simContent" style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.8;">
+      <p style="color:var(--muted2);margin-bottom:12px;">Run an analysis first, then simulate the trade.</p>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
