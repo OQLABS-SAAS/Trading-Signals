@@ -3421,9 +3421,12 @@ async function doAnalyze(ticker, assetType, timeframe) {
     try { runBacktest(d, true); } catch(e) {}
     try { updateChatContext(d); } catch(e) {}
     // Show content areas, hide empty states for all tabs
-    // btEmpty hidden — runBacktest() controls backtestPanel visibility
-    var btE = document.getElementById('btEmpty'); if (btE) btE.style.display = 'none';
-    var btC = document.getElementById('btContent'); if (btC) btC.style.display = '';
+    // Only hide btEmpty if signal has a tradeable entry (not HOLD)
+    // Otherwise runBacktest's HOLD handler keeps btEmpty visible with ticker buttons
+    if (d.signal && d.signal !== 'HOLD' && d.entry != null) {
+      var btE = document.getElementById('btEmpty'); if (btE) btE.style.display = 'none';
+      var btC = document.getElementById('btContent'); if (btC) btC.style.display = '';
+    }
     var simE = document.getElementById('simEmpty'); if (simE) simE.style.display = 'none';
     var simC = document.getElementById('simContent'); if (simC) simC.style.display = '';
     var stE = document.getElementById('stratEmpty'); if (stE) stE.style.display = 'none';
