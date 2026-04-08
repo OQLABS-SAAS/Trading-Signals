@@ -684,6 +684,56 @@ def build_ind_from_tv(tv):
         "chart_sell_signals": [],
     }
 
+def _enrich_chart_indicators(prices_c):
+    """Compute BB bands, RSI, and buy/sell signal markers from raw price array.
+    Returns (bb_upper, bb_lower, rsi_out, buy_sigs, sell_sigs)."""
+    _px = [p for p in prices_c if p is not None]
+    _n  = len(_px)
+
+    # Bollinger Bands (20-period SMA ± 2 std)
+    _bb_upper, _bb_lower = [], []
+    for _i in range(_n):
+        if _i < 19:
+            _bb_upper.append(None)
+            _bb_lower.append(None)
+        else:
+            _window = _px[_i-19:_i+1]
+            _sma = sum(_window) / 20
+            _std = (sum((_v - _sma)**2 for _v in _window) / 20) ** 0.5
+            _bb_upper.append(round(_sma + 2 * _std, 6))
+            _bb_lower.append(round(_sma - 2 * _std, 6))
+
+    # RSI (14-period Wilder smoothing)
+    _rsi_out = [None] * _n
+    if _n > 14:
+        _gains, _losses = [], []
+        for _i in range(1, _n):
+            _d = _px[_i] - _px[_i-1]
+            _gains.append(max(_d, 0))
+            _losses.append(max(-_d, 0))
+        _ag = sum(_gains[:14]) / 14
+        _al = sum(_losses[:14]) / 14
+        _rsi_out[14] = round(100 - 100 / (1 + _ag / _al), 2) if _al > 0 else 100.0
+        for _i in range(14, len(_gains)):
+            _ag = (_ag * 13 + _gains[_i]) / 14
+            _al = (_al * 13 + _losses[_i]) / 14
+            _rsi_out[_i + 1] = round(100 - 100 / (1 + _ag / _al), 2) if _al > 0 else 100.0
+
+    # Buy/Sell signal markers (RSI crossunder 40 = BUY, crossover 60 = SELL)
+    _buy_sigs, _sell_sigs = [], []
+    for _i in range(1, _n):
+        _prev = _rsi_out[_i - 1]
+        _curr = _rsi_out[_i]
+        if _prev is None or _curr is None:
+            continue
+        if _prev >= 40 and _curr < 40:
+            _buy_sigs.append(_i)
+        elif _prev <= 60 and _curr > 60:
+            _sell_sigs.append(_i)
+
+    return _bb_upper, _bb_lower, _rsi_out, _buy_sigs, _sell_sigs
+
+
 # ─── MULTI-SOURCE CHART DATA ──────────────────────────────────
 # Tries sources in order until one works. Yahoo Finance is blocked on Railway IPs,
 # so we try Binance (crypto) and Stooq (stocks/forex) first.
@@ -2226,6 +2276,13 @@ def analyze():
                 ind["chart_volumes"] = vols_c
                 ind["chart_ema20"]   = ema20_c
                 ind["chart_ema50"]   = ema50_c
+                # Compute BB/RSI/signals from raw prices
+                _bbu, _bbl, _rsi_c, _bsigs, _ssigs = _enrich_chart_indicators(prices_c)
+                ind["chart_bb_upper"]     = _bbu
+                ind["chart_bb_lower"]     = _bbl
+                ind["chart_rsi"]          = _rsi_c
+                ind["chart_buy_signals"]  = _bsigs
+                ind["chart_sell_signals"] = _ssigs
                 if not tv_ok and prices_c:
                     # Build minimal ind from direct chart so Claude has price data
                     p = prices_c[-1]
@@ -2257,12 +2314,14 @@ def analyze():
                 ind["chart_volumes"] = vols_c
                 ind["chart_ema20"]   = ema20_c
                 ind["chart_ema50"]   = ema50_c
-                ind.setdefault("chart_bb_upper", [None] * len(prices_c))
-                ind.setdefault("chart_bb_lower", [None] * len(prices_c))
-                ind.setdefault("chart_rsi",      [None] * len(prices_c))
-                ind.setdefault("chart_buy_signals",  [])
-                ind.setdefault("chart_sell_signals", [])
-                print(f"[analyze] chart fallback OK — {len(prices_c)} bars from direct sources")
+                # Compute BB/RSI/signals from raw prices
+                _bbu2, _bbl2, _rsi_c2, _bsigs2, _ssigs2 = _enrich_chart_indicators(prices_c)
+                ind["chart_bb_upper"]     = _bbu2
+                ind["chart_bb_lower"]     = _bbl2
+                ind["chart_rsi"]          = _rsi_c2
+                ind["chart_buy_signals"]  = _bsigs2
+                ind["chart_sell_signals"] = _ssigs2
+                print(f"[analyze] chart fallback OK — {len(prices_c)} bars, BB:{sum(1 for b in _bbu2 if b)} RSI:{sum(1 for r in _rsi_c2 if r)} signals:{len(_bsigs2)}B/{len(_ssigs2)}S")
             else:
                 print(f"[analyze] chart fallback also failed — chart will show 'unavailable'")
 
