@@ -1244,12 +1244,12 @@ body::before{
   </a>
 
   <nav class="nav-wrap">
-    <button class="nav-tab active" onclick="switchTab('signals',this)">Signals</button>
-    <button class="nav-tab" onclick="switchTab('strategy',this)">Strategy Engine</button>
-    <button class="nav-tab" onclick="switchTab('scanner',this)">Scanner</button>
-    <button class="nav-tab" onclick="switchTab('backtest',this)">Backtest</button>
-    <button class="nav-tab" onclick="switchTab('simulation',this)">Simulation</button>
-    <button class="nav-tab" onclick="switchTab('news',this)">News</button>
+    <button class="nav-tab active" onclick="switchMainTab('signals',this)">Signals</button>
+    <button class="nav-tab" onclick="switchMainTab('strategy',this)">Strategy Engine</button>
+    <button class="nav-tab" onclick="switchMainTab('scanner',this)">Scanner</button>
+    <button class="nav-tab" onclick="switchMainTab('backtest',this)">Backtest</button>
+    <button class="nav-tab" onclick="switchMainTab('simulation',this)">Simulation</button>
+    <button class="nav-tab" onclick="switchMainTab('news',this)">News</button>
   </nav>
 
   <div class="hdr-right"><div id="hdrTicker" style="font-family:var(--mono); font-size:13px; font-weight:600; color:var(--amber); margin-right:12px; min-width:50px;">—</div>
@@ -2468,6 +2468,9 @@ shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">
    JAVASCRIPT
 ══════════════════════════════════ -->
 <script>
+/* Safe element getter - prevents crashes on missing elements */
+function _el(id) { return document.getElementById(id) || document.createElement('div'); }
+
 /* Always send cookies with API calls */
 const _origFetch = window.fetch;
 window.fetch = function(url, opts={}) {
@@ -2505,14 +2508,17 @@ function showGate() {
 }
 
 function startApp() {
-  buildTape(); loadTape(); renderWatchlist(); refreshWatchPanel();
-  switchTab('crypto');       // populate sidebar instrument quick-select grid
-  updateInlineInst('crypto'); // populate inline instrument row under analyze bar
-  renderInstChips(null, null); // seed the switcher bar from localStorage
-  loadMarketPulse();
-  setInterval(loadTape, 120000);
-  setInterval(refreshWatchPanel, 60000);
-  setInterval(loadMarketPulse, 30 * 60 * 1000); // refresh every 30 min
+  try { buildTape(); } catch(e) { console.warn('buildTape:', e); }
+  try { loadTape(); } catch(e) { console.warn('loadTape:', e); }
+  try { renderWatchlist(); } catch(e) { console.warn('renderWatchlist:', e); }
+  try { refreshWatchPanel(); } catch(e) { console.warn('refreshWatchPanel:', e); }
+  try { switchTab('crypto'); } catch(e) { console.warn('switchTab:', e); }
+  try { updateInlineInst('crypto'); } catch(e) { console.warn('updateInlineInst:', e); }
+  try { renderInstChips(null, null); } catch(e) { console.warn('renderInstChips:', e); }
+  try { loadMarketPulse(); } catch(e) { console.warn('loadMarketPulse:', e); }
+  try { setInterval(loadTape, 120000); } catch(e) {}
+  try { setInterval(refreshWatchPanel, 60000); } catch(e) {}
+  try { setInterval(loadMarketPulse, 30 * 60 * 1000); } catch(e) {}
 }
 
 async function doLogin() {
@@ -2826,8 +2832,8 @@ const CONF_MAP = {HIGH:87,MEDIUM:58,LOW:30};
    INIT
 ════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', () => {
-  startClock();           // clock runs regardless (no auth needed)
-  checkAuth();            // check if already logged in — unlocks app if so
+  try { startClock(); } catch(e) { console.warn('startClock:', e); }
+  try { checkAuth(); } catch(e) { console.warn('checkAuth:', e); }
   // tape/watchlist/watches are started inside unlockApp() after login
 });
 
@@ -7316,11 +7322,12 @@ document.addEventListener('analysisRendered', () => { _initDataTips(); _initDivB
 </script>
 <script>
 // ─── TAB SWITCHING ───
-function switchTab(name, btn) {
+function switchMainTab(name, btn) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
-  btn.classList.add('active');
+  const panel = document.getElementById('tab-' + name);
+  if(panel) panel.classList.add('active');
+  if(btn) btn.classList.add('active');
 }
 
 // ─── CHART OVERLAYS ───
