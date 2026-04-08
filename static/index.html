@@ -207,6 +207,25 @@ body::before{
   min-height:calc(100vh - 90px);
 }
 .main-col{border-right:1px solid var(--border);display:flex;flex-direction:column;}
+/* When empty state is visible, center the command bar + empty message vertically */
+.main-col.empty-state{justify-content:center;}
+.main-col.empty-state #cmdBar{
+  border-bottom:none;background:transparent;padding:0 40px;
+  max-width:680px;width:100%;margin:0 auto;
+}
+.main-col.empty-state #sigHeroWrap{display:none!important;}
+
+/* Animated logo for empty state */
+@keyframes ringPulse1{0%,100%{r:36;opacity:.15;}50%{r:38;opacity:.35;}}
+@keyframes ringPulse2{0%,100%{r:26;opacity:.25;}50%{r:29;opacity:.5;}}
+@keyframes ringPulse3{0%,100%{r:16;opacity:.35;}50%{r:19;opacity:.65;}}
+@keyframes ringPulse4{0%,100%{r:7;opacity:.5;}50%{r:9;opacity:.85;}}
+@keyframes corePulse{0%,100%{r:2.5;opacity:.8;}50%{r:3.5;opacity:1;}}
+#emptyLogo .ring1{animation:ringPulse1 3s ease-in-out infinite;}
+#emptyLogo .ring2{animation:ringPulse2 3s ease-in-out infinite .3s;}
+#emptyLogo .ring3{animation:ringPulse3 3s ease-in-out infinite .6s;}
+#emptyLogo .ring4{animation:ringPulse4 3s ease-in-out infinite .9s;}
+#emptyLogo .core{animation:corePulse 2s ease-in-out infinite;}
 .side-col{display:flex;flex-direction:column;overflow-y:auto;background:var(--bg1);}
 
 /* ═══════════════════════════════════════════════
@@ -1356,7 +1375,7 @@ body::before{
   <div class="signals-layout">
 
     <!-- ─── MAIN COLUMN ─── -->
-    <div class="main-col">
+    <div class="main-col empty-state">
 
       <!-- SIGNAL HERO (part of signalResults — hidden until analysis) -->
       <div id="sigHeroWrap" style="display:none;">
@@ -1391,7 +1410,7 @@ body::before{
       </div><!-- /sigHeroWrap -->
 
       <!-- COMMAND BAR — ticker input + pills + instruments -->
-      <div style="padding:10px 20px 0;background:var(--bg1);border-bottom:1px solid var(--border);">
+      <div id="cmdBar" style="padding:10px 20px 0;background:var(--bg1);border-bottom:1px solid var(--border);">
         <!-- Row 1: Input + Analyze -->
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
           <input id="tickerInput" type="text" placeholder="BTC, AAPL, EUR/USD ..."
@@ -1449,7 +1468,7 @@ body::before{
       <!-- CHART -->
       <div class="chart-section">
         <div class="chart-topbar">
-          <span class="ct-title">BTC / USDT</span>
+          <span class="ct-title" id="chartTitle">BTC / USDT</span>
           <div class="tf-pills">
             <button class="tf-pill" onclick="setTF(this)">15m</button>
             <button class="tf-pill" onclick="setTF(this)">1H</button>
@@ -1458,141 +1477,45 @@ body::before{
             <button class="tf-pill" onclick="setTF(this)">1W</button>
           </div>
           <div class="chart-inds-row" style="margin-left:auto;">
-            <span class="ci-tag">EMA20 <span class="v a">$82,140</span></span>
-            <span class="ci-tag">EMA50 <span class="v">$79,820</span></span>
-            <span class="ci-tag">BB <span class="v g">Above mid</span></span>
+            <span class="ci-tag">EMA20 <span class="v a" id="ciEma20">—</span></span>
+            <span class="ci-tag">EMA50 <span class="v" id="ciEma50">—</span></span>
+            <span class="ci-tag">BB <span class="v g" id="ciBB">—</span></span>
           </div>
         </div>
 
-        <!-- Main chart SVG -->
-        <div style="position:relative;">
-          <svg class="chart-canvas" viewBox="0 0 960 240" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="aG" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#f5a623" stop-opacity=".07"/>
-                <stop offset="100%" stop-color="#f5a623" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <!-- Grid -->
-            <line x1="0" y1="60" x2="960" y2="60" stroke="#f5a623" stroke-width=".3" opacity=".15"/>
-            <line x1="0" y1="120" x2="960" y2="120" stroke="#f5a623" stroke-width=".3" opacity=".15"/>
-            <line x1="0" y1="180" x2="960" y2="180" stroke="#f5a623" stroke-width=".3" opacity=".15"/>
-            <!-- SL line -->
-            <line x1="0" y1="192" x2="960" y2="192" stroke="#ff4459" stroke-width="1" stroke-dasharray="4,5" opacity=".6"/>
-            <text x="5" y="188" fill="#ff4459" font-size="9" font-family="Fira Code" opacity=".8">SL $80,980</text>
-            <!-- TP1 -->
-            <line x1="0" y1="44" x2="960" y2="44" stroke="#00c98d" stroke-width="1" stroke-dasharray="4,5" opacity=".6"/>
-            <text x="5" y="40" fill="#00c98d" font-size="9" font-family="Fira Code" opacity=".8">TP1 $87,500</text>
-            <!-- TP2 -->
-            <line x1="0" y1="22" x2="960" y2="22" stroke="#00c98d" stroke-width=".8" stroke-dasharray="3,6" opacity=".4"/>
-            <text x="5" y="18" fill="#00c98d" font-size="8" font-family="Fira Code" opacity=".6">TP2 $91,200</text>
-            <!-- EMA lines -->
-            <polyline points="0,162 60,156 120,150 180,157 240,150 300,143 360,145 420,137 480,130 540,122 600,126 660,119 720,112 780,107 840,101 900,96 960,90" fill="none" stroke="#f5a623" stroke-width="1.3" opacity=".65"/>
-            <polyline points="0,180 60,175 120,172 180,176 240,170 300,164 360,162 420,155 480,152 540,145 600,147 660,140 720,134 780,130 840,125 900,121 960,115" fill="none" stroke="#6b6050" stroke-width="1" opacity=".55"/>
-            <!-- Area fill -->
-            <polygon points="0,240 0,165 60,157 120,148 180,155 240,148 300,140 360,143 420,133 480,126 540,118 600,122 660,115 720,108 780,104 840,98 900,93 960,88 960,240" fill="url(#aG)"/>
-            <!-- Candles -->
-            <g font-size="0">
-              <line x1="32" y1="160" x2="32" y2="170" stroke="#00c98d" stroke-width="1"/><rect x="28" y="161" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="72" y1="153" x2="72" y2="163" stroke="#00c98d" stroke-width="1"/><rect x="68" y="154" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="112" y1="148" x2="112" y2="157" stroke="#ff4459" stroke-width="1"/><rect x="108" y="149" width="8" height="7" fill="#ff4459" opacity=".85"/>
-              <line x1="152" y1="143" x2="152" y2="153" stroke="#00c98d" stroke-width="1"/><rect x="148" y="144" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="192" y1="146" x2="192" y2="155" stroke="#ff4459" stroke-width="1"/><rect x="188" y="147" width="8" height="7" fill="#ff4459" opacity=".85"/>
-              <line x1="232" y1="138" x2="232" y2="148" stroke="#00c98d" stroke-width="1"/><rect x="228" y="139" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="272" y1="133" x2="272" y2="143" stroke="#00c98d" stroke-width="1"/><rect x="268" y="134" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="312" y1="128" x2="312" y2="137" stroke="#00c98d" stroke-width="1"/><rect x="308" y="129" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="352" y1="131" x2="352" y2="140" stroke="#ff4459" stroke-width="1"/><rect x="348" y="132" width="8" height="7" fill="#ff4459" opacity=".85"/>
-              <line x1="392" y1="123" x2="392" y2="132" stroke="#00c98d" stroke-width="1"/><rect x="388" y="124" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="432" y1="116" x2="432" y2="125" stroke="#00c98d" stroke-width="1"/><rect x="428" y="117" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="472" y1="118" x2="472" y2="127" stroke="#ff4459" stroke-width="1"/><rect x="468" y="119" width="8" height="7" fill="#ff4459" opacity=".85"/>
-              <line x1="512" y1="110" x2="512" y2="119" stroke="#00c98d" stroke-width="1"/><rect x="508" y="111" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="552" y1="103" x2="552" y2="112" stroke="#00c98d" stroke-width="1"/><rect x="548" y="104" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="592" y1="105" x2="592" y2="114" stroke="#ff4459" stroke-width="1"/><rect x="588" y="106" width="8" height="7" fill="#ff4459" opacity=".85"/>
-              <line x1="632" y1="98" x2="632" y2="107" stroke="#00c98d" stroke-width="1"/><rect x="628" y="99" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="672" y1="91" x2="672" y2="100" stroke="#00c98d" stroke-width="1"/><rect x="668" y="92" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <line x1="712" y1="94" x2="712" y2="103" stroke="#ff4459" stroke-width="1"/><rect x="708" y="95" width="8" height="7" fill="#ff4459" opacity=".85"/>
-              <line x1="752" y1="87" x2="752" y2="96" stroke="#00c98d" stroke-width="1"/><rect x="748" y="88" width="8" height="8" fill="#00c98d" opacity=".85"/>
-              <!-- Current candle + BUY arrow (shows when overlay active) -->
-              <line x1="912" y1="80" x2="912" y2="92" stroke="#f5a623" stroke-width="1"/><rect x="908" y="81" width="8" height="10" fill="#f5a623" opacity="1"/>
-              <!-- Buy arrow -->
-              <text id="buyArrow" x="904" y="74" fill="#00c98d" font-size="18" font-family="Fira Code">▲</text>
-              <line x1="912" y1="76" x2="912" y2="82" stroke="#00c98d" stroke-width="1.5" stroke-dasharray="2,2" opacity=".7"/>
-              <rect x="900" y="96" width="24" height="10" rx="1" fill="rgba(0,201,141,.15)" stroke="#00c98d" stroke-width=".5"/>
-              <text x="904" y="105" fill="#00c98d" font-size="8" font-family="Fira Code">BUY</text>
-              <!-- Price marker -->
-              <line x1="0" y1="92" x2="960" y2="92" stroke="#f5a623" stroke-width=".5" stroke-dasharray="2,5" opacity=".35"/>
-              <rect x="910" y="86" width="46" height="12" rx="1" fill="rgba(245,166,35,.18)" stroke="#f5a623" stroke-width=".5"/>
-              <text x="913" y="96" fill="#f5a623" font-size="8.5" font-family="Fira Code">83,241</text>
-            </g>
-            <!-- BB Bands (shown when BB overlay active) -->
-            <g id="bbOverlay" style="display:none;" opacity=".45">
-              <polyline points="0,138 60,133 120,128 180,133 240,127 300,121 360,124 420,115 480,109 540,102 600,106 660,99 720,93 780,88 840,83 900,79 960,73" fill="none" stroke="#4d9fff" stroke-width="1.2"/>
-              <polyline points="0,192 60,188 120,184 180,188 240,183 300,177 360,179 420,172 480,168 540,161 600,164 660,158 720,152 780,148 840,143 900,139 960,133" fill="none" stroke="#4d9fff" stroke-width="1.2"/>
-            </g>
-          </svg>
+        <!-- Chart.js Price Canvas -->
+        <div style="position:relative;height:300px;background:var(--bg);">
+          <canvas id="priceChart"></canvas>
         </div>
 
-        <!-- RSI sub-chart (toggle) -->
-        <div class="sub-chart-wrap" id="rsiWrap">
-          <div class="sub-chart-label">RSI(14)</div>
-          <div class="sub-chart-badge div-bull" id="rsiDivBadge" style="display:none;">Bullish Divergence</div>
-          <svg viewBox="0 0 960 72" style="width:100%;display:block;">
-            <rect x="0" y="0" width="960" height="14" fill="rgba(255,68,89,.04)"/>
-            <rect x="0" y="58" width="960" height="14" fill="rgba(0,201,141,.04)"/>
-            <line x1="0" y1="14" x2="960" y2="14" stroke="#ff4459" stroke-width=".6" stroke-dasharray="3,5" opacity=".4"/>
-            <line x1="0" y1="58" x2="960" y2="58" stroke="#00c98d" stroke-width=".6" stroke-dasharray="3,5" opacity=".4"/>
-            <!-- RSI line -->
-            <polyline points="0,52 80,49 160,45 240,47 320,42 400,37 480,33 560,30 640,26 720,29 800,25 880,24 960,23" fill="none" stroke="#a78bfa" stroke-width="2"/>
-            <!-- RSI divergence markers -->
-            <circle id="rsiDiv1" cx="400" cy="37" r="3" fill="none" stroke="#00c98d" stroke-width="1.5" display="none"/>
-            <circle id="rsiDiv2" cx="800" cy="25" r="3" fill="none" stroke="#00c98d" stroke-width="1.5" display="none"/>
-            <line id="rsiDivLine" x1="400" y1="37" x2="800" y2="25" stroke="#00c98d" stroke-width="1" stroke-dasharray="3,3" opacity=".6" display="none"/>
-            <text x="6" y="12" fill="#ff4459" font-size="8" font-family="Fira Code" opacity=".7">70</text>
-            <text x="6" y="70" fill="#00c98d" font-size="8" font-family="Fira Code" opacity=".7">30</text>
-            <text x="6" y="38" fill="#a78bfa" font-size="10" font-family="Fira Code">62.4</text>
-          </svg>
+        <!-- Chart.js Volume Canvas -->
+        <div style="position:relative;height:80px;background:var(--bg);border-top:1px solid var(--border);">
+          <canvas id="volChart"></canvas>
         </div>
 
-        <!-- Delta sub-chart (toggle) -->
-        <div class="sub-chart-wrap" id="deltaWrap">
-          <div class="sub-chart-label">DELTA</div>
-          <svg viewBox="0 0 960 56" style="width:100%;display:block;">
-            <line x1="0" y1="28" x2="960" y2="28" stroke="rgba(255,255,255,.08)" stroke-width="1"/>
-            <g>
-              <!-- positive deltas (green) -->
-              <rect x="26" y="16" width="12" height="12" fill="#00c98d" opacity=".7"/>
-              <rect x="66" y="12" width="12" height="16" fill="#00c98d" opacity=".7"/>
-              <rect x="226" y="8" width="12" height="20" fill="#00c98d" opacity=".7"/>
-              <rect x="386" y="10" width="12" height="18" fill="#00c98d" opacity=".7"/>
-              <rect x="506" y="6" width="12" height="22" fill="#00c98d" opacity=".8"/>
-              <rect x="626" y="8" width="12" height="20" fill="#00c98d" opacity=".7"/>
-              <rect x="746" y="4" width="12" height="24" fill="#00c98d" opacity=".8"/>
-              <rect x="906" y="2" width="12" height="26" fill="#00c98d" opacity=".9"/>
-              <!-- negative deltas (red) -->
-              <rect x="106" y="28" width="12" height="14" fill="#ff4459" opacity=".7"/>
-              <rect x="306" y="28" width="12" height="10" fill="#ff4459" opacity=".6"/>
-              <rect x="426" y="28" width="12" height="12" fill="#ff4459" opacity=".7"/>
-              <rect x="566" y="28" width="12" height="10" fill="#ff4459" opacity=".6"/>
-              <rect x="666" y="28" width="12" height="8" fill="#ff4459" opacity=".6"/>
-              <rect x="706" y="28" width="12" height="11" fill="#ff4459" opacity=".7"/>
-            </g>
-            <text x="6" y="11" fill="rgba(255,255,255,.25)" font-size="8" font-family="Fira Code">BUY</text>
-            <text x="6" y="50" fill="rgba(255,255,255,.25)" font-size="8" font-family="Fira Code">SELL</text>
-          </svg>
+        <!-- Chart.js RSI sub-chart -->
+        <div id="rsiChartWrap" style="position:relative;height:80px;background:var(--bg);border-top:1px solid var(--border);">
+          <canvas id="rsiChart"></canvas>
         </div>
+
+        <!-- TradingView embed fallback (hidden by default) -->
+        <div id="tvChartEmbed" style="display:none;height:450px;background:var(--bg);"></div>
 
         <!-- Overlay toggle buttons -->
-        <div class="chart-ovr-row">
-          <button class="chart-ovr-btn active" id="ovrSIG" onclick="toggleOverlay('SIG',this)" data-tip="<div class='tt-title'>Buy / Sell Arrows</div><div class='tt-row'><span class='tt-key'>Shows</span><span class='tt-val'>Signal entry markers</span></div><div class='tt-note'>Toggle green BUY ▲ and red SELL ▼ arrows at signal entry points on the chart. Click to show or hide signal overlay.</div>">
-            ↑↓ Buy/Sell Arrows <span class="ovr-state" id="ovrSIGState">ON</span>
+        <div class="chart-ovr-row" id="chartOvrRow">
+          <button class="chart-ovr-btn active" id="ovrSIG" onclick="toggleOverlay('SIG',this)">
+            ↑↓ Signals <span class="ovr-state" id="ovrSIGState">ON</span>
           </button>
-          <button class="chart-ovr-btn active" id="ovrRSI" onclick="toggleOverlay('RSI',this)" data-tip="<div class='tt-title'>RSI Divergence Panel</div><div class='tt-row'><span class='tt-key'>Shows</span><span class='tt-val'>RSI sub-chart + divergence</span></div><div class='tt-row'><span class='tt-key'>Divergence</span><span class='tt-val g'>Bullish divergence ✓</span></div><div class='tt-note'>Displays a 14-period RSI sub-chart below the main price chart. Divergence lines show where price made lower lows but RSI made higher lows (bullish) — a leading reversal signal.</div>">
-            〰 RSI Divergence <span class="ovr-state" id="ovrRSIState">ON</span>
+          <button class="chart-ovr-btn active" id="ovrRSI" onclick="toggleOverlay('RSI',this)">
+            〰 RSI <span class="ovr-state" id="ovrRSIState">ON</span>
           </button>
-          <button class="chart-ovr-btn" id="ovrBB" onclick="toggleOverlay('BB',this)" data-tip="<div class='tt-title'>Bollinger Bands Overlay</div><div class='tt-row'><span class='tt-key'>Shows</span><span class='tt-val'>Upper + Lower bands</span></div><div class='tt-row'><span class='tt-key'>Settings</span><span class='tt-val'>20 EMA, 2σ</span></div><div class='tt-note'>Projects the upper ($86,120) and lower ($78,160) Bollinger Bands directly on the price chart. Useful for identifying breakouts and mean reversion targets.</div>">
+          <button class="chart-ovr-btn" id="ovrBB" onclick="toggleOverlay('BB',this)">
             ≡ BB Bands <span class="ovr-state" id="ovrBBState">OFF</span>
           </button>
-          <button class="chart-ovr-btn" id="ovrDELTA" onclick="toggleOverlay('DELTA',this)" data-tip="<div class='tt-title'>Footprint Delta Panel</div><div class='tt-row'><span class='tt-key'>Shows</span><span class='tt-val'>Buy vs Sell delta bars</span></div><div class='tt-row'><span class='tt-key'>Green bars</span><span class='tt-val g'>Buy delta (buyers won)</span></div><div class='tt-row'><span class='tt-key'>Red bars</span><span class='tt-val r'>Sell delta (sellers won)</span></div><div class='tt-note'>Volume delta chart shows the imbalance between market buys vs sells on each candle. Consecutive green deltas = institutional buying pressure accumulating.</div>">
+          <button class="chart-ovr-btn" id="ovrVOL" onclick="toggleOverlay('VOL',this)">
+            ▮ Volume <span class="ovr-state" id="ovrVOLState">ON</span>
+          </button>
+          <button class="chart-ovr-btn" id="ovrDELTA" onclick="toggleOverlay('DELTA',this)">
             ⬛ Delta <span class="ovr-state" id="ovrDELTAState">OFF</span>
           </button>
         </div>
@@ -1917,27 +1840,30 @@ body::before{
       <!-- MTF -->
       <div class="section-hdr">Multi-Timeframe Alignment</div>
       <div class="mtf-grid" id="mtfContent">
-        <div class="mtf-cell" data-tip="<div class='tt-title'>15-Minute</div><div class='tt-row'><span class='tt-key'>Signal</span><span class='tt-val g'>BUY</span></div><div class='tt-row'><span class='tt-key'>RSI</span><span class='tt-val'>58 — Momentum</span></div><div class='tt-row'><span class='tt-key'>MACD</span><span class='tt-val g'>Bullish hist</span></div><div class='tt-note'>Short-term scalping timeframe. Entry timing signal — confirms momentum is up on the micro view.</div>"><div class="mtf-tf">15m</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 58</div></div>
-        <div class="mtf-cell" data-tip="<div class='tt-title'>1-Hour</div><div class='tt-row'><span class='tt-key'>Signal</span><span class='tt-val g'>BUY</span></div><div class='tt-row'><span class='tt-key'>RSI</span><span class='tt-val'>61 — Momentum</span></div><div class='tt-row'><span class='tt-key'>MACD</span><span class='tt-val g'>Bullish cross</span></div><div class='tt-note'>Intraday timeframe. Strong alignment with 4H — both showing BUY in momentum zones. Ideal for precise entries.</div>"><div class="mtf-tf">1H</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 61</div></div>
-        <div class="mtf-cell" data-tip="<div class='tt-title'>4-Hour — Primary TF</div><div class='tt-row'><span class='tt-key'>Signal</span><span class='tt-val g'>BUY ★</span></div><div class='tt-row'><span class='tt-key'>RSI</span><span class='tt-val'>62 — Momentum</span></div><div class='tt-row'><span class='tt-key'>MACD</span><span class='tt-val g'>Bullish hist +234</span></div><div class='tt-note'>This is the primary analysis timeframe. All levels, targets, and stops are derived from the 4H chart. Strongest signal timeframe.</div>"><div class="mtf-tf">4H</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 62</div></div>
-        <div class="mtf-cell" data-tip="<div class='tt-title'>Daily</div><div class='tt-row'><span class='tt-key'>Signal</span><span class='tt-val g'>BUY</span></div><div class='tt-row'><span class='tt-key'>RSI</span><span class='tt-val'>55 — Neutral+</span></div><div class='tt-row'><span class='tt-key'>MACD</span><span class='tt-val g'>Above zero</span></div><div class='tt-note'>Higher timeframe confirmation. Daily structure is bullish — no conflicting signals. RSI at 55 means lots of room to run on the big picture.</div>"><div class="mtf-tf">1D</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 55</div></div>
-        <div class="mtf-cell" data-tip="<div class='tt-title'>Weekly</div><div class='tt-row'><span class='tt-key'>Signal</span><span class='tt-val a'>HOLD / Neutral</span></div><div class='tt-row'><span class='tt-key'>RSI</span><span class='tt-val'>50 — Neutral</span></div><div class='tt-row'><span class='tt-key'>MACD</span><span class='tt-val m'>Flat histogram</span></div><div class='tt-note'>Weekly is consolidating at midpoint RSI. Not a headwind — but no weekly momentum tailwind either. Trade is being driven by 4H + Daily structure.</div>"><div class="mtf-tf">1W</div><div class="mtf-sig hold">HOLD</div><div class="mtf-rsi">RSI 50</div></div>
-        <div class="mtf-cell" data-tip="<div class='tt-title'>Monthly</div><div class='tt-row'><span class='tt-key'>Signal</span><span class='tt-val g'>BUY</span></div><div class='tt-row'><span class='tt-key'>RSI</span><span class='tt-val'>64 — Momentum</span></div><div class='tt-row'><span class='tt-key'>Structure</span><span class='tt-val g'>Macro uptrend</span></div><div class='tt-note'>Monthly chart in bullish momentum zone. Macro structure supports the trade bias. This is the most important HTF context — all clear.</div>"><div class="mtf-tf">1M</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 64</div></div>
+        <div class="mtf-cell"><div class="mtf-tf">15m</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 58</div></div>
+        <div class="mtf-cell"><div class="mtf-tf">1H</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 61</div></div>
+        <div class="mtf-cell"><div class="mtf-tf">4H</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 62</div></div>
+        <div class="mtf-cell"><div class="mtf-tf">1D</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 55</div></div>
+        <div class="mtf-cell"><div class="mtf-tf">1W</div><div class="mtf-sig hold">HOLD</div><div class="mtf-rsi">RSI 50</div></div>
+        <div class="mtf-cell"><div class="mtf-tf">1M</div><div class="mtf-sig buy">BUY</div><div class="mtf-rsi">RSI 64</div></div>
       </div>
 
       </div><!-- /signalResults -->
 
       <!-- EMPTY STATE (shown before analysis) -->
-      <div id="signalEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;min-height:50vh;">
-        <svg viewBox="0 0 80 80" width="60" height="60" style="margin-bottom:24px;opacity:.4;">
-          <circle cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".7" fill="none" opacity=".3"/>
-          <circle cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".9" fill="none" opacity=".45"/>
-          <circle cx="40" cy="40" r="16" stroke="var(--amber)" stroke-width="1.1" fill="none" opacity=".6"/>
-          <circle cx="40" cy="40" r="7" stroke="var(--amber)" stroke-width="1.5" fill="none" opacity=".8"/>
-          <circle cx="40" cy="40" r="2.5" fill="var(--amber)"/>
+      <div id="signalEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 20px 40px;flex:1;">
+        <svg id="emptyLogo" viewBox="0 0 80 80" width="100" height="100" style="margin-bottom:28px;">
+          <circle class="ring1" cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".6" fill="none"/>
+          <circle class="ring2" cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".8" fill="none"/>
+          <circle class="ring3" cx="40" cy="40" r="16" stroke="var(--amber)" stroke-width="1" fill="none"/>
+          <circle class="ring4" cx="40" cy="40" r="7" stroke="var(--amber)" stroke-width="1.4" fill="none"/>
+          <circle class="core" cx="40" cy="40" r="2.5" fill="var(--amber)"/>
         </svg>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:2px;text-transform:uppercase;margin-bottom:20px;">Select an instrument above or type a ticker</div>
-        <div style="font-size:12px;color:var(--muted);max-width:360px;text-align:center;line-height:1.7;">Click any ticker button above — or type a symbol and hit <span style="color:var(--amber);font-family:var(--mono);font-weight:700;">⚡ ANALYZE</span> for real-time signals.</div>
+        <div style="font-family:var(--disp);font-size:20px;font-weight:700;color:var(--white);letter-spacing:-0.5px;margin-bottom:6px;">
+          <span style="color:var(--amber);">dot</span><span style="font-weight:300;">·</span><span style="font-weight:300;">verse</span>
+        </div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:2.5px;text-transform:uppercase;margin-bottom:28px;">Trade like you already know</div>
+        <div style="font-size:12px;color:var(--muted);max-width:360px;text-align:center;line-height:1.7;">Select an instrument or type a ticker and hit <span style="color:var(--amber);font-family:var(--mono);font-weight:700;">⚡ ANALYZE</span></div>
       </div>
 
     </div><!-- /main-col -->
@@ -2578,6 +2504,7 @@ shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">
 <!-- ══════════════════════════════════
    JAVASCRIPT
 ══════════════════════════════════ -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 /* Safe element getter - prevents crashes on missing elements */
 function _el(id) { return document.getElementById(id) || document.createElement('div'); }
@@ -6848,6 +6775,8 @@ function renderResultsV2(d) {
   var sr = _origGetById('signalResults'); if (sr) sr.style.display = '';
   var sh = _origGetById('sigHeroWrap'); if (sh) sh.style.display = '';
   var se = _origGetById('signalEmpty'); if (se) se.style.display = 'none';
+  // Remove centered empty-state layout
+  var mc = document.querySelector('.main-col'); if (mc) mc.classList.remove('empty-state');
   try { storeExpandData(d); } catch(e) { console.warn('storeExpandData:', e); }
   try { storeIndicatorExpandData(d); } catch(e) { console.warn('storeIndicatorExpandData:', e); }
   try { renderFootprint(d); } catch(e) { console.warn('renderFootprint:', e); }
@@ -6943,9 +6872,15 @@ function renderResultsV2(d) {
     infoCells[6].style.color = 'var(--amber)';
   }
   
-  // Chart title
-  var ctTitle = document.querySelector('.ct-title');
+  // Chart title + indicator tags
+  var ctTitle = _origGetById('chartTitle');
   if (ctTitle) ctTitle.textContent = d.ticker + ' / USDT';
+  var ciE20 = _origGetById('ciEma20');
+  if (ciE20 && d.ema20 != null) ciE20.textContent = '$' + Number(d.ema20).toLocaleString(undefined,{maximumFractionDigits:2});
+  var ciE50 = _origGetById('ciEma50');
+  if (ciE50 && d.ema50 != null) ciE50.textContent = '$' + Number(d.ema50).toLocaleString(undefined,{maximumFractionDigits:2});
+  var ciBB = _origGetById('ciBB');
+  if (ciBB && d.bb_pos != null) ciBB.textContent = d.bb_pos > 0.5 ? 'Above mid' : 'Below mid';
   
   // Narrative
   var narr = document.querySelector('.narrative-text');
@@ -7821,41 +7756,45 @@ function toggleOverlay(type, btn) {
   overlayState[type] = !overlayState[type];
   const on = overlayState[type];
   btn.classList.toggle('active', on);
-  document.getElementById('ovr' + type + 'State').textContent = on ? 'ON' : 'OFF';
+  var stateEl = document.getElementById('ovr' + type + 'State');
+  if (stateEl) stateEl.textContent = on ? 'ON' : 'OFF';
 
   if (type === 'SIG') {
-    const arrow = document.getElementById('buyArrow');
-    if (arrow) arrow.style.display = on ? '' : 'none';
-  }
-  if (type === 'RSI') {
-    const w = document.getElementById('rsiWrap');
-    w.style.display = on ? 'block' : 'none';
-    if (on) {
-      // Show divergence markers
-      document.getElementById('rsiDiv1').setAttribute('display','');
-      document.getElementById('rsiDiv2').setAttribute('display','');
-      document.getElementById('rsiDivLine').setAttribute('display','');
-      document.getElementById('rsiDivBadge').style.display = '';
-    } else {
-      document.getElementById('rsiDivBadge').style.display = 'none';
+    // Toggle buy/sell signal points on Chart.js price chart
+    if (priceChartInst) {
+      priceChartInst.data.datasets.forEach(function(ds) {
+        if (ds.label === 'Buy Signals' || ds.label === 'Sell Signals') ds.hidden = !on;
+      });
+      priceChartInst.update('none');
     }
   }
+  if (type === 'RSI') {
+    var rw = document.getElementById('rsiChartWrap');
+    if (rw) rw.style.display = on ? '' : 'none';
+  }
   if (type === 'BB') {
-    const bb = document.getElementById('bbOverlay');
-    if (bb) bb.style.display = on ? '' : 'none';
+    // Toggle BB bands on Chart.js price chart
+    if (priceChartInst) {
+      priceChartInst.data.datasets.forEach(function(ds) {
+        if (ds.label === 'BB Upper' || ds.label === 'BB Lower') ds.hidden = !on;
+      });
+      priceChartInst.update('none');
+    }
+  }
+  if (type === 'VOL') {
+    var vw = document.getElementById('volChart');
+    if (vw) vw.parentElement.style.display = on ? '' : 'none';
   }
   if (type === 'DELTA') {
-    const dw = document.getElementById('deltaWrap');
-    dw.style.display = on ? 'block' : 'none';
+    // Delta not yet wired to Chart.js — placeholder
+  }
+
+  // TradingView mode toggles
+  if (typeof tvMode !== 'undefined' && tvMode) {
+    tvStudies[type] = on;
+    if (typeof rebuildTVEmbed === 'function') rebuildTVEmbed();
   }
 }
-
-// Init: show RSI on load
-document.getElementById('rsiWrap').style.display = 'block';
-document.getElementById('rsiDiv1').setAttribute('display','');
-document.getElementById('rsiDiv2').setAttribute('display','');
-document.getElementById('rsiDivLine').setAttribute('display','');
-document.getElementById('rsiDivBadge').style.display = '';
 
 // ─── TF PILLS ───
 function setTF(btn) {
