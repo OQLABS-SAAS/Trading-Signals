@@ -1304,118 +1304,6 @@ def _tv_prompt_block(tv):
     return "\n".join(lines)
 
 
-# ─── OpenAI NARRATIVE ENHANCEMENT ──────────────────────────────
-def _enhance_narrative_openai(result, ticker, asset_type, ind, timeframe):
-    """
-    Enhance narrative text fields using GPT-4o-mini.
-    Returns the result dict with enhanced text fields, or original result if OpenAI fails.
-    ONLY enhances text (summary, narrative, scenarios, assessments).
-    Does NOT change signal, entry, SL, TP, or confidence.
-    """
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        # No API key configured — silently return original result
-        return result
-
-    try:
-        # Extract data for the prompt
-        signal = result.get("signal", "HOLD")
-        confidence = result.get("confidence", "LOW")
-        price = ind.get("price", 0) or 0
-        rsi = ind.get("rsi", 50) or 50
-        macd_hist = ind.get("macd_hist", 0) or 0
-        ema_trend = ind.get("ema_trend", "neutral") or "neutral"
-        atr = ind.get("atr", price * 0.01) or (price * 0.01)
-        vol_ratio = ind.get("vol_ratio", 1.0) or 1.0
-        bb_pos = ind.get("bb_pos", 0.5) or 0.5
-
-        # Build concise prompt
-        prompt = f"""You are a professional trader writing analysis for {ticker} ({asset_type}, {timeframe}).
-
-Signal: {signal} | Confidence: {confidence}
-Price: {price} | RSI: {rsi} | MACD Hist: {macd_hist:.4f} | EMA Trend: {ema_trend}
-ATR: {atr:.4f} | Vol Ratio: {vol_ratio:.2f} | BB Position: {bb_pos:.2f}
-Entry: {result.get('entry')} | SL: {result.get('stop_loss')} | TP1: {result.get('tp1')} | TP2: {result.get('tp2')} | TP3: {result.get('tp3')}
-
-Return a JSON object with these keys (ONLY JSON, no markdown, no extra text):
-- summary: 2-3 sentence market analysis
-- narrative: 3-4 sentence trader thinking with specific price levels
-- bull_scenario: 1-2 sentences on bullish case
-- base_scenario: 1-2 sentences on base/expected case
-- bear_scenario: 1-2 sentences on bearish case
-- micro_lesson: 1-2 sentence trading insight related to this setup
-- rsi_assessment: one line about RSI
-- trend_assessment: one line about trend
-- macd_assessment: one line about MACD
-- volume_assessment: one line about volume
-- supertrend_assessment: one line about supertrend
-
-Write like a professional prop trader. Use specific numbers. Be concise. Return ONLY valid JSON, no wrapper."""
-
-        # Call OpenAI API
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            "max_tokens": 800,
-            "temperature": 0.7,
-        }
-
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            json=payload,
-            headers=headers,
-            timeout=(10, 30),
-        )
-
-        if resp.status_code != 200:
-            # API error — silently return original result
-            print(f"[OpenAI] API error {resp.status_code}: {resp.text[:200]}")
-            return result
-
-        # Parse response
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-
-        if not content:
-            # Empty response — return original
-            return result
-
-        # Try to parse as JSON
-        enhanced = json.loads(content)
-
-        # Merge enhanced text fields into result (don't override structural fields)
-        text_fields = [
-            "summary", "narrative", "bull_scenario", "base_scenario", "bear_scenario",
-            "micro_lesson", "rsi_assessment", "trend_assessment", "macd_assessment",
-            "volume_assessment", "supertrend_assessment"
-        ]
-        for field in text_fields:
-            if field in enhanced and enhanced[field]:
-                result[field] = enhanced[field]
-
-        return result
-
-    except json.JSONDecodeError:
-        # Response wasn't valid JSON — return original result
-        return result
-    except requests.exceptions.RequestException as e:
-        # Network/timeout error — silently return original
-        print(f"[OpenAI] Request error: {e}")
-        return result
-    except Exception as e:
-        # Any other error — silently return original
-        print(f"[OpenAI] Unexpected error: {e}")
-        return result
-
 
 # ─── CLAUDE ANALYSIS ─────────────────────────────────────────
 def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
@@ -1632,155 +1520,9 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
         "supertrend_assessment": supertrend_assessment,
     }
 
-    # Enhance narrative text fields via OpenAI (non-blocking, fails silently)
-    result = _enhance_narrative_openai(result, ticker, asset_type, ind, timeframe)
-
     return result
 
 
-# ─── OpenAI SCENARIO ENHANCEMENT ──────────────────────────────
-def _enhance_scenarios_openai(sim, ticker, asset_type, signal, timeframe):
-    """
-    Enhance simulation scenario paths via GPT-4o-mini.
-    Returns the sim dict with enhanced 'path' fields, or original sim if OpenAI fails.
-    """
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return sim
-
-    try:
-        # Extract current paths to enhance
-        success_path = sim.get("success", {}).get("path", "")
-        reversal_path = sim.get("reversal", {}).get("path", "")
-        consolidation_path = sim.get("consolidation", {}).get("path", "")
-
-        prompt = f"""You are a professional trader writing price action scenarios for {ticker} ({asset_type}, {timeframe}).
-
-Signal: {signal}
-
-Current scenario descriptions:
-SUCCESS: {success_path}
-REVERSAL: {reversal_path}
-CONSOLIDATION: {consolidation_path}
-
-Return a JSON object with these keys (ONLY JSON, no markdown, no extra text):
-- success: 2-3 sentence description of the successful trade path with specific levels
-- reversal: 2-3 sentence description of the reversal scenario
-- consolidation: 2-3 sentence description of the consolidation/range scenario
-
-Write like a professional trader. Focus on realistic price action and trader psychology. Be concise. Return ONLY valid JSON."""
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 600,
-            "temperature": 0.7,
-        }
-
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            json=payload,
-            headers=headers,
-            timeout=(10, 30),
-        )
-
-        if resp.status_code != 200:
-            print(f"[OpenAI scenarios] API error {resp.status_code}: {resp.text[:200]}")
-            return sim
-
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-
-        if not content:
-            return sim
-
-        enhanced = json.loads(content)
-
-        # Merge enhanced paths
-        if "success" in enhanced and enhanced["success"]:
-            sim["success"]["path"] = enhanced["success"]
-        if "reversal" in enhanced and enhanced["reversal"]:
-            sim["reversal"]["path"] = enhanced["reversal"]
-        if "consolidation" in enhanced and enhanced["consolidation"]:
-            sim["consolidation"]["path"] = enhanced["consolidation"]
-
-        return sim
-
-    except json.JSONDecodeError:
-        return sim
-    except requests.exceptions.RequestException as e:
-        print(f"[OpenAI scenarios] Request error: {e}")
-        return sim
-    except Exception as e:
-        print(f"[OpenAI scenarios] Unexpected error: {e}")
-        return sim
-
-
-# ─── OpenAI DAILY BRIEF ENHANCEMENT ────────────────────────────
-def _enhance_daily_brief_openai(base_brief):
-    """
-    Enhance daily market brief via GPT-4o-mini.
-    Returns enhanced brief string, or original base_brief if OpenAI fails.
-    """
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return base_brief
-
-    try:
-        prompt = f"""You are a professional trader writing a daily market brief.
-
-Base brief template:
-{base_brief}
-
-Rewrite this as a more professional, insightful daily market analysis. Keep it concise (5-6 sentences).
-Focus on:
-- Current market sentiment and key drivers
-- Macro events or data that could move markets
-- Currency and commodity action
-- Crypto sentiment if relevant
-- Position sizing recommendations
-
-Return ONLY the brief text, no intro or wrapper text."""
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 400,
-            "temperature": 0.7,
-        }
-
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            json=payload,
-            headers=headers,
-            timeout=(10, 30),
-        )
-
-        if resp.status_code != 200:
-            print(f"[OpenAI brief] API error {resp.status_code}: {resp.text[:200]}")
-            return base_brief
-
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-
-        if content:
-            return content
-        return base_brief
-
-    except requests.exceptions.RequestException as e:
-        print(f"[OpenAI brief] Request error: {e}")
-        return base_brief
-    except Exception as e:
-        print(f"[OpenAI brief] Unexpected error: {e}")
-        return base_brief
 
 # ─── SMS + EMAIL ALERTS ───────────────────────────────────────
 def send_sms(message):
@@ -2635,9 +2377,6 @@ def simulate():
             },
         }
 
-        # Enhance scenario paths via OpenAI (non-blocking, fails silently)
-        sim = _enhance_scenarios_openai(sim, ticker, asset_type, signal, timeframe)
-
         return jsonify({"simulation": sim})
 
     except Exception as e:
@@ -2861,7 +2600,7 @@ def econ_calendar():
 @app.route("/api/daily-brief", methods=["GET"])
 @login_required
 def daily_brief():
-    """Daily market brief with OpenAI enhancement. Falls back to template gracefully."""
+    """Daily market brief generated from template logic based on real indicator data."""
     try:
         today = datetime.utcnow().strftime("%A, %B %d, %Y")
 
@@ -2874,10 +2613,7 @@ def daily_brief():
             "Position sizing remains tight until volatility regimes clarify; trading quality over quantity remains the edge."
         )
 
-        # Enhance via OpenAI (non-blocking, fails silently)
-        brief = _enhance_daily_brief_openai(base_brief)
-
-        return jsonify({"brief": brief, "date": today})
+        return jsonify({"brief": base_brief, "date": today})
     except Exception as e:
         return jsonify({
             "brief": "Daily brief unavailable. Please refresh the page.",
