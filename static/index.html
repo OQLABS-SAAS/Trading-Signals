@@ -203,10 +203,11 @@ body::before{
 /* ─── SIGNALS LAYOUT ─── */
 .signals-layout{
   display:grid;
-  grid-template-columns:1fr 300px;
+  grid-template-columns:minmax(0,1fr) 300px;
   min-height:calc(100vh - 90px);
+  overflow:hidden;
 }
-.main-col{border-right:1px solid var(--border);display:flex;flex-direction:column;}
+.main-col{border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0;overflow-x:hidden;}
 /* Empty state: fixed viewport height, centered logo */
 #signalEmpty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;max-height:calc(100vh - 200px);}
 
@@ -320,6 +321,7 @@ body::before{
 .sig-meta{
   margin-left:auto;padding:20px 24px 20px 0;
   display:flex;flex-direction:column;align-items:flex-end;gap:12px;
+  flex-shrink:1;min-width:0;
 }
 
 /* Confidence ring */
@@ -341,7 +343,7 @@ body::before{
 .conf-lbl{font-family:var(--mono);font-size:8px;color:var(--muted2);letter-spacing:1px;margin-top:2px;}
 
 /* Signal action buttons */
-.sig-btns{display:flex;gap:6px;}
+.sig-btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
 .btn-primary{
   background:var(--amber);color:#0C0A08;
   font-family:var(--mono);font-size:11px;font-weight:700;
@@ -406,7 +408,7 @@ body::before{
 .info-strip{position:relative;
   display:flex;gap:0;flex-wrap:wrap;
   border-bottom:1px solid var(--border);
-  overflow:visible;
+  overflow:hidden;
 }
 .info-cell{
   flex:1;min-width:100px;
@@ -424,7 +426,7 @@ body::before{
 /* ═══════════════════════════════════════════════
    CHART SECTION
 ═══════════════════════════════════════════════ */
-.chart-section{border-bottom:1px solid var(--border);}
+.chart-section{border-bottom:1px solid var(--border);overflow:hidden;max-width:100%;}
 
 .chart-topbar{
   display:flex;align-items:center;gap:10px;
@@ -1468,7 +1470,10 @@ body::before{
       <div id="pineCodeWrap" style="display:none;margin:0 20px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);">
           <span style="font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:1px;">PINE SCRIPT v5</span>
-          <button onclick="var c=document.getElementById('pineCodePre');navigator.clipboard.writeText(c.textContent);this.textContent='Copied';setTimeout(()=>this.textContent='Copy',2000);" style="padding:3px 10px;font-size:10px;font-family:var(--mono);background:var(--amber-glow);border:1px solid var(--amber);color:var(--amber);border-radius:2px;cursor:pointer;">Copy</button>
+          <div style="display:flex;gap:6px;">
+            <button onclick="var c=document.getElementById('pineCodePre');navigator.clipboard.writeText(c.textContent);this.textContent='Copied';setTimeout(()=>this.textContent='Copy',2000);" style="padding:3px 10px;font-size:10px;font-family:var(--mono);background:var(--amber-glow);border:1px solid var(--amber);color:var(--amber);border-radius:2px;cursor:pointer;">Copy</button>
+            <button onclick="togglePineCode()" style="padding:3px 10px;font-size:10px;font-family:var(--mono);background:none;border:1px solid var(--border2);color:var(--muted2);border-radius:2px;cursor:pointer;">✕ Close</button>
+          </div>
         </div>
         <pre class="pine-code" id="pineCodePre" style="padding:12px 16px;font-family:var(--mono);font-size:11.5px;line-height:1.7;color:var(--muted2);white-space:pre;overflow-x:auto;max-height:340px;overflow-y:auto;margin:0;">// Analyze a ticker to generate Pine Script</pre>
       </div>
@@ -1516,7 +1521,7 @@ body::before{
       </div>
 
       <!-- SIGNAL RESULTS — default visible, populated on analyze -->
-      <div id="signalResults">
+      <div id="signalResults" style="max-width:100%;overflow-x:hidden;">
 
       <!-- INFO STRIP -->
       <div class="info-strip"><div class="info-cell" style="min-width:100px;">
@@ -1668,7 +1673,7 @@ body::before{
       <!-- SIGNAL ALIGNMENT -->
       <div class="section-hdr" style="margin-top:1px;">Signal Alignment</div>
       <div class="alignment-wrap">
-        <div class="alignment-rows">
+        <div class="alignment-rows" id="alignContent">
           <div class="align-row">
             <span class="align-name">RSI</span>
             <span class="align-detail">—</span>
@@ -3197,9 +3202,10 @@ async function doAnalyze(ticker, assetType, timeframe) {
     try { renderResultsV2(d); } catch(e) { console.warn('renderResultsV2:', e); }
     // old renderResults removed — Concept 5 v2 only
     try { addToHistory(d); } catch(e) {}
-    try { runBacktest(d, false); } catch(e) {}
+    try { runBacktest(d, true); } catch(e) {}
     // Show content areas, hide empty states for all tabs
     var btE = document.getElementById('btEmpty'); if (btE) btE.style.display = 'none';
+    var btP = document.getElementById('backtestPanel'); if (btP) btP.style.display = '';
     var btC = document.getElementById('btContent'); if (btC) btC.style.display = '';
     var simE = document.getElementById('simEmpty'); if (simE) simE.style.display = 'none';
     var simC = document.getElementById('simContent'); if (simC) simC.style.display = '';
@@ -4805,7 +4811,7 @@ function copySignal() {
 async function openSimulate() {
   if (!currentData) return;
   const modal = document.getElementById('simModal');
-  const content = document.getElementById('simContent');
+  const content = document.getElementById('simModalContent');
   modal.style.display = 'flex';
   content.innerHTML = '<div class="sim-loading">Running simulation…</div>';
 
@@ -9471,19 +9477,19 @@ document.addEventListener('click', function(e) {
 });
 
 
-/* ═══ SIMULATE TRADE ═══ */
+/* ═══ SIMULATE TRADE (modal version) ═══ */
 function openSimulate() {
   var modal = _origGetById('simModal');
   if (!modal) return;
   modal.style.display = 'flex';
-  
+
   if (!currentData) {
-    _origGetById('simContent').innerHTML = '<p style="color:var(--muted2);">Run an analysis first to simulate a trade.</p>';
+    _origGetById('simModalContent').innerHTML = '<p style="color:var(--muted2);">Run an analysis first to simulate a trade.</p>';
     return;
   }
-  
+
   var d = currentData;
-  _origGetById('simContent').innerHTML = '<p style="margin-bottom:12px;">Fetching simulation for <strong style="color:var(--amber);">' + d.ticker + '</strong>...</p>';
+  _origGetById('simModalContent').innerHTML = '<p style="margin-bottom:12px;">Fetching simulation for <strong style="color:var(--amber);">' + d.ticker + '</strong>...</p>';
   
   fetch('/api/simulate', {
     method: 'POST',
@@ -9491,7 +9497,7 @@ function openSimulate() {
     body: JSON.stringify({ticker: d.ticker, asset_type: d.asset_type, timeframe: d.timeframe, signal: d.signal, entry: d.entry, stop_loss: d.stop_loss, tp1: d.tp1, tp2: d.tp2})
   }).then(function(r) { return r.json(); }).then(function(data) {
     if (data.error) {
-      _origGetById('simContent').innerHTML = '<p style="color:var(--red);">Simulation failed: ' + data.error + '</p>';
+      _origGetById('simModalContent').innerHTML = '<p style="color:var(--red);">Simulation failed: ' + data.error + '</p>';
       return;
     }
     var scenarios = data.scenarios || [];
@@ -9504,9 +9510,9 @@ function openSimulate() {
       html += '<div style="font-size:11px;color:var(--white2);line-height:1.6;">' + (s.narrative || s.description || JSON.stringify(s)) + '</div>';
       html += '</div>';
     });
-    _origGetById('simContent').innerHTML = html;
+    _origGetById('simModalContent').innerHTML = html;
   }).catch(function(e) {
-    _origGetById('simContent').innerHTML = '<p style="color:var(--red);">Network error: ' + e.message + '</p>';
+    _origGetById('simModalContent').innerHTML = '<p style="color:var(--red);">Network error: ' + e.message + '</p>';
   });
 }
 
@@ -9593,7 +9599,7 @@ function closeSimulate() {
       <h3 style="font-family:var(--disp);font-size:20px;color:var(--amber);">Simulate Trade</h3>
       <button onclick="closeSimulate()" style="background:none;border:none;color:var(--muted2);font-size:18px;cursor:pointer;">✕</button>
     </div>
-    <div id="simContent" style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.8;">
+    <div id="simModalContent" style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.8;">
       <p style="color:var(--muted2);margin-bottom:12px;">Run an analysis first, then simulate the trade.</p>
     </div>
   </div>
