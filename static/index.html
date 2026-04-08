@@ -207,8 +207,8 @@ body::before{
   min-height:calc(100vh - 90px);
 }
 .main-col{border-right:1px solid var(--border);display:flex;flex-direction:column;}
-/* Empty state fills remaining space and centers its content vertically */
-#signalEmpty{flex:1;}
+/* Empty state: fixed viewport height, centered logo */
+#signalEmpty{flex:none;height:calc(100vh - 206px);}
 
 /* Breathing logo — dramatic expand/contract */
 @keyframes breathe{
@@ -232,6 +232,36 @@ body::before{
 .gpill{border-radius:20px!important;}
 #inlineInstRow button{border-radius:20px!important;}
 .side-col{display:flex;flex-direction:column;overflow-y:auto;background:var(--bg1);}
+
+/* ─── MACRO / KPI / NEWS CARDS (News tab) ─── */
+.macro-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px;cursor:pointer;transition:border-color .15s;}
+.macro-card:hover{border-color:var(--amber);}
+.macro-card-bank{font-family:var(--mono);font-size:11px;color:var(--muted2);margin-bottom:4px;}
+.macro-card-rate{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--white);margin-bottom:4px;}
+.macro-card-bias{font-family:var(--mono);font-size:9px;padding:2px 6px;border-radius:2px;text-transform:uppercase;letter-spacing:.5px;}
+.macro-card-bias.hawkish{background:rgba(255,68,89,.12);color:var(--red);}
+.macro-card-bias.dovish{background:rgba(0,201,141,.12);color:var(--green);}
+.macro-card-bias.neutral{background:rgba(245,166,35,.12);color:var(--amber);}
+.kpi-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:8px 10px;text-align:center;}
+.kpi-label{font-size:10px;color:var(--muted2);margin-bottom:3px;font-family:var(--mono);}
+.kpi-val{font-family:var(--mono);font-size:16px;font-weight:700;}
+.kpi-prev{font-size:9px;color:var(--muted);margin-top:2px;font-family:var(--mono);}
+.econ-event{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;}
+.econ-event:hover{background:var(--bg2);}
+
+/* ─── NEWS CARDS: expandable on click ─── */
+.news-card{cursor:pointer;transition:border-color .15s;}
+.news-card:hover{border-color:var(--amber);}
+.nc-body{max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s ease;padding:0 16px;}
+.news-card.expanded .nc-body{max-height:200px;padding:0 16px 12px;}
+
+/* ─── SCANNER TABLE: expandable rows ─── */
+.scan-table tbody tr{cursor:pointer;transition:background .15s;}
+.scan-table tbody tr:hover{background:var(--bg3);}
+
+/* ─── SIM PATH CARDS: expandable ─── */
+.sim-path-card{cursor:pointer;transition:border-color .15s;}
+.sim-path-card:hover{border-color:var(--amber);}
 
 /* ═══════════════════════════════════════════════
    SIGNAL HERO
@@ -1407,8 +1437,8 @@ body::before{
           </div>
           <div class="win-badge" data-tip="<div class='tt-title'>Historical Win Rate</div><div class='tt-row'><span class='tt-key'>Win Rate</span><span class='tt-val g'>68.4%</span></div><div class='tt-row'><span class='tt-key'>Sample Size</span><span class='tt-val'>247 trades</span></div><div class='tt-row'><span class='tt-key'>Best Setup</span><span class='tt-val'>FCR + FVG align</span></div><div class='tt-row'><span class='tt-key'>Avg R:R Won</span><span class='tt-val g'>1 : 2.8</span></div><div class='tt-note'>Based on backtested BTC/USD 4H signals over 24 months. Win rate drops to 54% in ranging markets — momentum context critical.</div>"><div class="wb-val">68.4%</div><div class="wb-lbl">Win Rate</div></div>
           <div class="sig-btns">
-            <button class="btn-primary" onclick="openSimulate()">Simulate Trade</button>
-            <button class="btn-ghost">Pine Script</button>
+            <button class="btn-primary" onclick="switchMainTab('simulation',document.querySelector('.nav-tab:nth-child(5)'));if(currentData)runSimulation();">Simulate Trade</button>
+            <button class="btn-ghost" onclick="togglePineCode()">Pine Script</button>
           </div>
         </div>
       </div>
@@ -1856,19 +1886,15 @@ body::before{
       </div><!-- /signalResults -->
 
       <!-- EMPTY STATE (shown before analysis) -->
-      <div id="signalEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 20px 40px;">
-        <svg id="emptyLogo" viewBox="0 0 80 80" width="280" height="280" style="margin-bottom:32px;">
+      <div id="signalEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px;">
+        <svg id="emptyLogo" viewBox="0 0 80 80" width="280" height="280">
           <circle class="ring1" cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".6" fill="none"/>
           <circle class="ring2" cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".8" fill="none"/>
           <circle class="ring3" cx="40" cy="40" r="16" stroke="var(--amber)" stroke-width="1" fill="none"/>
           <circle class="ring4" cx="40" cy="40" r="7" stroke="var(--amber)" stroke-width="1.4" fill="none"/>
           <circle class="core" cx="40" cy="40" r="2.5" fill="var(--amber)"/>
         </svg>
-        <div style="font-family:var(--disp);font-size:20px;font-weight:700;color:var(--white);letter-spacing:-0.5px;margin-bottom:6px;">
-          <span style="color:var(--amber);">dot</span><span style="font-weight:300;">·</span><span style="font-weight:300;">verse</span>
-        </div>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:2.5px;text-transform:uppercase;margin-bottom:28px;">Trade like you already know</div>
-        <div style="font-size:12px;color:var(--muted);max-width:360px;text-align:center;line-height:1.7;">Select an instrument or type a ticker and hit <span style="color:var(--amber);font-family:var(--mono);font-weight:700;">⚡ ANALYZE</span></div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.2);text-align:center;margin-top:24px;font-family:var(--mono);letter-spacing:1px;">Type a ticker · hit ⚡ ANALYZE</div>
       </div>
 
     </div><!-- /main-col -->
@@ -2042,9 +2068,9 @@ body::before{
 
       <!-- Run + Auto-refresh -->
       <div class="strat-sidebar-section">
-        <button class="se-run-btn" id="seRunBtn">▶ RUN ENGINE</button>
-        <button class="se-scan-btn">⚡ SCAN ALL</button>
-        <button class="se-matrix-btn">📊 MATRIX SCAN — ALL TF × HTF × R:R</button>
+        <button class="se-run-btn" id="seRunBtn" onclick="seRunEngine()">RUN ENGINE</button>
+        <button class="se-scan-btn" onclick="runScanner()">SCAN ALL</button>
+        <button class="se-matrix-btn" onclick="seRunEngine()">MATRIX SCAN — ALL TF × HTF × R:R</button>
 
         <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
           <span style="font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:.4px;">AUTO-REFRESH:</span>
@@ -2213,7 +2239,15 @@ body::before{
 
       <!-- TRADE PLAN -->
       <div class="trade-plan-wrap">
-        <div class="tp-title">Auto-Generated Trade Plan</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div class="tp-title" style="margin:0;">Trade Management Plan</div>
+          <div style="display:flex;gap:4px;">
+            <button class="rb-btn active" onclick="setTradePlanView('auto',this)" style="font-size:10px;padding:4px 10px;">Auto</button>
+            <button class="rb-btn" onclick="setTradePlanView('daily',this)" style="font-size:10px;padding:4px 10px;">Daily</button>
+            <button class="rb-btn" onclick="setTradePlanView('weekly',this)" style="font-size:10px;padding:4px 10px;">Weekly</button>
+            <button class="rb-btn" onclick="setTradePlanView('monthly',this)" style="font-size:10px;padding:4px 10px;">Monthly</button>
+          </div>
+        </div>
         <div class="tp-dir long">LONG — BTC/USD</div>
         <div class="tp-levels">
           <div class="tp-level"><div class="tp-lv-label">Entry</div><div class="tp-lv-val" style="color:var(--amber);">$83,241</div><div class="tp-lv-sub">Limit order</div></div>
@@ -2289,7 +2323,7 @@ body::before{
       <h2 style="font-family:var(--disp);font-size:24px;font-weight:900;letter-spacing:-.5px;">Strategy Backtest</h2>
       <div style="display:flex;gap:10px;align-items:center;">
         <span style="font-family:var(--mono);font-size:12px;color:var(--muted2);">BTC/USD · 4H · Last 90 days</span>
-        <button class="btn-primary" style="padding:8px 16px;font-size:11px;">Run New Test</button>
+        <button class="btn-primary" onclick="if(currentData){showToast('Running backtest for '+currentData.ticker+'...');try{runBacktest(currentData,true);}catch(e){showToast('Backtest: '+e.message);}}" style="padding:8px 16px;font-size:11px;">Run New Test</button>
       </div>
     </div>
     <div class="bt-stats-row">
@@ -2320,7 +2354,7 @@ body::before{
           <button class="ptb">Indicator</button>
           <button class="ptb">Alert</button>
         </div>
-        <button class="btn-ghost" style="margin-left:auto;padding:5px 14px;font-size:11px;">Copy</button>
+        <button class="btn-ghost" onclick="var c=this.closest('.pine-section').querySelector('.pine-code');navigator.clipboard.writeText(c.textContent);this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy',2000);" style="margin-left:auto;padding:5px 14px;font-size:11px;">Copy</button>
       </div>
       <pre class="pine-code"><span class="pc">// dotverse — FCR + FVG Strategy</span>
 <span class="pc">// Auto-generated · BTC/USD 4H</span>
@@ -2372,7 +2406,10 @@ shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">
   <div class="sim-layout">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
       <h2 style="font-family:var(--disp);font-size:24px;font-weight:900;letter-spacing:-.5px;">Trade Simulation</h2>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--muted2);">BTC/USD — Long Entry $83,241 · Risk $200 (2%)</span>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-family:var(--mono);font-size:12px;color:var(--muted2);">BTC/USD — Long Entry $83,241 · Risk $200 (2%)</span>
+        <button class="btn-primary" onclick="runSimulation()" style="padding:6px 14px;font-size:11px;">⟳ Refresh</button>
+      </div>
     </div>
     <div class="sim-hero-grid">
       <div class="sim-chart-wrap">
@@ -2432,6 +2469,21 @@ shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">
   <div class="news-layout">
     <div class="news-main">
       <h2 style="font-family:var(--disp);font-size:24px;font-weight:900;letter-spacing:-.5px;margin-bottom:20px;">Market Intelligence</h2>
+
+      <!-- Central Bank Rates -->
+      <div class="section-hdr" style="margin-bottom:10px;">Central Bank Rates</div>
+      <div id="cbRatesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:24px;"></div>
+
+      <!-- Key Economic Indicators -->
+      <div class="section-hdr" style="margin-bottom:10px;">Key Economic Indicators</div>
+      <div id="kpiGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:24px;"></div>
+
+      <!-- Economic Calendar -->
+      <div class="section-hdr" style="margin-bottom:10px;">Economic Calendar</div>
+      <div id="econCalList" style="margin-bottom:24px;font-size:12px;color:var(--muted2);">Loading events...</div>
+
+      <!-- News Feed -->
+      <div class="section-hdr" style="margin-bottom:10px;">Latest News</div>
       <div class="news-feed">
         <div class="news-card">
           <div class="nc-meta"><span class="nc-time">14 min ago</span><span class="nc-source">CoinDesk</span></div>
@@ -3092,7 +3144,7 @@ async function doAnalyze(ticker, assetType, timeframe) {
     pushRecentInstrument(d.ticker, d.asset_type, d.timeframe);
     // Always update the visible Concept 5 v2 UI first
     try { renderResultsV2(d); } catch(e) { console.warn('renderResultsV2:', e); }
-    try { renderResults(d); } catch(e) { console.warn('old renderResults (expected):', e); }
+    // old renderResults removed — Concept 5 v2 only
     try { addToHistory(d); } catch(e) {}
     try { runBacktest(d, false); } catch(e) {}
   } catch(e) {
@@ -3391,25 +3443,14 @@ let chartDivergence  = null; // divergence pivot data for overlay lines
 let chartOverlays    = { BB: true, RSI: true, SIG: true, VOL: true };
 let chartOHLC        = null; // {opens, highs, lows, closes} for candlestick plugin
 let rsiChartInst     = null;
-let tvMode           = false;
-let tvStudies        = { BB: true, RSI: true, SIG: true }; // SIG → MACD on TV
+let tvMode           = false; // kept for compatibility, always false now
+let tvStudies        = { BB: true, RSI: true, SIG: true };
 let tvParams         = { sym: '', ivl: 'D', theme: 'dark' };
 
 /* ── Scroll to chart + pulse + ensure overlays are on ── */
 function highlightChart(overlayKeys) {
   const card = document.querySelector('.chart-card');
   if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-  if (tvMode) {
-    // TV embed: just flash border — can't inject overlays into cross-origin iframe
-    const tvEmbed = document.getElementById('tvChartEmbed');
-    if (tvEmbed && tvEmbed.style.display !== 'none') {
-      tvEmbed.style.transition = 'box-shadow .15s';
-      tvEmbed.style.boxShadow  = '0 0 0 2px rgba(245,166,35,.7), 0 0 20px rgba(245,166,35,.25)';
-      setTimeout(() => { tvEmbed.style.boxShadow = ''; }, 800);
-    }
-    return;
-  }
 
   // Chart.js mode: turn on requested overlays + flash card border
   if (priceChartInst) {
@@ -3424,48 +3465,8 @@ function highlightChart(overlayKeys) {
   }
 }
 
-/* ── Rebuild TV iframe with current tvStudies toggles ── */
-function rebuildTVEmbed() {
-  const tvEmbed = document.getElementById('tvChartEmbed');
-  if (!tvEmbed) return;
-  let src = 'https://s.tradingview.com/widgetembed/?frameElementId=tv_embed' +
-            '&symbol='   + encodeURIComponent(tvParams.sym) +
-            '&interval=' + tvParams.ivl +
-            '&theme='    + tvParams.theme +
-            '&style=1&locale=en&hide_top_toolbar=0&hide_legend=0&save_image=0&allow_symbol_change=0' +
-            '&hide_volume=0&no_timeframe_change=1';
-  if (tvStudies.BB)  src += '&studies[]=BB%40tv-basicstudies';
-  if (tvStudies.RSI) src += '&studies[]=RSI%40tv-basicstudies';
-  if (tvStudies.SIG) src += '&studies[]=MACD%40tv-basicstudies';
-
-  // Show a brief loading overlay so the user sees something is happening
-  tvEmbed.style.position = 'relative';
-  const loadDiv = document.createElement('div');
-  loadDiv.id = 'tvReloadOverlay';
-  loadDiv.style.cssText = 'position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;' +
-                          'background:rgba(0,0,0,.55);border-radius:8px;color:rgba(255,255,255,.7);font-size:12px;letter-spacing:.5px;';
-  loadDiv.textContent = 'Reloading chart…';
-
-  const existing = tvEmbed.querySelector('iframe');
-  if (existing) {
-    // Reuse the existing iframe - just update src (avoids full DOM removal)
-    const old = document.getElementById('tvReloadOverlay');
-    if (old) old.remove();
-    tvEmbed.appendChild(loadDiv);
-    existing.onload = () => { const o = document.getElementById('tvReloadOverlay'); if (o) o.remove(); };
-    existing.src = src;
-  } else {
-    // First render — create fresh iframe
-    const iframe = document.createElement('iframe');
-    iframe.src = src;
-    iframe.style.cssText = 'width:100%;height:420px;border:none;border-radius:8px;display:block;';
-    iframe.setAttribute('allowtransparency', 'true');
-    iframe.setAttribute('scrolling', 'no');
-    tvEmbed.appendChild(loadDiv);
-    iframe.onload = () => { const o = document.getElementById('tvReloadOverlay'); if (o) o.remove(); };
-    tvEmbed.innerHTML = '';
-    tvEmbed.appendChild(iframe);
-  }
+/* ── rebuildTVEmbed removed — TradingView not used, Chart.js only ── */
+function rebuildTVEmbed() { /* no-op */
 }
 
 /* ── Sync both the top chip-buttons and bottom indicator buttons ── */
@@ -3487,7 +3488,7 @@ function toggleIndBtn(key) {
     if (key === 'RSI') {
       toggleChartOverlay('RSI');
     } else {
-      showToast('📋 Buy/Sell signals are only on the in-app chart — copy Pine Script below and paste into TradingView');
+      showToast('Buy/Sell signals are only on the in-app chart — copy Pine Script below and paste into TradingView');
     }
     return;
   }
@@ -3853,7 +3854,7 @@ function renderChart(d) {
   const ovrRow    = document.getElementById('chartOvrRow');
   const rsiWrap   = document.getElementById('rsiChartWrap');
 
-  // ── When no OHLC history: fall back to TradingView embed widget ──
+  // ── When no OHLC history: show "data unavailable" message (no TradingView) ──
   if (prices.length === 0) {
     chartOHLC = null;
     if (priceChartInst) { priceChartInst.destroy(); priceChartInst = null; }
@@ -3862,42 +3863,27 @@ function renderChart(d) {
     canvasPC.parentElement.style.display = 'none';
     canvasVC.parentElement.style.display = 'none';
     if (rsiWrap) rsiWrap.style.display = 'none';
+    if (tvEmbed) tvEmbed.style.display = 'none';
+    if (ovrRow) ovrRow.style.display = 'none';
 
-    const tvSym  = (d.tv && d.tv.tv_symbol) ? d.tv.tv_symbol : d.ticker;
-    const tfMap  = {"5m":"5","15m":"15","30m":"30","1h":"60","4h":"240","1d":"D","1w":"W"};
-    const ivl    = tfMap[d.timeframe] || 'D';
-    const theme  = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-
-    // Store TV params + enable TV mode so toggle buttons work
-    tvMode    = true;
-    tvStudies = { BB: true, RSI: true, SIG: true };
-    tvParams  = { sym: tvSym, ivl: ivl, theme: theme };
-
-    // Show overlay toggle row with TV-appropriate labels (SIG = MACD on TV)
-    if (ovrRow) {
-      const bbBtn  = document.getElementById('ovrBB');
-      const rsiBtn = document.getElementById('ovrRSI');
-      const sigBtn = document.getElementById('ovrSIG');
-      const volBtn = document.getElementById('ovrVOL');
-      if (bbBtn)  { bbBtn.textContent  = 'BB Bands'; bbBtn.classList.add('active'); }
-      if (rsiBtn) { rsiBtn.textContent = 'RSI';      rsiBtn.classList.add('active'); }
-      if (sigBtn) { sigBtn.textContent = 'MACD';     sigBtn.classList.add('active'); }
-      if (volBtn) { volBtn.style.display = 'none'; }
-      ovrRow.style.display = 'flex';
+    // Show a styled "no data" message in the chart area
+    var noDataDiv = document.getElementById('chartNoData');
+    if (!noDataDiv) {
+      noDataDiv = document.createElement('div');
+      noDataDiv.id = 'chartNoData';
+      noDataDiv.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:300px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);';
+      noDataDiv.innerHTML = '<div style="font-family:var(--mono);font-size:13px;color:var(--muted2);letter-spacing:1px;">Chart data temporarily unavailable</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:8px;">Try a different timeframe or ticker</div>';
+      canvasPC.parentElement.parentElement.appendChild(noDataDiv);
     }
-    // Show bottom indicator buttons + TV hint
-    const indRow = document.getElementById('chartIndicatorRow');
-    if (indRow) indRow.style.display = 'flex';
-    const tvHint = document.getElementById('chartTVHint');
-    if (tvHint) tvHint.style.display = 'block';
-    _syncIndButtons('RSI', tvStudies.RSI);
-    _syncIndButtons('SIG', true); // keep active-looking; tap shows toast
-
-    rebuildTVEmbed();
-    tvEmbed.style.display = 'block';
+    noDataDiv.style.display = 'flex';
     document.getElementById('chartTitle').textContent = d.ticker + ' \u00b7 ' + d.timeframe.toUpperCase() + ' \u00b7 ' + (d.ema_trend || '');
     return;
   }
+
+  // Hide no-data message if it was shown previously
+  var noDataDiv = document.getElementById('chartNoData');
+  if (noDataDiv) noDataDiv.style.display = 'none';
 
   // ── OHLC data available — use Chart.js ──
   tvMode = false;
@@ -5156,29 +5142,7 @@ function calcRisk() {
 ════════════════════════════════════════════ */
 function isMobile() { return window.innerWidth <= 900; }
 
-/* ════════════════════════════════════════════
-   MAIN AREA TABS (Analysis | News)
-════════════════════════════════════════════ */
-function switchMainTab(tab) {
-  document.getElementById('tabAnalysis').classList.toggle('active', tab === 'analysis');
-  document.getElementById('tabNews').classList.toggle('active',     tab === 'news');
-  const newsArea = document.getElementById('newsArea');
-  if (tab === 'news') {
-    newsArea.classList.remove('hidden');
-    document.getElementById('loadingState').classList.add('hidden');
-    { const _es = document.getElementById('emptyState'); if (_es) _es.style.display = 'none'; }
-    { const _ra = document.getElementById('resultsArea'); if (_ra) _ra.style.display = 'none'; }
-    loadNewsTab();
-  } else {
-    newsArea.classList.add('hidden');
-    // Restore the right panel (empty state or results)
-    if (currentData) {
-      { const _ra = document.getElementById('resultsArea'); if (_ra) _ra.style.display = ''; }
-    } else {
-      { const _es = document.getElementById('emptyState'); if (_es) _es.style.display = ''; }
-    }
-  }
-}
+/* old switchMainTab removed — using tab-panel system at line 7684 */
 
 /* ════════════════════════════════════════════
    ASSET TYPE QUICK FILTER
@@ -6519,7 +6483,7 @@ async function copyPineScript() {
   const btn  = document.getElementById('copyPineBtn');
   btn.textContent = '✓ Copied!';
   chk.classList.add('show');
-  setTimeout(() => { chk.classList.remove('show'); btn.textContent = '📋 Buy/Sell Indicator'; }, 2200);
+  setTimeout(() => { chk.classList.remove('show'); btn.textContent = 'Buy/Sell Indicator'; }, 2200);
 }
 
 // Build formatted signal message for sharing
@@ -6988,7 +6952,7 @@ let btEquityChartInst = null;
 let _btGeneration = 0;  // incremented on every trigger; stale callbacks are discarded
 
 /* ── Explicit user trigger for the Strategy Report panel ──
-   Called by the "📊 Strategy Report" button in the share panel.
+   Called by the "Strategy Report" button in the share panel.
    Guards against null state (no analysis yet) and HOLD signals (no levels). */
 function triggerBacktest() {
   // Silent guards — button is hidden for HOLD/no-entry by renderResults(),
@@ -7398,7 +7362,7 @@ function copyPineScript() {
   _clipWrite(pine);
   _btnFeedback('copyPineBtn', '\u2713 Copied!', '\ud83d\udccb Buy/Sell Indicator');
   showCopyCheck();
-  showToast('📋 Pine Script copied — paste into TradingView Pine Editor to see signals');
+  showToast('Pine Script copied — paste into TradingView Pine Editor to see signals');
 }
 
 /* ════════════════════════════════════════════
@@ -7502,7 +7466,7 @@ function copyStrategy() {
   _clipWrite(pine);
   _btnFeedback('copyStratBtn', '\u2713 Copied!', '\u26a1 TP/SL Backtest Strategy');
   showCopyCheck();
-  showToast('📋 Strategy copied — paste into TradingView Pine Editor to backtest');
+  showToast('Strategy copied — paste into TradingView Pine Editor to backtest');
 }
 
 /* ════════════════════════════════════════════
@@ -7567,7 +7531,7 @@ function copyDivergence() {
   _clipWrite(pine);
   _btnFeedback('copyDivBtn', '\u2713 Copied!', '\ud83d\udcc9 Copy RSI Div');
   showCopyCheck();
-  showToast('📋 RSI Divergence script copied — paste into TradingView Pine Editor');
+  showToast('RSI Divergence script copied — paste into TradingView Pine Editor');
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -7757,6 +7721,9 @@ function switchMainTab(name, btn) {
   const panel = document.getElementById('tab-' + name);
   if(panel) panel.classList.add('active');
   if(btn) btn.classList.add('active');
+  // Trigger tab-specific data loads
+  if (name === 'news') { try { loadNewsTab(); } catch(e) { console.warn('loadNewsTab:', e); } }
+  if (name === 'simulation' && currentData) { try { runSimulation(); } catch(e) {} }
 }
 
 // ─── CHART OVERLAYS ───
@@ -7816,21 +7783,29 @@ function setTF(btn) {
 let refreshTimer = null, refreshSecs = 0;
 
 function setRefresh(secs, btn) {
-  document.querySelectorAll('.rb-btn').forEach(b => b.classList.remove('active'));
+  // Only toggle siblings in this button's parent, not all rb-btn on page
+  btn.closest('div').querySelectorAll('.rb-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   refreshSecs = secs;
   if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = null;
   const spin = document.getElementById('rbSpin');
   const time = document.getElementById('rbTime');
-  if (secs > 0) {
-    spin.classList.add('active');
-    time.textContent = 'Next: ' + secs + 's';
+  if (secs > 0 && currentData) {
+    if (spin) spin.classList.add('active');
+    if (time) time.textContent = 'Next: ' + secs + 's';
     refreshTimer = setInterval(() => {
-      time.textContent = 'Refreshed: ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      // Re-run analysis with current ticker
+      if (currentData && currentData.ticker) {
+        if (time) time.textContent = 'Refreshing...';
+        doAnalyze().then(() => {
+          if (time) time.textContent = 'Updated: ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        }).catch(() => {});
+      }
     }, secs * 1000);
   } else {
-    spin.classList.remove('active');
-    time.textContent = '—';
+    if (spin) spin.classList.remove('active');
+    if (time) time.textContent = '—';
   }
 }
 
@@ -7976,11 +7951,166 @@ function seSetRefresh(secs, btn) {
 }
 
 function toggleSeDetails() {
-  // placeholder — would show/hide the technical details on cards
   const btn = document.querySelector('.se-details-toggle');
   const showing = btn.textContent.includes('Hide');
   btn.textContent = showing ? 'Show technical details ▼' : 'Hide technical details ▲';
+  // Toggle all strategy card expansions
+  document.querySelectorAll('.strat-card').forEach(c => {
+    if (showing) c.classList.remove('expanded');
+    else c.classList.add('expanded');
+  });
 }
+
+// ─── STRATEGY ENGINE: RUN ENGINE ───
+function seRunEngine() {
+  const btn = document.getElementById('seRunBtn');
+  if (!btn) return;
+  const origText = btn.textContent;
+  btn.textContent = '⏳ RUNNING...';
+  btn.disabled = true;
+  btn.style.opacity = '.6';
+
+  // Use current ticker or default
+  const ticker = (currentData && currentData.ticker) ? currentData.ticker : 'BTC-USD';
+  const tf = (currentData && currentData.timeframe) ? currentData.timeframe : '4h';
+
+  // Fire analysis and populate strategy engine with results
+  fetch('/api/analyze', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ ticker: ticker, timeframe: tf, asset_type: 'crypto' })
+  })
+  .then(r => r.json())
+  .then(d => {
+    btn.textContent = origText;
+    btn.disabled = false;
+    btn.style.opacity = '';
+    if (d.error) { showToast(d.error); return; }
+    // Update SE plain summary with AI narrative
+    const psText = document.querySelector('.se-ps-text');
+    if (psText && d.narrative) psText.innerHTML = d.narrative;
+    // Update verdict bar
+    const vbLabel = document.querySelector('.svb-label');
+    if (vbLabel) {
+      const sig = (d.signal || 'HOLD').toUpperCase();
+      const conf = d.confidence || '—';
+      vbLabel.textContent = sig === 'BUY' ? 'GO — Trade Approved' : sig === 'SELL' ? 'GO — Short Approved' : 'NO-GO — Hold Position';
+    }
+    const vbSub = document.querySelector('.svb-sub');
+    if (vbSub) vbSub.textContent = d.ticker + ' ' + (d.timeframe||'').toUpperCase() + ' · ' + (d.confidence||'') + ' confidence';
+    // Update trade plan
+    const tpDir = document.querySelector('.tp-dir');
+    if (tpDir) {
+      const sig = (d.signal || 'HOLD').toUpperCase();
+      tpDir.className = 'tp-dir ' + (sig === 'BUY' ? 'long' : sig === 'SELL' ? 'short' : 'hold');
+      tpDir.textContent = (sig === 'BUY' ? 'LONG' : sig === 'SELL' ? 'SHORT' : 'HOLD') + ' — ' + d.ticker;
+    }
+    // Update trade plan levels
+    const levels = document.querySelectorAll('.tp-lv-val');
+    if (levels.length >= 5 && d.price) {
+      levels[0].textContent = '$' + parseFloat(d.price).toLocaleString();
+      if (d.stop_loss) levels[1].textContent = '$' + parseFloat(d.stop_loss).toLocaleString();
+      if (d.tp1) levels[2].textContent = '$' + parseFloat(d.tp1).toLocaleString();
+      if (d.tp2) levels[3].textContent = '$' + parseFloat(d.tp2).toLocaleString();
+      if (d.tp3) levels[4].textContent = '$' + parseFloat(d.tp3).toLocaleString();
+    }
+    // Update last updated
+    const lu = document.getElementById('seLastUpdated');
+    if (lu) lu.textContent = 'Updated: ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    showToast('Strategy Engine updated for ' + d.ticker);
+  })
+  .catch(e => {
+    btn.textContent = origText;
+    btn.disabled = false;
+    btn.style.opacity = '';
+    showToast('Engine error: ' + e.message);
+  });
+}
+
+// ─── TRADE PLAN VIEW: Auto/Daily/Weekly/Monthly ───
+function setTradePlanView(view, btn) {
+  btn.closest('div').querySelectorAll('.rb-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const narrative = document.querySelector('.tp-narrative');
+  if (!narrative) return;
+  const d = currentData || {};
+  const entry = d.price || '83,241';
+  const sl = d.stop_loss || '80,980';
+  const tp1 = d.tp1 || '87,500';
+  const tp2 = d.tp2 || '91,200';
+  const tp3 = d.tp3 || '96,800';
+  const ticker = d.ticker || 'BTC/USD';
+  if (view === 'auto') {
+    narrative.innerHTML = 'Enter long at <strong style="color:var(--amber);">$' + entry + '</strong> after confirmation candle. Place hard stop at <strong style="color:var(--red);">$' + sl + '</strong>. Take 50% at <strong style="color:var(--green);">$' + tp1 + '</strong> (TP1), 30% at <strong style="color:var(--green);">$' + tp2 + '</strong> (TP2), final 20% targets <strong style="color:var(--green);">$' + tp3 + '</strong> (TP3). Move stop to breakeven after TP1. Max risk: 2% of account.';
+  } else if (view === 'daily') {
+    narrative.innerHTML = '<strong style="color:var(--amber);">Daily Plan — ' + ticker + '</strong><br>• <strong>Morning Session:</strong> Monitor for entry at $' + entry + ' on 1H confirmation. Set alerts at key levels.<br>• <strong>Midday:</strong> If entered, check TP1 ($' + tp1 + ') proximity. Trail stop if +1R in profit.<br>• <strong>EOD:</strong> Review position. Close if 4H candle invalidates setup (close below $' + sl + '). Hold if structure intact.<br>• <strong>Risk:</strong> Max 2% account. No averaging down.';
+  } else if (view === 'weekly') {
+    narrative.innerHTML = '<strong style="color:var(--amber);">Weekly Plan — ' + ticker + '</strong><br>• <strong>Mon–Tue:</strong> Wait for weekly open bias. Enter long if price holds above $' + sl + ' on daily close.<br>• <strong>Wed–Thu:</strong> Monitor TP1 ($' + tp1 + '). Take partials if hit. Move stop to breakeven.<br>• <strong>Fri:</strong> Reduce exposure before weekend. Close 50% of remaining if TP2 ($' + tp2 + ') not reached.<br>• <strong>Weekend:</strong> No new entries. Let remaining position run with trailing stop at $' + entry + '.';
+  } else if (view === 'monthly') {
+    narrative.innerHTML = '<strong style="color:var(--amber);">Monthly Plan — ' + ticker + '</strong><br>• <strong>Week 1:</strong> Establish position at $' + entry + '. Use DCA if price dips toward $' + sl + '.<br>• <strong>Week 2:</strong> Monitor TP1 ($' + tp1 + '). Take 30% profit if reached.<br>• <strong>Week 3:</strong> Assess macro conditions. Extend to TP2 ($' + tp2 + ') if trend intact.<br>• <strong>Week 4:</strong> Final review. Close remaining at TP3 ($' + tp3 + ') or set trailing stop. Rebalance allocation for next month.';
+  }
+}
+
+// ─── SIMULATION: Run Monte Carlo simulation ───
+function runSimulation() {
+  if (!currentData) { showToast('Run a signal first to simulate'); return; }
+  const d = currentData;
+  const entry = parseFloat(d.price);
+  const sl = parseFloat(d.stop_loss);
+  const tp1 = parseFloat(d.tp1);
+  const tp2 = d.tp2 ? parseFloat(d.tp2) : tp1 * 1.08;
+  const tp3 = d.tp3 ? parseFloat(d.tp3) : tp1 * 1.16;
+  const isBuy = (d.signal || '').toUpperCase() === 'BUY';
+
+  // Update sim header
+  const simLayout = document.querySelector('.sim-layout');
+  if (!simLayout) return;
+  const simHeader = simLayout.querySelector('span[style*="font-family:var(--mono)"]');
+  if (simHeader) simHeader.textContent = d.ticker + ' — ' + (isBuy ? 'Long' : 'Short') + ' Entry $' + entry.toLocaleString() + ' · Risk 2%';
+
+  // Update SVG labels
+  const texts = simLayout.querySelectorAll('svg text');
+  if (texts.length >= 4) {
+    texts[0].textContent = 'ENTRY $' + entry.toLocaleString();
+    texts[1].textContent = 'SL $' + sl.toLocaleString();
+    texts[2].textContent = 'TP1 $' + tp1.toLocaleString();
+    texts[3].textContent = 'TP2 $' + tp2.toLocaleString();
+  }
+
+  // Update scenario cards
+  const pathCards = simLayout.querySelectorAll('.sim-path-card');
+  if (pathCards.length >= 3) {
+    const riskAmt = entry * 0.02;
+    // Bull
+    var bullRows = pathCards[0].querySelectorAll('.spc-row');
+    if (bullRows[0]) bullRows[0].innerHTML = 'TP1 hit <span style="color:var(--green)">$' + tp1.toLocaleString() + ' (+' + ((tp1/entry-1)*100).toFixed(1) + '%)</span>';
+    if (bullRows[1]) bullRows[1].innerHTML = 'TP2 target <span style="color:var(--green)">$' + tp2.toLocaleString() + ' (+' + ((tp2/entry-1)*100).toFixed(1) + '%)</span>';
+    if (bullRows[2]) bullRows[2].innerHTML = 'TP3 max <span style="color:var(--green)">$' + tp3.toLocaleString() + ' (+' + ((tp3/entry-1)*100).toFixed(1) + '%)</span>';
+
+    // Bear
+    var bearRows = pathCards[2].querySelectorAll('.spc-row');
+    if (bearRows[0]) bearRows[0].innerHTML = 'Stop hit <span style="color:var(--red)">$' + sl.toLocaleString() + ' (' + ((sl/entry-1)*100).toFixed(1) + '%)</span>';
+    if (bearRows[1]) bearRows[1].innerHTML = 'Loss <span style="color:var(--red)">−$' + Math.abs(riskAmt).toFixed(0) + ' (−2% acct)</span>';
+  }
+  showToast('Simulation updated for ' + d.ticker);
+}
+
+// ─── NEWS CARDS: toggle expand ───
+document.querySelectorAll('.news-card').forEach(card => {
+  card.addEventListener('click', function() { this.classList.toggle('expanded'); });
+});
+
+// ─── SCANNER TABLE ROWS: click to analyze ───
+document.querySelectorAll('.scan-table tbody tr').forEach(row => {
+  row.addEventListener('click', function() {
+    const sym = this.querySelector('.st-sym');
+    if (sym) {
+      const ticker = sym.textContent.trim().replace('/', '-');
+      const inp = document.getElementById('tickerInput');
+      if (inp) { inp.value = ticker; doAnalyze(); switchMainTab('signals', document.querySelector('.nav-tab')); }
+    }
+  });
+});
 
 // ─── SCAN FILTER BUTTONS ───
 document.querySelectorAll('.scan-filter-btn').forEach(btn => {

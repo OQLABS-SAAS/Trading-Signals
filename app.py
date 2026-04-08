@@ -169,13 +169,31 @@ _BINANCE_SYMBOL_MAP = {
 }
 
 def _to_binance_symbol(ticker):
-    """Convert app ticker (BTC-USD) to Binance pair (BTCUSDT). Returns None if not a known crypto."""
+    """Convert app ticker (BTC-USD) to Binance pair (BTCUSDT). Returns None if not a known crypto.
+    Handles: "BTC-USD" → "BTCUSDT", "ETH-USD" → "ETHUSDT", "BTC/USD" → "BTCUSDT",
+             "BTCUSDT" → "BTCUSDT" (pass-through), "BTC" → "BTCUSDT" (bare + USDT)
+    """
     if ticker in _BINANCE_SYMBOL_MAP:
         return _BINANCE_SYMBOL_MAP[ticker]
-    # Auto-convert: BTC-USD → BTCUSDT, ETH-USDT → ETHUSDT
-    t = ticker.replace("-USD","USDT").replace("-USDT","USDT").replace("/","")
+
+    t = ticker.upper()
+
+    # If already in BTCUSDT format (all caps, ends with USDT), return as-is
+    if t.endswith("USDT") and len(t) >= 5 and not any(c in t for c in "-/"):
+        return t
+
+    # Auto-convert: remove all separators and currency suffixes
+    # IMPORTANT: Replace -USDT before -USD to avoid substring matching issues
+    t = t.replace("-USDT","").replace("/USDT","").replace("-USD","").replace("/USD","").replace("/","")
+
+    # If we now have something that ends with USDT, return it
     if t.endswith("USDT") and len(t) >= 5:
         return t
+
+    # If bare symbol (BTC, ETH, etc), append USDT
+    if len(t) >= 2 and len(t) <= 10 and t.isalpha():
+        return t + "USDT"
+
     return None
 
 def fetch_binance_ohlcv(ticker, interval="1d", period="1y"):
@@ -184,6 +202,7 @@ def fetch_binance_ohlcv(ticker, interval="1d", period="1y"):
     """
     sym = _to_binance_symbol(ticker)
     if not sym:
+        print(f"[binance] Could not map ticker '{ticker}' to Binance symbol")
         return pd.DataFrame()
 
     cache_key = f"binance:{sym}:{interval}:{period}"
@@ -202,14 +221,16 @@ def fetch_binance_ohlcv(ticker, interval="1d", period="1y"):
 
     try:
         url = "https://api.binance.com/api/v3/klines"
+        print(f"[binance] Fetching {sym} {b_interval} (limit={limit}) from {url}")
         resp = _browser_session.get(url, params={
             "symbol": sym, "interval": b_interval, "limit": limit
         }, timeout=10)
         if resp.status_code != 200:
-            print(f"[binance] HTTP {resp.status_code} for {sym}")
+            print(f"[binance] HTTP {resp.status_code} for {sym} ({b_interval})")
             return pd.DataFrame()
         raw = resp.json()
         if not raw:
+            print(f"[binance] Empty response for {sym} ({b_interval})")
             return pd.DataFrame()
         # Binance kline format: [open_time, open, high, low, close, volume, ...]
         df = pd.DataFrame(raw, columns=[
@@ -220,11 +241,11 @@ def fetch_binance_ohlcv(ticker, interval="1d", period="1y"):
         df = df.set_index("ts")[["Open","High","Low","Close","Volume"]]
         df = df.astype(float)
         df = df.dropna(how="all")
-        print(f"[binance] Fetched {len(df)} bars for {sym} ({b_interval})")
+        print(f"[binance] SUCCESS — fetched {len(df)} bars for {sym} ({b_interval})")
         cache_set(cache_key, df)
         return df
     except Exception as e:
-        print(f"[binance] Error for {sym}: {e}")
+        print(f"[binance] Error for {sym} ({interval}): {e}")
         return pd.DataFrame()
 
 
@@ -310,11 +331,14 @@ def safe_download(ticker, period="1y", interval="1d", **kwargs):
         # ── Binance fallback for crypto tickers ──────────────────
         # Yahoo Finance often blocks cloud server IPs for crypto OHLCV.
         # Try Binance public API instead (no auth required, very reliable).
+        print(f"[binance-fallback] Attempting fallback for {ticker} after Yahoo Finance failed")
         b_df = fetch_binance_ohlcv(ticker, interval=interval, period=period)
         if not b_df.empty:
-            print(f"[binance] Fallback succeeded for {ticker}")
+            print(f"[binance-fallback] SUCCESS — fallback returned {len(b_df)} bars for {ticker}")
             cache_set(cache_key, b_df)
             return b_df
+        else:
+            print(f"[binance-fallback] FAILED — Binance also returned no data for {ticker}")
 
     return df
 
@@ -1779,6 +1803,16 @@ def analyze():
         yf_ok  = False
         try:
             df = safe_download(ticker, period=cfg["period"], interval=cfg["interval"])
+
+            # ── Direct Binance fallback for crypto if safe_download returns empty ──
+            # safe_download() should try Binance internally, but if it still fails
+            # (e.g., due to internal exception), try again here explicitly.
+            if df.empty and asset_type == "crypto":
+                print(f"[analyze] safe_download returned empty for crypto {ticker} — trying direct Binance fetch")
+                df = fetch_binance_ohlcv(ticker, interval=cfg["interval"], period=cfg["period"])
+                if not df.empty:
+                    print(f"[analyze] Direct Binance fallback succeeded — got {len(df)} bars for {ticker}")
+
             if "resample" in cfg and not df.empty:
                 df = df.resample(cfg["resample"]).agg(
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
@@ -1812,8 +1846,24 @@ def analyze():
                 yf_ok = True
                 print(f"[analyze] yfinance OK — {len(df)} bars  (tv_ok={tv_ok})")
         except Exception as yf_err:
-            print(f"[analyze] yfinance failed ({yf_err}) — trying direct chart fetch")
-            chart_result = fetch_chart_direct(ticker, asset_type, timeframe)
+            print(f"[analyze] yfinance exception ({yf_err}) — trying direct chart fetch")
+            # For crypto, prioritize Binance fallback since it's most reliable
+            chart_result = None
+            if asset_type == "crypto":
+                print(f"[analyze] Crypto asset — trying Binance first in exception handler")
+                df_binance = fetch_binance_ohlcv(ticker, interval=cfg["interval"], period=cfg["period"])
+                if not df_binance.empty:
+                    print(f"[analyze] Exception handler Binance fallback — got {len(df_binance)} bars")
+                    # Convert DataFrame back to chart format
+                    chart_result = _build_chart_output(
+                        df_binance.index.strftime("%b %d").tolist(),
+                        df_binance["Close"].tolist(),
+                        df_binance["Volume"].astype(int).tolist(),
+                        timeframe
+                    )
+            # Fallback to multi-source chart fetch (Binance → Stooq → Yahoo)
+            if not chart_result:
+                chart_result = fetch_chart_direct(ticker, asset_type, timeframe)
             if chart_result:
                 dates_c, prices_c, vols_c, ema20_c, ema50_c = chart_result
                 ind["chart_dates"]   = dates_c
