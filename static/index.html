@@ -7992,36 +7992,75 @@ function updateTradeAlert(d) {
   var price = parseFloat(d.price);
   var entry = parseFloat(d.entry);
   var sl = parseFloat(d.stop_loss);
+  var tp1 = parseFloat(d.tp1);
+  var tp2 = d.tp2 ? parseFloat(d.tp2) : null;
+  var tp3 = d.tp3 ? parseFloat(d.tp3) : null;
+  var _fmtP = function(v) { return v ? v.toLocaleString(undefined,{maximumFractionDigits: v < 1 ? 6 : v < 100 ? 4 : 2}) : '—'; };
+  var currSym = (d.asset_type === 'crypto') ? '$' : (d.asset_type === 'forex') ? '' : '$';
 
   // RSI extremes
-  if (rsi && rsi < 35) alerts.push('RSI oversold (' + rsi.toFixed(1) + ') — bounce setup forming');
-  else if (rsi && rsi > 70) alerts.push('RSI overbought (' + rsi.toFixed(1) + ') — reversal watch');
+  if (rsi && rsi < 35) alerts.push({text: 'RSI oversold (' + rsi.toFixed(1) + ') — bounce setup forming', detail: ''});
+  else if (rsi && rsi > 70) alerts.push({text: 'RSI overbought (' + rsi.toFixed(1) + ') — reversal watch', detail: ''});
 
-  // Price near entry zone
-  if (price && entry && Math.abs(price - entry) / price < 0.01)
-    alerts.push('Price at entry zone — ' + d.signal + ' trigger imminent');
+  // Price near entry zone — show the actual entry price + levels
+  if (price && entry && Math.abs(price - entry) / price < 0.01) {
+    var distPct = ((price - entry) / entry * 100).toFixed(2);
+    var entryDetail =
+      '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:6px;font-size:10px;">' +
+        '<span style="color:var(--muted);">Entry: <strong style="color:var(--amber);">' + currSym + _fmtP(entry) + '</strong></span>' +
+        '<span style="color:var(--muted);">Now: <strong style="color:var(--white);">' + currSym + _fmtP(price) + '</strong> (' + (distPct >= 0 ? '+' : '') + distPct + '%)</span>' +
+        '<span style="color:var(--muted);">SL: <strong style="color:var(--red);">' + currSym + _fmtP(sl) + '</strong></span>' +
+        '<span style="color:var(--muted);">TP1: <strong style="color:var(--green);">' + currSym + _fmtP(tp1) + '</strong></span>' +
+        (tp2 ? '<span style="color:var(--muted);">TP2: <strong style="color:var(--green);">' + currSym + _fmtP(tp2) + '</strong></span>' : '') +
+        (tp3 ? '<span style="color:var(--muted);">TP3: <strong style="color:var(--green);">' + currSym + _fmtP(tp3) + '</strong></span>' : '') +
+      '</div>';
+    alerts.push({
+      text: d.signal + ' at ' + currSym + _fmtP(entry) + ' — price ' + (Math.abs(parseFloat(distPct)) < 0.1 ? 'AT entry' : parseFloat(distPct) > 0 ? 'above entry' : 'below entry'),
+      detail: entryDetail
+    });
+  }
 
   // Price near support/SL
   if (price && sl && Math.abs(price - sl) / price < 0.015)
-    alerts.push('Price testing support near SL — watch for reaction');
+    alerts.push({text: 'Price testing support near SL (' + currSym + _fmtP(sl) + ') — watch for reaction', detail: ''});
 
   // Volume surge
   if (d.vol_ratio && d.vol_ratio >= 2)
-    alerts.push('Volume surge ' + d.vol_ratio.toFixed(1) + '× — institutional activity');
+    alerts.push({text: 'Volume surge ' + d.vol_ratio.toFixed(1) + '× — institutional activity', detail: ''});
 
   // EMA convergence
   if (d.ema_trend && d.ema_trend.toUpperCase() === 'MIXED')
-    alerts.push('EMAs converging — trend shift possible');
+    alerts.push({text: 'EMAs converging — trend shift possible', detail: ''});
 
   if (alerts.length) {
-    banner.innerHTML = '<span style="color:var(--amber);font-weight:700;">⚡ TRADE ALERT</span> <span>' + alerts[0] + '</span>' +
-      (alerts.length > 1 ? '<span style="opacity:.5;margin-left:8px;">+' + (alerts.length-1) + ' more</span>' : '');
+    var firstAlert = alerts[0];
+    banner.innerHTML = '<div style="flex:1;">' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+        '<span style="color:var(--amber);font-weight:700;">⚡ TRADE ALERT</span> <span>' + firstAlert.text + '</span>' +
+        (alerts.length > 1 ? '<span style="opacity:.5;">+' + (alerts.length-1) + ' more</span>' : '') +
+      '</div>' +
+      (firstAlert.detail || '') +
+    '</div>';
     banner.style.display = 'flex';
   } else {
     // Check if signal is BUY or SELL (active opportunity)
     if (d.signal && d.signal !== 'HOLD') {
-      var entryStr = entry ? entry.toLocaleString(undefined,{maximumFractionDigits:4}) : '—';
-      banner.innerHTML = '<span style="color:var(--amber);font-weight:700;">⚡ ACTIVE</span> <span>' + d.signal + ' signal at ' + (d.confidence || '') + ' confidence — entry at ' + entryStr + '</span>';
+      var entryStr = entry ? currSym + _fmtP(entry) : '—';
+      var slStr = sl ? currSym + _fmtP(sl) : '—';
+      var tp1Str = tp1 ? currSym + _fmtP(tp1) : '—';
+      banner.innerHTML = '<div style="flex:1;">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+          '<span style="color:var(--amber);font-weight:700;">⚡ ACTIVE</span> ' +
+          '<span>' + d.signal + ' signal — ' + (d.confidence || '') + ' confidence</span>' +
+        '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:4px;font-size:10px;">' +
+          '<span style="color:var(--muted);">Entry: <strong style="color:var(--amber);">' + entryStr + '</strong></span>' +
+          '<span style="color:var(--muted);">SL: <strong style="color:var(--red);">' + slStr + '</strong></span>' +
+          '<span style="color:var(--muted);">TP1: <strong style="color:var(--green);">' + tp1Str + '</strong></span>' +
+          (tp2 ? '<span style="color:var(--muted);">TP2: <strong style="color:var(--green);">' + currSym + _fmtP(tp2) + '</strong></span>' : '') +
+          (tp3 ? '<span style="color:var(--muted);">TP3: <strong style="color:var(--green);">' + currSym + _fmtP(tp3) + '</strong></span>' : '') +
+        '</div>' +
+      '</div>';
       banner.style.display = 'flex';
     } else {
       banner.style.display = 'none';
