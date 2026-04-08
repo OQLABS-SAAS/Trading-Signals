@@ -1305,6 +1305,106 @@ def _tv_prompt_block(tv):
 
 
 
+# ─── OPENAI DATA NARRATOR ────────────────────────────────────
+def _narrate_data_openai(result, ticker, asset_type, ind, timeframe):
+    """
+    Use OpenAI GPT-4o-mini to narrate indicator data as plain English.
+    Strict rules: ONLY reference exact numbers provided. No speculation, no predictions.
+    Returns result unchanged on any error or if API key is missing.
+    """
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return result
+
+    try:
+        # Build prompt with all exact computed values
+        prompt = f"""You are a data narrator for traders. Your ONLY job is to describe what the numbers below mean in plain English.
+
+STRICT RULES:
+- ONLY reference the exact numbers provided below. Do not invent or estimate any data.
+- Do not predict future price movement. Do not say "price will" or "expect to."
+- Do not add information not present in the data.
+- Write as a professional trader explaining indicators to another trader.
+- Be concise. Use the actual numbers.
+
+TICKER: {ticker} ({asset_type}, {timeframe} timeframe)
+SIGNAL: {result['signal']} | CONFIDENCE: {result['confidence']}
+PRICE: {ind.get('price')} | CHANGE: {ind.get('chg_1d')}%
+RSI (14): {ind.get('rsi')}
+MACD HISTOGRAM: {ind.get('macd_hist')}
+EMA TREND: {ind.get('ema_trend')} | EMA20: {ind.get('ema20')} | EMA50: {ind.get('ema50')}
+ATR (14): {ind.get('atr')} ({round((ind.get('atr',0)/max(ind.get('price',1),0.01))*100, 2)}% of price)
+VOLUME RATIO: {ind.get('vol_ratio')}x vs 30d avg
+BOLLINGER POSITION: {ind.get('bb_pos')} | BB WIDTH: {ind.get('bb_width')}
+SUPERTREND: {ind.get('supertrend')}
+SUPPORT: {ind.get('support')} | RESISTANCE: {ind.get('resistance')}
+ENTRY: {result.get('entry')} | STOP LOSS: {result.get('stop_loss')}
+TP1: {result.get('tp1')} | TP2: {result.get('tp2')} | TP3: {result.get('tp3')}
+
+Return JSON with these keys ONLY:
+- "summary": 2 sentences describing the current state using the numbers above
+- "narrative": 3 sentences explaining the trade setup referencing specific indicator values
+- "rsi_assessment": 1 sentence about RSI using the exact value
+- "trend_assessment": 1 sentence about EMA trend using exact EMA values
+- "macd_assessment": 1 sentence about MACD using exact histogram value
+- "volume_assessment": 1 sentence about volume using exact ratio
+- "supertrend_assessment": 1 sentence about supertrend
+
+Return ONLY valid JSON. No markdown."""
+
+        # POST to OpenAI API
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 600
+            },
+            timeout=(10, 25)
+        )
+
+        if response.status_code != 200:
+            return result
+
+        response_data = response.json()
+        if "choices" not in response_data or not response_data["choices"]:
+            return result
+
+        content = response_data["choices"][0].get("message", {}).get("content", "")
+        if not content:
+            return result
+
+        # Parse JSON response
+        openai_result = json.loads(content)
+
+        # Extract only allowed text keys
+        allowed_keys = {
+            "summary",
+            "narrative",
+            "rsi_assessment",
+            "trend_assessment",
+            "macd_assessment",
+            "volume_assessment",
+            "supertrend_assessment"
+        }
+
+        # Merge ONLY the text keys into result, preserving all other fields
+        for key in allowed_keys:
+            if key in openai_result and isinstance(openai_result[key], str):
+                result[key] = openai_result[key]
+
+        return result
+
+    except Exception:
+        # Silently return result unchanged on any error
+        return result
+
+
 # ─── CLAUDE ANALYSIS ─────────────────────────────────────────
 def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
     """Generate trading analysis using pure template logic — no API calls."""
@@ -1519,6 +1619,9 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
         "volume_assessment": volume_assessment,
         "supertrend_assessment": supertrend_assessment,
     }
+
+    # Call OpenAI to narrate data if API key is configured
+    result = _narrate_data_openai(result, ticker, asset_type, ind, timeframe)
 
     return result
 
