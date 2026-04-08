@@ -780,6 +780,10 @@ body::before{
 .ni-sent.bull{background:rgba(0,201,141,.12);color:var(--green);}
 .ni-sent.bear{background:rgba(255,68,89,.1);color:var(--red);}
 .ni-sent.neut{background:var(--amber-glow);color:var(--amber);}
+.news-expandable .ni-expand{max-height:0;overflow:hidden;transition:max-height .25s ease,opacity .2s;opacity:0;}
+.news-expandable.expanded .ni-expand{max-height:300px;opacity:1;}
+.news-expandable::after{content:'Tap to expand';display:block;font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;letter-spacing:.5px;}
+.news-expandable.expanded::after{content:'Tap to collapse';}
 
 /* ═══════════════════════════════════════════════
    STRATEGY ENGINE TAB
@@ -7066,16 +7070,78 @@ function renderResultsV2(d) {
     if (arc) arc.setAttribute('stroke-dashoffset', 157 - (fgScore / 100) * 157);
   }
 
-  // News sidebar — show brief summary from analysis
+  // News sidebar — show expandable news blocks from analysis
   var sideNews = document.getElementById('sideNews');
   var sideNewsItems = document.getElementById('sideNewsItems');
   if (sideNews && sideNewsItems) {
     sideNews.style.display = '';
-    sideNewsItems.innerHTML = '<div class="news-item">' +
+    var sig = d.signal || 'HOLD';
+    var sigClass = sig === 'BUY' ? 'bull' : sig === 'SELL' ? 'bear' : 'neut';
+    var sigColor = sig === 'BUY' ? 'var(--green)' : sig === 'SELL' ? 'var(--red)' : 'var(--amber)';
+    var rsiVal = d.rsi ? parseFloat(d.rsi).toFixed(1) : '—';
+    var volR = d.vol_ratio ? parseFloat(d.vol_ratio).toFixed(1) + 'x' : '—';
+    var atrVal = d.atr ? fmt(d.atr) : '—';
+    var emaTrend = d.ema_trend || '—';
+    var newsBlocks = '';
+
+    // Block 1: Signal summary (always present)
+    newsBlocks += '<div class="news-item news-expandable" onclick="this.classList.toggle(\'expanded\')">' +
       '<div class="ni-time">Just now</div>' +
-      '<div class="ni-head">' + d.ticker + ' analysis: ' + (d.signal||'HOLD') + ' signal at ' + fmt(d.price) + '</div>' +
-      '<span class="ni-sent ' + ((d.signal==='BUY')?'bull':(d.signal==='SELL')?'bear':'neut') + '">' + (d.signal||'Hold') + '</span>' +
-      '</div>';
+      '<div class="ni-head">' + d.ticker + ': <span style="color:' + sigColor + ';font-weight:700;">' + sig + '</span> at ' + fmt(d.price) + '</div>' +
+      '<span class="ni-sent ' + sigClass + '">' + sig + '</span>' +
+      '<div class="ni-expand">' +
+        '<div style="margin-top:8px;font-size:11px;color:var(--muted2);line-height:1.6;">' +
+          (d.summary || 'Analysis complete for ' + d.ticker) +
+        '</div>' +
+        '<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">' +
+          '<span style="font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;background:rgba(245,166,35,.12);color:var(--amber);">RSI ' + rsiVal + '</span>' +
+          '<span style="font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;background:rgba(245,166,35,.12);color:var(--amber);">Vol ' + volR + '</span>' +
+          '<span style="font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;background:rgba(245,166,35,.12);color:var(--amber);">ATR ' + atrVal + '</span>' +
+        '</div>' +
+      '</div></div>';
+
+    // Block 2: Trade levels
+    if (d.entry) {
+      newsBlocks += '<div class="news-item news-expandable" onclick="this.classList.toggle(\'expanded\')">' +
+        '<div class="ni-time">Trade Setup</div>' +
+        '<div class="ni-head">Entry ' + fmt(d.entry) + ' / SL ' + fmt(d.stop_loss) + '</div>' +
+        '<span class="ni-sent ' + sigClass + '">Levels</span>' +
+        '<div class="ni-expand">' +
+          '<div style="margin-top:8px;font-size:11px;color:var(--muted2);line-height:1.8;">' +
+            'TP1: ' + fmt(d.tp1) + (d.rr1 ? ' (R:R 1:' + parseFloat(d.rr1).toFixed(1) + ')' : '') + '<br>' +
+            'TP2: ' + fmt(d.tp2) + (d.rr2 ? ' (R:R 1:' + parseFloat(d.rr2).toFixed(1) + ')' : '') + '<br>' +
+            'TP3: ' + fmt(d.tp3) + (d.rr3 ? ' (R:R 1:' + parseFloat(d.rr3).toFixed(1) + ')' : '') +
+          '</div>' +
+        '</div></div>';
+    }
+
+    // Block 3: Trend context
+    newsBlocks += '<div class="news-item news-expandable" onclick="this.classList.toggle(\'expanded\')">' +
+      '<div class="ni-time">Trend</div>' +
+      '<div class="ni-head">EMA: ' + emaTrend + ' / BB: ' + (d.bb_pos || '—') + '</div>' +
+      '<span class="ni-sent ' + (emaTrend.includes('bull') ? 'bull' : emaTrend.includes('bear') ? 'bear' : 'neut') + '">Trend</span>' +
+      '<div class="ni-expand">' +
+        '<div style="margin-top:8px;font-size:11px;color:var(--muted2);line-height:1.6;">' +
+          (d.narrative || d.trend_assessment || 'Trend data for ' + d.ticker) +
+        '</div>' +
+      '</div></div>';
+
+    // Block 4: Scenarios (if available)
+    if (d.bull_scenario) {
+      newsBlocks += '<div class="news-item news-expandable" onclick="this.classList.toggle(\'expanded\')">' +
+        '<div class="ni-time">Scenarios</div>' +
+        '<div class="ni-head">Bull / Base / Bear outlook</div>' +
+        '<span class="ni-sent neut">View</span>' +
+        '<div class="ni-expand">' +
+          '<div style="margin-top:8px;font-size:11px;line-height:1.6;">' +
+            '<div style="color:var(--green);margin-bottom:4px;">Bull: ' + d.bull_scenario + '</div>' +
+            '<div style="color:var(--amber);margin-bottom:4px;">Base: ' + (d.base_scenario||'—') + '</div>' +
+            '<div style="color:var(--red);">Bear: ' + (d.bear_scenario||'—') + '</div>' +
+          '</div>' +
+        '</div></div>';
+    }
+
+    sideNewsItems.innerHTML = newsBlocks;
   }
 
   // Render chart (Chart.js)
