@@ -2302,8 +2302,7 @@ body::before{
       </select>
       <button id="scanBtn" onclick="runScanner()" style="padding:7px 16px; background:var(--amber); color:#0C0A08; border:none; border-radius:3px; font-family:var(--mono); font-size:11px; font-weight:700; cursor:pointer;">RUN SCAN</button>
     </div>
-    <div id="scanResults"></div>
-    <div class="scan-filter-row">
+    <div class="scan-filter-row" id="scanFilterRow" style="display:flex;position:sticky;top:0;z-index:10;background:var(--bg1);padding:8px 0;">
       <button class="scan-filter-btn active" onclick="filterScanResults('all',this)">All Signals</button>
       <button class="scan-filter-btn" onclick="filterScanResults('buy',this)">BUY Only</button>
       <button class="scan-filter-btn" onclick="filterScanResults('sell',this)">SELL Only</button>
@@ -2313,6 +2312,7 @@ body::before{
       <button class="scan-filter-btn" onclick="filterScanResults('equities',this)">Equities</button>
       <button class="scan-filter-btn" onclick="filterScanResults('commodities',this)">Commodities</button>
     </div>
+    <div id="scanResults"></div>
     <!-- Static demo table removed — scanResults will populate dynamically -->
     <div style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.2);text-align:center;padding:40px 0;">Select a preset and click RUN SCAN</div>
   </div>
@@ -4548,9 +4548,9 @@ async function runScanner() {
 
 function renderScanResults(results, assetType) {
   if (!results.length) { document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);">No results.</div>'; return; }
-  // Hide static mock table but keep filter buttons visible
-  var mt = document.querySelector('#tab-scanner .scan-table'); if (mt) mt.style.display = 'none';
-  var mf = document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
+  // Hide static mock table (outside scanResults) but keep filter buttons visible
+  document.querySelectorAll('#tab-scanner > .scanner-layout > .scan-table').forEach(function(t) { t.style.display = 'none'; });
+  var mf = document.getElementById('scanFilterRow') || document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
   var fmt = function(v) { return v != null ? parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:4}) : '—'; };
   document.getElementById('scanResults').innerHTML = '<table class="scan-table"><thead><tr>' +
     '<th>Symbol</th><th>Signal</th><th>Confidence</th><th>Price</th><th>RSI</th><th>EMA Trend</th><th>Volume</th><th>Change 1D</th><th>TF</th>' +
