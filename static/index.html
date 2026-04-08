@@ -8270,32 +8270,46 @@ async function seScanAll(filterSignal) {
     var sm = document.getElementById('stratMain'); if (sm) sm.style.display = '';
     var se = document.getElementById('stratEmpty'); if (se) se.style.display = 'none';
 
-    // Scan each symbol
-    for (var i = 0; i < syms.length; i++) {
-      if (prog) prog.textContent = 'Scanning ' + (i+1) + '/' + syms.length + ' — ' + syms[i] + '...';
-      if (btn) btn.textContent = '⏳ ' + (i+1) + '/' + syms.length;
-      try {
-        var r = await fetch('/api/analyze', {
+    // Scan all symbols in PARALLEL (3 at a time to avoid overloading server)
+    var batchSize = 3;
+    for (var b = 0; b < syms.length; b += batchSize) {
+      var batch = syms.slice(b, b + batchSize);
+      if (prog) prog.textContent = 'Scanning batch ' + (Math.floor(b/batchSize)+1) + '/' + Math.ceil(syms.length/batchSize) + ' — ' + batch.join(', ') + '...';
+      if (btn) btn.textContent = '⏳ ' + Math.min(b+batchSize, syms.length) + '/' + syms.length;
+
+      var batchPromises = batch.map(function(sym) {
+        return fetch('/api/analyze', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ ticker: syms[i], timeframe: tf, asset_type: scanAssetType })
-        });
-        var d = await r.json();
-        if (!d.error) {
-          results.push({
-            ticker: d.ticker || syms[i],
-            signal: d.signal || 'HOLD',
-            confidence: d.confidence || '—',
-            price: d.price || 0,
-            rsi: d.rsi || '—',
-            entry: d.entry,
-            stop_loss: d.stop_loss,
-            tp1: d.tp1
-          });
-        } else {
-          errors++;
-        }
-      } catch(e) { errors++; console.warn('Scan error for', syms[i], e); }
+          body: JSON.stringify({ ticker: sym, timeframe: tf, asset_type: scanAssetType })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (!d.error) {
+            return {
+              ticker: d.ticker || sym,
+              signal: d.signal || 'HOLD',
+              confidence: d.confidence || '—',
+              price: d.price || 0,
+              rsi: d.rsi || '—',
+              entry: d.entry,
+              stop_loss: d.stop_loss,
+              tp1: d.tp1
+            };
+          }
+          return null;
+        })
+        .catch(function(e) { console.warn('Scan error for', sym, e); return null; });
+      });
+
+      var batchResults = await Promise.all(batchPromises);
+      batchResults.forEach(function(r) {
+        if (r) results.push(r);
+        else errors++;
+      });
+
+      // Show intermediate results as they come in
+      _renderScanResults(results, filterSignal, errors);
     }
 
     // Store last scan results for filtering without re-scanning
@@ -8591,19 +8605,20 @@ async function seMatrixScan() {
     var sm = document.getElementById('stratMain'); if (sm) sm.style.display = '';
     var se = document.getElementById('stratEmpty'); if (se) se.style.display = 'none';
 
-    for (var i = 0; i < timeframes.length; i++) {
-      if (prog) prog.textContent = 'Scanning ' + ticker + ' ' + timeframes[i].toUpperCase() + ' (' + (i+1) + '/4)...';
-      if (btn) btn.textContent = '⏳ ' + timeframes[i].toUpperCase();
-      try {
-        var r = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ ticker: ticker, timeframe: timeframes[i], asset_type: scanAssetType })
-        });
-        var d = await r.json();
+    // Run all 4 timeframes in PARALLEL
+    if (prog) prog.textContent = 'Scanning ' + ticker + ' across 15m, 1h, 4h, 1D...';
+    if (btn) btn.textContent = '⏳ 4 TFs...';
+    var tfPromises = timeframes.map(function(tf_i) {
+      return fetch('/api/analyze', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ ticker: ticker, timeframe: tf_i, asset_type: scanAssetType })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
         if (!d.error) {
-          results.push({
-            tf: timeframes[i].toUpperCase(),
+          return {
+            tf: tf_i.toUpperCase(),
             signal: d.signal || 'HOLD',
             confidence: d.confidence || '—',
             rsi: d.rsi || '—',
@@ -8613,10 +8628,17 @@ async function seMatrixScan() {
             stop_loss: d.stop_loss,
             tp1: d.tp1,
             rr1: d.rr1
-          });
+          };
         }
-      } catch(e) { console.warn('Matrix error for', timeframes[i], e); }
-    }
+        return null;
+      })
+      .catch(function(e) { console.warn('Matrix error for', tf_i, e); return null; });
+    });
+    var tfResults = await Promise.all(tfPromises);
+    // Sort by timeframe order
+    var tfOrder = {'15M':0,'1H':1,'4H':2,'1D':3};
+    tfResults.forEach(function(r) { if (r) results.push(r); });
+    results.sort(function(a,b) { return (tfOrder[a.tf]||0) - (tfOrder[b.tf]||0); });
 
   var psText = document.querySelector('.se-ps-text');
   if (psText && results.length > 0) {
