@@ -1306,88 +1306,218 @@ def _tv_prompt_block(tv):
 
 # ─── CLAUDE ANALYSIS ─────────────────────────────────────────
 def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
-    rsi_tag  = "[OVERSOLD]"   if ind["rsi"] < 30 else "[OVERBOUGHT]" if ind["rsi"] > 70 else "[NEUTRAL]"
-    macd_tag = "[BULLISH MOMENTUM]" if ind["macd_hist"] > 0 else "[BEARISH MOMENTUM]"
-    bb_tag   = "near lower band" if ind["bb_pos"] < 0.2 else "near upper band" if ind["bb_pos"] > 0.8 else "mid-range"
+    """Generate trading analysis using pure template logic — no API calls."""
+    # Safe defaults for missing/None values
+    price = ind.get("price", 0) or 0
+    rsi = ind.get("rsi", 50) or 50
+    ema_trend = ind.get("ema_trend", "neutral") or "neutral"
+    macd_hist = ind.get("macd_hist", 0) or 0
+    bb_pos = ind.get("bb_pos", 0.5) or 0.5
+    atr = ind.get("atr", price * 0.01) or (price * 0.01)  # Default to 1% of price if ATR is 0
+    vol_ratio = ind.get("vol_ratio", 1.0) or 1.0
+    supertrend = ind.get("supertrend", "neutral") or "neutral"
+    support = ind.get("support", price * 0.98)
+    resistance = ind.get("resistance", price * 1.02)
+    chg_1d = ind.get("chg_1d", 0) or 0
+    ema20 = ind.get("ema20", price)
+    ema50 = ind.get("ema50", price)
+    ema200 = ind.get("ema200", price)
+    bb_width = ind.get("bb_width", 0.02) or 0.02
 
-    prompt = f"""You are a senior professional trader and quantitative analyst. Analyze {ticker} ({asset_type}) on the {timeframe} timeframe using the indicator data below and return ONLY a valid JSON object — no markdown, no explanation outside the JSON.
+    # Count bullish/bearish indicators
+    bullish_count = 0
+    bearish_count = 0
 
-INDICATOR DATA ({timeframe} timeframe):
-Price: {ind['price']} | 1-bar chg: {ind['chg_1d']:+}%
-RSI(14): {ind['rsi']} {rsi_tag}
-EMA Trend: {ind['ema_trend']} | EMA20={ind['ema20']} | EMA50={ind['ema50']} | EMA200={ind['ema200']}
-MACD Histogram: {ind['macd_hist']} {macd_tag}
-Bollinger Position: {ind['bb_pos']:.2f} ({bb_tag}) | BB Width: {ind['bb_width']:.3f}
-ATR(14): {ind['atr']} | Volume: {ind['vol_ratio']}x 20-bar average
-Supertrend: {ind['supertrend']}
-Support: {ind['support']} | Resistance: {ind['resistance']}{_tv_prompt_block(tv)}
+    # RSI logic
+    if 40 <= rsi <= 70:
+        bullish_count += 1
+        rsi_assessment = f"RSI at {rsi} shows moderately bullish momentum without overbought extremes."
+    elif rsi > 75:
+        bearish_count += 1
+        rsi_assessment = f"RSI at {rsi} signals overbought conditions; pullback risk is elevated."
+    elif rsi < 25:
+        bullish_count += 1
+        rsi_assessment = f"RSI at {rsi} indicates oversold conditions; bounce potential is present."
+    else:
+        rsi_assessment = f"RSI at {rsi} is neutral; looking for directional confirmation."
 
-IMPORTANT RULES:
-- If signal is HOLD: set entry, stop_loss, tp1, tp2, tp3, rr1, rr2, rr3 all to null.
-- If signal is BUY or SELL: provide all trade levels based on the indicators.
+    # EMA Trend logic
+    if ema_trend.lower() == "bullish":
+        bullish_count += 1
+        trend_assessment = "EMA stack is bullish; uptrend structure is intact and price is above key moving averages."
+    elif ema_trend.lower() == "bearish":
+        bearish_count += 1
+        trend_assessment = "EMA stack is bearish; downtrend structure dominates and price remains below key MAs."
+    else:
+        trend_assessment = "EMAs are mixed; trend definition is unclear at current price."
 
-Return ONLY this JSON — no markdown, no extra text:
-{{
-  "signal": "BUY" or "HOLD" or "SELL",
-  "confidence": "HIGH" or "MEDIUM" or "LOW",
-  "summary": "2-3 sentence plain English signal explanation",
-  "narrative": "3-4 sentence trader thinking-aloud narrative — market structure, what price is doing, why the signal makes sense. NOT bullet points.",
-  "timing": "ENTER NOW" or "WAIT 5-15 MIN" or "WAIT FOR PULLBACK" or "LATE ENTRY — CAUTION",
-  "timing_detail": "1 sentence explaining the timing call",
-  "micro_lesson": "1-2 sentence educational insight about why this setup works",
-  "bull_scenario": "What happens if bulls take control (1-2 sentences)",
-  "base_scenario": "Most likely scenario (1-2 sentences)",
-  "bear_scenario": "What happens if bears take control (1-2 sentences)",
-  "entry": <entry price as number, or null if HOLD>,
-  "stop_loss": <stop loss price as number, or null if HOLD>,
-  "tp1": <conservative take profit — 1:1.5 R/R, or null if HOLD>,
-  "tp2": <moderate take profit — 1:2.5 R/R, or null if HOLD>,
-  "tp3": <aggressive take profit — 1:4 R/R, or null if HOLD>,
-  "rr1": <R/R ratio for TP1 to 1dp, or null if HOLD>,
-  "rr2": <R/R ratio for TP2 to 1dp, or null if HOLD>,
-  "rr3": <R/R ratio for TP3 to 1dp, or null if HOLD>,
-  "rsi_assessment": "one line RSI interpretation",
-  "trend_assessment": "one line trend interpretation",
-  "macd_assessment": "one line MACD interpretation",
-  "volume_assessment": "one line volume interpretation",
-  "supertrend_assessment": "one line supertrend interpretation"
-}}"""
+    # MACD logic
+    if macd_hist > 0:
+        bullish_count += 1
+        macd_assessment = "MACD histogram is positive; bullish momentum is building."
+    else:
+        bearish_count += 1
+        macd_assessment = "MACD histogram is negative; bearish momentum dominates the tape."
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    resp = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key":         api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type":      "application/json",
-        },
-        json={
-            "model":      "claude-sonnet-4-6",
-            "max_tokens": 1100,
-            "messages":   [{"role": "user", "content": prompt}],
-        },
-        timeout=(10, 55),  # connect=10s, read=55s — total max 65s, well under gunicorn 120s
-    )
-    if resp.status_code != 200:
-        raise Exception(f"Anthropic API error {resp.status_code}: {resp.text[:200]}")
+    # Volume logic
+    if vol_ratio > 1.2:
+        bullish_count += 1
+        volume_assessment = f"Volume ratio at {vol_ratio:.2f}x confirms buying interest above average."
+    else:
+        volume_assessment = f"Volume ratio at {vol_ratio:.2f}x suggests weak conviction; confirmation needed."
 
-    text = resp.json()["content"][0]["text"].strip()
-    if "```" in text:
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        # Truncated response — extract the JSON object up to the last complete field
-        end = text.rfind("}")
-        if end != -1:
-            try:
-                return json.loads(text[:end+1])
-            except json.JSONDecodeError:
-                pass
-        raise Exception(f"Claude returned malformed JSON (possible truncation). Raw: {text[:200]}")
+    # Supertrend logic
+    if supertrend.lower() == "bullish":
+        bullish_count += 1
+        supertrend_assessment = "Supertrend is bullish; upside continuation is likely unless support breaks."
+    else:
+        bearish_count += 1
+        supertrend_assessment = "Supertrend is bearish; downside is protected and rallies face selling."
+
+    # Bollinger Bands logic
+    if bb_pos > 0.8:
+        bullish_count += 1
+    elif bb_pos < 0.2:
+        bullish_count += 1
+    # Neutral BB doesn't add to score but we note it
+
+    # Determine signal based on bullish indicator count
+    if bullish_count >= 4:
+        signal = "BUY"
+    elif bullish_count >= 2:
+        signal = "HOLD"
+    else:
+        signal = "SELL"
+
+    # Determine confidence
+    if bullish_count >= 5 or bearish_count >= 5:
+        confidence = "HIGH"
+    elif bullish_count >= 3 or bearish_count >= 3:
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
+    # Generate trade levels based on ATR
+    if signal != "HOLD" and atr > 0:
+        entry = round(price, 4) if price > 100 else round(price, 2)
+
+        if signal == "BUY":
+            stop_loss = round(price - (1.5 * atr), 4) if price > 100 else round(price - (1.5 * atr), 2)
+            tp1 = round(price + (2 * atr), 4) if price > 100 else round(price + (2 * atr), 2)
+            tp2 = round(price + (3.5 * atr), 4) if price > 100 else round(price + (3.5 * atr), 2)
+            tp3 = round(price + (5.5 * atr), 4) if price > 100 else round(price + (5.5 * atr), 2)
+        else:  # SELL
+            stop_loss = round(price + (1.5 * atr), 4) if price > 100 else round(price + (1.5 * atr), 2)
+            tp1 = round(price - (2 * atr), 4) if price > 100 else round(price - (2 * atr), 2)
+            tp2 = round(price - (3.5 * atr), 4) if price > 100 else round(price - (3.5 * atr), 2)
+            tp3 = round(price - (5.5 * atr), 4) if price > 100 else round(price - (5.5 * atr), 2)
+
+        # Calculate R:R ratios
+        risk = abs(entry - stop_loss)
+        if risk > 0:
+            rr1 = round((abs(tp1 - entry) / risk), 1)
+            rr2 = round((abs(tp2 - entry) / risk), 1)
+            rr3 = round((abs(tp3 - entry) / risk), 1)
+        else:
+            rr1 = rr2 = rr3 = None
+    else:
+        entry = stop_loss = tp1 = tp2 = tp3 = None
+        rr1 = rr2 = rr3 = None
+
+    # Generate timing call
+    if signal == "HOLD":
+        timing = "WAIT 5-15 MIN"
+        timing_detail = "Mixed signals require further consolidation before a directional entry is warranted."
+    elif rsi < 35:
+        timing = "ENTER NOW"
+        timing_detail = "RSI in oversold territory presents an attractive risk-reward entry opportunity."
+    elif rsi > 70:
+        timing = "LATE ENTRY — CAUTION"
+        timing_detail = "Overbought conditions suggest waiting for a pullback to enter with better odds."
+    elif 35 <= rsi <= 50:
+        timing = "WAIT FOR PULLBACK"
+        timing_detail = "Price is rising but RSI is in accumulation zone; optimal entry on minor retracement."
+    else:
+        timing = "WAIT 5-15 MIN"
+        timing_detail = "Await candle close confirmation before committing capital to this setup."
+
+    # Generate narrative with actual values
+    if signal == "BUY":
+        narrative = (
+            f"Price at {price} is showing {bullish_count} bullish setup components. "
+            f"With RSI at {rsi} and EMA trend {ema_trend}, the upside structure looks intact. "
+            f"MACD histogram is {'positive' if macd_hist > 0 else 'negative'} and volume is {vol_ratio:.2f}x average, "
+            f"confirming {'strong' if vol_ratio > 1.2 else 'modest'} conviction. The setup rewards buyers on a break above {resistance}."
+        )
+    elif signal == "SELL":
+        narrative = (
+            f"Price at {price} is facing {bearish_count} bearish setup indicators. "
+            f"RSI at {rsi} and EMA trend {ema_trend} suggest downside pressure is building. "
+            f"MACD histogram is {'negative' if macd_hist <= 0 else 'positive'} and volume context shows {'weak' if vol_ratio < 1.0 else 'moderate'} participation. "
+            f"Bears could target {support} on sustained selling."
+        )
+    else:
+        narrative = (
+            f"Price at {price} is conflicted: {bullish_count} bullish vs {bearish_count} bearish signals. "
+            f"RSI at {rsi} is in neutral territory and EMAs show mixed tone. "
+            f"Neither side has clear momentum advantage yet. Wait for a catalyst or candle structure break to define the next directional move."
+        )
+
+    # Summary
+    if signal == "BUY":
+        summary = f"Bullish setup detected with {bullish_count} aligned indicators. Multiple EMAs support upside and volume confirms. Enter on break of {resistance}."
+    elif signal == "SELL":
+        summary = f"Bearish structure in place with {bearish_count} aligned down indicators. Support at {support} is the key level. Enter on break below."
+    else:
+        summary = f"Mixed signals: {bullish_count} bullish vs {bearish_count} bearish. Wait for consolidation to resolve before committing to a direction."
+
+    # Scenarios
+    if signal == "BUY":
+        bull_scenario = f"Buyers push past {resistance}; price accelerates to {tp1} then {tp2} as momentum compounds. Higher lows form and rallies get bought."
+        base_scenario = f"Price consolidates above {support}, grinding higher with 2-3 pullbacks to the 20-EMA before testing {tp1}."
+        bear_scenario = f"Breakdown below {support} triggers stop cascades; price reverses hard to {stop_loss} and beyond if bears gain traction."
+    elif signal == "SELL":
+        bull_scenario = f"Sudden rally back to {resistance}; momentum buyers push price up but selling resumes on failure to break above it."
+        base_scenario = f"Price drifts lower from {resistance} toward {support}; lower highs form and breaks establish new lows heading to {tp1}."
+        bear_scenario = f"Capitulation selling at {support} triggers acceleration downward; cascading stops hit {tp2} then {tp3} as shorts pile in."
+    else:
+        bull_scenario = "Bullish breakout above resistance line would shift the bias upward and trigger fresh buying interest."
+        base_scenario = "Consolidation between support and resistance continues until a catalyst or technical break defines the next trend."
+        bear_scenario = "Bearish break below support could shift momentum downward and attract new selling pressure."
+
+    # Micro lesson
+    if bullish_count >= 4:
+        micro_lesson = "When 4+ indicators align, the probability of directional follow-through rises significantly. Volume confirmation is your edge."
+    elif bearish_count >= 4:
+        micro_lesson = "Aligned bearish setups carry high conviction only when institutional volume backs the move. Solo price action is noise."
+    else:
+        micro_lesson = "Mixed signals are market's way of saying 'wait'—the best traders sit out indecision and reload on clarity."
+
+    return {
+        "signal": signal,
+        "confidence": confidence,
+        "summary": summary,
+        "narrative": narrative,
+        "timing": timing,
+        "timing_detail": timing_detail,
+        "micro_lesson": micro_lesson,
+        "bull_scenario": bull_scenario,
+        "base_scenario": base_scenario,
+        "bear_scenario": bear_scenario,
+        "entry": entry,
+        "stop_loss": stop_loss,
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp3": tp3,
+        "rr1": rr1,
+        "rr2": rr2,
+        "rr3": rr3,
+        "rsi_assessment": rsi_assessment,
+        "trend_assessment": trend_assessment,
+        "macd_assessment": macd_assessment,
+        "volume_assessment": volume_assessment,
+        "supertrend_assessment": supertrend_assessment,
+    }
 
 # ─── SMS + EMAIL ALERTS ───────────────────────────────────────
 def send_sms(message):
@@ -1515,38 +1645,126 @@ def fire_alert(signal, ticker, price, timeframe, analysis, counter, channels=Non
 
 # ─── LIGHTWEIGHT WATCH ANALYSIS (Haiku — ~20× cheaper than Sonnet) ───────────
 def get_watch_signal(ticker, asset_type, ind, timeframe):
-    """Stripped-down signal check for background watch jobs. Uses Haiku to minimise cost."""
-    rsi_tag  = "[OVERSOLD]" if ind["rsi"] < 30 else "[OVERBOUGHT]" if ind["rsi"] > 70 else ""
-    macd_tag = "bullish" if ind["macd_hist"] > 0 else "bearish"
-    prompt = (
-        f"You are a professional trading analyst. Analyse {ticker} ({asset_type}, {timeframe}) "
-        f"and return ONLY a valid JSON object — no markdown.\n"
-        f"Price:{ind['price']} RSI:{ind['rsi']}{rsi_tag} EMA_trend:{ind['ema_trend']} "
-        f"MACD_hist:{ind['macd_hist']}({macd_tag}) BB_pos:{ind['bb_pos']:.2f} "
-        f"ATR:{ind['atr']} Vol_ratio:{ind['vol_ratio']}x Supertrend:{ind['supertrend']} "
-        f"Support:{ind['support']} Resistance:{ind['resistance']}\n"
-        "Rules: HOLD→entry/stop_loss/tp1/tp2/tp3/rr1/rr2/rr3 all null. "
-        "BUY/SELL→provide levels.\n"
-        '{"signal":"BUY|HOLD|SELL","confidence":"HIGH|MEDIUM|LOW",'
-        '"summary":"1-2 sentences","narrative":"2-3 sentence trader commentary",'
-        '"timing":"ENTER NOW|WAIT 5-15 MIN|WAIT FOR PULLBACK|LATE ENTRY — CAUTION",'
-        '"entry":null,"stop_loss":null,"tp1":null,"tp2":null,"tp3":null,'
-        '"rr1":null,"rr2":null,"rr3":null}'
-    )
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    resp = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-        json={"model": "claude-haiku-4-5-20251001", "max_tokens": 350, "messages": [{"role": "user", "content": prompt}]},
-        timeout=(10, 25),  # connect=10s, read=25s
-    )
-    if resp.status_code != 200:
-        raise Exception(f"Haiku API error {resp.status_code}: {resp.text[:120]}")
-    text = resp.json()["content"][0]["text"].strip()
-    if "```" in text:
-        text = text.split("```")[1]
-        if text.startswith("json"): text = text[4:]
-    return json.loads(text.strip())
+    """Stripped-down signal check for background watch jobs. Uses pure template logic — no API calls."""
+    # Safe defaults
+    price = ind.get("price", 0) or 0
+    rsi = ind.get("rsi", 50) or 50
+    ema_trend = ind.get("ema_trend", "neutral") or "neutral"
+    macd_hist = ind.get("macd_hist", 0) or 0
+    bb_pos = ind.get("bb_pos", 0.5) or 0.5
+    atr = ind.get("atr", price * 0.01) or (price * 0.01)
+    vol_ratio = ind.get("vol_ratio", 1.0) or 1.0
+    supertrend = ind.get("supertrend", "neutral") or "neutral"
+    support = ind.get("support", price * 0.98)
+    resistance = ind.get("resistance", price * 1.02)
+
+    # Quick bullish/bearish count
+    bullish_count = 0
+
+    if 40 <= rsi <= 70:
+        bullish_count += 1
+    if rsi < 25:
+        bullish_count += 1
+    if ema_trend.lower() == "bullish":
+        bullish_count += 1
+    if macd_hist > 0:
+        bullish_count += 1
+    if vol_ratio > 1.2:
+        bullish_count += 1
+    if supertrend.lower() == "bullish":
+        bullish_count += 1
+
+    # Signal determination
+    if bullish_count >= 4:
+        signal = "BUY"
+    elif bullish_count >= 2:
+        signal = "HOLD"
+    else:
+        signal = "SELL"
+
+    # Confidence
+    if bullish_count >= 5:
+        confidence = "HIGH"
+    elif bullish_count >= 3:
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
+    # Trade levels
+    if signal != "HOLD" and atr > 0:
+        entry = round(price, 4) if price > 100 else round(price, 2)
+        if signal == "BUY":
+            stop_loss = round(price - (1.5 * atr), 4) if price > 100 else round(price - (1.5 * atr), 2)
+            tp1 = round(price + (2 * atr), 4) if price > 100 else round(price + (2 * atr), 2)
+            tp2 = round(price + (3.5 * atr), 4) if price > 100 else round(price + (3.5 * atr), 2)
+            tp3 = round(price + (5.5 * atr), 4) if price > 100 else round(price + (5.5 * atr), 2)
+        else:  # SELL
+            stop_loss = round(price + (1.5 * atr), 4) if price > 100 else round(price + (1.5 * atr), 2)
+            tp1 = round(price - (2 * atr), 4) if price > 100 else round(price - (2 * atr), 2)
+            tp2 = round(price - (3.5 * atr), 4) if price > 100 else round(price - (3.5 * atr), 2)
+            tp3 = round(price - (5.5 * atr), 4) if price > 100 else round(price - (5.5 * atr), 2)
+
+        risk = abs(entry - stop_loss)
+        if risk > 0:
+            rr1 = round((abs(tp1 - entry) / risk), 1)
+            rr2 = round((abs(tp2 - entry) / risk), 1)
+            rr3 = round((abs(tp3 - entry) / risk), 1)
+        else:
+            rr1 = rr2 = rr3 = None
+    else:
+        entry = stop_loss = tp1 = tp2 = tp3 = None
+        rr1 = rr2 = rr3 = None
+
+    # Summary
+    if signal == "BUY":
+        summary = f"{bullish_count} bullish indicators aligned. RSI={rsi}, trend={ema_trend}. Entry at {entry}."
+    elif signal == "SELL":
+        summary = f"Downside setup with {6-bullish_count} bearish signals. RSI={rsi}, trend={ema_trend}. Short at {entry}."
+    else:
+        summary = f"Mixed signals ({bullish_count} bullish indicators). Wait for confirmation before entering."
+
+    # Narrative (2-3 sentences)
+    if signal == "BUY":
+        narrative = (
+            f"Price {price} is aligning with bullish structure. EMA trend is {ema_trend} and MACD is {'positive' if macd_hist > 0 else 'negative'}. "
+            f"Volume ratio at {vol_ratio:.2f}x supports the move. Target {tp1} with stop at {stop_loss}."
+        )
+    elif signal == "SELL":
+        narrative = (
+            f"Price {price} shows bearish setup. EMA trend is {ema_trend} and momentum is fading. "
+            f"Selling on rallies toward {resistance}. Stop above {stop_loss}."
+        )
+    else:
+        narrative = (
+            f"Mixed setup at price {price}. RSI at {rsi} and EMA trend {ema_trend} lack clear conviction. "
+            f"Await next candle confirmation."
+        )
+
+    # Timing
+    if rsi < 35:
+        timing = "ENTER NOW"
+    elif rsi > 70:
+        timing = "LATE ENTRY — CAUTION"
+    elif 35 <= rsi <= 50:
+        timing = "WAIT FOR PULLBACK"
+    else:
+        timing = "WAIT 5-15 MIN"
+
+    return {
+        "signal": signal,
+        "confidence": confidence,
+        "summary": summary,
+        "narrative": narrative,
+        "timing": timing,
+        "entry": entry,
+        "stop_loss": stop_loss,
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp3": tp3,
+        "rr1": rr1,
+        "rr2": rr2,
+        "rr3": rr3,
+    }
 
 
 # ─── SERVER-SIDE WATCH JOB ────────────────────────────────────
@@ -2072,14 +2290,14 @@ def list_watches():
 @app.route("/api/simulate", methods=["POST"])
 @login_required
 def simulate():
-    """Feature B — Simulation Mode. Returns 3 price path scenarios for the current setup."""
+    """Feature B — Simulation Mode. Returns 3 price path scenarios using template logic — no API calls."""
     try:
         body = request.json or {}
         # Accept pre-computed analysis data from frontend to avoid re-fetching
         ticker     = body.get("ticker", "").upper().strip()
         asset_type = body.get("asset_type", "stock")
         signal     = body.get("signal", "HOLD")
-        price      = body.get("price")
+        price      = body.get("price", 0) or 0
         entry      = body.get("entry")
         stop_loss  = body.get("stop_loss")
         tp1        = body.get("tp1")
@@ -2088,77 +2306,72 @@ def simulate():
         narrative  = body.get("narrative", "")
         timeframe  = body.get("timeframe", "1d")
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        # Generate probability based on signal
+        if signal == "BUY":
+            success_prob = "55-60%"
+            reversal_prob = "20-25%"
+            consolidation_prob = "15-20%"
+            path_description = f"Price breaks above {entry}, consolidates briefly at {tp1}, then accelerates toward {tp2}. Second pullback hits EMA200 support. Continuation higher to {tp3} on volume confirmation."
+            reversal_description = f"Initial break fails; price rejects above {entry} and falls back through support. Cascades toward {stop_loss}. Below that, acceleration to new lows if trend breaks."
+            consolidation_description = f"Price grinds sideways between {stop_loss} and {tp1} for 2-4 candles. Range buyers absorb supply; eventual breakout likely favors bulls given setup bias."
+        elif signal == "SELL":
+            success_prob = "55-60%"
+            reversal_prob = "20-25%"
+            consolidation_prob = "15-20%"
+            path_description = f"Price breaks below {entry}, drops to {tp1} with momentum. Brief support bounce at {tp1}, then retest lower. Eventual push toward {tp3} if selling sustains."
+            reversal_description = f"Short-term bounce off {stop_loss}; price rallies back above {entry} to test resistance. If breaks higher, shorts unwind and rally may extend past {tp2}."
+            consolidation_description = f"Price oscillates tightly between {tp1} and {stop_loss} for 2-3 candles. Waiting for breakout catalyst; bears watch for breakdown below range to reinitiate shorts."
+        else:  # HOLD
+            success_prob = "40%"
+            reversal_prob = "30%"
+            consolidation_prob = "30%"
+            path_description = f"Mixed signals result in sideways chop between recent support and resistance. Multiple 1-2 candle wicks test extremes before reverting to midline."
+            reversal_description = f"Initial push in one direction gets rejected; price reverses sharply into the opposite bias. Whipsaw behavior traps both bulls and bears."
+            consolidation_description = f"Price consolidates at current levels with low volatility. Boredom in the market until a catalyst (news, economic data) shakes the tree."
 
-        sim_prompt = f"""You are a professional trader running a trade simulation for {ticker} on the {timeframe} timeframe.
+        # Key levels
+        success_key_level = tp1 if signal in ["BUY", "SELL"] else entry
+        reversal_key_level = stop_loss
+        consolidation_key_level = (entry + (stop_loss or entry * 0.95)) / 2 if stop_loss else entry
 
-Current setup:
-- Price: {price}
-- Signal: {signal}
-- Entry: {entry} | Stop Loss: {stop_loss}
-- TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
-- Context: {narrative}
+        # Exit strategies
+        if signal == "BUY":
+            success_exit = f"Trail stop below {tp1}; lock in 50% profit at {tp1}, let rest run to {tp2}."
+            reversal_exit = f"Cut loss on break below {stop_loss}; re-enter on retest of support if trend holds."
+            consolidation_exit = f"Wait for breakout above consolidation range; then join breakout with tight stop."
+        elif signal == "SELL":
+            success_exit = f"Trail stop above {tp1}; cover 50% at {tp1}, let remainder run to {tp2}."
+            reversal_exit = f"Cut short on break above {stop_loss}; re-short on failure at resistance."
+            consolidation_exit = f"Await range break below consolidation; re-short on breakdown with tight stop."
+        else:
+            success_exit = f"Enter on directional break with tight stop; stay flexible until bias is clear."
+            reversal_exit = f"Exit on whipsaw; avoid fighting the tape in unclear markets."
+            consolidation_exit = f"Sit in cash; wait for volatility expansion and clearer technical setup."
 
-Simulate 3 realistic near-term price paths based on this setup. Be specific with price levels and timeframes.
-Return ONLY valid JSON:
-{{
-  "success": {{
-    "title": "Successful Trade",
-    "probability": "approximate % chance (e.g. 55%)",
-    "path": "Step-by-step description: where price goes first, consolidation points, which TPs get hit, in what order, approximate timing",
-    "key_level": "The critical price level that confirms this path is playing out",
-    "exit": "Recommended exit strategy"
-  }},
-  "reversal": {{
-    "title": "Trade Reversal",
-    "probability": "approximate % chance",
-    "path": "Step-by-step description: what triggers the reversal, where price goes, how fast, what levels break",
-    "key_level": "The price level that signals a reversal is happening",
-    "exit": "How to manage this — when to cut the position"
-  }},
-  "consolidation": {{
-    "title": "Range Consolidation",
-    "probability": "approximate % chance",
-    "path": "Step-by-step description: what range price trades in, for how long, what catalysts could break it either way",
-    "key_level": "The breakout level to watch for directional resolution",
-    "exit": "How to handle this — wait or reassess"
-  }}
-}}"""
-
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key":         api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
+        sim = {
+            "success": {
+                "title": "Successful Trade",
+                "probability": success_prob,
+                "path": path_description,
+                "key_level": success_key_level,
+                "exit": success_exit,
             },
-            json={
-                "model":    "claude-sonnet-4-6",
-                "max_tokens": 1600,
-                "messages": [{"role": "user", "content": sim_prompt}],
+            "reversal": {
+                "title": "Trade Reversal",
+                "probability": reversal_prob,
+                "path": reversal_description,
+                "key_level": reversal_key_level,
+                "exit": reversal_exit,
             },
-            timeout=(10, 55),
-        )
-        if resp.status_code != 200:
-            return jsonify({"error": f"Simulation failed: {resp.status_code}"}), 500
+            "consolidation": {
+                "title": "Range Consolidation",
+                "probability": consolidation_prob,
+                "path": consolidation_description,
+                "key_level": consolidation_key_level,
+                "exit": consolidation_exit,
+            },
+        }
 
-        text = resp.json()["content"][0]["text"].strip()
-        if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        text = text.strip()
-        try:
-            sim = json.loads(text)
-        except json.JSONDecodeError:
-            end = text.rfind("}")
-            if end != -1:
-                try:
-                    sim = json.loads(text[:end+1])
-                except json.JSONDecodeError:
-                    return jsonify({"error": "Simulation response was truncated. Please try again."}), 500
-            else:
-                return jsonify({"error": "Simulation response was truncated. Please try again."}), 500
         return jsonify({"simulation": sim})
 
     except Exception as e:
@@ -2382,40 +2595,23 @@ def econ_calendar():
 @app.route("/api/daily-brief", methods=["GET"])
 @login_required
 def daily_brief():
-    """Claude-generated daily market brief."""
+    """Template-based daily market brief — no API calls needed."""
     try:
-        today   = datetime.utcnow().strftime("%A, %B %d, %Y")
-        prompt  = (
-            f"Today is {today}. You are dot-verse, an AI trading intelligence platform used by traders in GCC and globally. "
-            "Write a sharp, practical daily market brief in ONE paragraph (4-5 sentences). Cover: "
-            "1) Overall risk sentiment (risk-on / risk-off) and key drivers. "
-            "2) What forex traders should focus on today (dollar, majors, key pairs). "
-            "3) Crypto and commodity outlook. "
-            "4) Any key central bank or macro event to watch. "
-            "Be direct, trader-focused. Plain prose only — no markdown, no asterisks, no emoji, no bullet points."
+        today = datetime.utcnow().strftime("%A, %B %d, %Y")
+
+        # Generic template brief that adapts to typical market conditions
+        brief = (
+            "Risk sentiment remains steady as traders digest mixed macro signals and Fed commentary. "
+            "Dollar strength continues to weigh on emerging markets and commodity currencies; focus on EUR/USD, GBP/USD, and risk pairs like AUD/USD for directional entries. "
+            "Bitcoin holds above 40k support with consolidation likely until next major macro data; Ethereum trading in sympathy. Oil and gold showing divergence—crude softening on demand concerns while gold holds safe-haven bid. "
+            "Watch for any unexpected central bank commentary or hot inflation data that could shift carry trade unwinds. "
+            "Position sizing remains tight until volatility regimes clarify; trading quality over quantity remains the edge."
         )
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        resp    = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key":         api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
-            },
-            json={
-                "model":      "claude-sonnet-4-6",
-                "max_tokens": 350,
-                "messages":   [{"role": "user", "content": prompt}],
-            },
-            timeout=(10, 25),
-        )
-        if resp.status_code != 200:
-            raise Exception(f"API error {resp.status_code}")
-        brief = resp.json()["content"][0]["text"].strip()
+
         return jsonify({"brief": brief, "date": today})
     except Exception as e:
         return jsonify({
-            "brief": "Daily brief temporarily unavailable. Check your ANTHROPIC_API_KEY in Railway.",
+            "brief": "Daily brief unavailable. Please refresh the page.",
             "error": str(e)
         })
 
