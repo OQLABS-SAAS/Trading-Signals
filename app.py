@@ -2833,6 +2833,13 @@ def api_chat():
     trend  = context.get("ema_trend", "")
     narr   = context.get("narrative", "")
 
+    tab = context.get("tab", "signals")
+    vol_ratio = context.get("vol_ratio")
+    macd_hist = context.get("macd_hist")
+    supertrend = context.get("supertrend")
+    tp2 = context.get("tp2")
+    tp3 = context.get("tp3")
+
     # Build a rich context prompt for the AI
     ctx_parts = []
     if ticker: ctx_parts.append(f"Ticker: {ticker} ({atype})")
@@ -2844,16 +2851,44 @@ def api_chat():
     if entry:  ctx_parts.append(f"Entry: ${entry}")
     if sl:     ctx_parts.append(f"Stop Loss: ${sl}")
     if tp1:    ctx_parts.append(f"TP1: ${tp1}")
+    if tp2:    ctx_parts.append(f"TP2: ${tp2}")
+    if tp3:    ctx_parts.append(f"TP3: ${tp3}")
+    if vol_ratio: ctx_parts.append(f"Volume Ratio: {vol_ratio}x avg")
+    if macd_hist is not None: ctx_parts.append(f"MACD Histogram: {macd_hist}")
+    if supertrend: ctx_parts.append(f"Supertrend: {supertrend}")
     ctx_str = " | ".join(ctx_parts) if ctx_parts else "No instrument loaded"
+
+    # Tab-specific instructions so AI only references what's on screen
+    tab_instructions = {
+        "signals": "The user is on the SIGNALS page showing indicators (RSI, MACD, EMA, Bollinger, Volume, Supertrend), signal alignment, and chart. ONLY discuss these indicators and the overall signal. Do NOT mention backtest results, strategy patterns, or simulation scenarios.",
+        "order": "The user is on the ORDER FLOW page showing candle footprint (buy/sell pressure, delta, CVD), buyer/seller authenticity (posers vs real), stacked imbalances, and liquidity zones. ONLY discuss order flow and volume dynamics. Do NOT mention strategy patterns or backtest stats.",
+        "flow": "The user is on the ORDER FLOW page showing candle footprint (buy/sell pressure, delta, CVD), buyer/seller authenticity (posers vs real), stacked imbalances, and liquidity zones. ONLY discuss order flow and volume dynamics.",
+        "strateg": "The user is on the STRATEGY ENGINE page showing detected patterns (FCR, MSL, LF, FVG, FF, BFR, QFVG) and gate conditions. ONLY discuss which strategies triggered and their gate requirements. Do NOT mention backtest or simulation results.",
+        "backtest": "The user is on the BACKTEST page showing historical performance: win rate, total return, max drawdown, profit factor, trade count, and equity curve. ONLY discuss backtest statistics and historical performance.",
+        "simul": "The user is on the SIMULATION page showing Bull/Base/Bear probability scenarios with projected prices. ONLY discuss the three scenarios and their probabilities.",
+        "trade": "The user is on the TRADE MANAGEMENT page showing entry, stop loss, TP1/TP2/TP3, position sizing, and risk management. ONLY discuss the trade plan and risk management.",
+        "manage": "The user is on the TRADE MANAGEMENT page showing entry, stop loss, TP1/TP2/TP3, position sizing, and risk management. ONLY discuss the trade plan and risk management.",
+        "scan": "The user is on the MARKET SCANNER page showing signals across multiple instruments and timeframes. ONLY discuss which instruments have active signals and cross-market comparisons.",
+    }
+    tab_ctx = ""
+    for key, instruction in tab_instructions.items():
+        if key in tab.lower():
+            tab_ctx = instruction
+            break
+    if not tab_ctx:
+        tab_ctx = "The user is viewing signal data. Only reference the metrics provided in the context below."
 
     system_prompt = (
         "You are DotVerse AI, a trading assistant embedded in a signal analysis platform. "
-        "Answer concisely (2-4 sentences) using the current signal context. "
-        "Be practical and actionable. Use specific numbers from the context. "
-        f"Current context: {ctx_str}"
+        "You explain trading concepts in simple, beginner-friendly language. Avoid jargon — if you must use a technical term, immediately explain what it means in parentheses. "
+        "Answer concisely (2-4 sentences max). Use specific numbers from the context. "
+        "CRITICAL: " + tab_ctx + " "
+        "Never make up data that isn't in the context. If asked about something not on the current page, tell the user which tab to check.\n"
+        f"Current page: {tab}\n"
+        f"Data: {ctx_str}"
     )
     if narr:
-        system_prompt += f"\nAI narrative already generated: {narr[:500]}"
+        system_prompt += f"\nGenerated narrative: {narr[:400]}"
 
     try:
         import openai

@@ -9844,7 +9844,10 @@ function chipAsk(chip) {
       price: d ? d.price : null, rsi: d ? d.rsi : null, timeframe: d ? d.timeframe : null,
       asset_type: d ? d.asset_type : null, confidence: d ? d.confidence : null,
       entry: d ? d.entry : null, stop_loss: d ? d.stop_loss : null, tp1: d ? d.tp1 : null,
-      ema_trend: d ? d.ema_trend : null, narrative: d ? d.narrative : null
+      tp2: d ? d.tp2 : null, tp3: d ? d.tp3 : null,
+      ema_trend: d ? d.ema_trend : null, vol_ratio: d ? d.vol_ratio : null,
+      macd_hist: d ? d.macd_hist : null, supertrend: d ? d.supertrend : null,
+      narrative: d ? d.narrative : null
     }
   };
   fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(aiPayload) })
@@ -9924,7 +9927,7 @@ function chatSend() {
     contextInfo = d.ticker + ' (' + (d.asset_type||'') + ') on ' + (d.timeframe||'') + ' — Signal: ' + (d.signal||'HOLD') + ', RSI: ' + (d.rsi||'—') + ', Price: $' + (d.price||'—');
   }
 
-  // Send to AI endpoint with context
+  // Send to AI endpoint with full page-aware context
   var aiPayload = {
     message: txt,
     context: {
@@ -9939,7 +9942,12 @@ function chatSend() {
       entry: d ? d.entry : null,
       stop_loss: d ? d.stop_loss : null,
       tp1: d ? d.tp1 : null,
+      tp2: d ? d.tp2 : null,
+      tp3: d ? d.tp3 : null,
       ema_trend: d ? d.ema_trend : null,
+      vol_ratio: d ? d.vol_ratio : null,
+      macd_hist: d ? d.macd_hist : null,
+      supertrend: d ? d.supertrend : null,
       narrative: d ? d.narrative : null
     }
   };
@@ -9966,36 +9974,65 @@ function _buildContextReply(question, d, tab) {
   var sig = (d.signal||'HOLD').toUpperCase();
   var ticker = d.ticker || '—';
   var price = d.price ? '$' + parseFloat(d.price).toLocaleString() : '—';
+  var t = (tab||'').toLowerCase();
 
+  // Tab-specific responses — only reference what's on the current page
+  if (t.includes('order') || t.includes('flow')) {
+    if (q.includes('buy') || q.includes('sell') || q.includes('who')) return 'On ' + ticker + ': The footprint shows the buy/sell split from candle structure. Check the buyer/seller authenticity section to see how much is real vs posing (fake) volume. Real delta tells you who actually has control.';
+    if (q.includes('fake') || q.includes('poser')) return 'Posing volume comes from large wick candles — orders placed to move price but quickly withdrawn. The authenticity bars show what % of buying/selling is genuine. Higher real % = more trustworthy move.';
+    if (q.includes('delta')) return 'Delta is the difference between buying and selling volume on ' + ticker + '. Positive delta = more buyers. Negative = more sellers. Combined with CVD trend, it shows whether accumulation or distribution is happening.';
+    if (q.includes('imbalance') || q.includes('stack')) return 'Stacked imbalances show consecutive candles dominated by one side. 3+ buy stacks = strong bullish pressure building. Check the dot indicators — green = buy dominance, red = sell dominance.';
+    if (q.includes('liquid')) return 'Liquidity zones show where stop-loss orders are clustered. Liquidity above = short stops (price magnet). Liquidity below = long stops (support). "NEAR" means price is close to triggering these clusters.';
+    return 'You\'re on the Order Flow page for ' + ticker + '. This shows candle footprint (buy/sell pressure), buyer/seller authenticity (real vs posing volume), stacked imbalances, and liquidity zones. Click any highlighted term for details.';
+  }
+  if (t.includes('strateg')) {
+    return 'Strategy Engine for ' + ticker + ': The signal is ' + sig + ' at ' + (d.confidence||'—') + ' confidence. This page shows which trading patterns were detected (like structure breaks, fair value gaps, etc.) and whether the gate conditions are met. All gates must pass for a high-conviction setup.';
+  }
+  if (t.includes('backtest')) {
+    return 'Backtest for ' + ticker + ': This page shows how the ' + sig + ' strategy would have performed historically. Check win rate, total return, max drawdown (biggest loss streak), and profit factor. Click any stat card for a beginner-friendly breakdown.';
+  }
+  if (t.includes('simul')) {
+    return 'Simulation for ' + ticker + ': Three scenarios are modeled — Bull (price goes up), Base (stays flat/small move), and Bear (price drops). Each shows a projected price with probability. Click each card to see the reasoning.';
+  }
+  if (t.includes('trade') || t.includes('manage')) {
+    return 'Trade plan for ' + ticker + ': Entry at ' + (d.entry ? '$'+parseFloat(d.entry).toLocaleString() : price) +
+      (d.stop_loss ? ', Stop Loss at $'+parseFloat(d.stop_loss).toLocaleString() : '') +
+      (d.tp1 ? ', first target (TP1) at $'+parseFloat(d.tp1).toLocaleString() : '') +
+      '. This page shows exactly where to enter, where to place your safety exit, and your profit targets.';
+  }
+  if (t.includes('scan')) {
+    return 'Market Scanner shows signals across multiple instruments and timeframes. Look for instruments with BUY or SELL signals at high confidence. Click any row to load that instrument for full analysis.';
+  }
+
+  // Signals page (default) — answer common questions using indicator data
   if (q.includes('why') && (q.includes('buy') || q.includes('sell') || q.includes('signal'))) {
     return ticker + ' is showing a ' + sig + ' signal because: ' +
-      (d.rsi ? 'RSI at ' + parseFloat(d.rsi).toFixed(1) + (d.rsi < 40 ? ' (oversold — bullish)' : d.rsi > 60 ? ' (overbought — bearish)' : ' (neutral)') + '. ' : '') +
-      (d.ema_trend ? 'EMA trend is ' + d.ema_trend + '. ' : '') +
-      (d.confidence ? 'Confidence: ' + d.confidence + '. ' : '') +
-      'Check the Signal Alignment section for the full indicator breakdown.';
+      (d.rsi ? 'RSI (momentum) at ' + parseFloat(d.rsi).toFixed(1) + (d.rsi < 40 ? ' — oversold, suggesting a bounce.' : d.rsi > 60 ? ' — overbought, suggesting caution.' : ' — neutral zone.') + ' ' : '') +
+      (d.ema_trend ? 'Trend direction is ' + d.ema_trend + '. ' : '') +
+      (d.confidence ? 'Overall confidence: ' + d.confidence + '.' : '');
   }
-  if (q.includes('entry') || q.includes('where') && q.includes('enter')) {
-    return 'For ' + ticker + ': Entry at ' + (d.entry ? '$' + parseFloat(d.entry).toLocaleString() : price) +
-      (d.stop_loss ? ', Stop Loss at $' + parseFloat(d.stop_loss).toLocaleString() : '') +
-      (d.tp1 ? ', TP1 at $' + parseFloat(d.tp1).toLocaleString() : '') +
-      '. See the Trade Management Plan for the full scaling strategy.';
+  if (q.includes('entry') || (q.includes('where') && q.includes('enter'))) {
+    return 'For ' + ticker + ': Check the Trade Management tab for the full plan. Entry at ' + (d.entry ? '$'+parseFloat(d.entry).toLocaleString() : price) +
+      (d.stop_loss ? ', safety exit (stop loss) at $'+parseFloat(d.stop_loss).toLocaleString() : '') +
+      (d.tp1 ? ', first profit target at $'+parseFloat(d.tp1).toLocaleString() : '') + '.';
   }
   if (q.includes('risk') || q.includes('stop') || q.includes('loss')) {
-    return 'Risk management for ' + ticker + ': ' +
-      (d.stop_loss ? 'Stop Loss at $' + parseFloat(d.stop_loss).toLocaleString() + '. ' : '') +
-      (d.atr ? 'ATR is ' + parseFloat(d.atr).toFixed(2) + ' — ' + (d.atr / d.price * 100 > 3 ? 'elevated volatility, reduce position size.' : 'normal volatility range.') : '') +
-      ' Never risk more than 1-2% of your account on a single trade.';
+    return 'Risk on ' + ticker + ': ' +
+      (d.stop_loss ? 'Safety exit at $'+parseFloat(d.stop_loss).toLocaleString()+'. ' : '') +
+      'Never risk more than 1-2% of your total account on one trade. Check the Trade Management tab for position sizing details.';
   }
-  if (tab === 'strategy') {
-    return 'Strategy Engine is analyzing ' + ticker + '. The current signal is ' + sig + ' with ' + (d.confidence||'—') + ' confidence. Check the gate conditions in the sidebar — all 5 gates must pass for a high-conviction trade.';
+  if (q.includes('volume') || q.includes('activity')) {
+    return ticker + ' volume is ' + (d.vol_ratio ? d.vol_ratio + '× the average' : 'not available') + '. ' +
+      (d.vol_ratio >= 1.5 ? 'This is elevated — big players are likely active, which makes the signal more reliable.' : 'Normal activity — the signal may need more volume confirmation.');
   }
-  if (tab === 'backtest') {
-    return 'The backtest tab shows how the ' + sig + ' strategy for ' + ticker + ' would have performed historically. Click any stat card for a detailed breakdown with What/Why/How explanations.';
+  if (q.includes('indicator') || q.includes('aligned') || q.includes('alignment')) {
+    return 'Signal alignment for ' + ticker + ': ' +
+      (d.rsi ? 'RSI ' + (d.rsi > 50 ? 'bullish' : 'bearish') + ' (' + parseFloat(d.rsi).toFixed(1) + '). ' : '') +
+      (d.ema_trend ? 'EMA trend ' + d.ema_trend + '. ' : '') +
+      (d.supertrend ? 'Supertrend ' + d.supertrend + '. ' : '') +
+      'When most indicators agree, the signal is stronger.';
   }
-  if (tab === 'simulation') {
-    return 'The simulation shows 3 scenarios for ' + ticker + ': Bull (55% probability), Base (30%), and Bear (15%). Click each card to expand the What/Why/How details.';
-  }
-  return 'Currently viewing ' + ticker + ' at ' + price + ' — ' + sig + ' signal, ' + (d.confidence||'') + ' confidence. ' +
+  return 'Viewing ' + ticker + ' at ' + price + ' — ' + sig + ' signal' + (d.confidence ? ', ' + d.confidence + ' confidence' : '') + '. ' +
     (d.rsi ? 'RSI: ' + parseFloat(d.rsi).toFixed(1) + '. ' : '') +
     'What would you like to know? Try asking about entry points, risk management, or why this signal was generated.';
 }
