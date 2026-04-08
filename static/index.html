@@ -408,7 +408,7 @@ body::before{
 .info-strip{position:relative;
   display:flex;gap:0;flex-wrap:wrap;
   border-bottom:1px solid var(--border);
-  overflow:hidden;
+  overflow:visible;
 }
 .info-cell{
   flex:1;min-width:100px;
@@ -750,6 +750,43 @@ body::before{
 .wl-chg{font-family:var(--mono);font-size:11px;width:50px;text-align:right;}
 .wl-chg.up{color:var(--green);}
 .wl-chg.dn{color:var(--red);}
+
+/* Active alerts / watch items */
+.watch-item{background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:8px 10px;font-family:var(--mono);font-size:11px;}
+.watch-header{display:flex;justify-content:space-between;align-items:center;}
+.watch-ticker{font-weight:700;color:var(--amber);font-size:12px;}
+.watch-tf{color:var(--muted2);font-size:10px;}
+.watch-status{font-size:10px;color:var(--muted2);}
+.watch-check{font-size:9px;color:var(--muted);}
+.watch-channels{font-size:9px;color:var(--muted);margin-top:3px;}
+.remove-watch-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0;transition:color .15s;}
+.remove-watch-btn:hover{color:var(--red);}
+.no-watches{font-size:11px;color:var(--muted);padding:8px 0;text-align:center;opacity:.6;}
+
+/* Sidebar quick-action buttons */
+.sq-btn{
+  padding:6px 10px;border-radius:3px;font-family:var(--mono);font-size:10px;font-weight:600;
+  border:1px solid var(--border);background:var(--bg2);color:var(--muted2);cursor:pointer;
+  transition:all .15s;
+}
+.sq-btn:hover{border-color:var(--amber);color:var(--amber);background:rgba(245,166,35,.06);}
+
+/* Pulse dot animation */
+.pulse-dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse-anim 2s infinite;}
+@keyframes pulse-anim{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,201,141,.5);}50%{opacity:.6;box-shadow:0 0 0 4px rgba(0,201,141,0);}}
+
+/* Radar sweep */
+.radar-sweep .radar-line{transform-origin:50px 50px;animation:radar-spin 4s linear infinite;}
+@keyframes radar-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+
+/* Mini ticker row for sidebar */
+.se-mini-ticker{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:3px;font-family:var(--mono);font-size:11px;cursor:pointer;transition:background .12s;background:rgba(255,255,255,.02);}
+.se-mini-ticker:hover{background:rgba(245,166,35,.08);}
+.se-mini-ticker .mt-sym{font-weight:700;color:var(--amber);width:55px;}
+.se-mini-ticker .mt-price{color:var(--white);font-size:10px;}
+.se-mini-ticker .mt-chg{font-size:10px;font-weight:600;}
+.se-mini-ticker .mt-chg.up{color:var(--green);}
+.se-mini-ticker .mt-chg.dn{color:var(--red);}
 
 /* RSI bar gauge */
 .rsi-gauge-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:2px;padding:12px;}
@@ -1938,6 +1975,12 @@ body::before{
         <div class="wl-rows" id="wlRows"></div>
       </div>
 
+      <div class="side-section" id="sideAlerts" style="display:none;">
+        <div class="side-heading">Active Alerts <span id="watchCount" style="font-size:9px;padding:2px 7px;border-radius:10px;background:rgba(245,166,35,.15);color:var(--amber);margin-left:auto;font-weight:700;">0 active</span></div>
+        <div id="watchlistItems" style="display:flex;flex-direction:column;gap:4px;"></div>
+        <div id="watchListPanel" style="display:flex;flex-direction:column;gap:4px;"></div>
+      </div>
+
       <div class="side-section" id="sideRsi" style="display:none;">
         <div class="side-heading">RSI Momentum</div>
         <div class="rsi-gauge-wrap">
@@ -1971,9 +2014,60 @@ body::before{
         <div class="news-items" id="sideNewsItems"></div>
       </div>
 
-      <!-- Empty sidebar state -->
-      <div id="sideEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:40px 20px;text-align:center;">
-        <div style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.15);letter-spacing:1.5px;text-transform:uppercase;">Analyze a ticker to populate</div>
+      <!-- Empty sidebar state — engaging + animated -->
+      <div id="sideEmpty" style="display:flex;flex-direction:column;height:100%;padding:0;overflow:hidden;">
+
+        <!-- Live market pulse animation -->
+        <div style="padding:16px 16px 10px;">
+          <div style="font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--amber);text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            <span class="pulse-dot"></span> Market Pulse
+          </div>
+          <div id="sideEmptyTickers" style="display:flex;flex-direction:column;gap:4px;"></div>
+        </div>
+
+        <!-- Quick actions -->
+        <div style="padding:10px 16px;border-top:1px solid var(--border);">
+          <div style="font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--muted2);text-transform:uppercase;margin-bottom:8px;">Quick Analyze</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;" id="sideQuickBtns">
+            <button class="sq-btn" onclick="quickLoad('BTC-USD','crypto','4h')">₿ BTC</button>
+            <button class="sq-btn" onclick="quickLoad('ETH-USD','crypto','4h')">Ξ ETH</button>
+            <button class="sq-btn" onclick="quickLoad('SOL-USD','crypto','4h')">◎ SOL</button>
+            <button class="sq-btn" onclick="quickLoad('AAPL','stock','1d')">🍎 AAPL</button>
+            <button class="sq-btn" onclick="quickLoad('NVDA','stock','1d')">🟢 NVDA</button>
+            <button class="sq-btn" onclick="quickLoad('EURUSD=X','forex','4h')">💱 EUR/USD</button>
+          </div>
+        </div>
+
+        <!-- Animated scanner CTA -->
+        <div style="padding:12px 16px;border-top:1px solid var(--border);">
+          <div onclick="switchMainTab('scanner',document.querySelector('.nav-tab:nth-child(2)'))" style="cursor:pointer;background:linear-gradient(135deg,rgba(245,166,35,.08),rgba(0,201,141,.06));border:1px solid rgba(245,166,35,.2);border-radius:4px;padding:12px;text-align:center;transition:all .2s;">
+            <div style="font-family:var(--disp);font-size:14px;font-weight:700;color:var(--amber);margin-bottom:4px;">🔍 Run Scanner</div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Scan 50+ instruments for signals</div>
+          </div>
+        </div>
+
+        <!-- Strategy engine CTA -->
+        <div style="padding:0 16px 12px;">
+          <div onclick="switchMainTab('strategy',document.querySelector('.nav-tab:nth-child(3)'))" style="cursor:pointer;background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:4px;padding:12px;text-align:center;transition:all .2s;">
+            <div style="font-family:var(--disp);font-size:14px;font-weight:700;color:var(--white);margin-bottom:4px;">⚙️ Strategy Engine</div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">12 strategies · 5 gate filters</div>
+          </div>
+        </div>
+
+        <!-- Animated radar sweep -->
+        <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:10px 16px;opacity:.3;">
+          <svg viewBox="0 0 100 100" width="80" height="80" class="radar-sweep">
+            <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(245,166,35,.15)" stroke-width="0.5"/>
+            <circle cx="50" cy="50" r="30" fill="none" stroke="rgba(245,166,35,.1)" stroke-width="0.5"/>
+            <circle cx="50" cy="50" r="15" fill="none" stroke="rgba(245,166,35,.08)" stroke-width="0.5"/>
+            <circle cx="50" cy="50" r="2" fill="var(--amber)" opacity=".5"/>
+            <line x1="50" y1="50" x2="50" y2="5" stroke="var(--amber)" stroke-width="0.5" class="radar-line"/>
+          </svg>
+        </div>
+
+        <div style="padding:8px 16px 16px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.12);letter-spacing:1px;">DOTVERSE SIGNALS v2.0</div>
+        </div>
       </div>
 
     </div><!-- /side-col -->
@@ -2733,9 +2827,31 @@ function unlockApp() {
   refreshWatchPanel();
   switchTab('crypto');
   loadMarketPulse();
+  loadSidebarTickers();
   setInterval(loadTape, 120000);
   setInterval(refreshWatchPanel, 60000);
   setInterval(loadMarketPulse, 30 * 60 * 1000);
+  setInterval(loadSidebarTickers, 60000);
+}
+
+async function loadSidebarTickers() {
+  var container = document.getElementById('sideEmptyTickers');
+  if (!container || container.closest('#sideEmpty').style.display === 'none') return;
+  var topTickers = [['BTC','BTC-USD','crypto'],['ETH','ETH-USD','crypto'],['SOL','SOL-USD','crypto'],['AAPL','AAPL','stock'],['NVDA','NVDA','stock']];
+  try {
+    var r = await fetch('/api/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:topTickers.map(t=>t[1])})});
+    var data = await r.json();
+    container.innerHTML = topTickers.map(function(t) {
+      var d = data[t[1]];
+      if (!d || d.price === null) return '';
+      var cls = d.chg >= 0 ? 'up' : 'dn';
+      var chgStr = (d.chg >= 0 ? '+' : '') + d.chg.toFixed(2) + '%';
+      return '<div class="se-mini-ticker" onclick="quickLoad(\'' + t[1] + '\',\'' + t[2] + '\',\'4h\')">' +
+        '<span class="mt-sym">' + t[0] + '</span>' +
+        '<span class="mt-price">$' + parseFloat(d.price).toLocaleString(undefined,{maximumFractionDigits:2}) + '</span>' +
+        '<span class="mt-chg ' + cls + '">' + chgStr + '</span></div>';
+    }).join('');
+  } catch(e) { console.warn('sidebar tickers:', e); }
 }
 
 async function doLogout() {
@@ -4743,29 +4859,44 @@ async function removeWatch(ticker, timeframe) {
   refreshWatchPanel();
 }
 async function refreshWatchPanel() {
-  if (!document.getElementById('watchlistItems')) return;
   try {
     const r = await fetch('/api/watches');
     const d = await r.json();
     const watches = d.watches || [];
-    document.getElementById('watchCount').textContent = `${watches.length} active`;
+    // Show/hide the alerts section in sidebar
+    var sideAlerts = document.getElementById('sideAlerts');
+    if (sideAlerts) sideAlerts.style.display = watches.length ? '' : 'none';
+    var wc = document.getElementById('watchCount');
+    if (wc) wc.textContent = `${watches.length} active`;
+    // Also update the alert button appearance
+    var alertBtn = document.getElementById('alertBtn');
+    if (alertBtn && watches.length > 0) {
+      alertBtn.style.position = 'relative';
+      var badge = alertBtn.querySelector('.alert-count-badge');
+      if (!badge) { badge = document.createElement('span'); badge.className = 'alert-count-badge'; badge.style.cssText = 'position:absolute;top:-5px;right:-5px;background:var(--amber);color:#0C0A08;font-size:9px;font-weight:800;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;'; alertBtn.appendChild(badge); }
+      badge.textContent = watches.length;
+    } else if (alertBtn) {
+      var badge = alertBtn.querySelector('.alert-count-badge');
+      if (badge) badge.remove();
+    }
     const panel = document.getElementById('watchListPanel');
+    if (!panel) return;
     if (!watches.length) { panel.innerHTML = '<div class="no-watches">No active watches. Click 🔔 to start.</div>'; return; }
-    panel.innerHTML = watches.map(w => `
-      <div class="watch-item">
+    panel.innerHTML = watches.map(w => {
+      var sigColor = (w.last_signal||'').includes('BUY') ? 'var(--green)' : (w.last_signal||'').includes('SELL') ? 'var(--red)' : 'var(--amber)';
+      return `<div class="watch-item">
         <div class="watch-header">
           <div><span class="watch-ticker">${w.ticker}</span><span class="watch-tf"> · ${w.timeframe.toUpperCase()}</span></div>
           <button class="remove-watch-btn" onclick="removeWatch('${w.ticker}','${w.timeframe}')">✕</button>
         </div>
-        <div style="display:flex;justify-content:space-between;margin-top:2px;">
-          <span class="watch-status">${w.last_signal||'Waiting…'}</span>
-          <span class="watch-check">${w.last_check}</span>
+        <div style="display:flex;justify-content:space-between;margin-top:3px;">
+          <span class="watch-status" style="color:${sigColor};font-weight:600;">${w.last_signal||'Waiting…'}</span>
+          <span class="watch-check">⏱ ${w.last_check}</span>
         </div>
-        <div class="watch-channels">${chIcons(w.alert_channels)} ${(w.alert_channels||['sms']).map(c=>c.charAt(0).toUpperCase()+c.slice(1)).join(' · ')}</div>
-        ${getLiveCommentaryBadge(w)}
-      </div>`
-    ).join('');
-  } catch(e) {}
+        <div class="watch-channels">${(w.alert_channels||['sms']).map(c => c === 'sms' ? '📱' : c === 'whatsapp' ? '💬' : '✈️').join(' ')} ${(w.alert_channels||['sms']).map(c=>c.charAt(0).toUpperCase()+c.slice(1)).join(' · ')}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('refreshWatchPanel:', e); }
 }
 
 /* ════════════════════════════════════════════
@@ -6742,11 +6873,22 @@ function renderFootprint(d) {
   if (!d) return;
 
   // Derive buy/sell pressure from OHLCV candle data
-  var opens = d.chart_opens || [];
   var closes = d.chart_prices || [];
+  var volumes = d.chart_volumes || [];
+  var opens = d.chart_opens || [];
   var highs = d.chart_highs || [];
   var lows = d.chart_lows || [];
-  var volumes = d.chart_volumes || [];
+
+  // If OHLC arrays missing/empty but we have closes, approximate them
+  if (closes.length > 5 && (!opens.length || opens.length < 5)) {
+    opens = closes.map(function(c, i) { return i > 0 ? closes[i-1] : c; });
+    highs = closes.map(function(c, i) { var o = i > 0 ? closes[i-1] : c; return Math.max(c, o) * 1.002; });
+    lows  = closes.map(function(c, i) { var o = i > 0 ? closes[i-1] : c; return Math.min(c, o) * 0.998; });
+  }
+  if (volumes.length < closes.length) {
+    while (volumes.length < closes.length) volumes.push(0);
+  }
+
   var n = Math.min(opens.length, closes.length, volumes.length);
   if (n < 5) return;
 
@@ -8176,6 +8318,14 @@ function switchMainTab(name, btn) {
   // Trigger tab-specific data loads
   if (name === 'news') { try { loadNewsTab(); } catch(e) { console.warn('loadNewsTab:', e); } }
   if (name === 'simulation' && currentData) { try { runSimulation(); } catch(e) {} }
+  // Auto-run strategy engine with first symbol if no analysis loaded yet
+  if (name === 'strategy') {
+    var sm = document.getElementById('stratMain');
+    if (sm && sm.style.display === 'none') {
+      // No strategy data yet — auto-run with first quick-pick or currentData
+      try { seRunEngine(); } catch(e) { console.warn('seRunEngine auto:', e); }
+    }
+  }
 }
 
 // ─── CHART OVERLAYS ───
@@ -9170,10 +9320,13 @@ function storeExpandData(d) {
 // Make info strip cells expandable
 document.addEventListener('click', function(e) {
   var cell = e.target.closest('.info-cell');
+  // Close info-cells if clicking outside (but don't touch ind-cards — they have their own handler)
   if (!cell) {
-    // Close all expanded
     document.querySelectorAll('.info-cell.expanded').forEach(function(c) { c.classList.remove('expanded'); });
-    document.querySelectorAll('.ind-card.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+    // Only close ind-cards if we didn't click on one (avoid conflict with ind-card handler)
+    if (!e.target.closest('.ind-card') && !e.target.closest('.fp-card')) {
+      document.querySelectorAll('.ind-card.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+    }
     return;
   }
   

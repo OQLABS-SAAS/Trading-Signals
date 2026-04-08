@@ -674,6 +674,9 @@ def build_ind_from_tv(tv):
         "support":        round(bbl, 4),
         "chart_dates":        [],
         "chart_prices":       [],
+        "chart_opens":        [],
+        "chart_highs":        [],
+        "chart_lows":         [],
         "chart_ema20":        [],
         "chart_ema50":        [],
         "chart_volumes":      [],
@@ -846,11 +849,14 @@ def _fetch_stooq(ticker, asset_type, timeframe):
             return None
 
         dt_fmt = "%b %d" if timeframe in ("1d","1w") else "%b %d"
-        dates, prices, vols = [], [], []
+        dates, opens, highs, lows, prices, vols = [], [], [], [], [], []
         for row in rows[-200:]:
             try:
                 dates.append(row.get("Date","")[:10])
                 prices.append(round(float(row["Close"]), 6))
+                opens.append(round(float(row.get("Open", row["Close"])), 6))
+                highs.append(round(float(row.get("High", row["Close"])), 6))
+                lows.append(round(float(row.get("Low", row["Close"])), 6))
                 vols.append(int(float(row.get("Volume", 0) or 0)))
             except (ValueError, KeyError):
                 continue
@@ -858,7 +864,8 @@ def _fetch_stooq(ticker, asset_type, timeframe):
         if len(prices) < 10:
             return None
         print(f"[stooq] OK — {sym} {iv}: {len(prices)} bars")
-        return _build_chart_output(dates, prices, vols, timeframe)
+        return _build_chart_output(dates, prices, vols, timeframe,
+                                   opens_raw=opens, highs_raw=highs, lows_raw=lows)
     except Exception as e:
         print(f"[stooq] error {sym}: {e}")
         return None
@@ -893,31 +900,53 @@ def _fetch_yahoo_v8(ticker, asset_type, timeframe):
         ts_l   = res.get("timestamp", [])
         quote  = res.get("indicators", {}).get("quote", [{}])[0]
         closes = quote.get("close", [])
+        opens_ = quote.get("open", [])
+        highs_ = quote.get("high", [])
+        lows_  = quote.get("low", [])
         vols   = quote.get("volume", [])
 
         if timeframe == "4h":
             from collections import defaultdict
             bk, vk = defaultdict(list), defaultdict(int)
-            for t, c, v in zip(ts_l, closes, vols or [0]*len(ts_l)):
+            ok, hk, lk = defaultdict(list), defaultdict(list), defaultdict(list)
+            for i, t in enumerate(ts_l):
+                c = closes[i] if i < len(closes) else None
                 if c and not (isinstance(c, float) and math.isnan(c)):
                     b = t - (t % 14400); bk[b].append(c)
+                    v = vols[i] if i < len(vols) else 0
                     vk[b] += int(v) if v and not math.isnan(float(v)) else 0
+                    o = opens_[i] if i < len(opens_) else c
+                    h = highs_[i] if i < len(highs_) else c
+                    l = lows_[i] if i < len(lows_) else c
+                    ok[b].append(o if o and not (isinstance(o,float) and math.isnan(o)) else c)
+                    hk[b].append(h if h and not (isinstance(h,float) and math.isnan(h)) else c)
+                    lk[b].append(l if l and not (isinstance(l,float) and math.isnan(l)) else c)
             ts_l   = sorted(bk.keys())
             closes = [bk[t][-1] for t in ts_l]
-            vols   = [vk[t]    for t in ts_l]
+            opens_ = [ok[t][0]  for t in ts_l]
+            highs_ = [max(hk[t]) for t in ts_l]
+            lows_  = [min(lk[t]) for t in ts_l]
+            vols   = [vk[t]     for t in ts_l]
 
         dt_fmt = "%H:%M" if timeframe in ("5m","15m","30m","1h") else "%b %d"
-        dates, prices, volumes = [], [], []
-        for t, c, v in zip(ts_l, closes, vols or [0]*len(ts_l)):
+        dates, prices, volumes, o_out, h_out, l_out = [], [], [], [], [], []
+        for i, (t, c, v) in enumerate(zip(ts_l, closes, vols or [0]*len(ts_l))):
             if c and not (isinstance(c, float) and math.isnan(c)):
                 dates.append(datetime.utcfromtimestamp(t).strftime(dt_fmt))
                 prices.append(round(float(c), 6))
                 volumes.append(int(v) if v and not (isinstance(v,float) and math.isnan(v)) else 0)
+                o = opens_[i] if i < len(opens_) else c
+                h = highs_[i] if i < len(highs_) else c
+                l = lows_[i]  if i < len(lows_)  else c
+                o_out.append(round(float(o), 6) if o and not (isinstance(o,float) and math.isnan(o)) else round(float(c), 6))
+                h_out.append(round(float(h), 6) if h and not (isinstance(h,float) and math.isnan(h)) else round(float(c), 6))
+                l_out.append(round(float(l), 6) if l and not (isinstance(l,float) and math.isnan(l)) else round(float(c), 6))
 
         if len(prices) < 5:
             return None
         print(f"[yahoo_v8] OK — {yf_ticker} {timeframe}: {len(prices)} bars")
-        return _build_chart_output(dates, prices, volumes, timeframe)
+        return _build_chart_output(dates, prices, volumes, timeframe,
+                                   opens_raw=o_out, highs_raw=h_out, lows_raw=l_out)
     except Exception as e:
         print(f"[yahoo_v8] error {yf_ticker}: {e}")
         return None
@@ -2253,12 +2282,15 @@ def analyze():
                 df_binance = fetch_binance_ohlcv(ticker, interval=cfg["interval"], period=cfg["period"])
                 if not df_binance.empty:
                     print(f"[analyze] Exception handler Binance fallback — got {len(df_binance)} bars")
-                    # Convert DataFrame back to chart format
+                    # Convert DataFrame back to chart format — include OHLC for footprint
                     chart_result = _build_chart_output(
                         df_binance.index.strftime("%b %d").tolist(),
                         df_binance["Close"].tolist(),
                         df_binance["Volume"].astype(int).tolist(),
-                        timeframe
+                        timeframe,
+                        opens_raw=df_binance["Open"].tolist() if "Open" in df_binance else None,
+                        highs_raw=df_binance["High"].tolist() if "High" in df_binance else None,
+                        lows_raw=df_binance["Low"].tolist() if "Low" in df_binance else None,
                     )
             # Fallback to multi-source chart fetch (Binance → Stooq → Yahoo)
             if not chart_result:
@@ -2816,6 +2848,27 @@ def get_prices():
                         results[ticker] = {"price": None, "chg": None}
                 except Exception:
                     results[ticker] = {"price": None, "chg": None}
+
+        # ── TradingView fallback for any tickers still missing prices ──
+        missing = [t for t in tickers if not results.get(t, {}).get("price")]
+        if missing:
+            for t in missing:
+                try:
+                    # Detect asset type
+                    tu = t.upper()
+                    if tu.endswith("-USD") or tu.endswith("USDT"):
+                        at = "crypto"
+                    elif "=X" in tu or is_forex_pair(tu.replace("/","").replace("-","").replace("=X","")):
+                        at = "forex"
+                    elif tu.startswith("^"):
+                        at = "index"
+                    else:
+                        at = "stock"
+                    tv = fetch_tv_data(t, at, "1d")
+                    if tv and tv.get("tv_price"):
+                        results[t] = {"price": round(tv["tv_price"], 4), "chg": round(tv.get("tv_chg", 0), 2)}
+                except Exception:
+                    pass
 
         return jsonify(results)
     except Exception as e:
