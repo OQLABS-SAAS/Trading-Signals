@@ -1193,7 +1193,7 @@ body::before{
 
 <!-- ═══════════════════ TICKER TAPE ═══════════════════ -->
 <div class="tape">
-  <div class="tape-track">
+  <div class="tape-track" id="tapeTrack">
     <!-- Markets x2 for seamless loop -->
     <div class="tape-item"><span class="ti-sym">BTC/USD</span><span class="ti-price">$83,241</span><span class="ti-chg up">+2.41%</span></div>
     <div class="tape-item"><span class="ti-sym">ETH/USD</span><span class="ti-price">$3,182</span><span class="ti-chg up">+1.78%</span></div>
@@ -2471,6 +2471,27 @@ shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">
 /* Safe element getter - prevents crashes on missing elements */
 function _el(id) { return document.getElementById(id) || document.createElement('div'); }
 
+/* ═══ SAFE DOM ACCESS ═══ */
+const _origGetById = document.getElementById.bind(document);
+document.getElementById = function(id) {
+  const el = _origGetById(id);
+  if (!el) {
+    // Create a dummy element so property assignments don't crash
+    const dummy = document.createElement('div');
+    dummy.id = '__dummy_' + id;
+    dummy.style.display = 'none';
+    // Don't append to DOM - just return it as a sink
+    return null;
+  }
+  return el;
+};
+
+/* Safe helper - returns element or inert dummy */
+function $(id) {
+  return _origGetById(id) || Object.assign(document.createElement('div'), {style:{cssText:'display:none'}});
+}
+
+
 /* Always send cookies with API calls */
 const _origFetch = window.fetch;
 window.fetch = function(url, opts={}) {
@@ -3005,8 +3026,8 @@ function quickLoad(ticker, assetType, timeframe) {
 }
 async function doAnalyze(ticker, assetType, timeframe) {
   setLoading(true, `Analyzing ${ticker} on ${timeframe.toUpperCase()}…`);
-  document.getElementById('emptyState').classList.add('hidden');
-  document.getElementById('resultsArea').classList.add('hidden');
+  { const _es = document.getElementById('emptyState'); if (_es) _es.style.display = 'none'; }
+  { const _ra = document.getElementById('resultsArea'); if (_ra) _ra.style.display = 'none'; }
   // Reset backtest panel immediately so stale results from the previous run
   // are never visible while the new analysis is in flight
   const _btPanel = document.getElementById('backtestPanel');
@@ -3055,7 +3076,7 @@ function initSharePanel(d) {
    RENDER RESULTS
 ════════════════════════════════════════════ */
 function renderResults(d) {
-  document.getElementById('resultsArea').classList.remove('hidden');
+  { const _ra = document.getElementById('resultsArea'); if (_ra) _ra.style.display = ''; }
   initSharePanel(d);
 
   // Asset header
@@ -4362,7 +4383,8 @@ function renderAlignment(d) {
 ════════════════════════════════════════════ */
 function renderWatchlist() {
   const el = document.getElementById('watchlistItems');
-  document.getElementById('wlCount').textContent = watchlist.length;
+  if (!el) return;
+  const wlc = document.getElementById('wlCount'); if (wlc) wlc.textContent = watchlist.length;
   if (!watchlist.length) { el.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px 0;text-align:center;opacity:.6;">No tickers yet.</div>'; return; }
   el.innerHTML = watchlist.map((w, i) => `
     <div class="wl-item" onclick="quickLoad('${w.ticker}','${w.asset_type}','1d')">
@@ -4555,6 +4577,7 @@ async function removeWatch(ticker, timeframe) {
   refreshWatchPanel();
 }
 async function refreshWatchPanel() {
+  if (!document.getElementById('watchlistItems')) return;
   try {
     const r = await fetch('/api/watches');
     const d = await r.json();
@@ -5100,16 +5123,16 @@ function switchMainTab(tab) {
   if (tab === 'news') {
     newsArea.classList.remove('hidden');
     document.getElementById('loadingState').classList.add('hidden');
-    document.getElementById('emptyState').classList.add('hidden');
-    document.getElementById('resultsArea').classList.add('hidden');
+    { const _es = document.getElementById('emptyState'); if (_es) _es.style.display = 'none'; }
+    { const _ra = document.getElementById('resultsArea'); if (_ra) _ra.style.display = 'none'; }
     loadNewsTab();
   } else {
     newsArea.classList.add('hidden');
     // Restore the right panel (empty state or results)
     if (currentData) {
-      document.getElementById('resultsArea').classList.remove('hidden');
+      { const _ra = document.getElementById('resultsArea'); if (_ra) _ra.style.display = ''; }
     } else {
-      document.getElementById('emptyState').classList.remove('hidden');
+      { const _es = document.getElementById('emptyState'); if (_es) _es.style.display = ''; }
     }
   }
 }
@@ -5441,20 +5464,20 @@ function toggleTheme() {
    HELPERS
 ════════════════════════════════════════════ */
 function setLoading(on, label='') {
-  document.getElementById('loadingState').classList.toggle('hidden', !on);
-  document.getElementById('loadingLabel').textContent = label;
-  document.getElementById('analyzeBtn').disabled = on;
+  var ls = _origGetById('loadingState'); if (ls) ls.style.display = on ? 'flex' : 'none';
+  var ll = _origGetById('loadingLabel') || _origGetById('loadingMsg'); if (ll) ll.textContent = label;
+  var ab = _origGetById('analyzeBtn'); if (ab) ab.disabled = on;
 }
 function showError(msg) {
   document.getElementById('emptyState').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Analysis Failed</div><div class="empty-sub">${msg}</div></div>`;
-  document.getElementById('emptyState').classList.remove('hidden');
-  document.getElementById('resultsArea').classList.add('hidden');
+  { const _es = document.getElementById('emptyState'); if (_es) _es.style.display = ''; }
+  { const _ra = document.getElementById('resultsArea'); if (_ra) _ra.style.display = 'none'; }
 }
 function showToast(msg) {
-  const t = document.getElementById('toast');
-  document.getElementById('toastMsg').textContent = msg;
-  t.style.display = 'flex';
-  setTimeout(() => { t.style.display = 'none'; }, 3000);
+  var t = _origGetById('toast'); if (!t) return;
+  var tm = _origGetById('toastMsg') || _origGetById('toastText'); if (tm) tm.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(function() { t.style.display = 'none'; }, 3000);
 }
 
 /* ── colorizeNumbers: wraps inline numbers in colour spans ──
