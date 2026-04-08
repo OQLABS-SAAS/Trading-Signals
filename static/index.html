@@ -2069,9 +2069,10 @@ body::before{
 
       <!-- Run + Auto-refresh -->
       <div class="strat-sidebar-section">
-        <button class="se-run-btn" id="seRunBtn" onclick="seRunEngine()">RUN ENGINE</button>
-        <button class="se-scan-btn" onclick="seScanAll()">SCAN ALL</button>
-        <button class="se-matrix-btn" onclick="seMatrixScan()">MATRIX SCAN — ALL TF × HTF × R:R</button>
+        <button class="se-run-btn" id="seRunBtn" type="button" onclick="seRunEngine()">RUN ENGINE</button>
+        <button class="se-scan-btn" type="button" onclick="seScanAll()">SCAN ALL</button>
+        <button class="se-matrix-btn" type="button" onclick="seMatrixScan()">MATRIX SCAN — ALL TF × HTF × R:R</button>
+        <div id="seScanProgress" style="display:none;font-family:var(--mono);font-size:10px;color:var(--amber);padding:6px 0;letter-spacing:.4px;"></div>
 
         <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
           <span style="font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:.4px;">AUTO-REFRESH:</span>
@@ -8235,9 +8236,13 @@ function seMode(m) {
 async function seScanAll(filterSignal) {
   // filterSignal: optional 'BUY' or 'SELL' to only show matching results
   var btn = document.querySelector('.se-scan-btn');
-  if (btn) { btn.textContent = 'SCANNING...'; btn.disabled = true; }
   var matBtn = document.querySelector('.se-matrix-btn');
-  if (matBtn) matBtn.disabled = true;  // disable matrix during scan
+  var runBtn = document.getElementById('seRunBtn');
+  var prog = document.getElementById('seScanProgress');
+  if (btn) { btn.textContent = '⏳ SCANNING...'; btn.disabled = true; btn.style.opacity='.5'; }
+  if (matBtn) { matBtn.disabled = true; matBtn.style.opacity='.4'; }
+  if (runBtn) { runBtn.disabled = true; runBtn.style.opacity='.4'; }
+  if (prog) { prog.style.display = 'block'; prog.textContent = 'Initializing scan...'; }
 
   try {
     // Collect all quick pick symbols
@@ -8251,11 +8256,10 @@ async function seScanAll(filterSignal) {
 
     // Detect asset type from active category
     var activeCat = document.querySelector('.se-qp-cats .se-qp-cat.active');
-    var catName = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
-    var assetMap = { crypto:'crypto', forex:'forex', stocks:'stock', indices:'index' };
-    var scanAssetType = assetMap[catName] || 'crypto';
+    var catText = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
+    var scanAssetType = catText.includes('forex') ? 'forex' : catText.includes('stock') ? 'stock' : catText.includes('index') ? 'index' : 'crypto';
 
-    var tf = (currentData && currentData.timeframe) ? currentData.timeframe : '4h';
+    var tf = '4h';
     var seTfSelect = document.querySelector('.strat-sidebar select');
     if (seTfSelect) tf = seTfSelect.value || tf;
 
@@ -8266,13 +8270,10 @@ async function seScanAll(filterSignal) {
     var sm = document.getElementById('stratMain'); if (sm) sm.style.display = '';
     var se = document.getElementById('stratEmpty'); if (se) se.style.display = 'none';
 
-    // Show progress in psText
-    var psText = document.querySelector('.se-ps-text');
-    if (psText) psText.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--amber);">Scanning 0/' + syms.length + '...</div>';
-
     // Scan each symbol
     for (var i = 0; i < syms.length; i++) {
-      if (psText) psText.querySelector('div').textContent = 'Scanning ' + (i+1) + '/' + syms.length + ' — ' + syms[i] + '...';
+      if (prog) prog.textContent = 'Scanning ' + (i+1) + '/' + syms.length + ' — ' + syms[i] + '...';
+      if (btn) btn.textContent = '⏳ ' + (i+1) + '/' + syms.length;
       try {
         var r = await fetch('/api/analyze', {
           method: 'POST',
@@ -8297,38 +8298,11 @@ async function seScanAll(filterSignal) {
       } catch(e) { errors++; console.warn('Scan error for', syms[i], e); }
     }
 
+    // Store last scan results for filtering without re-scanning
+    window._lastScanResults = results;
+
     // Filter results if requested (BUY only, SELL only)
-    var displayed = filterSignal ? results.filter(function(r) { return r.signal === filterSignal; }) : results;
-
-    // Display results in the strategy main area
-    if (psText) {
-      var filterLabel = filterSignal ? (filterSignal + ' SIGNALS') : 'ALL SIGNALS';
-      var html = '<div style="font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--amber);margin-bottom:6px;">' + filterLabel + ' — ' + displayed.length + '/' + results.length + ' instruments' + (errors ? ' (' + errors + ' errors)' : '') + '</div>';
-      // Filter buttons row
-      html += '<div style="display:flex;gap:4px;margin-bottom:10px;">';
-      html += '<button class="rb-btn' + (!filterSignal ? ' active' : '') + '" onclick="seScanAll()" style="font-size:9px;">ALL</button>';
-      html += '<button class="rb-btn' + (filterSignal==='BUY' ? ' active' : '') + '" onclick="seScanAll(\'BUY\')" style="font-size:9px;color:var(--green);">BUY ONLY</button>';
-      html += '<button class="rb-btn' + (filterSignal==='SELL' ? ' active' : '') + '" onclick="seScanAll(\'SELL\')" style="font-size:9px;color:var(--red);">SELL ONLY</button>';
-      html += '</div>';
-
-      if (displayed.length > 0) {
-        html += '<div style="display:grid;gap:6px;">';
-        displayed.forEach(function(r) {
-          var sigColor = r.signal === 'BUY' ? 'var(--green)' : r.signal === 'SELL' ? 'var(--red)' : 'var(--amber)';
-          html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:3px;cursor:pointer;" onclick="document.querySelector(\'#seQPSyms input\') ? document.querySelector(\'#seQPSyms input\').value=\'' + r.ticker + '\' : 0;seRunEngine();">';
-          html += '<span style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--white);min-width:70px;">' + r.ticker + '</span>';
-          html += '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + sigColor + ';min-width:40px;">' + r.signal + '</span>';
-          html += '<span style="font-family:var(--mono);font-size:10px;color:var(--muted2);">' + r.confidence + '</span>';
-          html += '<span style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-left:auto;">RSI ' + (typeof r.rsi === 'number' ? parseFloat(r.rsi).toFixed(1) : r.rsi) + '</span>';
-          if (r.entry) html += '<span style="font-family:var(--mono);font-size:10px;color:var(--muted);">E: ' + parseFloat(r.entry).toLocaleString() + '</span>';
-          html += '</div>';
-        });
-        html += '</div>';
-      } else {
-        html += '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:16px 0;">No ' + (filterSignal || '') + ' signals found in current scan.</div>';
-      }
-      psText.innerHTML = html;
-    }
+    _renderScanResults(results, filterSignal, errors);
 
     showToast('Scanned ' + results.length + ' instruments' + (errors ? ', ' + errors + ' errors' : ''));
   } catch(outerErr) {
@@ -8336,22 +8310,80 @@ async function seScanAll(filterSignal) {
     showToast('Scan failed: ' + outerErr.message);
   } finally {
     // ALWAYS restore buttons
-    if (btn) { btn.textContent = 'SCAN ALL'; btn.disabled = false; }
-    if (matBtn) matBtn.disabled = false;
+    if (btn) { btn.textContent = 'SCAN ALL'; btn.disabled = false; btn.style.opacity=''; }
+    if (matBtn) { matBtn.disabled = false; matBtn.style.opacity=''; }
+    if (runBtn) { runBtn.disabled = false; runBtn.style.opacity=''; }
+    if (prog) prog.style.display = 'none';
   }
+}
+
+function _filterScanResults(filterSignal) {
+  // Re-render last scan results with a filter — no re-fetching
+  if (window._lastScanResults) _renderScanResults(window._lastScanResults, filterSignal, 0);
+}
+
+function _renderScanResults(results, filterSignal, errors) {
+  var displayed = filterSignal ? results.filter(function(r) { return r.signal === filterSignal; }) : results;
+  var psText = document.querySelector('.se-ps-text');
+  if (!psText) return;
+
+  var filterLabel = filterSignal ? (filterSignal + ' SIGNALS') : 'ALL SIGNALS';
+  var html = '<div style="font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--amber);margin-bottom:6px;">' + filterLabel + ' — ' + displayed.length + '/' + results.length + ' instruments' + (errors ? ' (' + errors + ' errors)' : '') + '</div>';
+  // Filter buttons row
+  html += '<div style="display:flex;gap:4px;margin-bottom:10px;">';
+  html += '<button class="rb-btn' + (!filterSignal ? ' active' : '') + '" onclick="_filterScanResults(null)" style="font-size:9px;">ALL</button>';
+  html += '<button class="rb-btn' + (filterSignal==='BUY' ? ' active' : '') + '" onclick="_filterScanResults(\'BUY\')" style="font-size:9px;color:var(--green);">BUY ONLY</button>';
+  html += '<button class="rb-btn' + (filterSignal==='SELL' ? ' active' : '') + '" onclick="_filterScanResults(\'SELL\')" style="font-size:9px;color:var(--red);">SELL ONLY</button>';
+  html += '</div>';
+
+  if (displayed.length > 0) {
+    html += '<div style="display:grid;gap:6px;">';
+    displayed.forEach(function(r) {
+      var sigColor = r.signal === 'BUY' ? 'var(--green)' : r.signal === 'SELL' ? 'var(--red)' : 'var(--amber)';
+      html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:3px;cursor:pointer;" onclick="document.querySelector(\'.se-input[type=text]\').value=\'' + r.ticker + '\';seRunEngine();">';
+      html += '<span style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--white);min-width:70px;">' + r.ticker + '</span>';
+      html += '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + sigColor + ';min-width:40px;">' + r.signal + '</span>';
+      html += '<span style="font-family:var(--mono);font-size:10px;color:var(--muted2);">' + r.confidence + '</span>';
+      html += '<span style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-left:auto;">RSI ' + (typeof r.rsi === 'number' ? parseFloat(r.rsi).toFixed(1) : r.rsi) + '</span>';
+      if (r.entry) html += '<span style="font-family:var(--mono);font-size:10px;color:var(--muted);">E: ' + parseFloat(r.entry).toLocaleString() + '</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:16px 0;">No ' + (filterSignal || '') + ' signals found in current scan.</div>';
+  }
+  psText.innerHTML = html;
 }
 
 function seQPCat(btn, cat) {
   btn.closest('.se-qp-cats').querySelectorAll('.se-qp-cat').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  // data-sym = exact ticker for backend, display = short label
   const maps = {
-    crypto: ['BTC','ETH','SOL','XRP','BNB','DOGE','ADA','AVAX'],
-    forex: ['EUR/USD','GBP/USD','USD/JPY','AUD/USD','USD/CAD','NZD/USD'],
-    stocks: ['AAPL','NVDA','TSLA','MSFT','AMZN','META','GOOGL'],
-    indices: ['SPX','NDX','DJI','FTSE','DAX','NIKKEI']
+    crypto: [
+      {sym:'BTC-USD',label:'BTC'},{sym:'ETH-USD',label:'ETH'},{sym:'SOL-USD',label:'SOL'},
+      {sym:'XRP-USD',label:'XRP'},{sym:'BNB-USD',label:'BNB'},{sym:'DOGE-USD',label:'DOGE'},
+      {sym:'ADA-USD',label:'ADA'},{sym:'AVAX-USD',label:'AVAX'}
+    ],
+    forex: [
+      {sym:'EURUSD=X',label:'EUR/USD'},{sym:'GBPUSD=X',label:'GBP/USD'},{sym:'USDJPY=X',label:'USD/JPY'},
+      {sym:'AUDUSD=X',label:'AUD/USD'},{sym:'USDCAD=X',label:'USD/CAD'},{sym:'NZDUSD=X',label:'NZD/USD'}
+    ],
+    stocks: [
+      {sym:'AAPL',label:'AAPL'},{sym:'NVDA',label:'NVDA'},{sym:'TSLA',label:'TSLA'},
+      {sym:'MSFT',label:'MSFT'},{sym:'AMZN',label:'AMZN'},{sym:'META',label:'META'},{sym:'GOOGL',label:'GOOGL'}
+    ],
+    indices: [
+      {sym:'^GSPC',label:'S&P 500'},{sym:'^IXIC',label:'NASDAQ'},{sym:'^DJI',label:'DOW'},
+      {sym:'^FTSE',label:'FTSE'},{sym:'^GDAXI',label:'DAX'},{sym:'^N225',label:'NIKKEI'}
+    ]
   };
   const syms = document.getElementById('seQPSyms');
-  syms.innerHTML = (maps[cat] || maps.crypto).map(s => `<button class="se-qp-sym" data-sym="${s}" onclick="sePickSym(this,'${s}')">${s}</button>`).join('');
+  const items = maps[cat] || maps.crypto;
+  syms.innerHTML = items.map(s => `<button class="se-qp-sym" data-sym="${s.sym}" onclick="sePickSym(this,'${s.sym}')">${s.label}</button>`).join('');
+  // Clear the custom input when switching categories
+  var ci = syms.parentNode.querySelector('input[type="text"]');
+  if (ci) ci.value = '';
 }
 
 function sePickSym(btn, sym) {
@@ -8403,15 +8435,15 @@ function seRunEngine() {
 
   // Detect asset type from active category
   var activeCat = document.querySelector('.se-qp-cats .se-qp-cat.active');
-  var catName = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
-  var catAssetMap = { crypto:'crypto', forex:'forex', stocks:'stock', indices:'index' };
+  var catText = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
+  var catAssetMap = null; // not needed
 
   if (activeSym) {
     ticker = activeSym.getAttribute('data-sym') || activeSym.textContent.trim();
-    assetType = catAssetMap[catName] || 'crypto';
+    assetType = catText.includes('forex') ? 'forex' : catText.includes('stock') ? 'stock' : catText.includes('index') ? 'index' : 'crypto';
   } else if (customInput && customInput.value.trim()) {
     ticker = customInput.value.trim();
-    assetType = catAssetMap[catName] || 'crypto';
+    assetType = catText.includes('forex') ? 'forex' : catText.includes('stock') ? 'stock' : catText.includes('index') ? 'index' : 'crypto';
   } else if (currentData && currentData.ticker) {
     ticker = currentData.ticker;
     assetType = currentData.asset_type || 'crypto';
@@ -8526,12 +8558,16 @@ function seRunEngine() {
 async function seMatrixScan() {
   var btn = document.querySelector('.se-matrix-btn');
   var scanBtn = document.querySelector('.se-scan-btn');
-  if (btn) { btn.textContent = 'SCANNING MATRIX...'; btn.disabled = true; }
-  if (scanBtn) scanBtn.disabled = true;
+  var runBtn = document.getElementById('seRunBtn');
+  var prog = document.getElementById('seScanProgress');
+  if (btn) { btn.textContent = '⏳ MATRIX SCANNING...'; btn.disabled = true; btn.style.opacity='.5'; }
+  if (scanBtn) { scanBtn.disabled = true; scanBtn.style.opacity='.4'; }
+  if (runBtn) { runBtn.disabled = true; runBtn.style.opacity='.4'; }
+  if (prog) { prog.style.display = 'block'; prog.textContent = 'Initializing matrix scan...'; }
 
   try {
     var activeSym = document.querySelector('#seQPSyms .se-qp-sym.active-sym');
-    var customInput = document.querySelector('#seQPSyms') ? document.querySelector('#seQPSyms').parentNode.querySelector('input[type="text"]') : null;
+    var customInput = document.querySelector('.se-input[type="text"]');
     var ticker;
 
     if (activeSym) {
@@ -8546,9 +8582,8 @@ async function seMatrixScan() {
 
     // Detect asset type from active category
     var activeCat = document.querySelector('.se-qp-cats .se-qp-cat.active');
-    var catName = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
-    var assetMap = { crypto:'crypto', forex:'forex', stocks:'stock', indices:'index' };
-    var scanAssetType = assetMap[catName] || 'crypto';
+    var catText = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
+    var scanAssetType = catText.includes('forex') ? 'forex' : catText.includes('stock') ? 'stock' : catText.includes('index') ? 'index' : 'crypto';
 
     var timeframes = ['15m', '1h', '4h', '1d'];
     var results = [];
@@ -8556,11 +8591,9 @@ async function seMatrixScan() {
     var sm = document.getElementById('stratMain'); if (sm) sm.style.display = '';
     var se = document.getElementById('stratEmpty'); if (se) se.style.display = 'none';
 
-    var psText = document.querySelector('.se-ps-text');
-    if (psText) psText.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--amber);">Matrix scanning ' + ticker + '...</div>';
-
     for (var i = 0; i < timeframes.length; i++) {
-      if (psText) psText.querySelector('div').textContent = 'Scanning ' + ticker + ' ' + timeframes[i].toUpperCase() + '...';
+      if (prog) prog.textContent = 'Scanning ' + ticker + ' ' + timeframes[i].toUpperCase() + ' (' + (i+1) + '/4)...';
+      if (btn) btn.textContent = '⏳ ' + timeframes[i].toUpperCase();
       try {
         var r = await fetch('/api/analyze', {
           method: 'POST',
@@ -8625,8 +8658,10 @@ async function seMatrixScan() {
     console.error('seMatrixScan error:', outerErr);
     showToast('Matrix scan failed: ' + outerErr.message);
   } finally {
-    if (btn) { btn.textContent = 'MATRIX SCAN — ALL TF × HTF × R:R'; btn.disabled = false; }
-    if (scanBtn) scanBtn.disabled = false;
+    if (btn) { btn.textContent = 'MATRIX SCAN — ALL TF × HTF × R:R'; btn.disabled = false; btn.style.opacity=''; }
+    if (scanBtn) { scanBtn.disabled = false; scanBtn.style.opacity=''; }
+    if (runBtn) { runBtn.disabled = false; runBtn.style.opacity=''; }
+    if (prog) prog.style.display = 'none';
   }
 }
 
