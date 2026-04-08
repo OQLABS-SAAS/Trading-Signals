@@ -1756,9 +1756,9 @@ body::before{
         <p class="narrative-text" id="narrativeText" style="color:var(--muted);font-style:italic;">Run analysis on a ticker to generate AI-powered market insights.</p>
       </div>
 
-      <!-- FOOTPRINT + ORDER FLOW -->
-      <div class="section-hdr">Footprint & Order Flow</div>
-      <div class="fp-wrap" id="fpWrap">
+      <!-- FOOTPRINT + ORDER FLOW — hidden until data populates -->
+      <div class="section-hdr" id="fpSectionHdr" style="display:none;">Footprint & Order Flow</div>
+      <div class="fp-wrap" id="fpWrap" style="display:none;">
         <!-- Candle Footprint -->
         <div class="fp-card">
           <div class="fp-header">
@@ -4550,11 +4550,32 @@ function renderIndicators(d) {
    MTF + ALIGNMENT
 ════════════════════════════════════════════ */
 function renderMTF(mtf) {
-  const keys = Object.keys(mtf);
-  if (!keys.length) { document.getElementById('mtfContent').innerHTML = '<div style="font-size:12px;color:var(--muted);">Not available for this timeframe.</div>'; return; }
-  document.getElementById('mtfContent').innerHTML = keys.map(tf => {
-    const t = mtf[tf];
-    return `<div class="mtf-row"><span class="mtf-tf">${tf}</span><span class="mtf-trend ${t.trend}">${t.trend}</span><span class="mtf-rsi">RSI ${t.rsi}</span></div>`;
+  var el = document.getElementById('mtfContent');
+  if (!el) return;
+  var keys = Object.keys(mtf);
+  if (!keys.length) {
+    // Reset cells to placeholder instead of destroying the grid
+    el.querySelectorAll('.mtf-cell').forEach(function(c) {
+      var sig = c.querySelector('.mtf-sig');
+      var rsi = c.querySelector('.mtf-rsi');
+      if (sig) { sig.textContent = '—'; sig.style.color = 'var(--muted)'; }
+      if (rsi) rsi.textContent = '—';
+    });
+    return;
+  }
+  // Rebuild grid with correct class names matching CSS (.mtf-cell, .mtf-tf, .mtf-sig, .mtf-rsi)
+  var defaultTFs = ['15m','1H','4H','1D','1W','1M'];
+  var tfs = keys.length > 0 ? keys : defaultTFs;
+  el.innerHTML = tfs.map(function(tf) {
+    var t = mtf[tf];
+    if (!t) return '<div class="mtf-cell"><div class="mtf-tf">' + tf.toUpperCase() + '</div><div class="mtf-sig" style="color:var(--muted);">—</div><div class="mtf-rsi">—</div></div>';
+    var trend = (t.trend || '').toLowerCase();
+    var isBull = trend.includes('bull') || trend.includes('up');
+    var isBear = trend.includes('bear') || trend.includes('down');
+    var label = isBull ? 'BULLISH' : isBear ? 'BEARISH' : 'NEUTRAL';
+    var cls = isBull ? 'buy' : isBear ? 'sell' : 'hold';
+    var rsi = t.rsi != null ? 'RSI ' + parseFloat(t.rsi).toFixed(1) : '—';
+    return '<div class="mtf-cell"><div class="mtf-tf">' + tf.toUpperCase() + '</div><div class="mtf-sig ' + cls + '">' + label + '</div><div class="mtf-rsi">' + rsi + '</div></div>';
   }).join('');
 }
 
@@ -4577,10 +4598,13 @@ function renderAlignment(d) {
   document.getElementById('alignContent').innerHTML = checks.map(c => {
     const cls  = c.ok===null ? 'neut' : c.ok ? 'bull' : 'bear';
     const icon = c.ok===null ? '·' : c.ok ? '✓' : '✗';
-    return `<div class="alignment-row">
-      <span class="alignment-name">${c.name}</span>
-      <span class="alignment-note" style="flex:1;font-size:10px;color:var(--text2);font-family:var(--mono);text-align:right;padding-right:8px;">${c.note}</span>
-      <span class="alignment-status ${cls}">${icon}</span>
+    const barW = c.ok===null ? 50 : c.ok ? 80 : 20;
+    const barClr = c.ok===null ? 'var(--amber)' : c.ok ? 'var(--green)' : 'var(--red)';
+    return `<div class="align-row">
+      <span class="align-name">${c.name}</span>
+      <span class="align-detail">${c.note}</span>
+      <span class="align-status ${cls}">${icon}</span>
+      <div class="align-bar-wrap"><div class="align-bar" style="width:${barW}%;background:${barClr};"></div></div>
     </div>`;
   }).join('');
 }
@@ -6872,6 +6896,10 @@ async function sendSMS() {
 function renderFootprint(d) {
   if (!d) return;
 
+  // Show footprint section
+  var fpHdr = document.getElementById('fpSectionHdr');
+  var fpW = document.getElementById('fpWrap');
+
   // Derive buy/sell pressure from OHLCV candle data
   var closes = d.chart_prices || [];
   var volumes = d.chart_volumes || [];
@@ -6891,6 +6919,10 @@ function renderFootprint(d) {
 
   var n = Math.min(opens.length, closes.length, volumes.length);
   if (n < 5) return;
+
+  // Show the footprint section now that we have data
+  if (fpHdr) fpHdr.style.display = '';
+  if (fpW) fpW.style.display = '';
 
   // Last candle analysis
   var lastIdx = n - 1;
@@ -7035,8 +7067,38 @@ function renderFootprint(d) {
   }
 }
 
+function _resetUIBeforeAnalysis() {
+  // Reset info strip
+  document.querySelectorAll('.info-cell .ic-val').forEach(function(el) { el.textContent = '—'; el.style.color = ''; });
+  document.querySelectorAll('.info-cell .ic-sub').forEach(function(el) { el.textContent = '—'; });
+  // Reset indicator cards
+  document.querySelectorAll('.ind-card').forEach(function(c) {
+    var v = c.querySelector('.ind-val'); if (v) { v.textContent = '—'; v.style.color = ''; }
+    var b = c.querySelector('.ind-badge'); if (b) { b.textContent = '—'; b.className = 'ind-badge'; }
+  });
+  // Reset MTF cells
+  document.querySelectorAll('.mtf-cell').forEach(function(c) {
+    var sig = c.querySelector('.mtf-sig'); if (sig) { sig.textContent = '—'; sig.style.color = 'var(--muted)'; sig.className = 'mtf-sig'; }
+    var rsi = c.querySelector('.mtf-rsi'); if (rsi) rsi.textContent = '—';
+  });
+  // Reset alignment rows
+  document.querySelectorAll('.align-row').forEach(function(r) {
+    var d = r.querySelector('.align-detail'); if (d) d.textContent = '—';
+    var s = r.querySelector('.align-status'); if (s) { s.textContent = '—'; s.className = 'align-status'; }
+    var b = r.querySelector('.align-bar'); if (b) b.style.width = '0%';
+  });
+  // Hide footprint section until data confirms
+  var fpH = document.getElementById('fpSectionHdr'); if (fpH) fpH.style.display = 'none';
+  var fpW = document.getElementById('fpWrap'); if (fpW) fpW.style.display = 'none';
+  // Reset footprint cards
+  document.querySelectorAll('.fp-badge').forEach(function(b) { b.textContent = '—'; b.className = 'fp-badge'; });
+  document.querySelectorAll('.fp-stat-val').forEach(function(v) { v.textContent = '—'; v.className = 'fp-stat-val'; });
+}
+
 function renderResultsV2(d) {
   if (!d) return;
+  // Clear stale data from previous analysis
+  _resetUIBeforeAnalysis();
   // Show results, hide empty state
   var sr = _origGetById('signalResults'); if (sr) sr.style.display = '';
   var sh = _origGetById('sigHeroWrap'); if (sh) sh.style.display = '';

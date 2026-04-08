@@ -2354,6 +2354,27 @@ def analyze():
                 ind["chart_buy_signals"]  = _bsigs2
                 ind["chart_sell_signals"] = _ssigs2
                 print(f"[analyze] chart fallback OK — {len(prices_c)} bars, BB:{sum(1 for b in _bbu2 if b)} RSI:{sum(1 for r in _rsi_c2 if r)} signals:{len(_bsigs2)}B/{len(_ssigs2)}S")
+                # Mark as OK so we don't 404 — Stooq/direct chart data is enough
+                yf_ok = True
+                if not tv_ok and prices_c:
+                    # Build minimal indicator set from chart data for Claude analysis
+                    p = prices_c[-1]
+                    ind.setdefault("price", p)
+                    # Compute RSI from chart prices
+                    rsi_vals = [v for v in (_rsi_c2 or []) if v is not None]
+                    ind.setdefault("rsi", round(rsi_vals[-1], 1) if rsi_vals else 50.0)
+                    # EMA trend from chart EMAs
+                    e20_last = ema20_c[-1] if ema20_c else p
+                    e50_last = ema50_c[-1] if ema50_c else p
+                    if p > e20_last > e50_last:     trend_s = "BULLISH"
+                    elif p < e20_last < e50_last:   trend_s = "BEARISH"
+                    else:                           trend_s = "MIXED"
+                    ind.setdefault("ema_trend", trend_s)
+                    ind.setdefault("ema_20", round(e20_last, 4))
+                    ind.setdefault("ema_50", round(e50_last, 4))
+                    ind.setdefault("signal", "HOLD")
+                    ind.setdefault("confidence", "LOW — limited data from fallback source")
+                    print(f"[analyze] built minimal indicators from chart fallback: price={p}, rsi={ind['rsi']}, trend={ind['ema_trend']}")
             else:
                 print(f"[analyze] chart fallback also failed — chart will show 'unavailable'")
 
