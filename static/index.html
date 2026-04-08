@@ -1335,7 +1335,26 @@ body::before{
           ANALYZE
         </button>
       </div>
-    
+
+      <!-- ASSET TYPE PILLS + INSTRUMENT QUICK-SELECT -->
+      <div style="padding:8px 24px 4px; border-bottom:1px solid var(--border); background:var(--bg1);">
+        <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
+          <button class="gpill active" data-sel="assetType" data-val="crypto" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-weight:700;cursor:pointer;">Crypto</button>
+          <button class="gpill" data-sel="assetType" data-val="stock" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Stock</button>
+          <button class="gpill" data-sel="assetType" data-val="forex" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Forex</button>
+          <button class="gpill" data-sel="assetType" data-val="commodity" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Commodity</button>
+          <button class="gpill" data-sel="assetType" data-val="index" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Index</button>
+          <span style="width:1px;height:18px;background:var(--border);margin:0 4px;"></span>
+          <button class="gpill" data-sel="timeframe" data-val="15m" onclick="setPill(this)" style="padding:4px 8px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">15M</button>
+          <button class="gpill" data-sel="timeframe" data-val="1h" onclick="setPill(this)" style="padding:4px 8px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">1H</button>
+          <button class="gpill active" data-sel="timeframe" data-val="4h" onclick="setPill(this)" style="padding:4px 8px;font-size:10px;font-family:var(--mono);background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-weight:700;cursor:pointer;">4H</button>
+          <button class="gpill" data-sel="timeframe" data-val="1d" onclick="setPill(this)" style="padding:4px 8px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">1D</button>
+        </div>
+        <div id="instGrid" style="display:flex; gap:6px; flex-wrap:wrap; padding-bottom:8px;"></div>
+        <div id="inlineInstRow" style="display:flex; gap:6px; overflow-x:auto; padding-bottom:6px;"></div>
+        <div id="instChips" style="display:flex; gap:6px; flex-wrap:wrap; padding-bottom:4px;"></div>
+      </div>
+
 <div class="refresh-bar">
         <span class="rb-label">Auto-Refresh</span>
         <div class="rb-btns">
@@ -2209,6 +2228,18 @@ body::before{
       <h2 style="font-family:var(--disp);font-size:24px;font-weight:900;letter-spacing:-.5px;">Market Scanner</h2>
       <span style="font-family:var(--mono);font-size:11px;color:var(--muted);">Updated <span style="color:var(--amber);">12s ago</span></span>
     </div>
+    <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; align-items:center;">
+      <select id="scanPreset" style="padding:7px 10px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:11px;">
+        <option value="crypto_top10">Crypto Top 10</option><option value="defi">DeFi</option><option value="meme">Meme Coins</option>
+        <option value="mag7">Magnificent 7</option><option value="tech">Tech</option><option value="semiconductors">Semiconductors</option>
+        <option value="forex_major">Forex Majors</option><option value="us_indices">US Indices</option><option value="commodities">Commodities</option>
+      </select>
+      <select id="scanTF" style="padding:7px 10px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:11px;">
+        <option value="1h">1H</option><option value="4h" selected>4H</option><option value="1d">1D</option>
+      </select>
+      <button id="scanBtn" onclick="runScanner()" style="padding:7px 16px; background:var(--amber); color:#0C0A08; border:none; border-radius:3px; font-family:var(--mono); font-size:11px; font-weight:700; cursor:pointer;">RUN SCAN</button>
+      <div id="scanResults"></div>
+    </div>
     <div class="scan-filter-row">
       <button class="scan-filter-btn active">All Signals</button>
       <button class="scan-filter-btn">BUY Only</button>
@@ -2989,8 +3020,9 @@ function updateInlineInst(assetType) {
 
 function setPill(btn) {
   const sel = btn.dataset.sel;
-  document.querySelectorAll(`.gpill[data-sel="${sel}"]`).forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.gpill[data-sel="' + sel + '"]').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  try { updatePillStyles(); } catch(e) {}
   document.getElementById(sel).value = btn.dataset.val;
   // Sync inline instrument chips when asset type changes
   if (sel === 'assetType') updateInlineInst(btn.dataset.val);
@@ -3287,6 +3319,8 @@ function renderResults(d) {
   setTimeout(_initDataTips, 100);
   // Signal other listeners that a new analysis has been rendered
   document.dispatchEvent(new Event('analysisRendered'));
+  // Update Concept 5 v2 visible elements
+  try { renderResultsV2(d); } catch(e) { console.warn('renderResultsV2:', e); }
 }
 
 /* ════════════════════════════════════════════
@@ -6572,6 +6606,193 @@ async function sendSMS() {
     status.style.color = 'rgba(255,82,70,.9)';
   }
 }
+
+/* ═══ CONCEPT 5 V2 RENDER ADAPTER ═══ */
+/* Maps API response data to the visible Concept 5 v2 UI elements */
+function renderResultsV2(d) {
+  if (!d) return;
+  
+  // Signal badge
+  var sigEl = _origGetById('sigLabel');
+  if (sigEl) {
+    var sig = d.signal || 'HOLD';
+    sigEl.textContent = sig;
+    sigEl.className = 'sig-label ' + sig.toLowerCase();
+  }
+  
+  // Signal subtitle
+  var sigSub = document.querySelector('.sig-sub');
+  if (sigSub) {
+    var conf = d.confidence || 'MEDIUM';
+    sigSub.textContent = conf.charAt(0) + conf.slice(1).toLowerCase() + ' ' + (d.signal||'hold').toLowerCase() + ' signal';
+  }
+  
+  // Entry / SL / TP prices
+  var slvls = document.querySelectorAll('.slvl-val');
+  if (slvls.length >= 5) {
+    slvls[0].textContent = fmt(d.entry || d.price);  // Entry
+    slvls[1].textContent = fmt(d.stop_loss || 0);     // SL
+    slvls[2].textContent = fmt(d.tp1 || 0);           // TP1
+    slvls[3].textContent = fmt(d.tp2 || 0);           // TP2
+    slvls[4].textContent = fmt(d.tp3 || 0);           // TP3
+  }
+  
+  // Signal type bar color
+  var typeBar = document.querySelector('.sig-type-bar');
+  if (typeBar) {
+    typeBar.className = 'sig-type-bar ' + (d.signal||'hold').toLowerCase();
+  }
+  
+  // Confidence ring
+  var confEl = _origGetById('confPct');
+  if (confEl) {
+    var pct = CONF_MAP[d.confidence||'MEDIUM'] || 58;
+    confEl.textContent = pct + '%';
+    // Update SVG ring
+    var crFill = document.querySelector('.cr-fill');
+    if (crFill) {
+      var circumference = 2 * Math.PI * 32; // r=32
+      crFill.style.strokeDasharray = circumference;
+      crFill.style.strokeDashoffset = circumference - (pct / 100) * circumference;
+      var clr = (d.signal==='BUY') ? '#00c98d' : (d.signal==='SELL') ? '#ff4459' : '#f5a623';
+      crFill.style.stroke = clr;
+    }
+  }
+  
+  // Win rate badge
+  var wbVal = document.querySelector('.wb-val');
+  var wbLbl = document.querySelector('.wb-lbl');
+  if (wbVal && d.win_rate != null) {
+    wbVal.textContent = d.win_rate + '%';
+  }
+  
+  // Info strip cells
+  var infoCells = document.querySelectorAll('.info-cell .ic-val');
+  if (infoCells.length >= 7) {
+    // Change
+    infoCells[0].innerHTML = (d.chg_1d >= 0 ? '+' : '') + d.chg_1d + '%';
+    infoCells[0].style.color = d.chg_1d >= 0 ? 'var(--green)' : 'var(--red)';
+    // R:R
+    if (d.entry && d.stop_loss && d.tp1) {
+      var risk = Math.abs(d.entry - d.stop_loss);
+      var reward = Math.abs(d.tp1 - d.entry);
+      infoCells[1].textContent = '1 : ' + (risk > 0 ? (reward/risk).toFixed(1) : '—');
+    }
+    // ATR
+    infoCells[2].textContent = '$' + (d.atr ? d.atr.toLocaleString() : '—');
+    // Volume
+    if (d.vol_ratio) {
+      infoCells[3].textContent = (d.vol_ratio >= 1.2 ? '↑ ' : '↓ ') + (d.vol_ratio >= 1.5 ? 'High' : d.vol_ratio >= 0.8 ? 'Normal' : 'Low');
+      infoCells[3].style.color = d.vol_ratio >= 1.2 ? 'var(--green)' : 'var(--muted2)';
+      var volSub = infoCells[3].parentElement.querySelector('.ic-sub');
+      if (volSub) volSub.textContent = d.vol_ratio + '× 30d avg';
+    }
+    // MACD
+    if (d.macd_signal) {
+      infoCells[4].textContent = d.macd_signal;
+      infoCells[4].style.color = d.macd_signal.toLowerCase().includes('bull') ? 'var(--green)' : d.macd_signal.toLowerCase().includes('bear') ? 'var(--red)' : 'var(--amber)';
+    }
+    // RSI
+    if (d.rsi != null) {
+      infoCells[5].textContent = d.rsi.toFixed(1);
+      var rsiSub = infoCells[5].parentElement.querySelector('.ic-sub');
+      if (rsiSub) rsiSub.textContent = d.rsi > 70 ? 'Overbought' : d.rsi < 30 ? 'Oversold' : d.rsi > 50 ? 'Momentum zone' : 'Weak zone';
+    }
+    // Timeframe
+    infoCells[6].textContent = (d.timeframe||'4h').toUpperCase();
+    infoCells[6].style.color = 'var(--amber)';
+  }
+  
+  // Chart title
+  var ctTitle = document.querySelector('.ct-title');
+  if (ctTitle) ctTitle.textContent = d.ticker + ' / USDT';
+  
+  // Narrative
+  var narr = document.querySelector('.narrative-text');
+  if (narr && d.narrative) {
+    narr.innerHTML = typeof colorizeNarrative === 'function' ? colorizeNarrative(d.narrative) : d.narrative;
+  }
+  
+  // Indicator cards
+  if (d.indicators) {
+    var indCards = document.querySelectorAll('.ind-card');
+    var indKeys = Object.keys(d.indicators);
+    indCards.forEach(function(card, i) {
+      if (i < indKeys.length) {
+        var key = indKeys[i];
+        var ind = d.indicators[key];
+        var valEl = card.querySelector('.ind-val');
+        var nameEl = card.querySelector('.ind-name');
+        var descEl = card.querySelector('.ind-desc');
+        var dotEl = card.querySelector('.ind-dot');
+        if (valEl) valEl.textContent = typeof ind === 'object' ? (ind.value||ind.label||'—') : ind;
+        if (nameEl) nameEl.textContent = key;
+        if (descEl && typeof ind === 'object' && ind.detail) descEl.textContent = ind.detail;
+        if (dotEl && typeof ind === 'object') {
+          var bull = ind.bias === 'bullish' || ind.bias === 'buy';
+          var bear = ind.bias === 'bearish' || ind.bias === 'sell';
+          dotEl.style.background = bull ? 'var(--green)' : bear ? 'var(--red)' : 'var(--amber)';
+        }
+      }
+    });
+  }
+  
+  // MTF grid
+  if (d.mtf) {
+    var mtfCells = document.querySelectorAll('.mtf-cell');
+    var tfKeys = Object.keys(d.mtf);
+    mtfCells.forEach(function(cell, i) {
+      if (i < tfKeys.length) {
+        var key = tfKeys[i];
+        var val = d.mtf[key];
+        var tfLabel = cell.querySelector('.mtf-tf');
+        var biasEl = cell.querySelector('.mtf-bias');
+        if (tfLabel) tfLabel.textContent = key.toUpperCase();
+        if (biasEl && typeof val === 'object') {
+          biasEl.textContent = val.bias || val.trend || '—';
+          biasEl.style.color = (val.bias||'').toLowerCase().includes('bull') ? 'var(--green)' : (val.bias||'').toLowerCase().includes('bear') ? 'var(--red)' : 'var(--amber)';
+        }
+      }
+    });
+  }
+  
+  // Auto-fill calculator with signal values
+  var cEntry = _origGetById('cEntry');
+  var cSL = _origGetById('cSL');
+  var cTP1 = _origGetById('cTP1');
+  var cTP2 = _origGetById('cTP2');
+  var cTP3 = _origGetById('cTP3');
+  if (cEntry && d.entry) cEntry.value = d.entry;
+  if (cSL && d.stop_loss) cSL.value = d.stop_loss;
+  if (cTP1 && d.tp1) cTP1.value = d.tp1;
+  if (cTP2 && d.tp2) cTP2.value = d.tp2;
+  if (cTP3 && d.tp3) cTP3.value = d.tp3;
+  
+  // Update sidebar RSI momentum display
+  var rsiMomVal = document.querySelector('.rsi-big');
+  if (rsiMomVal && d.rsi != null) rsiMomVal.textContent = d.rsi.toFixed(1);
+  
+  // Update right sidebar watchlist header ticker
+  var headerTicker = document.querySelector('.header-ticker .ht-sym');
+  if (headerTicker) headerTicker.textContent = d.ticker;
+  var headerPrice = document.querySelector('.header-ticker .ht-price');
+  if (headerPrice) headerPrice.textContent = fmt(d.price);
+  
+  console.log('[dotverse] renderResultsV2 complete for', d.ticker);
+}
+
+
+/* ═══ PILL STYLE UPDATER ═══ */
+function updatePillStyles() {
+  document.querySelectorAll('.gpill').forEach(function(btn) {
+    if (btn.classList.contains('active')) {
+      btn.style.background = 'var(--amber)'; btn.style.color = '#0C0A08'; btn.style.border = 'none'; btn.style.fontWeight = '700';
+    } else {
+      btn.style.background = 'var(--bg2)'; btn.style.color = 'var(--muted2)'; btn.style.border = '1px solid var(--border)'; btn.style.fontWeight = '600';
+    }
+  });
+}
+
 </script>
 <script>
 /* ════════════════════════════════════════════
