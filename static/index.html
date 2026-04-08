@@ -1716,7 +1716,7 @@ body::before{
       <div class="section-hdr">What the indicators say</div>
       <div class="indicators-grid" id="indicatorsGrid">
         <!-- RSI -->
-        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="rsi">
+        <div class="ind-card" data-ind="rsi">
           <div class="ind-card-top">
             <div><div class="ind-plain">Momentum Tracker</div><div class="ind-tech">RSI (14)</div></div>
             <span class="ind-badge">—</span>
@@ -1724,11 +1724,10 @@ body::before{
           <div class="ind-val">—</div>
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
-          <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
           <div class="ind-expand" id="indExpandRsi"></div>
         </div>
         <!-- MACD -->
-        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="macd">
+        <div class="ind-card" data-ind="macd">
           <div class="ind-card-top">
             <div><div class="ind-plain">Trend Momentum</div><div class="ind-tech">MACD (12,26,9)</div></div>
             <span class="ind-badge">—</span>
@@ -1736,11 +1735,10 @@ body::before{
           <div class="ind-val">—</div>
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
-          <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
           <div class="ind-expand" id="indExpandMacd"></div>
         </div>
         <!-- EMA -->
-        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="ema">
+        <div class="ind-card" data-ind="ema">
           <div class="ind-card-top">
             <div><div class="ind-plain">Trend Direction</div><div class="ind-tech">EMA 20/50</div></div>
             <span class="ind-badge">—</span>
@@ -1748,11 +1746,10 @@ body::before{
           <div class="ind-val">—</div>
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
-          <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
           <div class="ind-expand" id="indExpandEma"></div>
         </div>
         <!-- BB -->
-        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="bb">
+        <div class="ind-card" data-ind="bb">
           <div class="ind-card-top">
             <div><div class="ind-plain">Volatility Bands</div><div class="ind-tech">Bollinger Bands (20,2)</div></div>
             <span class="ind-badge">—</span>
@@ -1760,11 +1757,10 @@ body::before{
           <div class="ind-val">—</div>
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
-          <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
           <div class="ind-expand" id="indExpandBb"></div>
         </div>
         <!-- Volume -->
-        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="volume">
+        <div class="ind-card" data-ind="volume">
           <div class="ind-card-top">
             <div><div class="ind-plain">Buying Pressure</div><div class="ind-tech">Volume Analysis</div></div>
             <span class="ind-badge">—</span>
@@ -1772,11 +1768,10 @@ body::before{
           <div class="ind-val">—</div>
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
-          <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
           <div class="ind-expand" id="indExpandVolume"></div>
         </div>
         <!-- ATR / Supertrend -->
-        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="supertrend">
+        <div class="ind-card" data-ind="supertrend">
           <div class="ind-card-top">
             <div><div class="ind-plain">Trend Strength</div><div class="ind-tech">Supertrend (ATR 10,3)</div></div>
             <span class="ind-badge">—</span>
@@ -1784,7 +1779,6 @@ body::before{
           <div class="ind-val">—</div>
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
-          <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
           <div class="ind-expand" id="indExpandSupertrend"></div>
         </div>
       </div>
@@ -4717,7 +4711,6 @@ function renderIndicators(d) {
       </div>
       <div class="ind-desc">${colorizeNumbers(c.desc)}</div>
       <div class="ind-raw">${c.raw}</div>
-      ${c.bar}
       <div class="ind-expand"></div>
     </div>`;
   }).join('');
@@ -10234,86 +10227,83 @@ var _indExpandData = {};
 
 function storeIndicatorExpandData(d) {
   if (!d) return;
+  // Indices MUST match the card order in renderIndicators():
+  // 0=RSI, 1=Divergence, 2=EMA, 3=MACD, 4=BB, 5=Supertrend, 6=Volume
+  var div = d.rsi_divergence || {};
   _indExpandData = {
-    0: { // RSI
-      title: 'RSI (14) — Detailed',
+    0: { // RSI — Momentum Gauge
+      title: 'Momentum Gauge',
       rows: [
-        ['Current RSI', d.rsi != null ? d.rsi.toFixed(1) : '—', d.rsi>50?'g':'r'],
-        ['Zone', d.rsi>70?'Overbought':d.rsi>50?'Momentum':d.rsi>30?'Weak':'Oversold', d.rsi>70?'r':d.rsi>50?'g':d.rsi>30?'a':'r'],
-        ['Bias', d.rsi>50?'Bullish ↑':'Bearish ↓', d.rsi>50?'g':'r'],
-        ['Room to OB', d.rsi != null ? (70-d.rsi).toFixed(1)+' pts' : '—', 'a'],
-        ['Divergence', d.rsi_divergence || (d.rsi>50?'Bullish':'None detected'), d.rsi>50?'g':''],
+        ['RSI Value', d.rsi != null ? d.rsi.toFixed(1) : '—', d.rsi>50?'g':'r'],
+        ['Zone', d.rsi>70?'Overbought (caution)':d.rsi>50?'Bullish momentum':d.rsi>30?'Weak / neutral':'Oversold (opportunity)', d.rsi>70?'r':d.rsi>50?'g':d.rsi>30?'a':'g'],
+        ['Direction', d.rsi>50?'Buyers leading ↑':'Sellers leading ↓', d.rsi>50?'g':'r'],
       ],
-      note: 'RSI 50-70 = momentum zone. Above 70 = overbought risk. Below 30 = oversold opportunity.'
+      note: 'RSI measures buying vs selling pressure. Above 50 = buyers winning. Above 70 = overheated. Below 30 = potential bounce.'
     },
-    1: { // MACD
-      title: 'MACD (12, 26, 9) — Detailed',
+    1: { // Divergence Signal
+      title: 'Divergence Signal',
       rows: [
-        ['MACD Line', d.macd_line != null ? d.macd_line.toFixed(2) : '—', d.macd_line>0?'g':'r'],
-        ['Signal Line', d.macd_signal_line != null ? d.macd_signal_line.toFixed(2) : '—', ''],
-        ['Histogram', d.macd_hist != null ? d.macd_hist.toFixed(2) : '—', d.macd_hist>0?'g':'r'],
-        ['Cross', d.macd_signal || '—', (d.macd_signal||'').includes('Bull')?'g':'r'],
-        ['Trend', d.macd_hist>0?'Expanding bullish':'Contracting', d.macd_hist>0?'g':'r'],
+        ['Type', div.label || 'None detected', div.type==='bullish'?'g':div.type==='bearish'?'r':''],
+        ['Strength', div.strength ? div.strength+'%' : '—', div.strength>50?'g':'a'],
+        ['Meaning', div.type==='bullish'?'Price falling but momentum rising — possible bounce':'Price rising but momentum fading — potential reversal', div.type==='bullish'?'g':div.type==='bearish'?'r':'a'],
       ],
-      note: 'MACD crossover above signal = bullish. Expanding histogram = momentum accelerating.'
+      note: 'Divergence = price and momentum disagree. Often signals a trend change is coming.'
     },
-    2: { // EMA
-      title: 'EMA Stack — Detailed',
+    2: { // EMA — Trend Direction
+      title: 'Trend Direction',
       rows: [
-        ['EMA 20', d.ema_20 ? fmt(d.ema_20) : '—', 'a'],
-        ['EMA 50', d.ema_50 ? fmt(d.ema_50) : '—', ''],
-        ['Spread', d.ema_20 && d.ema_50 ? fmt(Math.abs(d.ema_20-d.ema_50)) : '—', d.ema_20>d.ema_50?'g':'r'],
-        ['Stack', d.ema_20>d.ema_50?'Golden (bullish)':'Death cross', d.ema_20>d.ema_50?'g':'r'],
-        ['Price vs EMA', d.price>d.ema_20?'Above both':'Below EMA 20', d.price>d.ema_20?'g':'r'],
+        ['Short-term (EMA 20)', d.ema_20 ? fmt(d.ema_20) : '—', 'a'],
+        ['Medium-term (EMA 50)', d.ema_50 ? fmt(d.ema_50) : '—', ''],
+        ['Trend', d.ema_20>d.ema_50?'Short above long = Uptrend':'Short below long = Downtrend', d.ema_20>d.ema_50?'g':'r'],
+        ['Price Position', d.price>d.ema_20?'Above both averages (strong)':'Below short-term average (weak)', d.price>d.ema_20?'g':'r'],
       ],
-      note: 'Golden stack: EMA 20 > EMA 50, price above both. Classic uptrend structure.'
+      note: 'When the fast average is above the slow average, the trend is up. Price above both = strong uptrend.'
     },
-    3: { // Bollinger
-      title: 'Bollinger Bands (20, 2σ) — Detailed',
+    3: { // MACD — Trend Momentum
+      title: 'Trend Momentum',
+      rows: [
+        ['MACD Line', d.macd_line != null ? d.macd_line.toFixed(3) : '—', d.macd_line>0?'g':'r'],
+        ['Signal Line', d.macd_signal_line != null ? d.macd_signal_line.toFixed(3) : '—', ''],
+        ['Histogram', d.macd_hist != null ? d.macd_hist.toFixed(3) : '—', d.macd_hist>0?'g':'r'],
+        ['Status', d.macd_hist>0?'Bullish momentum growing':'Bearish momentum', d.macd_hist>0?'g':'r'],
+      ],
+      note: 'MACD shows if momentum is speeding up or slowing down. Positive histogram = bulls accelerating.'
+    },
+    4: { // Bollinger — Volatility Range
+      title: 'Volatility Range',
       rows: [
         ['Upper Band', d.bb_upper ? fmt(d.bb_upper) : '—', ''],
-        ['Middle (SMA 20)', d.bb_mid ? fmt(d.bb_mid) : d.ema_20 ? fmt(d.ema_20) : '—', 'a'],
+        ['Middle Band', d.bb_mid ? fmt(d.bb_mid) : d.ema_20 ? fmt(d.ema_20) : '—', 'a'],
         ['Lower Band', d.bb_lower ? fmt(d.bb_lower) : '—', ''],
-        ['Price Position', d.price>(d.bb_mid||d.ema_20||0)?'Above midband':'Below midband', d.price>(d.bb_mid||d.ema_20||0)?'g':'r'],
-        ['Band Width', d.bb_width || 'Expanding', 'a'],
+        ['Where is price?', d.price>(d.bb_mid||d.ema_20||0)?'Upper half (bullish zone)':'Lower half (bearish zone)', d.price>(d.bb_mid||d.ema_20||0)?'g':'r'],
       ],
-      note: 'Price above midband = bullish. Widening bands = volatility expansion with the move.'
+      note: 'Bollinger Bands show the normal trading range. Price near the top = stretched. Price near the bottom = compressed.'
     },
-    4: { // Volume
-      title: 'Volume Analysis — Detailed',
+    5: { // Supertrend — Trend Confirmation
+      title: 'Trend Confirmation',
+      rows: [
+        ['Supertrend', d.supertrend || '—', (d.supertrend||'').includes('BULL')?'g':'r'],
+        ['ATR (volatility)', d.atr ? fmt(d.atr) : '—', 'a'],
+        ['Volatility Level', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'Elevated — reduce position size' : 'Normal', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'r' : 'g'],
+        ['Support', fmt(d.support), 'g'],
+        ['Resistance', fmt(d.resistance), 'r'],
+      ],
+      note: 'Supertrend confirms the overall direction. ATR measures how much the price moves on average — bigger moves = riskier.'
+    },
+    6: { // Volume — Trading Activity
+      title: 'Trading Activity',
       rows: (function() {
         var volU = d.vol_usd || (d.vol_raw && d.price ? d.vol_raw * d.price : 0);
         var avgU = d.vol_avg_usd || (d.vol_avg && d.price ? d.vol_avg * d.price : 0);
         var fv = function(n) { return !n ? '—' : n >= 1e9 ? '$'+(n/1e9).toFixed(1)+'B' : n >= 1e6 ? '$'+(n/1e6).toFixed(1)+'M' : n >= 1e3 ? '$'+(n/1e3).toFixed(1)+'K' : '$'+Math.round(n).toLocaleString(); };
-        var fu = function(n) { return !n ? '—' : n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : Math.round(n).toLocaleString(); };
-        var rows = [
+        return [
           ['Dollar Volume', fv(volU), d.vol_ratio>=1.5?'g':'a'],
-          ['Raw Units', fu(d.vol_raw||0), ''],
-          ['Avg Dollar Vol', fv(avgU), ''],
-          ['Volume Ratio', d.vol_ratio ? d.vol_ratio + '× avg' : '—', d.vol_ratio>=1.5?'g':'a'],
-          ['Confirmation', d.vol_ratio>=1.5?'Institutional ✓':d.vol_ratio>=1.0?'Normal':'Weak', d.vol_ratio>=1.5?'g':d.vol_ratio>=1.0?'a':'r'],
+          ['Average Volume', fv(avgU), ''],
+          ['Volume Ratio', d.vol_ratio ? d.vol_ratio + '× average' : '—', d.vol_ratio>=1.5?'g':'a'],
+          ['What this means', d.vol_ratio>=1.5?'Big players are active — signal is strong':'Normal activity — wait for volume confirmation', d.vol_ratio>=1.5?'g':'a'],
         ];
-        if (d.entry && d.stop_loss) {
-          var rpu = Math.abs(d.entry - d.stop_loss);
-          var lots = rpu > 0 ? (200 / rpu) : 0;
-          rows.push(['Lot Size (2%)', lots >= 1 ? lots.toFixed(1) + ' lots' : lots.toFixed(2) + ' lots', 'a']);
-          rows.push(['Position Value', '$' + (lots * (d.entry||d.price||0)).toFixed(0), 'a']);
-        }
-        return rows;
       })(),
-      note: 'Volume ≥ 1.5× average = institutional participation. Dollar volume shows real market depth.'
-    },
-    5: { // ATR / Supertrend
-      title: 'ATR & Supertrend — Detailed',
-      rows: [
-        ['ATR (14)', d.atr ? fmt(d.atr) : '—', 'a'],
-        ['% of Price', d.atr && d.price ? (d.atr/d.price*100).toFixed(2)+'%' : '—', 'a'],
-        ['Volatility', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'Elevated' : 'Normal', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'r' : 'g'],
-        ['Support', fmt(d.support), 'g'],
-        ['Resistance', fmt(d.resistance), 'r'],
-        ['Position Adj.', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'Reduce size 25%' : 'Normal size OK', 'a'],
-      ],
-      note: 'ATR > 2.5% of price = elevated volatility. Reduce position size to maintain constant dollar risk.'
+      note: 'High volume confirms a move is real. Volume 1.5× above average = institutional (big money) participation.'
     }
   };
 }
@@ -10341,8 +10331,8 @@ document.addEventListener('click', function(e) {
     card.appendChild(expand);
   }
 
-  // Map card index to WWH key
-  var wwhKeyMap = {0:'rsi', 1:'macd', 2:'ema_trend', 3:'bollinger', 4:'volume', 5:'supertrend'};
+  // Map card index to WWH key — must match renderIndicators() order
+  var wwhKeyMap = {0:'rsi', 1:'rsi', 2:'ema_trend', 3:'macd', 4:'bollinger', 5:'supertrend', 6:'volume'};
   var wKey = wwhKeyMap[idx];
 
   if (data && data.rows) {
@@ -10387,21 +10377,52 @@ document.addEventListener('click', function(e) {
   var sellLblEl = fpCards[0] ? fpCards[0].querySelector('.fp-sell-lbl') : null;
 
   if (idx === 0) {
-    // Candle Footprint detail — use live values
+    // Candle Footprint detail — clean, beginner-friendly
     var bLbl = buyLblEl ? buyLblEl.textContent : '—';
     var sLbl = sellLblEl ? sellLblEl.textContent : '—';
     var dVal = fpStatVals.length >= 3 ? fpStatVals[2].textContent : '—';
     var cvdVal = fpStatVals.length >= 4 ? fpStatVals[3].textContent : '—';
-    var dPositive = dVal.includes('+');
+    var dPositive = dVal.includes('+') || (!dVal.includes('-') && dVal !== '0');
     var cvdRising = cvdVal.includes('Rising');
+    var cvdFalling = cvdVal.includes('Falling');
+    // Get poser data from the already-rendered expand area
+    var fpExp = fpCards[0] ? fpCards[0].querySelector('.fp-expand') : null;
+    var poserHTML = fpExp ? fpExp.innerHTML : '';
 
-    expand.innerHTML = '<div class="ep-title">Candle Footprint — Deep Dive</div>' +
-      '<div class="ep-row"><span class="ep-key">Buy/Sell Ratio</span><span class="ep-val ' + (dPositive?'g':'r') + '">' + bLbl + ' / ' + sLbl + '</span></div>' +
-      '<div class="ep-row"><span class="ep-key">True Buyers</span><span class="ep-val g">' + (fpStatVals[0]?fpStatVals[0].textContent:'—') + '</span></div>' +
-      '<div class="ep-row"><span class="ep-key">True Sellers</span><span class="ep-val r">' + (fpStatVals[1]?fpStatVals[1].textContent:'—') + '</span></div>' +
-      '<div class="ep-row"><span class="ep-key">Volume Delta</span><span class="ep-val ' + (dPositive?'g':'r') + '">' + dVal + '</span></div>' +
-      '<div class="ep-row"><span class="ep-key">CVD Trend</span><span class="ep-val ' + (cvdRising?'g':'r') + '">' + cvdVal + '</span></div>' +
-      '<div class="ep-note">Positive delta with rising CVD = genuine accumulation. Negative delta with falling CVD = distribution. Data derived from OHLCV candle structure — buy pressure = (close − low) / (high − low).</div>';
+    // Simple interpretation
+    var interpretation = '';
+    if (dPositive && cvdRising) interpretation = '<span style="color:var(--green);">Buyers are in control.</span> Volume confirms the upward push — this is real buying activity, not fake orders.';
+    else if (!dPositive && cvdFalling) interpretation = '<span style="color:var(--red);">Sellers are dominating.</span> Selling pressure is genuine and increasing. Caution for longs.';
+    else if (dPositive && cvdFalling) interpretation = '<span style="color:var(--amber);">Mixed signals.</span> Current candle shows buying, but the broader trend of money flow is downward. Could be a temporary bounce.';
+    else if (!dPositive && cvdRising) interpretation = '<span style="color:var(--amber);">Mixed signals.</span> Current candle shows selling, but overall money flow is still upward. Likely a pullback, not a reversal.';
+    else interpretation = '<span style="color:var(--muted2);">No clear direction.</span> Buyers and sellers are roughly balanced. Wait for a clearer setup.';
+
+    expand.innerHTML = '<div class="ep-title" style="margin-bottom:10px;">Candle Footprint — What\'s Happening</div>' +
+      // Main interpretation — plain English
+      '<div style="padding:10px 12px;background:rgba(245,166,35,.04);border-left:3px solid var(--amber);border-radius:0 4px 4px 0;margin-bottom:12px;font-size:12px;line-height:1.6;">' + interpretation + '</div>' +
+      // Key numbers in a clean grid
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">' +
+        '<div style="padding:8px;background:rgba(255,255,255,.03);border-radius:4px;">' +
+          '<div style="font-size:9px;color:var(--muted);letter-spacing:.5px;margin-bottom:3px;">WHO\'S BUYING</div>' +
+          '<div style="font-size:16px;font-weight:700;color:var(--green);">' + bLbl + '</div>' +
+        '</div>' +
+        '<div style="padding:8px;background:rgba(255,255,255,.03);border-radius:4px;">' +
+          '<div style="font-size:9px;color:var(--muted);letter-spacing:.5px;margin-bottom:3px;">WHO\'S SELLING</div>' +
+          '<div style="font-size:16px;font-weight:700;color:var(--red);">' + sLbl + '</div>' +
+        '</div>' +
+        '<div style="padding:8px;background:rgba(255,255,255,.03);border-radius:4px;">' +
+          '<div style="font-size:9px;color:var(--muted);letter-spacing:.5px;margin-bottom:3px;">NET PRESSURE</div>' +
+          '<div style="font-size:14px;font-weight:700;color:' + (dPositive ? 'var(--green)' : 'var(--red)') + ';">' + dVal + '</div>' +
+          '<div style="font-size:9px;color:var(--muted);">Difference between buyers &amp; sellers</div>' +
+        '</div>' +
+        '<div style="padding:8px;background:rgba(255,255,255,.03);border-radius:4px;">' +
+          '<div style="font-size:9px;color:var(--muted);letter-spacing:.5px;margin-bottom:3px;">MONEY FLOW TREND</div>' +
+          '<div style="font-size:14px;font-weight:700;color:' + (cvdRising ? 'var(--green)' : cvdFalling ? 'var(--red)' : 'var(--amber)') + ';">' + cvdVal + '</div>' +
+          '<div style="font-size:9px;color:var(--muted);">Cumulative buying vs selling over 20 bars</div>' +
+        '</div>' +
+      '</div>' +
+      // Poser section — reuse the already-computed poser content
+      (poserHTML ? '<div style="margin-top:4px;">' + poserHTML + '</div>' : '');
   } else {
     // Order Flow detail — use live support/resistance
     var liqAbove = currentData && currentData.resistance ? fmt(currentData.resistance) : '—';
