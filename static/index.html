@@ -1421,6 +1421,25 @@ body::before{
 .sim-path-card .sim-expand{display:none;margin-top:8px;padding:10px 12px;border-top:1px solid var(--border);font-size:11px;line-height:1.7;font-family:var(--mono);}
 .sim-path-card.expanded .sim-expand{display:block;}
 
+/* ── Multi-TF Scanner Table ── */
+.scan-mtf-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;}
+.scan-mtf-table th{padding:6px 8px;text-align:center;font-size:9px;letter-spacing:1px;color:var(--amber);border-bottom:1px solid var(--border);}
+.scan-mtf-table td{padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;}
+.scan-mtf-table tr:hover td{background:rgba(245,166,35,.04);}
+.scan-mtf-cell{display:flex;flex-direction:column;align-items:center;gap:2px;}
+.scan-mtf-pill{padding:1px 6px;border-radius:2px;font-size:9px;font-weight:700;letter-spacing:.5px;}
+.scan-mtf-pill.buy{background:rgba(0,201,141,.15);color:var(--green);}
+.scan-mtf-pill.sell{background:rgba(255,68,89,.15);color:var(--red);}
+.scan-mtf-pill.hold{background:rgba(255,255,255,.05);color:var(--muted);}
+.scan-mtf-rsi{font-size:8px;color:var(--muted);}
+
+/* ── Backtest Ticker Buttons ── */
+.bt-ticker-btn{padding:6px 14px;background:var(--bg2);border:1px solid var(--border2);color:var(--white);border-radius:3px;font-family:var(--mono);font-size:11px;cursor:pointer;transition:all .15s;}
+.bt-ticker-btn:hover{border-color:var(--amber);color:var(--amber);background:rgba(245,166,35,.06);}
+
+/* ── Trade Alert Banner ── */
+.trade-alert-banner{display:none;align-items:center;gap:8px;padding:8px 14px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.2);border-radius:4px;font-family:var(--mono);font-size:11px;color:var(--white);margin-bottom:8px;}
+
 </style>
 </head>
 <body>
@@ -1633,6 +1652,12 @@ body::before{
 
       <!-- CHART -->
       <div class="chart-section">
+        <!-- Trade Alert Banner -->
+        <div id="tradeAlertBanner" class="trade-alert-banner">
+          <span style="color:var(--amber);font-weight:700;">⚡ TRADE ALERT</span>
+          <span>Trade setup forming...</span>
+        </div>
+
         <div class="chart-topbar">
           <span class="ct-title" id="chartTitle">— / —</span>
           <div class="tf-pills">
@@ -2454,7 +2479,8 @@ body::before{
         <option value="commodities">Commodities</option><option value="metals">Metals</option><option value="energy_comm">Energy Commodities</option>
       </select>
       <select id="scanTF" style="padding:7px 10px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:11px;">
-        <option value="1h">1H</option><option value="4h" selected>4H</option><option value="1d">1D</option>
+        <option value="all" selected>ALL TF</option>
+        <option value="15m">15m</option><option value="1h">1H</option><option value="4h">4H</option><option value="1d">1D</option><option value="1w">1W</option>
       </select>
       <button id="scanBtn" onclick="runScanner()" style="padding:7px 16px; background:var(--amber); color:#0C0A08; border:none; border-radius:3px; font-family:var(--mono); font-size:11px; font-weight:700; cursor:pointer;">RUN SCAN</button>
     </div>
@@ -2477,9 +2503,62 @@ body::before{
 
 <!-- ════════════ BACKTEST TAB ════════════ -->
 <div id="tab-backtest" class="tab-panel">
-  <div id="btEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center;">
-    <svg viewBox="0 0 80 80" width="120" height="120" style="opacity:0.15;"><circle cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".6" fill="none"/><circle cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".8" fill="none"/><circle cx="40" cy="40" r="16" stroke="var(--amber)" stroke-width="1" fill="none"/><circle cx="40" cy="40" r="2.5" fill="var(--amber)"/></svg>
-    <div style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.15);letter-spacing:1.5px;text-transform:uppercase;margin-top:16px;">Analyze a ticker to run backtests</div>
+  <div id="btEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center;width:100%;">
+    <svg viewBox="0 0 80 80" width="80" height="80" style="opacity:0.15;"><circle cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".6" fill="none"/><circle cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".8" fill="none"/><circle cx="40" cy="40" r="16" stroke="var(--amber)" stroke-width="1" fill="none"/><circle cx="40" cy="40" r="2.5" fill="var(--amber)"/></svg>
+    <div style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:1.5px;text-transform:uppercase;margin:12px 0 20px;">Select an instrument to backtest</div>
+    <div style="max-width:600px;width:100%;">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--amber);letter-spacing:1px;margin-bottom:8px;text-align:left;">CRYPTO</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
+        <button class="bt-ticker-btn" onclick="quickLoad('BTC','crypto','4h')">BTC</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('ETH','crypto','4h')">ETH</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('SOL','crypto','4h')">SOL</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('XRP','crypto','4h')">XRP</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('BNB','crypto','4h')">BNB</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('ADA','crypto','4h')">ADA</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('AVAX','crypto','4h')">AVAX</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('DOT','crypto','4h')">DOT</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('LINK','crypto','4h')">LINK</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('DOGE','crypto','4h')">DOGE</button>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--amber);letter-spacing:1px;margin-bottom:8px;text-align:left;">STOCKS</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
+        <button class="bt-ticker-btn" onclick="quickLoad('AAPL','stock','1d')">AAPL</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('MSFT','stock','1d')">MSFT</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('NVDA','stock','1d')">NVDA</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('AMZN','stock','1d')">AMZN</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('GOOGL','stock','1d')">GOOGL</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('META','stock','1d')">META</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('TSLA','stock','1d')">TSLA</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('AMD','stock','1d')">AMD</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('JPM','stock','1d')">JPM</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('V','stock','1d')">V</button>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--amber);letter-spacing:1px;margin-bottom:8px;text-align:left;">FOREX</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
+        <button class="bt-ticker-btn" onclick="quickLoad('EURUSD','forex','4h')">EUR/USD</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('GBPUSD','forex','4h')">GBP/USD</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('USDJPY','forex','4h')">USD/JPY</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('AUDUSD','forex','4h')">AUD/USD</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('USDCHF','forex','4h')">USD/CHF</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('NZDUSD','forex','4h')">NZD/USD</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('USDCAD','forex','4h')">USD/CAD</button>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--amber);letter-spacing:1px;margin-bottom:8px;text-align:left;">COMMODITIES</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
+        <button class="bt-ticker-btn" onclick="quickLoad('GOLD','commodity','4h')">GOLD</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('SILVER','commodity','4h')">SILVER</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('OIL','commodity','4h')">OIL</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('NATGAS','commodity','4h')">NATGAS</button>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--amber);letter-spacing:1px;margin-bottom:8px;text-align:left;">INDICES (ETFs)</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+        <button class="bt-ticker-btn" onclick="quickLoad('SPY','stock','1d')">SPY</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('QQQ','stock','1d')">QQQ</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('IWM','stock','1d')">IWM</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('DIA','stock','1d')">DIA</button>
+        <button class="bt-ticker-btn" onclick="quickLoad('GLD','stock','1d')">GLD</button>
+      </div>
+    </div>
   </div>
   <div id="backtestPanel" style="display:none;">
   <div class="backtest-layout" id="btContent">
@@ -2757,17 +2836,14 @@ shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">
     <button class="cd-close" onclick="toggleChat()">✕</button>
   </div>
   <div class="cd-msgs" id="cdMsgs">
-    <div class="cd-msg">
+    <div class="cd-msg" id="cdWelcome">
       <div class="cd-avatar">AI</div>
-      <div class="cd-bubble">Signal detected on BTC/USD 4H — <strong>BUY</strong> at $83,241, 75% confidence. Structure break confirmed above $82,400, supported by FVG fill and stop sweep at $80,980. Targeting $87,500 (TP1). Ask me anything.</div>
+      <div class="cd-bubble">Welcome to DotVerse AI. Analyze an instrument and I'll provide context-aware insights on signals, strategy, risk, and more.</div>
     </div>
   </div>
-  <div class="cd-chips">
-    <button class="cd-chip" onclick="chipAsk(this)">Why BUY now?</button>
-    <button class="cd-chip" onclick="chipAsk(this)">Simulate trade</button>
-    <button class="cd-chip" onclick="chipAsk(this)">Key risks?</button>
-    <button class="cd-chip" onclick="chipAsk(this)">Best entry?</button>
-    <button class="cd-chip" onclick="chipAsk(this)">Position size?</button>
+  <div class="cd-chips" id="cdChips">
+    <button class="cd-chip" onclick="chipAsk(this)">How does this work?</button>
+    <button class="cd-chip" onclick="chipAsk(this)">What can I ask?</button>
   </div>
   <div class="cd-input-row">
     <input class="cd-input" id="cdInput" placeholder="Ask about this signal..." onkeydown="if(event.key==='Enter')chatSend()">
@@ -3391,6 +3467,7 @@ async function doAnalyze(ticker, assetType, timeframe) {
     // old renderResults removed — Concept 5 v2 only
     try { addToHistory(d); } catch(e) {}
     try { runBacktest(d, true); } catch(e) {}
+    try { updateChatContext(d); } catch(e) {}
     // Show content areas, hide empty states for all tabs
     var btE = document.getElementById('btEmpty'); if (btE) btE.style.display = 'none';
     var btP = document.getElementById('backtestPanel'); if (btP) btP.style.display = '';
@@ -4755,39 +4832,90 @@ async function runScanner() {
   const btn = document.getElementById('scanBtn');
   btn.disabled = true; btn.textContent = 'Scanning...';
   var totalCount = p.tickers.length;
-  document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0;">Scanning ' + totalCount + ' instruments — may take 20-40s...</div>';
+  var isMultiTF = tf === 'all';
+  var tfList = isMultiTF ? ['15m','1h','4h','1d','1w'] : [tf];
+  var scanMsg = isMultiTF ? 'Scanning ' + totalCount + ' instruments across 5 timeframes — may take 60-120s...' : 'Scanning ' + totalCount + ' instruments — may take 20-40s...';
+  document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0;">' + scanMsg + '</div>';
   // Hide static mock table
   var mockTable = document.querySelector('#tab-scanner > .scanner-layout > .scan-table'); if (mockTable) mockTable.style.display = 'none';
   try {
-    if (p.asset_type === 'mixed') {
-      // Split by asset type for mixed presets
-      var cryptoTickers = ['BTC','ETH','SOL','XRP','BNB','ADA','AVAX','DOT','LINK','LTC','DOGE'];
-      var forexTickers = ['EURUSD','GBPUSD','USDJPY','AUDUSD'];
-      var commTickers = ['GOLD','SILVER','OIL','NATGAS'];
-      var stockTickers = p.tickers.filter(t => !cryptoTickers.includes(t) && !forexTickers.includes(t) && !commTickers.includes(t));
-      var batches = [];
-      var cBatch = p.tickers.filter(t => cryptoTickers.includes(t));
-      var fBatch = p.tickers.filter(t => forexTickers.includes(t));
-      var cmBatch = p.tickers.filter(t => commTickers.includes(t));
-      if (cBatch.length) batches.push({tickers:cBatch, asset_type:'crypto'});
-      if (stockTickers.length) batches.push({tickers:stockTickers, asset_type:'stock'});
-      if (fBatch.length) batches.push({tickers:fBatch, asset_type:'forex'});
-      if (cmBatch.length) batches.push({tickers:cmBatch, asset_type:'commodity'});
-      var allResults = [];
-      for (var b of batches) {
-        try {
-          var r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:b.tickers,asset_type:b.asset_type,timeframe:tf})});
-          var data = await r.json();
-          (data.results||[]).forEach(function(res){ res.asset_type = b.asset_type; });
-          allResults = allResults.concat(data.results||[]);
-        } catch(e) { /* skip batch */ }
+    if (isMultiTF) {
+      // Multi-timeframe scanning
+      var resultsByTicker = {};
+      if (p.asset_type === 'mixed') {
+        var cryptoTickers = ['BTC','ETH','SOL','XRP','BNB','ADA','AVAX','DOT','LINK','LTC','DOGE'];
+        var forexTickers = ['EURUSD','GBPUSD','USDJPY','AUDUSD'];
+        var commTickers = ['GOLD','SILVER','OIL','NATGAS'];
+        var stockTickers = p.tickers.filter(t => !cryptoTickers.includes(t) && !forexTickers.includes(t) && !commTickers.includes(t));
+        var batches = [];
+        var cBatch = p.tickers.filter(t => cryptoTickers.includes(t));
+        var fBatch = p.tickers.filter(t => forexTickers.includes(t));
+        var cmBatch = p.tickers.filter(t => commTickers.includes(t));
+        if (cBatch.length) batches.push({tickers:cBatch, asset_type:'crypto'});
+        if (stockTickers.length) batches.push({tickers:stockTickers, asset_type:'stock'});
+        if (fBatch.length) batches.push({tickers:fBatch, asset_type:'forex'});
+        if (cmBatch.length) batches.push({tickers:cmBatch, asset_type:'commodity'});
+
+        for (var currentTF of tfList) {
+          for (var b of batches) {
+            try {
+              var r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:b.tickers,asset_type:b.asset_type,timeframe:currentTF})});
+              var data = await r.json();
+              (data.results||[]).forEach(function(res){
+                res.asset_type = b.asset_type;
+                if (!resultsByTicker[res.ticker]) resultsByTicker[res.ticker] = {};
+                resultsByTicker[res.ticker][currentTF] = res;
+              });
+            } catch(e) { /* skip batch */ }
+          }
+        }
+        renderScanResultsMultiTF(resultsByTicker, 'mixed');
+      } else {
+        for (var currentTF of tfList) {
+          try {
+            var r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:p.tickers,asset_type:p.asset_type,timeframe:currentTF})});
+            var data = await r.json();
+            (data.results||[]).forEach(function(res){
+              res.asset_type = p.asset_type;
+              if (!resultsByTicker[res.ticker]) resultsByTicker[res.ticker] = {};
+              resultsByTicker[res.ticker][currentTF] = res;
+            });
+          } catch(e) { /* skip TF */ }
+        }
+        renderScanResultsMultiTF(resultsByTicker, p.asset_type);
       }
-      renderScanResults(allResults, 'mixed');
     } else {
-      const r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:p.tickers,asset_type:p.asset_type,timeframe:tf})});
-      const data = await r.json();
-      (data.results||[]).forEach(function(res){ res.asset_type = p.asset_type; });
-      renderScanResults(data.results || [], p.asset_type);
+      // Single timeframe scanning (original logic)
+      if (p.asset_type === 'mixed') {
+        // Split by asset type for mixed presets
+        var cryptoTickers = ['BTC','ETH','SOL','XRP','BNB','ADA','AVAX','DOT','LINK','LTC','DOGE'];
+        var forexTickers = ['EURUSD','GBPUSD','USDJPY','AUDUSD'];
+        var commTickers = ['GOLD','SILVER','OIL','NATGAS'];
+        var stockTickers = p.tickers.filter(t => !cryptoTickers.includes(t) && !forexTickers.includes(t) && !commTickers.includes(t));
+        var batches = [];
+        var cBatch = p.tickers.filter(t => cryptoTickers.includes(t));
+        var fBatch = p.tickers.filter(t => forexTickers.includes(t));
+        var cmBatch = p.tickers.filter(t => commTickers.includes(t));
+        if (cBatch.length) batches.push({tickers:cBatch, asset_type:'crypto'});
+        if (stockTickers.length) batches.push({tickers:stockTickers, asset_type:'stock'});
+        if (fBatch.length) batches.push({tickers:fBatch, asset_type:'forex'});
+        if (cmBatch.length) batches.push({tickers:cmBatch, asset_type:'commodity'});
+        var allResults = [];
+        for (var b of batches) {
+          try {
+            var r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:b.tickers,asset_type:b.asset_type,timeframe:tf})});
+            var data = await r.json();
+            (data.results||[]).forEach(function(res){ res.asset_type = b.asset_type; });
+            allResults = allResults.concat(data.results||[]);
+          } catch(e) { /* skip batch */ }
+        }
+        renderScanResults(allResults, 'mixed');
+      } else {
+        const r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:p.tickers,asset_type:p.asset_type,timeframe:tf})});
+        const data = await r.json();
+        (data.results||[]).forEach(function(res){ res.asset_type = p.asset_type; });
+        renderScanResults(data.results || [], p.asset_type);
+      }
     }
   } catch(e) {
     document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--red);">Scan failed. Try again.</div>';
@@ -4828,9 +4956,42 @@ function renderScanResults(results, assetType) {
   }).join('') + '</tbody></table>';
 }
 
+function renderScanResultsMultiTF(resultsByTicker, assetType) {
+  var tickers = Object.keys(resultsByTicker).sort();
+  if (!tickers.length) { document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);">No results.</div>'; return; }
+  document.querySelectorAll('#tab-scanner > .scanner-layout > .scan-table').forEach(function(t) { t.style.display = 'none'; });
+  var mf = document.getElementById('scanFilterRow') || document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
+  var tfList = ['15m','1h','4h','1d','1w'];
+  var html = '<table class="scan-mtf-table"><thead><tr><th>Symbol</th>';
+  tfList.forEach(function(tf) { html += '<th>' + tf.toUpperCase() + '</th>'; });
+  html += '</tr></thead><tbody>';
+  tickers.forEach(function(ticker) {
+    var tfResults = resultsByTicker[ticker];
+    html += '<tr onclick="quickLoad(\'' + ticker + '\',\'' + assetType + '\',\'4h\')" style="cursor:pointer;">';
+    html += '<td style="text-align:left;font-weight:700;color:var(--amber);">' + ticker + '</td>';
+    tfList.forEach(function(tf) {
+      var res = tfResults[tf];
+      var sig = res ? (res.signal_hint || 'HOLD') : '—';
+      var rsi = res ? (res.rsi != null ? res.rsi.toFixed(1) : '—') : '—';
+      var sigClass = sig === 'BUY' || sig.includes('BUY') ? 'buy' : sig === 'SELL' || sig.includes('SELL') ? 'sell' : 'hold';
+      html += '<td onclick="event.stopPropagation();quickLoad(\'' + ticker + '\',\'' + assetType + '\',\'' + tf + '\')" style="cursor:pointer;">';
+      html += '<div class="scan-mtf-cell">';
+      html += '<div class="scan-mtf-pill ' + sigClass + '">' + (sig === 'COUNTER_BUY' ? 'CTR' : sig === 'POSSIBLE_BUY' ? 'PBY' : sig === 'POSSIBLE_SELL' ? 'PSL' : sig) + '</div>';
+      html += '<div class="scan-mtf-rsi">' + rsi + '</div>';
+      html += '</div>';
+      html += '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('scanResults').innerHTML = html;
+}
+
 // Scanner filter buttons
 var _lastScanResults = [];
 var _lastScanAssetType = 'crypto';
+var _lastScanResultsByTicker = null;
+var _lastScanIsMultiTF = false;
 var _origRunScanner = runScanner;
 runScanner = async function() {
   await _origRunScanner();
@@ -4840,21 +5001,55 @@ var _origRenderScanResults = renderScanResults;
 renderScanResults = function(results, assetType) {
   _lastScanResults = results;
   _lastScanAssetType = assetType;
+  _lastScanResultsByTicker = null;
+  _lastScanIsMultiTF = false;
   _origRenderScanResults(results, assetType);
+};
+// Patch renderScanResultsMultiTF to store last results
+var _origRenderScanResultsMultiTF = renderScanResultsMultiTF;
+renderScanResultsMultiTF = function(resultsByTicker, assetType) {
+  _lastScanResults = [];
+  _lastScanResultsByTicker = resultsByTicker;
+  _lastScanIsMultiTF = true;
+  _lastScanAssetType = assetType;
+  _origRenderScanResultsMultiTF(resultsByTicker, assetType);
 };
 function filterScanResults(filter, btn) {
   document.querySelectorAll('.scan-filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  if (!_lastScanResults.length) return;
-  var filtered = _lastScanResults;
-  if (filter === 'buy') filtered = _lastScanResults.filter(r => r.signal_hint && (r.signal_hint.includes('BUY')));
-  else if (filter === 'sell') filtered = _lastScanResults.filter(r => r.signal_hint && (r.signal_hint.includes('SELL')));
-  else if (filter === 'highconf') filtered = _lastScanResults.filter(r => r.confidence && parseInt(r.confidence) >= 65);
-  else if (filter === 'crypto') filtered = _lastScanResults.filter(r => r.asset_type === 'crypto');
-  else if (filter === 'forex') filtered = _lastScanResults.filter(r => r.asset_type === 'forex');
-  else if (filter === 'equities') filtered = _lastScanResults.filter(r => r.asset_type === 'stock');
-  else if (filter === 'commodities') filtered = _lastScanResults.filter(r => r.asset_type === 'commodity');
-  _origRenderScanResults(filtered, _lastScanAssetType);
+  if (_lastScanIsMultiTF) {
+    var filtered = {};
+    var src = _lastScanResultsByTicker;
+    if (filter === 'all') { filtered = src; }
+    else if (filter === 'buy') {
+      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.signal_hint && r.signal_hint.includes('BUY'); })) filtered[tk] = src[tk]; });
+    } else if (filter === 'sell') {
+      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.signal_hint && r.signal_hint.includes('SELL'); })) filtered[tk] = src[tk]; });
+    } else if (filter === 'highconf') {
+      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.confidence && parseInt(r.confidence) >= 65; })) filtered[tk] = src[tk]; });
+    } else if (filter === 'crypto') {
+      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.asset_type === 'crypto'; })) filtered[tk] = src[tk]; });
+    } else if (filter === 'forex') {
+      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.asset_type === 'forex'; })) filtered[tk] = src[tk]; });
+    } else if (filter === 'equities') {
+      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.asset_type === 'stock'; })) filtered[tk] = src[tk]; });
+    } else if (filter === 'commodities') {
+      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.asset_type === 'commodity'; })) filtered[tk] = src[tk]; });
+    } else { filtered = src; }
+    _origRenderScanResultsMultiTF(filtered, _lastScanAssetType);
+  } else {
+    // For single-TF results, apply original filters
+    if (!_lastScanResults.length) return;
+    var filtered = _lastScanResults;
+    if (filter === 'buy') filtered = _lastScanResults.filter(r => r.signal_hint && (r.signal_hint.includes('BUY')));
+    else if (filter === 'sell') filtered = _lastScanResults.filter(r => r.signal_hint && (r.signal_hint.includes('SELL')));
+    else if (filter === 'highconf') filtered = _lastScanResults.filter(r => r.confidence && parseInt(r.confidence) >= 65);
+    else if (filter === 'crypto') filtered = _lastScanResults.filter(r => r.asset_type === 'crypto');
+    else if (filter === 'forex') filtered = _lastScanResults.filter(r => r.asset_type === 'forex');
+    else if (filter === 'equities') filtered = _lastScanResults.filter(r => r.asset_type === 'stock');
+    else if (filter === 'commodities') filtered = _lastScanResults.filter(r => r.asset_type === 'commodity');
+    _origRenderScanResults(filtered, _lastScanAssetType);
+  }
 }
 
 /* ════════════════════════════════════════════
@@ -7808,6 +8003,9 @@ function renderResultsV2(d) {
     }
   }
 
+  // Update trade alert banner
+  try { updateTradeAlert(d); } catch(e) { console.warn('updateTradeAlert:', e); }
+
   console.log('[dotverse] renderResultsV2 complete for', d.ticker);
 }
 
@@ -7821,6 +8019,52 @@ function updatePillStyles() {
       btn.style.background = 'var(--bg2)'; btn.style.color = 'var(--muted2)'; btn.style.border = '1px solid var(--border)'; btn.style.fontWeight = '600';
     }
   });
+}
+
+/* ═══ TRADE ALERT BANNER ═══ */
+function updateTradeAlert(d) {
+  var banner = document.getElementById('tradeAlertBanner');
+  if (!banner) return;
+  var alerts = [];
+  var rsi = parseFloat(d.rsi);
+  var price = parseFloat(d.price);
+  var entry = parseFloat(d.entry);
+  var sl = parseFloat(d.stop_loss);
+
+  // RSI extremes
+  if (rsi && rsi < 35) alerts.push('RSI oversold (' + rsi.toFixed(1) + ') — bounce setup forming');
+  else if (rsi && rsi > 70) alerts.push('RSI overbought (' + rsi.toFixed(1) + ') — reversal watch');
+
+  // Price near entry zone
+  if (price && entry && Math.abs(price - entry) / price < 0.01)
+    alerts.push('Price at entry zone — ' + d.signal + ' trigger imminent');
+
+  // Price near support/SL
+  if (price && sl && Math.abs(price - sl) / price < 0.015)
+    alerts.push('Price testing support near SL — watch for reaction');
+
+  // Volume surge
+  if (d.vol_ratio && d.vol_ratio >= 2)
+    alerts.push('Volume surge ' + d.vol_ratio.toFixed(1) + '× — institutional activity');
+
+  // EMA convergence
+  if (d.ema_trend && d.ema_trend.toUpperCase() === 'MIXED')
+    alerts.push('EMAs converging — trend shift possible');
+
+  if (alerts.length) {
+    banner.innerHTML = '<span style="color:var(--amber);font-weight:700;">⚡ TRADE ALERT</span> <span>' + alerts[0] + '</span>' +
+      (alerts.length > 1 ? '<span style="opacity:.5;margin-left:8px;">+' + (alerts.length-1) + ' more</span>' : '');
+    banner.style.display = 'flex';
+  } else {
+    // Check if signal is BUY or SELL (active opportunity)
+    if (d.signal && d.signal !== 'HOLD') {
+      var entryStr = entry ? entry.toLocaleString(undefined,{maximumFractionDigits:4}) : '—';
+      banner.innerHTML = '<span style="color:var(--amber);font-weight:700;">⚡ ACTIVE</span> <span>' + d.signal + ' signal at ' + (d.confidence || '') + ' confidence — entry at ' + entryStr + '</span>';
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
 }
 
 </script>
@@ -8740,6 +8984,8 @@ function switchMainTab(name, btn) {
       try { seRunEngine(); } catch(e) { console.warn('seRunEngine auto:', e); }
     }
   }
+  // Update chat context when tab switches
+  try { updateChatContext(currentData, name); } catch(e) {}
 }
 
 // ─── CHART OVERLAYS ───
@@ -9594,11 +9840,78 @@ const replies = {
 function chipAsk(chip) {
   var text = chip.textContent;
   addMsg(text, 'user');
-  // Use the context-aware chat system instead of static replies
+  // Send to AI endpoint first, fallback to local
   var d = currentData;
   var activeTab = document.querySelector('.nav-tab.active');
   var tabName = activeTab ? activeTab.textContent.trim().toLowerCase() : 'signals';
-  setTimeout(function() { addMsg(_buildContextReply(text, d, tabName), 'ai'); }, 600);
+  var aiPayload = {
+    message: text,
+    context: {
+      tab: tabName, ticker: d ? d.ticker : null, signal: d ? d.signal : null,
+      price: d ? d.price : null, rsi: d ? d.rsi : null, timeframe: d ? d.timeframe : null,
+      asset_type: d ? d.asset_type : null, confidence: d ? d.confidence : null,
+      entry: d ? d.entry : null, stop_loss: d ? d.stop_loss : null, tp1: d ? d.tp1 : null,
+      ema_trend: d ? d.ema_trend : null, narrative: d ? d.narrative : null
+    }
+  };
+  fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(aiPayload) })
+  .then(function(r) { return r.json(); })
+  .then(function(res) { addMsg(res.reply || _buildContextReply(text, d, tabName), 'ai'); })
+  .catch(function() { addMsg(_buildContextReply(text, d, tabName), 'ai'); });
+}
+
+/* ── Dynamic chat context — updates welcome + chips per page/tab/signal ── */
+function updateChatContext(d, tabOverride) {
+  var welcome = document.getElementById('cdWelcome');
+  var chips = document.getElementById('cdChips');
+  if (!chips) return;
+  var activeTab = tabOverride || (document.querySelector('.nav-tab.active') ? document.querySelector('.nav-tab.active').textContent.trim().toLowerCase() : 'signals');
+  var sig = d ? (d.signal||'HOLD').toUpperCase() : 'HOLD';
+  var ticker = d ? (d.ticker||'') : '';
+  var price = d && d.price ? '$' + parseFloat(d.price).toLocaleString(undefined,{maximumFractionDigits:4}) : '';
+  var conf = d ? (d.confidence||'') : '';
+
+  // Update welcome message
+  if (welcome && d) {
+    var bubble = welcome.querySelector('.cd-bubble');
+    if (bubble) {
+      if (sig === 'BUY' || sig === 'SELL' || sig === 'POSSIBLE_BUY' || sig === 'POSSIBLE_SELL' || sig === 'COUNTER_BUY') {
+        bubble.innerHTML = '<strong>' + sig.replace('_',' ') + '</strong> signal on <strong>' + ticker + '</strong> at ' + price + ' — ' + conf + ' confidence. Ask me anything about this setup.';
+      } else {
+        bubble.innerHTML = '<strong>' + ticker + '</strong> is at ' + price + ' with a <strong>HOLD</strong> signal. No clear entry right now. Ask me what to watch for or about the indicators.';
+      }
+    }
+  }
+
+  // Build dynamic chips based on tab + signal
+  var chipList = [];
+  if (activeTab.includes('signal') || activeTab.includes('overview')) {
+    if (sig === 'HOLD') {
+      chipList = ['What should I watch for?', 'When might a signal trigger?', 'Key support/resistance?', 'How are indicators aligned?', 'Volume analysis?'];
+    } else if (sig.includes('BUY')) {
+      chipList = ['Why ' + sig.replace('_',' ') + ' now?', 'Best entry point?', 'Where is the stop loss?', 'Target prices?', 'Position size?'];
+    } else {
+      chipList = ['Why ' + sig.replace('_',' ') + '?', 'Where to short?', 'Stop loss level?', 'Downside targets?', 'Key risks?'];
+    }
+  } else if (activeTab.includes('order') || activeTab.includes('flow')) {
+    chipList = ['Who is buying/selling?', 'Are there fake orders?', 'What does delta say?', 'Stacked imbalances?', 'Liquidity zones?'];
+  } else if (activeTab.includes('strateg')) {
+    chipList = ['Which strategy triggered?', 'What are the gate conditions?', 'Explain the pattern', 'Confidence level?', 'Historical accuracy?'];
+  } else if (activeTab.includes('backtest')) {
+    chipList = ['Is this strategy profitable?', 'What\'s the max drawdown?', 'Win rate analysis?', 'Best timeframe?', 'Risk-reward ratio?'];
+  } else if (activeTab.includes('simul')) {
+    chipList = ['Bull case scenario?', 'Bear case risks?', 'Most likely outcome?', 'Key catalysts?', 'Probability breakdown?'];
+  } else if (activeTab.includes('trade') || activeTab.includes('manage')) {
+    chipList = ['Explain the entry plan', 'Where are the TPs?', 'Risk per trade?', 'When to move stop?', 'Scaling strategy?'];
+  } else if (activeTab.includes('scan')) {
+    chipList = ['Best opportunity now?', 'Strongest signal?', 'Which sector is hot?', 'Crypto vs stocks?', 'High confidence picks?'];
+  } else {
+    chipList = d ? ['Explain the signal', 'Key indicators', 'Risk assessment', 'Trade plan'] : ['How does this work?', 'What can I ask?'];
+  }
+
+  chips.innerHTML = chipList.map(function(q) {
+    return '<button class="cd-chip" onclick="chipAsk(this)">' + q + '</button>';
+  }).join('');
 }
 
 function chatSend() {
