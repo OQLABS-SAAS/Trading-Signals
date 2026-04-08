@@ -2029,14 +2029,14 @@ body::before{
         </div>
         <!-- QP symbols -->
         <div class="se-qp-syms" id="seQPSyms">
-          <button class="se-qp-sym active-sym" onclick="sePickSym(this,'BTC-USD')">BTC</button>
-          <button class="se-qp-sym" onclick="sePickSym(this,'ETH-USD')">ETH</button>
-          <button class="se-qp-sym" onclick="sePickSym(this,'SOL-USD')">SOL</button>
-          <button class="se-qp-sym" onclick="sePickSym(this,'XRP-USD')">XRP</button>
-          <button class="se-qp-sym" onclick="sePickSym(this,'BNB-USD')">BNB</button>
-          <button class="se-qp-sym" onclick="sePickSym(this,'DOGE-USD')">DOGE</button>
-          <button class="se-qp-sym" onclick="sePickSym(this,'ADA-USD')">ADA</button>
-          <button class="se-qp-sym" onclick="sePickSym(this,'AVAX-USD')">AVAX</button>
+          <button class="se-qp-sym active-sym" data-sym="BTC-USD" onclick="sePickSym(this,'BTC-USD')">BTC</button>
+          <button class="se-qp-sym" data-sym="ETH-USD" onclick="sePickSym(this,'ETH-USD')">ETH</button>
+          <button class="se-qp-sym" data-sym="SOL-USD" onclick="sePickSym(this,'SOL-USD')">SOL</button>
+          <button class="se-qp-sym" data-sym="XRP-USD" onclick="sePickSym(this,'XRP-USD')">XRP</button>
+          <button class="se-qp-sym" data-sym="BNB-USD" onclick="sePickSym(this,'BNB-USD')">BNB</button>
+          <button class="se-qp-sym" data-sym="DOGE-USD" onclick="sePickSym(this,'DOGE-USD')">DOGE</button>
+          <button class="se-qp-sym" data-sym="ADA-USD" onclick="sePickSym(this,'ADA-USD')">ADA</button>
+          <button class="se-qp-sym" data-sym="AVAX-USD" onclick="sePickSym(this,'AVAX-USD')">AVAX</button>
         </div>
         <input class="se-input" type="text" placeholder="Custom symbol (e.g. BTC-USD)" style="margin-bottom:0;" oninput="this.value=this.value.toUpperCase()">
       </div>
@@ -2070,8 +2070,8 @@ body::before{
       <!-- Run + Auto-refresh -->
       <div class="strat-sidebar-section">
         <button class="se-run-btn" id="seRunBtn" onclick="seRunEngine()">RUN ENGINE</button>
-        <button class="se-scan-btn" onclick="runScanner()">SCAN ALL</button>
-        <button class="se-matrix-btn" onclick="seRunEngine()">MATRIX SCAN — ALL TF × HTF × R:R</button>
+        <button class="se-scan-btn" onclick="seScanAll()">SCAN ALL</button>
+        <button class="se-matrix-btn" onclick="seMatrixScan()">MATRIX SCAN — ALL TF × HTF × R:R</button>
 
         <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
           <span style="font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:.4px;">AUTO-REFRESH:</span>
@@ -8224,6 +8224,121 @@ function sePickTab(idx) {
 function seMode(m) {
   document.getElementById('seModeS').className = 'se-mode-btn' + (m==='single' ? ' active' : '');
   document.getElementById('seModeM').className = 'se-mode-btn' + (m==='multi' ? ' active' : '');
+  // Clear selections when switching modes
+  if (m === 'single') {
+    document.querySelectorAll('#seQPSyms .se-qp-sym.active-sym').forEach(function(b, i) {
+      if (i > 0) b.classList.remove('active-sym');
+    });
+  }
+}
+
+async function seScanAll(filterSignal) {
+  // filterSignal: optional 'BUY' or 'SELL' to only show matching results
+  var btn = document.querySelector('.se-scan-btn');
+  if (btn) { btn.textContent = 'SCANNING...'; btn.disabled = true; }
+  var matBtn = document.querySelector('.se-matrix-btn');
+  if (matBtn) matBtn.disabled = true;  // disable matrix during scan
+
+  try {
+    // Collect all quick pick symbols
+    var syms = [];
+    document.querySelectorAll('#seQPSyms .se-qp-sym').forEach(function(el) {
+      var sym = el.getAttribute('data-sym') || el.textContent.trim();
+      if (sym) syms.push(sym);
+    });
+
+    if (syms.length === 0) syms = ['BTC-USD','ETH-USD','SOL-USD','XRP-USD','BNB-USD'];
+
+    // Detect asset type from active category
+    var activeCat = document.querySelector('.se-qp-cats .se-qp-cat.active');
+    var catName = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
+    var assetMap = { crypto:'crypto', forex:'forex', stocks:'stock', indices:'index' };
+    var scanAssetType = assetMap[catName] || 'crypto';
+
+    var tf = (currentData && currentData.timeframe) ? currentData.timeframe : '4h';
+    var seTfSelect = document.querySelector('.strat-sidebar select');
+    if (seTfSelect) tf = seTfSelect.value || tf;
+
+    var results = [];
+    var errors  = 0;
+
+    // Show stratMain, hide stratEmpty
+    var sm = document.getElementById('stratMain'); if (sm) sm.style.display = '';
+    var se = document.getElementById('stratEmpty'); if (se) se.style.display = 'none';
+
+    // Show progress in psText
+    var psText = document.querySelector('.se-ps-text');
+    if (psText) psText.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--amber);">Scanning 0/' + syms.length + '...</div>';
+
+    // Scan each symbol
+    for (var i = 0; i < syms.length; i++) {
+      if (psText) psText.querySelector('div').textContent = 'Scanning ' + (i+1) + '/' + syms.length + ' — ' + syms[i] + '...';
+      try {
+        var r = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ ticker: syms[i], timeframe: tf, asset_type: scanAssetType })
+        });
+        var d = await r.json();
+        if (!d.error) {
+          results.push({
+            ticker: d.ticker || syms[i],
+            signal: d.signal || 'HOLD',
+            confidence: d.confidence || '—',
+            price: d.price || 0,
+            rsi: d.rsi || '—',
+            entry: d.entry,
+            stop_loss: d.stop_loss,
+            tp1: d.tp1
+          });
+        } else {
+          errors++;
+        }
+      } catch(e) { errors++; console.warn('Scan error for', syms[i], e); }
+    }
+
+    // Filter results if requested (BUY only, SELL only)
+    var displayed = filterSignal ? results.filter(function(r) { return r.signal === filterSignal; }) : results;
+
+    // Display results in the strategy main area
+    if (psText) {
+      var filterLabel = filterSignal ? (filterSignal + ' SIGNALS') : 'ALL SIGNALS';
+      var html = '<div style="font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--amber);margin-bottom:6px;">' + filterLabel + ' — ' + displayed.length + '/' + results.length + ' instruments' + (errors ? ' (' + errors + ' errors)' : '') + '</div>';
+      // Filter buttons row
+      html += '<div style="display:flex;gap:4px;margin-bottom:10px;">';
+      html += '<button class="rb-btn' + (!filterSignal ? ' active' : '') + '" onclick="seScanAll()" style="font-size:9px;">ALL</button>';
+      html += '<button class="rb-btn' + (filterSignal==='BUY' ? ' active' : '') + '" onclick="seScanAll(\'BUY\')" style="font-size:9px;color:var(--green);">BUY ONLY</button>';
+      html += '<button class="rb-btn' + (filterSignal==='SELL' ? ' active' : '') + '" onclick="seScanAll(\'SELL\')" style="font-size:9px;color:var(--red);">SELL ONLY</button>';
+      html += '</div>';
+
+      if (displayed.length > 0) {
+        html += '<div style="display:grid;gap:6px;">';
+        displayed.forEach(function(r) {
+          var sigColor = r.signal === 'BUY' ? 'var(--green)' : r.signal === 'SELL' ? 'var(--red)' : 'var(--amber)';
+          html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:3px;cursor:pointer;" onclick="document.querySelector(\'#seQPSyms input\') ? document.querySelector(\'#seQPSyms input\').value=\'' + r.ticker + '\' : 0;seRunEngine();">';
+          html += '<span style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--white);min-width:70px;">' + r.ticker + '</span>';
+          html += '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + sigColor + ';min-width:40px;">' + r.signal + '</span>';
+          html += '<span style="font-family:var(--mono);font-size:10px;color:var(--muted2);">' + r.confidence + '</span>';
+          html += '<span style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-left:auto;">RSI ' + (typeof r.rsi === 'number' ? parseFloat(r.rsi).toFixed(1) : r.rsi) + '</span>';
+          if (r.entry) html += '<span style="font-family:var(--mono);font-size:10px;color:var(--muted);">E: ' + parseFloat(r.entry).toLocaleString() + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:16px 0;">No ' + (filterSignal || '') + ' signals found in current scan.</div>';
+      }
+      psText.innerHTML = html;
+    }
+
+    showToast('Scanned ' + results.length + ' instruments' + (errors ? ', ' + errors + ' errors' : ''));
+  } catch(outerErr) {
+    console.error('seScanAll error:', outerErr);
+    showToast('Scan failed: ' + outerErr.message);
+  } finally {
+    // ALWAYS restore buttons
+    if (btn) { btn.textContent = 'SCAN ALL'; btn.disabled = false; }
+    if (matBtn) matBtn.disabled = false;
+  }
 }
 
 function seQPCat(btn, cat) {
@@ -8236,12 +8351,16 @@ function seQPCat(btn, cat) {
     indices: ['SPX','NDX','DJI','FTSE','DAX','NIKKEI']
   };
   const syms = document.getElementById('seQPSyms');
-  syms.innerHTML = (maps[cat] || maps.crypto).map(s => `<button class="se-qp-sym" onclick="sePickSym(this,'${s}')">${s}</button>`).join('');
+  syms.innerHTML = (maps[cat] || maps.crypto).map(s => `<button class="se-qp-sym" data-sym="${s}" onclick="sePickSym(this,'${s}')">${s}</button>`).join('');
 }
 
 function sePickSym(btn, sym) {
-  btn.closest('.se-qp-syms').querySelectorAll('.se-qp-sym').forEach(b => b.classList.remove('active-sym'));
-  btn.classList.add('active-sym');
+  var isMulti = document.getElementById('seModeM').classList.contains('active');
+  if (!isMulti) {
+    // Single mode: deselect all, select this one
+    btn.closest('.se-qp-syms').querySelectorAll('.se-qp-sym').forEach(b => b.classList.remove('active-sym'));
+  }
+  btn.classList.toggle('active-sym');
 }
 
 var seRefreshTimer = null;
@@ -8277,15 +8396,40 @@ function seRunEngine() {
   btn.disabled = true;
   btn.style.opacity = '.6';
 
-  // Use current ticker or default
-  const ticker = (currentData && currentData.ticker) ? currentData.ticker : 'BTC-USD';
-  const tf = (currentData && currentData.timeframe) ? currentData.timeframe : '4h';
+  // Check Quick Pick selection first
+  var activeSym = document.querySelector('#seQPSyms .se-qp-sym.active-sym');
+  var customInput = document.querySelector('#seQPSyms').parentNode.querySelector('input[type="text"]');
+  var ticker, assetType;
+
+  // Detect asset type from active category
+  var activeCat = document.querySelector('.se-qp-cats .se-qp-cat.active');
+  var catName = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
+  var catAssetMap = { crypto:'crypto', forex:'forex', stocks:'stock', indices:'index' };
+
+  if (activeSym) {
+    ticker = activeSym.getAttribute('data-sym') || activeSym.textContent.trim();
+    assetType = catAssetMap[catName] || 'crypto';
+  } else if (customInput && customInput.value.trim()) {
+    ticker = customInput.value.trim();
+    assetType = catAssetMap[catName] || 'crypto';
+  } else if (currentData && currentData.ticker) {
+    ticker = currentData.ticker;
+    assetType = currentData.asset_type || 'crypto';
+  } else {
+    ticker = 'BTC-USD';
+    assetType = 'crypto';
+  }
+
+  var tf = (currentData && currentData.timeframe) ? currentData.timeframe : '4h';
+  // Check if there's a timeframe selector in strategy sidebar
+  var seTfSelect = document.querySelector('.strat-sidebar select');
+  if (seTfSelect) tf = seTfSelect.value || tf;
 
   // Fire analysis and populate strategy engine with results
   fetch('/api/analyze', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ ticker: ticker, timeframe: tf, asset_type: 'crypto' })
+    body: JSON.stringify({ ticker: ticker, timeframe: tf, asset_type: assetType })
   })
   .then(r => r.json())
   .then(d => {
@@ -8377,6 +8521,113 @@ function seRunEngine() {
     btn.style.opacity = '';
     showToast('Engine error: ' + e.message);
   });
+}
+
+async function seMatrixScan() {
+  var btn = document.querySelector('.se-matrix-btn');
+  var scanBtn = document.querySelector('.se-scan-btn');
+  if (btn) { btn.textContent = 'SCANNING MATRIX...'; btn.disabled = true; }
+  if (scanBtn) scanBtn.disabled = true;
+
+  try {
+    var activeSym = document.querySelector('#seQPSyms .se-qp-sym.active-sym');
+    var customInput = document.querySelector('#seQPSyms') ? document.querySelector('#seQPSyms').parentNode.querySelector('input[type="text"]') : null;
+    var ticker;
+
+    if (activeSym) {
+      ticker = activeSym.getAttribute('data-sym') || activeSym.textContent.trim();
+    } else if (customInput && customInput.value.trim()) {
+      ticker = customInput.value.trim();
+    } else if (currentData && currentData.ticker) {
+      ticker = currentData.ticker;
+    } else {
+      ticker = 'BTC-USD';
+    }
+
+    // Detect asset type from active category
+    var activeCat = document.querySelector('.se-qp-cats .se-qp-cat.active');
+    var catName = activeCat ? activeCat.textContent.trim().toLowerCase() : 'crypto';
+    var assetMap = { crypto:'crypto', forex:'forex', stocks:'stock', indices:'index' };
+    var scanAssetType = assetMap[catName] || 'crypto';
+
+    var timeframes = ['15m', '1h', '4h', '1d'];
+    var results = [];
+
+    var sm = document.getElementById('stratMain'); if (sm) sm.style.display = '';
+    var se = document.getElementById('stratEmpty'); if (se) se.style.display = 'none';
+
+    var psText = document.querySelector('.se-ps-text');
+    if (psText) psText.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--amber);">Matrix scanning ' + ticker + '...</div>';
+
+    for (var i = 0; i < timeframes.length; i++) {
+      if (psText) psText.querySelector('div').textContent = 'Scanning ' + ticker + ' ' + timeframes[i].toUpperCase() + '...';
+      try {
+        var r = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ ticker: ticker, timeframe: timeframes[i], asset_type: scanAssetType })
+        });
+        var d = await r.json();
+        if (!d.error) {
+          results.push({
+            tf: timeframes[i].toUpperCase(),
+            signal: d.signal || 'HOLD',
+            confidence: d.confidence || '—',
+            rsi: d.rsi || '—',
+            ema_trend: d.ema_trend || '—',
+            vol_ratio: d.vol_ratio || '—',
+            entry: d.entry,
+            stop_loss: d.stop_loss,
+            tp1: d.tp1,
+            rr1: d.rr1
+          });
+        }
+      } catch(e) { console.warn('Matrix error for', timeframes[i], e); }
+    }
+
+  var psText = document.querySelector('.se-ps-text');
+  if (psText && results.length > 0) {
+    var html = '<div style="font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--amber);margin-bottom:10px;">MATRIX SCAN — ' + ticker + '</div>';
+    // Header
+    html += '<div style="display:grid;grid-template-columns:60px 60px 70px 55px 65px 60px 70px;gap:1px;font-family:var(--mono);font-size:10px;color:var(--muted);padding:6px 0;border-bottom:1px solid var(--border);">';
+    html += '<span>TF</span><span>Signal</span><span>Conf</span><span>RSI</span><span>Trend</span><span>Vol</span><span>R:R</span></div>';
+    // Rows
+    results.forEach(function(r) {
+      var sigColor = r.signal === 'BUY' ? 'var(--green)' : r.signal === 'SELL' ? 'var(--red)' : 'var(--amber)';
+      html += '<div style="display:grid;grid-template-columns:60px 60px 70px 55px 65px 60px 70px;gap:1px;font-family:var(--mono);font-size:11px;padding:8px 0;border-bottom:1px solid var(--border);">';
+      html += '<span style="color:var(--white);font-weight:700;">' + r.tf + '</span>';
+      html += '<span style="color:' + sigColor + ';font-weight:700;">' + r.signal + '</span>';
+      html += '<span style="color:var(--muted2);">' + r.confidence + '</span>';
+      html += '<span style="color:var(--muted2);">' + (typeof r.rsi === 'number' ? parseFloat(r.rsi).toFixed(1) : r.rsi) + '</span>';
+      html += '<span style="color:' + (String(r.ema_trend).includes('bull') ? 'var(--green)' : String(r.ema_trend).includes('bear') ? 'var(--red)' : 'var(--amber)') + ';">' + r.ema_trend + '</span>';
+      html += '<span style="color:var(--muted2);">' + (typeof r.vol_ratio === 'number' ? parseFloat(r.vol_ratio).toFixed(1) + 'x' : r.vol_ratio) + '</span>';
+      html += '<span style="color:var(--muted2);">' + (r.rr1 ? '1:' + parseFloat(r.rr1).toFixed(1) : '—') + '</span>';
+      html += '</div>';
+    });
+
+    // Summary
+    var buys = results.filter(function(r) { return r.signal === 'BUY'; }).length;
+    var sells = results.filter(function(r) { return r.signal === 'SELL'; }).length;
+    var holds = results.length - buys - sells;
+    html += '<div style="margin-top:10px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:3px;font-family:var(--mono);font-size:11px;">';
+    html += '<span style="color:var(--green);">BUY: ' + buys + '</span> · ';
+    html += '<span style="color:var(--red);">SELL: ' + sells + '</span> · ';
+    html += '<span style="color:var(--amber);">HOLD: ' + holds + '</span> · ';
+    html += '<span style="color:var(--muted2);">Consensus: </span>';
+    html += '<span style="color:' + (buys > sells ? 'var(--green)' : sells > buys ? 'var(--red)' : 'var(--amber)') + ';font-weight:700;">' + (buys > sells ? 'BULLISH' : sells > buys ? 'BEARISH' : 'NEUTRAL') + '</span>';
+    html += '</div>';
+
+    psText.innerHTML = html;
+  }
+
+  showToast('Matrix scan complete for ' + ticker);
+  } catch(outerErr) {
+    console.error('seMatrixScan error:', outerErr);
+    showToast('Matrix scan failed: ' + outerErr.message);
+  } finally {
+    if (btn) { btn.textContent = 'MATRIX SCAN — ALL TF × HTF × R:R'; btn.disabled = false; }
+    if (scanBtn) scanBtn.disabled = false;
+  }
 }
 
 // ─── TRADE PLAN VIEW: Auto/Daily/Weekly/Monthly ───

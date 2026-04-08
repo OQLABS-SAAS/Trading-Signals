@@ -687,8 +687,11 @@ def build_ind_from_tv(tv):
 # ─── MULTI-SOURCE CHART DATA ──────────────────────────────────
 # Tries sources in order until one works. Yahoo Finance is blocked on Railway IPs,
 # so we try Binance (crypto) and Stooq (stocks/forex) first.
-def _build_chart_output(dates_raw, prices_raw, vols_raw, timeframe, max_bars=200):
-    """Helper: trim, compute EMAs, return (dates, prices, vols, ema20, ema50)."""
+def _build_chart_output(dates_raw, prices_raw, vols_raw, timeframe, max_bars=200,
+                        opens_raw=None, highs_raw=None, lows_raw=None):
+    """Helper: trim, compute EMAs, return tuple.
+    Returns (dates, prices, vols, ema20, ema50) when no OHLC provided,
+    or (dates, prices, vols, ema20, ema50, opens, highs, lows) when OHLC is available."""
     dates_raw  = dates_raw[-max_bars:]
     prices_raw = prices_raw[-max_bars:]
     vols_raw   = vols_raw[-max_bars:]
@@ -704,7 +707,10 @@ def _build_chart_output(dates_raw, prices_raw, vols_raw, timeframe, max_bars=200
             out.append(round(ema, 6))
         return out
 
-    return dates_raw, prices_raw, vols_raw, _ema(prices_raw, 20), _ema(prices_raw, min(50, len(prices_raw)-1))
+    base = (dates_raw, prices_raw, vols_raw, _ema(prices_raw, 20), _ema(prices_raw, min(50, len(prices_raw)-1)))
+    if opens_raw and highs_raw and lows_raw:
+        return base + (opens_raw[-max_bars:], highs_raw[-max_bars:], lows_raw[-max_bars:])
+    return base
 
 
 def _fetch_binance(ticker, timeframe):
@@ -729,19 +735,21 @@ def _fetch_binance(ticker, timeframe):
             return None
 
         dt_fmt = "%H:%M" if timeframe in ("5m","15m","30m","1h") else "%b %d"
-        dates, prices, vols = [], [], []
+        dates, opens, highs, lows, prices, vols = [], [], [], [], [], []
         for k in klines:
             ts = int(k[0]) // 1000
-            c  = float(k[4])
-            v  = float(k[5])
             dates.append(datetime.utcfromtimestamp(ts).strftime(dt_fmt))
-            prices.append(round(c, 6))
-            vols.append(int(v))
+            opens.append(round(float(k[1]), 6))
+            highs.append(round(float(k[2]), 6))
+            lows.append(round(float(k[3]), 6))
+            prices.append(round(float(k[4]), 6))
+            vols.append(int(float(k[5])))
 
         if len(prices) < 10:
             return None
         print(f"[binance] OK — {sym} {interval}: {len(prices)} bars")
-        return _build_chart_output(dates, prices, vols, timeframe)
+        return _build_chart_output(dates, prices, vols, timeframe,
+                                   opens_raw=opens, highs_raw=highs, lows_raw=lows)
     except Exception as e:
         print(f"[binance] error {sym}: {e}")
         return None
@@ -2206,7 +2214,13 @@ def analyze():
             if not chart_result:
                 chart_result = fetch_chart_direct(ticker, asset_type, timeframe)
             if chart_result:
-                dates_c, prices_c, vols_c, ema20_c, ema50_c = chart_result
+                if len(chart_result) == 8:
+                    dates_c, prices_c, vols_c, ema20_c, ema50_c, opens_c, highs_c, lows_c = chart_result
+                    ind["chart_opens"]  = opens_c
+                    ind["chart_highs"]  = highs_c
+                    ind["chart_lows"]   = lows_c
+                else:
+                    dates_c, prices_c, vols_c, ema20_c, ema50_c = chart_result
                 ind["chart_dates"]   = dates_c
                 ind["chart_prices"]  = prices_c
                 ind["chart_volumes"] = vols_c
@@ -2219,6 +2233,38 @@ def analyze():
                     ind.setdefault("rsi",   50.0)
                     ind.setdefault("ema_trend", "MIXED")
                 yf_ok = bool(chart_result)
+
+        # ── STEP 2b: If chart arrays are STILL empty, fetch chart from direct sources ──
+        # This handles the case where TV succeeded (gives indicators but no chart)
+        # and yfinance returned empty WITHOUT raising an exception (common on Railway).
+        if not ind.get("chart_prices"):
+            print(f"[analyze] chart_prices still empty — trying fetch_chart_direct fallback")
+            chart_fb = fetch_chart_direct(ticker, asset_type, timeframe)
+            if chart_fb:
+                # _build_chart_output returns 5-tuple or 8-tuple (with OHLC)
+                if len(chart_fb) == 8:
+                    dates_c, prices_c, vols_c, ema20_c, ema50_c, opens_c, highs_c, lows_c = chart_fb
+                    ind["chart_opens"]  = opens_c
+                    ind["chart_highs"]  = highs_c
+                    ind["chart_lows"]   = lows_c
+                else:
+                    dates_c, prices_c, vols_c, ema20_c, ema50_c = chart_fb
+                    ind.setdefault("chart_opens",  [])
+                    ind.setdefault("chart_highs",  [])
+                    ind.setdefault("chart_lows",   [])
+                ind["chart_dates"]   = dates_c
+                ind["chart_prices"]  = prices_c
+                ind["chart_volumes"] = vols_c
+                ind["chart_ema20"]   = ema20_c
+                ind["chart_ema50"]   = ema50_c
+                ind.setdefault("chart_bb_upper", [None] * len(prices_c))
+                ind.setdefault("chart_bb_lower", [None] * len(prices_c))
+                ind.setdefault("chart_rsi",      [None] * len(prices_c))
+                ind.setdefault("chart_buy_signals",  [])
+                ind.setdefault("chart_sell_signals", [])
+                print(f"[analyze] chart fallback OK — {len(prices_c)} bars from direct sources")
+            else:
+                print(f"[analyze] chart fallback also failed — chart will show 'unavailable'")
 
         # Hard fail only when BOTH TV and yfinance/Stooq are unavailable
         if not tv_ok and not yf_ok:
