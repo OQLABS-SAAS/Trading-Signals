@@ -1458,6 +1458,7 @@ body::before{
           <div class="sig-btns">
             <button class="btn-primary" onclick="switchMainTab('simulation',document.querySelector('.nav-tab:nth-child(5)'));if(currentData)runSimulation();">Simulate Trade</button>
             <button class="btn-ghost" onclick="togglePineCode()">Pine Script</button>
+            <button class="btn-ghost" id="alertBtn" onclick="toggleWatch()" style="border-color:var(--amber);color:var(--amber);">🔔 Alert Me</button>
           </div>
         </div>
       </div>
@@ -2324,32 +2325,84 @@ body::before{
     <svg viewBox="0 0 80 80" width="120" height="120" style="opacity:0.15;"><circle cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".6" fill="none"/><circle cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".8" fill="none"/><circle cx="40" cy="40" r="16" stroke="var(--amber)" stroke-width="1" fill="none"/><circle cx="40" cy="40" r="2.5" fill="var(--amber)"/></svg>
     <div style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.15);letter-spacing:1.5px;text-transform:uppercase;margin-top:16px;">Analyze a ticker to run backtests</div>
   </div>
-  <div class="backtest-layout" id="btContent" style="display:none;">
+  <div id="backtestPanel" style="display:none;">
+  <div class="backtest-layout" id="btContent">
+    <div id="backtestLoading" style="display:none;text-align:center;padding:40px;font-family:var(--mono);font-size:12px;color:var(--amber);">
+      <div style="margin-bottom:8px;">⏳ Running backtest...</div>
+      <div style="width:40px;height:40px;border:2px solid var(--border);border-top-color:var(--amber);border-radius:50%;margin:0 auto;animation:spin 1s linear infinite;"></div>
+    </div>
+    <div id="backtestError" style="display:none;text-align:center;padding:40px;font-family:var(--mono);font-size:12px;color:var(--red);"></div>
+    <div id="backtestResults">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
       <h2 style="font-family:var(--disp);font-size:24px;font-weight:900;letter-spacing:-.5px;">Strategy Backtest</h2>
       <div style="display:flex;gap:10px;align-items:center;">
-        <span style="font-family:var(--mono);font-size:12px;color:var(--muted2);">BTC/USD · 4H · Last 90 days</span>
+        <span id="backtestPeriod" style="font-family:var(--mono);font-size:12px;color:var(--muted2);">—</span>
         <button class="btn-primary" onclick="if(currentData){showToast('Running backtest for '+currentData.ticker+'...');try{runBacktest(currentData,true);}catch(e){showToast('Backtest: '+e.message);}}" style="padding:8px 16px;font-size:11px;">Run New Test</button>
       </div>
     </div>
     <div class="bt-stats-row">
-      <div class="bt-stat"><div class="bt-stat-lbl">Total Return</div><div class="bt-stat-val pos">+42.8%</div></div>
-      <div class="bt-stat"><div class="bt-stat-lbl">Win Rate</div><div class="bt-stat-val neu">64.3%</div></div>
-      <div class="bt-stat"><div class="bt-stat-lbl">Avg R:R</div><div class="bt-stat-val neu">1 : 2.3</div></div>
-      <div class="bt-stat"><div class="bt-stat-lbl">Max Drawdown</div><div class="bt-stat-val neg">−8.4%</div></div>
-      <div class="bt-stat"><div class="bt-stat-lbl">Sharpe Ratio</div><div class="bt-stat-val pos">1.84</div></div>
-      <div class="bt-stat"><div class="bt-stat-lbl">Total Trades</div><div class="bt-stat-val neu">28</div></div>
+      <div class="bt-stat" onclick="toggleBtStatDetail(this,'return')" style="cursor:pointer;transition:all .2s;">
+        <div class="bt-stat-lbl">Total Return</div>
+        <div class="bt-stat-val pos" id="btPnlPct">—</div>
+        <div class="bt-stat-sub" id="btPnlUsd" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;">—</div>
+        <div class="bt-stat-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6;"></div>
+      </div>
+      <div class="bt-stat" onclick="toggleBtStatDetail(this,'winrate')" style="cursor:pointer;transition:all .2s;">
+        <div class="bt-stat-lbl">Win Rate</div>
+        <div class="bt-stat-val neu" id="btWinRate">—</div>
+        <div class="bt-stat-sub" id="btWL" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;">—</div>
+        <div class="bt-stat-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6;"></div>
+      </div>
+      <div class="bt-stat" onclick="toggleBtStatDetail(this,'rr')" style="cursor:pointer;transition:all .2s;">
+        <div class="bt-stat-lbl">Avg R:R</div>
+        <div class="bt-stat-val neu" style="font-size:20px;"><span id="btAvgWin" style="color:var(--green);">—</span> / <span id="btAvgLoss" style="color:var(--red);">—</span></div>
+        <div class="bt-stat-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6;"></div>
+      </div>
+      <div class="bt-stat" onclick="toggleBtStatDetail(this,'drawdown')" style="cursor:pointer;transition:all .2s;">
+        <div class="bt-stat-lbl">Max Drawdown</div>
+        <div class="bt-stat-val neg" id="btDdPct">—</div>
+        <div class="bt-stat-sub" id="btDdUsd" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;">—</div>
+        <div class="bt-stat-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6;"></div>
+      </div>
+      <div class="bt-stat" onclick="toggleBtStatDetail(this,'pf')" style="cursor:pointer;transition:all .2s;">
+        <div class="bt-stat-lbl">Profit Factor</div>
+        <div class="bt-stat-val pos" id="btPF">—</div>
+        <div class="bt-stat-sub" id="btTotalR" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;">—</div>
+        <div class="bt-stat-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6;"></div>
+      </div>
+      <div class="bt-stat" onclick="toggleBtStatDetail(this,'trades')" style="cursor:pointer;transition:all .2s;">
+        <div class="bt-stat-lbl">Total Trades</div>
+        <div class="bt-stat-val neu" id="btTrades">—</div>
+        <div class="bt-stat-sub" id="btPeriod" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;">—</div>
+        <div class="bt-stat-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6;"></div>
+      </div>
     </div>
     <!-- Equity curve -->
     <div class="section-card" style="margin-bottom:20px;">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--amber);">Equity Curve</div>
-      <svg viewBox="0 0 960 140" style="width:100%;display:block;">
-        <defs><linearGradient id="eqG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00c98d" stop-opacity=".13"/><stop offset="100%" stop-color="#00c98d" stop-opacity="0"/></linearGradient></defs>
-        <polygon points="0,140 0,110 80,104 160,97 240,101 320,90 400,78 480,72 560,67 640,60 720,54 800,47 960,38 960,140" fill="url(#eqG)"/>
-        <polyline points="0,110 80,104 160,97 240,101 320,90 400,78 480,72 560,67 640,60 720,54 800,47 960,38" fill="none" stroke="#00c98d" stroke-width="2.5"/>
-        <line x1="220" y1="0" x2="220" y2="140" stroke="rgba(255,68,89,.12)" stroke-width="1"/>
-        <line x1="490" y1="0" x2="490" y2="140" stroke="rgba(255,68,89,.08)" stroke-width="1"/>
-      </svg>
+      <canvas id="btEquityCanvas" style="width:100%;height:160px;display:block;"></canvas>
+    </div>
+    <!-- Trade list -->
+    <div class="section-card" style="margin-bottom:20px;">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--amber);">List of Trades</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Click row for details</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="padding:8px 12px;text-align:left;color:var(--muted2);font-size:10px;font-weight:400;letter-spacing:1px;">#</th>
+              <th style="padding:8px 12px;text-align:left;color:var(--muted2);font-size:10px;font-weight:400;letter-spacing:1px;">DATE</th>
+              <th style="padding:8px 12px;text-align:left;color:var(--muted2);font-size:10px;font-weight:400;letter-spacing:1px;">SIGNAL</th>
+              <th style="padding:8px 12px;text-align:center;color:var(--muted2);font-size:10px;font-weight:400;letter-spacing:1px;">EXIT</th>
+              <th style="padding:8px 12px;text-align:right;color:var(--muted2);font-size:10px;font-weight:400;letter-spacing:1px;">R</th>
+              <th style="padding:8px 12px;text-align:right;color:var(--muted2);font-size:10px;font-weight:400;letter-spacing:1px;">P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody id="btTradesTbody"></tbody>
+        </table>
+      </div>
     </div>
     <!-- Pine Script -->
     <div class="pine-section">
@@ -2403,7 +2456,9 @@ shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">
     <span class="pf">strategy.exit</span>(<span class="ps">"L TP2"</span>, <span class="ps">"Long"</span>, qty_percent=<span class="pn">30</span>, stop=sl, limit=tp2)
     <span class="pf">strategy.exit</span>(<span class="ps">"L TP3"</span>, <span class="ps">"Long"</span>, qty_percent=<span class="pn">20</span>, stop=sl, limit=tp3)</pre>
     </div>
-  </div>
+    </div><!-- /backtestResults -->
+  </div><!-- /btContent -->
+  </div><!-- /backtestPanel -->
 </div><!-- /tab-backtest -->
 
 
@@ -4629,10 +4684,10 @@ function openAlertModal() {
   const {ticker, timeframe} = currentData;
   document.getElementById('alertModalSubtitle').textContent =
     `Alerts for ${ticker} · ${timeframe.toUpperCase()}`;
-  document.getElementById('alertModal').classList.add('open');
+  document.getElementById('alertModal').style.display = 'flex';
 }
 function closeAlertModal() {
-  document.getElementById('alertModal').classList.remove('open');
+  document.getElementById('alertModal').style.display = 'none';
 }
 function getModalChannels() {
   const channels = [];
@@ -7293,8 +7348,92 @@ function switchBtTab(tab) {
 }
 
 /* ── Equity curve mini chart ── */
+/* ── Expandable backtest stat boxes ── */
+function toggleBtStatDetail(el, type) {
+  var detail = el.querySelector('.bt-stat-detail');
+  if (!detail) return;
+  var isOpen = detail.style.display !== 'none';
+  // Close all other details first
+  document.querySelectorAll('.bt-stat-detail').forEach(function(d) { d.style.display = 'none'; });
+  document.querySelectorAll('.bt-stat').forEach(function(s) { s.style.borderColor = 'var(--border)'; });
+  if (isOpen) return;
+  var bt = window._lastBt;
+  if (!bt) { detail.innerHTML = '<span style="color:var(--muted2);">Run a backtest first</span>'; detail.style.display = 'block'; return; }
+  var html = '';
+  var green = 'var(--green)', red = 'var(--red)', amber = 'var(--amber)', muted = 'var(--muted)';
+  if (type === 'return') {
+    var pct = bt.total_pnl_pct || 0;
+    var usd = bt.total_pnl_usd || 0;
+    var initCap = bt.initial_capital || 10000;
+    var finalEq = initCap + usd;
+    html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">' +
+      '<span style="color:' + muted + ';">Initial Capital</span><span style="color:var(--white2);">$' + initCap.toLocaleString() + '</span>' +
+      '<span style="color:' + muted + ';">Final Equity</span><span style="color:' + (finalEq>=initCap?green:red) + ';">$' + finalEq.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span>' +
+      '<span style="color:' + muted + ';">Net P&L</span><span style="color:' + (usd>=0?green:red) + ';">' + (usd>=0?'+':'') + '$' + Math.abs(usd).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span>' +
+      '<span style="color:' + muted + ';">Return %</span><span style="color:' + (pct>=0?green:red) + ';">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</span>' +
+      '<span style="color:' + muted + ';">Risk per Trade</span><span style="color:var(--white2);">$100 (1% of capital)</span>' +
+      '</div>';
+  } else if (type === 'winrate') {
+    var wr = bt.win_rate || 0;
+    var w = bt.wins || 0;
+    var l = bt.losses || 0;
+    var total = bt.total_trades || 0;
+    var tp1Count = 0, tp2Count = 0, tp3Count = 0;
+    if (bt.trades_list) {
+      bt.trades_list.forEach(function(t) {
+        if (t.outcome === 'win_tp1') tp1Count++;
+        else if (t.outcome === 'win_tp2') tp2Count++;
+        else if (t.outcome === 'win_tp3') tp3Count++;
+      });
+    }
+    html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">' +
+      '<span style="color:' + muted + ';">Win Rate</span><span style="color:' + (wr>=60?green:wr>=45?amber:red) + ';">' + wr + '%</span>' +
+      '<span style="color:' + muted + ';">Wins / Losses</span><span style="color:var(--white2);">' + w + ' / ' + l + '</span>' +
+      '<span style="color:' + muted + ';">TP1 Exits</span><span style="color:' + green + ';">' + tp1Count + '</span>' +
+      '<span style="color:' + muted + ';">TP2 Exits</span><span style="color:' + green + ';">' + tp2Count + '</span>' +
+      '<span style="color:' + muted + ';">TP3 Exits</span><span style="color:' + green + ';">' + tp3Count + '</span>' +
+      '<span style="color:' + muted + ';">SL Exits</span><span style="color:' + red + ';">' + l + '</span>' +
+      '</div>';
+  } else if (type === 'rr') {
+    html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">' +
+      '<span style="color:' + muted + ';">Avg Win</span><span style="color:' + green + ';">+' + bt.avg_win_r + 'R</span>' +
+      '<span style="color:' + muted + ';">Avg Loss</span><span style="color:' + red + ';">−' + bt.avg_loss_r + 'R</span>' +
+      '<span style="color:' + muted + ';">Best Trade</span><span style="color:' + green + ';">' + (bt.trades_list ? '+' + Math.max.apply(null, bt.trades_list.map(function(t){return t.r;})).toFixed(2) + 'R' : '—') + '</span>' +
+      '<span style="color:' + muted + ';">Worst Trade</span><span style="color:' + red + ';">' + (bt.trades_list ? Math.min.apply(null, bt.trades_list.map(function(t){return t.r;})).toFixed(2) + 'R' : '—') + '</span>' +
+      '<span style="color:' + muted + ';">Expectancy</span><span style="color:' + (bt.total_r>=0?green:red) + ';">' + (bt.total_trades ? (bt.total_r/bt.total_trades).toFixed(2) : '—') + 'R/trade</span>' +
+      '</div>';
+  } else if (type === 'drawdown') {
+    html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">' +
+      '<span style="color:' + muted + ';">Max Drawdown $</span><span style="color:' + red + ';">−$' + Math.abs(bt.max_dd_usd).toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' +
+      '<span style="color:' + muted + ';">Max Drawdown %</span><span style="color:' + red + ';">−' + bt.max_dd_pct.toFixed(2) + '%</span>' +
+      '<span style="color:' + muted + ';">Recovery</span><span style="color:var(--white2);">' + (bt.equity_curve && bt.equity_curve[bt.equity_curve.length-1] >= bt.initial_capital ? 'Recovered' : 'In drawdown') + '</span>' +
+      '<span style="color:' + muted + ';">Consecutive Losses</span><span style="color:var(--white2);">' + (function(){if(!bt.trades_list)return"—";var mx=0,c=0;bt.trades_list.forEach(function(t){if(t.outcome==="loss"){c++;if(c>mx)mx=c;}else c=0;});return mx;}()) + '</span>' +
+      '</div>';
+  } else if (type === 'pf') {
+    var pf = bt.profit_factor || 0;
+    html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">' +
+      '<span style="color:' + muted + ';">Profit Factor</span><span style="color:' + (pf>=1.5?green:pf>=1?amber:red) + ';">' + (pf>=99?'∞':pf.toFixed(2)) + '</span>' +
+      '<span style="color:' + muted + ';">Total R</span><span style="color:' + (bt.total_r>=0?green:red) + ';">' + (bt.total_r>=0?'+':'') + bt.total_r + 'R</span>' +
+      '<span style="color:' + muted + ';">Gross Profit</span><span style="color:' + green + ';">' + (bt.trades_list ? '+' + bt.trades_list.filter(function(t){return t.r>0;}).reduce(function(s,t){return s+t.pnl_usd;},0).toFixed(2) : '—') + '</span>' +
+      '<span style="color:' + muted + ';">Gross Loss</span><span style="color:' + red + ';">−' + (bt.trades_list ? Math.abs(bt.trades_list.filter(function(t){return t.r<0;}).reduce(function(s,t){return s+t.pnl_usd;},0)).toFixed(2) : '—') + '</span>' +
+      '<span style="color:' + muted + ';">Quality</span><span style="color:' + (pf>=2?green:pf>=1.5?amber:red) + ';">' + (pf>=2?'Excellent':pf>=1.5?'Good':pf>=1?'Marginal':'Poor') + '</span>' +
+      '</div>';
+  } else if (type === 'trades') {
+    html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">' +
+      '<span style="color:' + muted + ';">Total Trades</span><span style="color:var(--white2);">' + bt.total_trades + '</span>' +
+      '<span style="color:' + muted + ';">Bars Tested</span><span style="color:var(--white2);">' + bt.bars_tested + '</span>' +
+      '<span style="color:' + muted + ';">Period</span><span style="color:var(--white2);">' + (bt.period || '—') + '</span>' +
+      '<span style="color:' + muted + ';">Signal</span><span style="color:' + (bt.signal==='BUY'?green:red) + ';">' + bt.signal + '</span>' +
+      '<span style="color:' + muted + ';">Avg Trades/Month</span><span style="color:var(--white2);">~' + Math.round(bt.total_trades / Math.max(1, bt.bars_tested / 30)) + '</span>' +
+      '</div>';
+  }
+  detail.innerHTML = html;
+  detail.style.display = 'block';
+  el.style.borderColor = 'var(--amber)';
+}
+
 function renderEquityChart(equityCurve) {
-  const canvas = document.getElementById('btEquityChart');
+  const canvas = document.getElementById('btEquityCanvas') || document.getElementById('btEquityChart');
   if (!canvas || !equityCurve || equityCurve.length < 2) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.offsetWidth || 400;
@@ -7451,6 +7590,11 @@ async function runBacktest(d, showPanel = true) {
     document.getElementById('btAvgLoss').textContent = '\u2212' + bt.avg_loss_r + 'R';
 
     if (period) period.textContent = bt.period || (bt.bars_tested + ' bars');
+    var btPeriodEl = document.getElementById('btPeriod');
+    if (btPeriodEl) btPeriodEl.textContent = bt.period || (bt.bars_tested + ' bars');
+
+    // ── Store backtest data for expandable stat boxes ──
+    window._lastBt = bt;
 
     // Reveal panel only when explicitly requested (button click)
     if (showPanel) {
@@ -9416,6 +9560,33 @@ function closeSimulate() {
 
 
 <!-- SIMULATION MODAL -->
+<!-- ALERT CHANNEL PICKER MODAL -->
+<div id="alertModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(12,10,8,.9);z-index:600;display:none;align-items:center;justify-content:center;">
+  <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;max-width:380px;width:90%;padding:24px;position:relative;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="font-family:var(--disp);font-size:18px;color:var(--amber);">🔔 Set Alert</h3>
+      <button onclick="closeAlertModal()" style="background:none;border:none;color:var(--muted2);font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <p id="alertModalSubtitle" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:16px;">Alerts for — · —</p>
+    <p style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-bottom:12px;">Choose notification channels:</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;">
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--white2);cursor:pointer;">
+        <input type="checkbox" id="amChkSms" checked style="accent-color:var(--amber);"> 📱 SMS
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--white2);cursor:pointer;">
+        <input type="checkbox" id="amChkWa" style="accent-color:var(--amber);"> 💬 WhatsApp
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--white2);cursor:pointer;">
+        <input type="checkbox" id="amChkTg" style="accent-color:var(--amber);"> ✈️ Telegram
+      </label>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="confirmAlertModal()" style="flex:1;padding:10px;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">Start Watching</button>
+      <button onclick="closeAlertModal()" style="padding:10px 16px;background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-family:var(--mono);font-size:12px;cursor:pointer;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div id="simModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(12,10,8,.9);z-index:600;align-items:center;justify-content:center;">
   <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;max-width:500px;width:90%;padding:24px;position:relative;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
