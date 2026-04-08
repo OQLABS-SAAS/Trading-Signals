@@ -1187,6 +1187,23 @@ body::before{
 .dv-tip .tt-action.r{background:rgba(255,68,89,.12);color:var(--red);border:1px solid rgba(255,68,89,.28);}
 .dv-tip .tt-action.a{background:rgba(245,166,35,.1);color:var(--amber);border:1px solid rgba(245,166,35,.25);}
 [data-tip]{cursor:help;}
+
+/* ═══ INSTRUMENT CHIP BUTTONS ═══ */
+.inst-chip, #instGrid button, #inlineInstRow button, #instChips button {
+  padding:4px 11px;font-size:11px;font-weight:700;font-family:var(--mono);
+  border-radius:3px;border:1px solid var(--border);background:var(--bg2);
+  color:var(--muted2);cursor:pointer;white-space:nowrap;transition:all .15s;
+}
+.inst-chip:hover, #instGrid button:hover, #inlineInstRow button:hover, #instChips button:hover {
+  border-color:var(--amber);color:var(--amber);background:var(--amber-dim);
+}
+.inst-chip.active {
+  border-color:var(--amber);color:#0C0A08;background:var(--amber);font-weight:700;
+}
+.inst-chip .chip-tf, .inst-chip span {
+  font-size:9px;opacity:.55;font-weight:400;margin-left:2px;
+}
+
 </style>
 </head>
 <body>
@@ -3078,16 +3095,11 @@ async function doAnalyze(ticker, assetType, timeframe) {
     currentData = d;
     isWatching = false;
     pushRecentInstrument(d.ticker, d.asset_type, d.timeframe);
-    try {
-      renderResults(d);
-      addToHistory(d);
-      // Silent background run — only populates the win rate badge, panel stays hidden.
-      // The full Strategy Report panel only appears when the user clicks the button.
-      runBacktest(d, false);
-    } catch(renderErr) {
-      console.error('[dotverse] renderResults error:', renderErr);
-      showError('Display error: ' + (renderErr && renderErr.message ? renderErr.message : String(renderErr)));
-    }
+    // Always update the visible Concept 5 v2 UI first
+    try { renderResultsV2(d); } catch(e) { console.warn('renderResultsV2:', e); }
+    try { renderResults(d); } catch(e) { console.warn('old renderResults (expected):', e); }
+    try { addToHistory(d); } catch(e) {}
+    try { runBacktest(d, false); } catch(e) {}
   } catch(e) {
     console.error('[dotverse] fetch error:', e);
     showError(e && e.message && !e.message.includes('fetch') ? 'Error: ' + e.message : 'Network error — check connection and try again.');
@@ -7885,11 +7897,11 @@ recalc();
   }
 
   document.addEventListener('mousemove', function(e) {
-    if (tip.classList.contains('show')) positionTip(e);
+    if (tip && tip.classList && tip.classList.contains('show')) positionTip(e);
   });
 
   document.addEventListener('mouseover', function(e) {
-    const el = e.target.closest('[data-tip]');
+    var el = e.target.closest('[data-tip]');
     if (!el) return;
     clearTimeout(showTimer);
     clearTimeout(hideTimer);
