@@ -2808,6 +2808,68 @@ def scan_list():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/chat", methods=["POST"])
+@login_required
+def api_chat():
+    """Context-aware AI chat — uses current signal data to answer questions."""
+    data = request.get_json(force=True)
+    message = data.get("message", "")
+    context = data.get("context", {})
+
+    ticker = context.get("ticker", "")
+    signal = context.get("signal", "HOLD")
+    price  = context.get("price")
+    rsi    = context.get("rsi")
+    tf     = context.get("timeframe", "4h")
+    atype  = context.get("asset_type", "crypto")
+    conf   = context.get("confidence", "")
+    entry  = context.get("entry")
+    sl     = context.get("stop_loss")
+    tp1    = context.get("tp1")
+    trend  = context.get("ema_trend", "")
+    narr   = context.get("narrative", "")
+
+    # Build a rich context prompt for the AI
+    ctx_parts = []
+    if ticker: ctx_parts.append(f"Ticker: {ticker} ({atype})")
+    if price:  ctx_parts.append(f"Price: ${price}")
+    if signal: ctx_parts.append(f"Signal: {signal}")
+    if conf:   ctx_parts.append(f"Confidence: {conf}")
+    if rsi:    ctx_parts.append(f"RSI: {rsi}")
+    if trend:  ctx_parts.append(f"EMA Trend: {trend}")
+    if entry:  ctx_parts.append(f"Entry: ${entry}")
+    if sl:     ctx_parts.append(f"Stop Loss: ${sl}")
+    if tp1:    ctx_parts.append(f"TP1: ${tp1}")
+    ctx_str = " | ".join(ctx_parts) if ctx_parts else "No instrument loaded"
+
+    system_prompt = (
+        "You are DotVerse AI, a trading assistant embedded in a signal analysis platform. "
+        "Answer concisely (2-4 sentences) using the current signal context. "
+        "Be practical and actionable. Use specific numbers from the context. "
+        f"Current context: {ctx_str}"
+    )
+    if narr:
+        system_prompt += f"\nAI narrative already generated: {narr[:500]}"
+
+    try:
+        import openai
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message},
+            ],
+            max_tokens=300,
+            temperature=0.7,
+        )
+        reply = resp.choices[0].message.content.strip()
+        return jsonify({"reply": reply})
+    except Exception as e:
+        print(f"[chat] AI error: {e}")
+        return jsonify({"reply": None, "error": str(e)})
+
+
 @app.route("/api/prices", methods=["POST"])
 @login_required
 def get_prices():
