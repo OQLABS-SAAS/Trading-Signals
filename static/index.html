@@ -7232,6 +7232,7 @@ function renderFootprint(d) {
 
   // ── Poser analysis: estimate fake/real volume from candle wicks vs body ──
   // Higher wick-to-body ratio suggests spoofed/fake orders that didn't hold
+  // Store globally so the deep-dive click handler can use it without re-reading innerHTML
   var poserBuyPct = 0, poserSellPct = 0;
   var recentBars = Math.min(20, n);
   var wickBuySum = 0, wickSellSum = 0, bodySum = 0;
@@ -7250,6 +7251,16 @@ function renderFootprint(d) {
   var realSellPct = 100 - poserSellPct;
   var realBuyers = Math.round(trueBuyers * realBuyPct / 100);
   var realSellers = Math.round(trueSellers * realSellPct / 100);
+
+  // Store poser data globally for deep-dive click handler
+  window._fpPoserData = {
+    realBuyPct: realBuyPct, poserBuyPct: poserBuyPct,
+    realSellPct: realSellPct, poserSellPct: poserSellPct,
+    realBuyers: realBuyers, realSellers: realSellers,
+    poserBuyVol: trueBuyers - realBuyers, poserSellVol: trueSellers - realSellers,
+    trueBuyers: trueBuyers, trueSellers: trueSellers,
+    fmtVol: fmtVol
+  };
 
   // ── Lot size estimation ──
   var avgVol = 0;
@@ -8259,18 +8270,32 @@ async function runBacktest(d, showPanel = true) {
   if (!panel) return;
 
   if (d.signal === 'HOLD' || d.entry == null) {
-    // Show a helpful message instead of blank screen
-    panel.style.display = '';
+    // Show a helpful message instead of blank screen, and re-show ticker buttons
+    panel.style.display = 'none';
     results.style.display = 'none';
     if (tradesTab) tradesTab.style.display = 'none';
     loading.style.display = 'none';
-    errEl.style.display = '';
-    errEl.innerHTML = '<div style="padding:30px 20px;text-align:center;">' +
-      '<div style="font-size:14px;color:var(--muted2);margin-bottom:8px;">No active trade signal for <strong style="color:var(--amber);">' + (d.ticker||'this instrument') + '</strong></div>' +
-      '<div style="font-size:11px;color:var(--muted);line-height:1.7;max-width:400px;margin:0 auto;">Backtest requires a BUY or SELL signal with entry/exit levels. ' +
-      'The current signal is <strong>HOLD</strong> — no clear trade setup right now.</div>' +
-      '<div style="margin-top:16px;font-size:10px;color:var(--muted);">Try a different ticker or timeframe from the Signals tab.</div>' +
-      '</div>';
+    errEl.style.display = 'none';
+    // Re-show btEmpty so user can pick another ticker
+    var btEmptyEl = document.getElementById('btEmpty');
+    if (btEmptyEl) {
+      btEmptyEl.style.display = 'flex';
+      btEmptyEl.innerHTML =
+        '<svg viewBox="0 0 80 80" width="60" height="60" style="opacity:0.12;"><circle cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".6" fill="none"/><circle cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".8" fill="none"/><circle cx="40" cy="40" r="2.5" fill="var(--amber)"/></svg>' +
+        '<div style="font-family:var(--body);font-size:14px;color:var(--muted2);margin:12px 0 6px;">No active trade signal for <strong style="color:var(--amber);">' + (d.ticker||'this instrument') + '</strong></div>' +
+        '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.7;max-width:400px;margin:0 auto 6px;">Backtest requires a BUY or SELL signal with entry/exit levels. The current signal is <strong>HOLD</strong> — no clear trade setup right now.</div>' +
+        '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:16px;">Try a different ticker or timeframe:</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:420px;">' +
+          '<button class="bt-ticker-btn" onclick="quickLoad(\'BTC\',\'crypto\',\'4h\')">BTC</button>' +
+          '<button class="bt-ticker-btn" onclick="quickLoad(\'ETH\',\'crypto\',\'4h\')">ETH</button>' +
+          '<button class="bt-ticker-btn" onclick="quickLoad(\'SOL\',\'crypto\',\'4h\')">SOL</button>' +
+          '<button class="bt-ticker-btn" onclick="quickLoad(\'AAPL\',\'stock\',\'1d\')">AAPL</button>' +
+          '<button class="bt-ticker-btn" onclick="quickLoad(\'NVDA\',\'stock\',\'1d\')">NVDA</button>' +
+          '<button class="bt-ticker-btn" onclick="quickLoad(\'TSLA\',\'stock\',\'1d\')">TSLA</button>' +
+          '<button class="bt-ticker-btn" onclick="quickLoad(\'EURUSD\',\'forex\',\'4h\')">EUR/USD</button>' +
+          '<button class="bt-ticker-btn" onclick="quickLoad(\'GOLD\',\'commodity\',\'4h\')">GOLD</button>' +
+        '</div>';
+    }
     return;
   }
 
@@ -10392,9 +10417,6 @@ document.addEventListener('click', function(e) {
     var dPositive = dVal.includes('+') || (!dVal.includes('-') && dVal !== '0');
     var cvdRising = cvdVal.includes('Rising');
     var cvdFalling = cvdVal.includes('Falling');
-    // Get poser data from the already-rendered expand area
-    var fpExp = fpCards[0] ? fpCards[0].querySelector('.fp-expand') : null;
-    var poserHTML = fpExp ? fpExp.innerHTML : '';
 
     // Simple interpretation
     var interpretation = '';
@@ -10403,6 +10425,73 @@ document.addEventListener('click', function(e) {
     else if (dPositive && cvdFalling) interpretation = '<span style="color:var(--amber);">Mixed signals.</span> Current candle shows buying, but the broader trend of money flow is downward. Could be a temporary bounce.';
     else if (!dPositive && cvdRising) interpretation = '<span style="color:var(--amber);">Mixed signals.</span> Current candle shows selling, but overall money flow is still upward. Likely a pullback, not a reversal.';
     else interpretation = '<span style="color:var(--muted2);">No clear direction.</span> Buyers and sellers are roughly balanced. Wait for a clearer setup.';
+
+    // Build Real vs Posing comparison from stored data (NOT from innerHTML)
+    var pd = window._fpPoserData || {};
+    var _fv = pd.fmtVol || function(n) { return n ? n.toLocaleString() : '0'; };
+    var poserCompareHTML = '';
+    if (pd.trueBuyers || pd.trueSellers) {
+      poserCompareHTML =
+        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
+          '<div style="font-size:10px;letter-spacing:1px;color:var(--amber);font-weight:700;margin-bottom:10px;">REAL vs POSING — WHO\'S FAKING IT?</div>' +
+          // Explanation
+          '<div style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;">' +
+            'Posing orders are fake buy/sell walls that get pulled before execution. They trick other traders into thinking there\'s real demand or supply. Higher "Real %" = more trustworthy volume.' +
+          '</div>' +
+          // BUYERS comparison
+          '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(0,201,141,.04);border-radius:6px;border:1px solid rgba(0,201,141,.1);">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+              '<span style="font-size:11px;font-weight:700;color:var(--green);">BUYERS</span>' +
+              '<span style="font-family:var(--mono);font-size:11px;color:var(--green);">' + _fv(pd.trueBuyers) + ' total</span>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;margin-bottom:4px;">' +
+              '<div style="flex:1;padding:6px;background:rgba(0,201,141,.08);border-radius:4px;text-align:center;">' +
+                '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">REAL BUYERS</div>' +
+                '<div style="font-size:15px;font-weight:700;color:var(--green);">' + (pd.realBuyPct || 0) + '%</div>' +
+                '<div style="font-size:10px;color:var(--green);opacity:.8;">' + _fv(pd.realBuyers) + '</div>' +
+              '</div>' +
+              '<div style="flex:0 0 20px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);">vs</div>' +
+              '<div style="flex:1;padding:6px;background:rgba(255,255,255,.03);border-radius:4px;text-align:center;opacity:.7;">' +
+                '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">POSING BUYERS</div>' +
+                '<div style="font-size:15px;font-weight:700;color:var(--amber);">' + (pd.poserBuyPct || 0) + '%</div>' +
+                '<div style="font-size:10px;color:var(--muted);">' + _fv(pd.poserBuyVol) + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;">' +
+              '<div style="height:100%;width:' + (pd.realBuyPct || 0) + '%;background:var(--green);border-radius:2px;"></div>' +
+            '</div>' +
+          '</div>' +
+          // SELLERS comparison
+          '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(255,68,89,.04);border-radius:6px;border:1px solid rgba(255,68,89,.1);">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+              '<span style="font-size:11px;font-weight:700;color:var(--red);">SELLERS</span>' +
+              '<span style="font-family:var(--mono);font-size:11px;color:var(--red);">' + _fv(pd.trueSellers) + ' total</span>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;margin-bottom:4px;">' +
+              '<div style="flex:1;padding:6px;background:rgba(255,68,89,.08);border-radius:4px;text-align:center;">' +
+                '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">REAL SELLERS</div>' +
+                '<div style="font-size:15px;font-weight:700;color:var(--red);">' + (pd.realSellPct || 0) + '%</div>' +
+                '<div style="font-size:10px;color:var(--red);opacity:.8;">' + _fv(pd.realSellers) + '</div>' +
+              '</div>' +
+              '<div style="flex:0 0 20px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);">vs</div>' +
+              '<div style="flex:1;padding:6px;background:rgba(255,255,255,.03);border-radius:4px;text-align:center;opacity:.7;">' +
+                '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">POSING SELLERS</div>' +
+                '<div style="font-size:15px;font-weight:700;color:var(--amber);">' + (pd.poserSellPct || 0) + '%</div>' +
+                '<div style="font-size:10px;color:var(--muted);">' + _fv(pd.poserSellVol) + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;">' +
+              '<div style="height:100%;width:' + (pd.realSellPct || 0) + '%;background:var(--red);border-radius:2px;"></div>' +
+            '</div>' +
+          '</div>' +
+          // Net Real Delta
+          '<div style="padding:6px 8px;background:rgba(255,255,255,.02);border-radius:4px;font-size:10px;color:var(--muted2);text-align:center;">' +
+            'Net Real Delta: <strong style="color:' + ((pd.realBuyers||0) > (pd.realSellers||0) ? 'var(--green)' : 'var(--red)') + ';">' +
+            ((pd.realBuyers||0) > (pd.realSellers||0) ? '+' : '') + _fv((pd.realBuyers||0) - (pd.realSellers||0)) + '</strong>' +
+            ' — ' + ((pd.realBuyers||0) > (pd.realSellers||0) ? 'Real buyers outweigh real sellers' : 'Real sellers outweigh real buyers') +
+          '</div>' +
+        '</div>';
+    }
 
     expand.innerHTML = '<div class="ep-title" style="margin-bottom:10px;">Candle Footprint — What\'s Happening</div>' +
       // Main interpretation — plain English
@@ -10428,8 +10517,8 @@ document.addEventListener('click', function(e) {
           '<div style="font-size:9px;color:var(--muted);">Cumulative buying vs selling over 20 bars</div>' +
         '</div>' +
       '</div>' +
-      // Poser section — reuse the already-computed poser content
-      (poserHTML ? '<div style="margin-top:4px;">' + poserHTML + '</div>' : '');
+      // Real vs Posing comparison — computed from stored data, NOT innerHTML
+      poserCompareHTML;
   } else {
     // Order Flow detail — use live support/resistance
     var liqAbove = currentData && currentData.resistance ? fmt(currentData.resistance) : '—';
