@@ -1241,6 +1241,21 @@ body::before{
 .dv-tip .tt-action.r{background:rgba(255,68,89,.12);color:var(--red);border:1px solid rgba(255,68,89,.28);}
 .dv-tip .tt-action.a{background:rgba(245,166,35,.1);color:var(--amber);border:1px solid rgba(245,166,35,.25);}
 [data-tip]{cursor:help;}
+#chartTooltip{position:fixed;z-index:9999;pointer-events:none;max-width:290px;background:rgba(15,12,8,.98);border:1px solid rgba(245,166,35,.32);border-radius:5px;padding:12px 15px;box-shadow:0 10px 40px rgba(0,0,0,.65),0 0 0 1px rgba(245,166,35,.04);opacity:0;transition:opacity .14s,transform .14s;font-family:var(--body);font-size:12.5px;color:var(--white2);line-height:1.55;transform:translateY(5px);backdrop-filter:blur(16px);}
+#chartTooltip.visible{opacity:1;transform:translateY(0);}
+#chartTooltip .tt-title{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--amber);letter-spacing:1.2px;margin-bottom:8px;text-transform:uppercase;display:flex;align-items:center;gap:6px;}
+#chartTooltip .tt-title::after{content:'';flex:1;height:1px;background:rgba(245,166,35,.2);}
+#chartTooltip .tt-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);}
+#chartTooltip .tt-row:last-of-type{border-bottom:none;}
+#chartTooltip .tt-key{color:rgba(237,230,214,.42);font-family:var(--mono);font-size:10px;letter-spacing:.2px;padding-top:1px;flex-shrink:0;}
+#chartTooltip .tt-val{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--white);text-align:right;}
+#chartTooltip .tt-val.g{color:var(--green);}
+#chartTooltip .tt-val.r{color:var(--red);}
+#chartTooltip .tt-val.a{color:var(--amber);}
+#chartTooltip .tt-val.b{color:var(--blue);}
+#chartTooltip .tt-val.m{color:var(--muted2);}
+#chartTooltip .tt-note{font-size:11.5px;color:rgba(237,230,214,.48);margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06);line-height:1.55;}
+#chartTooltip .ct-body{font-size:11.5px;color:rgba(255,255,255,.78);line-height:1.65;}
 
 /* ═══ INSTRUMENT CHIP BUTTONS ═══ */
 .inst-chip, #instGrid button, #inlineInstRow button, #instChips button {
@@ -2275,25 +2290,28 @@ body::before{
     </div>
     <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; align-items:center;">
       <select id="scanPreset" style="padding:7px 10px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:11px;">
-        <option value="crypto_top10">Crypto Top 10</option><option value="defi">DeFi</option><option value="meme">Meme Coins</option>
-        <option value="mag7">Magnificent 7</option><option value="tech">Tech</option><option value="semiconductors">Semiconductors</option>
-        <option value="forex_major">Forex Majors</option><option value="us_indices">US Indices</option><option value="commodities">Commodities</option>
+        <option value="all_instruments">ALL INSTRUMENTS</option>
+        <option value="crypto_top10">Crypto Top 10</option><option value="crypto_mid">Crypto Mid Cap</option><option value="defi">DeFi</option><option value="layer2">Layer 2</option><option value="meme">Meme Coins</option>
+        <option value="mag7">Magnificent 7</option><option value="tech">Tech</option><option value="semiconductors">Semiconductors</option><option value="financial">Financial</option><option value="energy">Energy</option><option value="healthcare">Healthcare</option><option value="consumer">Consumer</option>
+        <option value="forex_major">Forex Majors</option><option value="forex_cross">Forex Cross</option><option value="forex_exotic">Forex Exotic</option>
+        <option value="us_indices">US Indices</option><option value="us_etfs">US ETFs</option><option value="europe_indices">Europe Indices</option><option value="asia_indices">Asia Indices</option><option value="global_indices">Global Indices</option>
+        <option value="commodities">Commodities</option><option value="metals">Metals</option><option value="energy_comm">Energy Commodities</option>
       </select>
       <select id="scanTF" style="padding:7px 10px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:11px;">
         <option value="1h">1H</option><option value="4h" selected>4H</option><option value="1d">1D</option>
       </select>
       <button id="scanBtn" onclick="runScanner()" style="padding:7px 16px; background:var(--amber); color:#0C0A08; border:none; border-radius:3px; font-family:var(--mono); font-size:11px; font-weight:700; cursor:pointer;">RUN SCAN</button>
-      <div id="scanResults"></div>
     </div>
+    <div id="scanResults"></div>
     <div class="scan-filter-row">
-      <button class="scan-filter-btn active">All Signals</button>
-      <button class="scan-filter-btn">BUY Only</button>
-      <button class="scan-filter-btn">SELL Only</button>
-      <button class="scan-filter-btn">High Confidence</button>
-      <button class="scan-filter-btn">Crypto</button>
-      <button class="scan-filter-btn">Forex</button>
-      <button class="scan-filter-btn">Equities</button>
-      <button class="scan-filter-btn">Commodities</button>
+      <button class="scan-filter-btn active" onclick="filterScanResults('all',this)">All Signals</button>
+      <button class="scan-filter-btn" onclick="filterScanResults('buy',this)">BUY Only</button>
+      <button class="scan-filter-btn" onclick="filterScanResults('sell',this)">SELL Only</button>
+      <button class="scan-filter-btn" onclick="filterScanResults('highconf',this)">High Confidence</button>
+      <button class="scan-filter-btn" onclick="filterScanResults('crypto',this)">Crypto</button>
+      <button class="scan-filter-btn" onclick="filterScanResults('forex',this)">Forex</button>
+      <button class="scan-filter-btn" onclick="filterScanResults('equities',this)">Equities</button>
+      <button class="scan-filter-btn" onclick="filterScanResults('commodities',this)">Commodities</button>
     </div>
     <table class="scan-table">
       <thead><tr>
@@ -2837,6 +2855,11 @@ const SCAN_PRESETS = {
   agriculture: {
     tickers:['WHEAT','CORN'],
     asset_type:'commodity'
+  },
+  // ── ALL INSTRUMENTS ─────────────────────────────────────────
+  all_instruments: {
+    tickers:['BTC','ETH','SOL','XRP','BNB','ADA','AVAX','DOT','LINK','LTC','DOGE','AAPL','MSFT','NVDA','AMZN','GOOGL','META','TSLA','AMD','JPM','EURUSD','GBPUSD','USDJPY','AUDUSD','GOLD','SILVER','OIL','NATGAS'],
+    asset_type:'mixed'
   },
 };
 
@@ -4447,18 +4470,45 @@ async function runScanner() {
   const p = SCAN_PRESETS[preset];
   if (!p) return;
   const btn = document.getElementById('scanBtn');
-  btn.disabled = true; btn.textContent = '⏳ Scanning…';
-  document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0;">Scanning — may take 20\u201340s…</div>';
+  btn.disabled = true; btn.textContent = 'Scanning...';
+  var totalCount = p.tickers.length;
+  document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0;">Scanning ' + totalCount + ' instruments — may take 20-40s...</div>';
   // Hide static mock table
-  var mockTable = document.querySelector('.scan-table'); if (mockTable) mockTable.style.display = 'none';
-  var mockFilters = document.querySelector('.scan-filter-row'); if (mockFilters) mockFilters.style.display = 'none';
+  var mockTable = document.querySelector('#tab-scanner > .scanner-layout > .scan-table'); if (mockTable) mockTable.style.display = 'none';
   try {
-    const r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:p.tickers,asset_type:p.asset_type,timeframe:tf})});
-    const data = await r.json();
-    renderScanResults(data.results || [], p.asset_type);
+    if (p.asset_type === 'mixed') {
+      // Split by asset type for mixed presets
+      var cryptoTickers = ['BTC','ETH','SOL','XRP','BNB','ADA','AVAX','DOT','LINK','LTC','DOGE'];
+      var forexTickers = ['EURUSD','GBPUSD','USDJPY','AUDUSD'];
+      var commTickers = ['GOLD','SILVER','OIL','NATGAS'];
+      var stockTickers = p.tickers.filter(t => !cryptoTickers.includes(t) && !forexTickers.includes(t) && !commTickers.includes(t));
+      var batches = [];
+      var cBatch = p.tickers.filter(t => cryptoTickers.includes(t));
+      var fBatch = p.tickers.filter(t => forexTickers.includes(t));
+      var cmBatch = p.tickers.filter(t => commTickers.includes(t));
+      if (cBatch.length) batches.push({tickers:cBatch, asset_type:'crypto'});
+      if (stockTickers.length) batches.push({tickers:stockTickers, asset_type:'stock'});
+      if (fBatch.length) batches.push({tickers:fBatch, asset_type:'forex'});
+      if (cmBatch.length) batches.push({tickers:cmBatch, asset_type:'commodity'});
+      var allResults = [];
+      for (var b of batches) {
+        try {
+          var r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:b.tickers,asset_type:b.asset_type,timeframe:tf})});
+          var data = await r.json();
+          (data.results||[]).forEach(function(res){ res.asset_type = b.asset_type; });
+          allResults = allResults.concat(data.results||[]);
+        } catch(e) { /* skip batch */ }
+      }
+      renderScanResults(allResults, 'mixed');
+    } else {
+      const r = await fetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:p.tickers,asset_type:p.asset_type,timeframe:tf})});
+      const data = await r.json();
+      (data.results||[]).forEach(function(res){ res.asset_type = p.asset_type; });
+      renderScanResults(data.results || [], p.asset_type);
+    }
   } catch(e) {
     document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--red);">Scan failed. Try again.</div>';
-  } finally { btn.disabled=false; btn.textContent='⚡ Run Scan'; }
+  } finally { btn.disabled=false; btn.textContent='RUN SCAN'; }
 }
 
 function renderScanResults(results, assetType) {
@@ -4466,16 +4516,62 @@ function renderScanResults(results, assetType) {
   // Hide static mock table
   var mt = document.querySelector('.scan-table'); if (mt) mt.style.display = 'none';
   var mf = document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'none';
-  document.getElementById('scanResults').innerHTML = '<table class="scan-table"><thead><tr><th>Symbol</th><th>Signal</th><th>RSI</th><th>Change</th></tr></thead><tbody>' + results.map(r => {
-    if (r.error) return '<tr><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm hold">ERR</span></td><td>—</td><td>—</td></tr>';
+  var fmt = function(v) { return v != null ? parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:4}) : '—'; };
+  document.getElementById('scanResults').innerHTML = '<table class="scan-table"><thead><tr>' +
+    '<th>Symbol</th><th>Signal</th><th>Confidence</th><th>Price</th><th>RSI</th><th>EMA Trend</th><th>Volume</th><th>Change 1D</th><th>TF</th>' +
+    '</tr></thead><tbody>' + results.map(r => {
+    if (r.error) return '<tr><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm hold">ERR</span></td><td colspan="7" style="color:var(--muted);">' + (r.error||'Failed') + '</td></tr>';
     const hint = r.signal_hint || 'HOLD';
-    const cls  = hint==='BUY'||hint==='COUNTER_BUY'?'up':hint==='SELL'?'down':'';
-    const chg  = r.chg_1d >= 0 ? `+${r.chg_1d}%` : `${r.chg_1d}%`;
-    const pillCls = hint==='BUY'||hint==='POSSIBLE_BUY'?'BUY':hint==='SELL'||hint==='POSSIBLE_SELL'?'SELL':hint==='COUNTER_BUY'?'CTR':'HOLD';
+    const chg  = r.chg_1d != null ? (r.chg_1d >= 0 ? '+' + r.chg_1d + '%' : r.chg_1d + '%') : '—';
+    const chgCls = r.chg_1d >= 0 ? 'style="color:var(--green)"' : 'style="color:var(--red)"';
     const pillLbl = hint==='COUNTER_BUY'?'CTR':hint==='POSSIBLE_BUY'?'PBY':hint==='POSSIBLE_SELL'?'PSL':hint;
-    var sigCls = pillCls==='BUY'?'buy':pillCls==='SELL'?'sell':'hold';
-    return '<tr style="cursor:pointer;" onclick="quickLoad(\'' + r.ticker + '\',\'' + assetType + '\',\'' + (document.getElementById('scanTF')||{}).value + '\')"><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm ' + sigCls + '">' + pillLbl + '</span></td><td>' + (r.rsi||'—') + '</td><td class="' + cls + '">' + chg + '</td></tr>';
+    var sigCls = (hint==='BUY'||hint==='POSSIBLE_BUY'||hint==='COUNTER_BUY')?'buy':(hint==='SELL'||hint==='POSSIBLE_SELL')?'sell':'hold';
+    var confColor = (r.confidence && parseInt(r.confidence) > 65) ? 'var(--amber)' : 'var(--muted2)';
+    var trend = r.ema_trend || '—';
+    var trendColor = trend.toLowerCase().includes('bull') ? 'var(--green)' : trend.toLowerCase().includes('bear') ? 'var(--red)' : 'var(--muted2)';
+    var vol = r.volume ? (r.volume > 1e9 ? (r.volume/1e9).toFixed(1)+'B' : r.volume > 1e6 ? (r.volume/1e6).toFixed(1)+'M' : r.volume > 1e3 ? (r.volume/1e3).toFixed(1)+'K' : r.volume) : '—';
+    var tf = (document.getElementById('scanTF')||{}).value || '4h';
+    return '<tr style="cursor:pointer;" onclick="quickLoad(\'' + r.ticker + '\',\'' + assetType + '\',\'' + tf + '\')">' +
+      '<td class="st-sym">' + r.ticker + '</td>' +
+      '<td><span class="sig-badge-sm ' + sigCls + '">' + pillLbl + '</span></td>' +
+      '<td style="color:' + confColor + ';">' + (r.confidence || '—') + '</td>' +
+      '<td>' + fmt(r.price) + '</td>' +
+      '<td>' + (r.rsi||'—') + '</td>' +
+      '<td style="color:' + trendColor + ';">' + trend + '</td>' +
+      '<td style="font-family:var(--mono);font-size:11px;">' + vol + '</td>' +
+      '<td ' + chgCls + '>' + chg + '</td>' +
+      '<td style="color:var(--amber);">' + tf.toUpperCase() + '</td>' +
+      '</tr>';
   }).join('') + '</tbody></table>';
+}
+
+// Scanner filter buttons
+var _lastScanResults = [];
+var _lastScanAssetType = 'crypto';
+var _origRunScanner = runScanner;
+runScanner = async function() {
+  await _origRunScanner();
+};
+// Patch renderScanResults to store last results
+var _origRenderScanResults = renderScanResults;
+renderScanResults = function(results, assetType) {
+  _lastScanResults = results;
+  _lastScanAssetType = assetType;
+  _origRenderScanResults(results, assetType);
+};
+function filterScanResults(filter, btn) {
+  document.querySelectorAll('.scan-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (!_lastScanResults.length) return;
+  var filtered = _lastScanResults;
+  if (filter === 'buy') filtered = _lastScanResults.filter(r => r.signal_hint && (r.signal_hint.includes('BUY')));
+  else if (filter === 'sell') filtered = _lastScanResults.filter(r => r.signal_hint && (r.signal_hint.includes('SELL')));
+  else if (filter === 'highconf') filtered = _lastScanResults.filter(r => r.confidence && parseInt(r.confidence) >= 65);
+  else if (filter === 'crypto') filtered = _lastScanResults.filter(r => r.asset_type === 'crypto');
+  else if (filter === 'forex') filtered = _lastScanResults.filter(r => r.asset_type === 'forex');
+  else if (filter === 'equities') filtered = _lastScanResults.filter(r => r.asset_type === 'stock');
+  else if (filter === 'commodities') filtered = _lastScanResults.filter(r => r.asset_type === 'commodity');
+  _origRenderScanResults(filtered, _lastScanAssetType);
 }
 
 /* ════════════════════════════════════════════
@@ -6816,12 +6912,22 @@ function renderResultsV2(d) {
     }
     // ATR
     infoCells[2].textContent = '$' + (d.atr ? d.atr.toLocaleString() : '—');
-    // Volume
+    // Volume — with lot size and price
     if (d.vol_ratio) {
-      infoCells[3].textContent = (d.vol_ratio >= 1.2 ? '↑ ' : '↓ ') + (d.vol_ratio >= 1.5 ? 'High' : d.vol_ratio >= 0.8 ? 'Normal' : 'Low');
-      infoCells[3].style.color = d.vol_ratio >= 1.2 ? 'var(--green)' : 'var(--muted2)';
+      infoCells[3].textContent = (d.vol_ratio >= 1.2 ? '↑ ' : '↓ ') + d.vol_ratio + '×';
+      infoCells[3].style.color = d.vol_ratio >= 1.5 ? 'var(--green)' : d.vol_ratio >= 1.0 ? 'var(--amber)' : 'var(--muted2)';
       var volSub = infoCells[3].parentElement.querySelector('.ic-sub');
-      if (volSub) volSub.textContent = d.vol_ratio + '× 30d avg';
+      // Calculate lot size: 2% of $10k account / risk per unit
+      var lotSize = '—';
+      if (d.entry && d.stop_loss) {
+        var riskPerUnit = Math.abs(d.entry - d.stop_loss);
+        if (riskPerUnit > 0) {
+          var acctRisk = 200; // 2% of $10k
+          var lots = acctRisk / riskPerUnit;
+          lotSize = lots >= 1 ? lots.toFixed(1) : lots.toFixed(2);
+        }
+      }
+      if (volSub) volSub.textContent = lotSize + ' lots · $' + (d.price ? d.price.toLocaleString(undefined,{maximumFractionDigits:2}) : '—');
     }
     // MACD
     if (d.macd_signal) {
@@ -8285,11 +8391,21 @@ function storeExpandData(d) {
     },
     volume: {
       title: 'Volume Analysis',
-      rows: [
-        ['Volume Ratio', d.vol_ratio ? d.vol_ratio + 'x avg' : '—', d.vol_ratio>=1.5?'g':'a'],
-        ['Confirmation', d.vol_ratio>=1.5 ? 'Institutional ✓' : d.vol_ratio>=1.0 ? 'Normal' : 'Weak', d.vol_ratio>=1.5?'g':d.vol_ratio>=1.0?'a':'r'],
-      ],
-      note: 'Volume ≥1.5x average = institutional-grade confirmation. Below 1x = weak conviction.'
+      rows: (function() {
+        var rows = [
+          ['Volume Ratio', d.vol_ratio ? d.vol_ratio + '× avg' : '—', d.vol_ratio>=1.5?'g':'a'],
+          ['Confirmation', d.vol_ratio>=1.5 ? 'Institutional ✓' : d.vol_ratio>=1.0 ? 'Normal' : 'Weak', d.vol_ratio>=1.5?'g':d.vol_ratio>=1.0?'a':'r'],
+          ['Price', d.price ? '$' + d.price.toLocaleString(undefined,{maximumFractionDigits:2}) : '—', 'a'],
+        ];
+        if (d.entry && d.stop_loss) {
+          var rpu = Math.abs(d.entry - d.stop_loss);
+          var lots = rpu > 0 ? (200 / rpu) : 0;
+          rows.push(['Lot Size (2% risk)', lots >= 1 ? lots.toFixed(1) + ' lots' : lots.toFixed(2) + ' lots', 'a']);
+          rows.push(['Position Value', '$' + (lots * (d.entry||d.price||0)).toFixed(0), 'a']);
+        }
+        return rows;
+      })(),
+      note: 'Volume ≥1.5× average = institutional-grade. Lot size based on 2% account risk ($10k).'
     },
     macd: {
       title: 'MACD (12, 26, 9)',
@@ -8419,13 +8535,23 @@ function storeIndicatorExpandData(d) {
     },
     4: { // Volume
       title: 'Volume Analysis — Detailed',
-      rows: [
-        ['Volume Ratio', d.vol_ratio ? d.vol_ratio + '× avg' : '—', d.vol_ratio>=1.5?'g':'a'],
-        ['Confirmation', d.vol_ratio>=1.5?'Institutional ✓':d.vol_ratio>=1.0?'Normal':'Weak', d.vol_ratio>=1.5?'g':d.vol_ratio>=1.0?'a':'r'],
-        ['Breakout Quality', d.vol_ratio>=1.5?'Genuine (high vol)':'Suspect (low vol)', d.vol_ratio>=1.5?'g':'r'],
-        ['Signal Weight', 'High — most objective confirmer', 'a'],
-      ],
-      note: 'Volume ≥ 1.5× average = institutional participation. Below 1.2× on breakout = suspicious.'
+      rows: (function() {
+        var rows = [
+          ['Volume Ratio', d.vol_ratio ? d.vol_ratio + '× avg' : '—', d.vol_ratio>=1.5?'g':'a'],
+          ['Confirmation', d.vol_ratio>=1.5?'Institutional ✓':d.vol_ratio>=1.0?'Normal':'Weak', d.vol_ratio>=1.5?'g':d.vol_ratio>=1.0?'a':'r'],
+          ['Breakout Quality', d.vol_ratio>=1.5?'Genuine (high vol)':'Suspect (low vol)', d.vol_ratio>=1.5?'g':'r'],
+          ['Price', d.price ? '$' + d.price.toLocaleString(undefined,{maximumFractionDigits:2}) : '—', 'a'],
+        ];
+        if (d.entry && d.stop_loss) {
+          var rpu = Math.abs(d.entry - d.stop_loss);
+          var lots = rpu > 0 ? (200 / rpu) : 0;
+          rows.push(['Lot Size (2%)', lots >= 1 ? lots.toFixed(1) + ' lots' : lots.toFixed(2) + ' lots', 'a']);
+          rows.push(['Position Value', '$' + (lots * (d.entry||d.price||0)).toFixed(0), 'a']);
+        }
+        rows.push(['Signal Weight', 'High — most objective confirmer', 'a']);
+        return rows;
+      })(),
+      note: 'Volume ≥ 1.5× average = institutional participation. Lot size based on 2% account risk ($10k).'
     },
     5: { // ATR / Supertrend
       title: 'ATR & Supertrend — Detailed',
