@@ -2604,7 +2604,8 @@ def alert_test():
 @app.route("/api/scan-list", methods=["POST"])
 @login_required
 def scan_list():
-    """Pre-screen multiple tickers quickly — no Claude API call."""
+    """Pre-screen multiple tickers quickly using TradingView scanner (primary)
+    with yfinance fallback. No AI API call."""
     try:
         data      = request.json or {}
         tickers   = [t.strip().upper() for t in data.get("tickers", [])[:15]]
@@ -2617,9 +2618,41 @@ def scan_list():
         for ticker in tickers:
             raw = normalise_ticker(ticker, asset_type)
             try:
-                df = safe_download(raw, period=cfg["period"], interval=cfg["interval"],
-                                  progress=False, auto_adjust=True)
-                if "resample" in cfg:
+                # ── PRIMARY: TradingView scanner (fast, works on Railway) ──
+                tv = fetch_tv_data(raw, asset_type, timeframe)
+                if tv and tv.get("tv_price"):
+                    ind = build_ind_from_tv(tv)
+                    screen = pre_screen(ind)
+                    ct     = detect_counter_trade(ind)
+                    # Get volume from TV for display
+                    volume = tv.get("tv_volume") or 0
+                    results.append({
+                        "ticker":       ticker,
+                        "raw_ticker":   raw,
+                        "price":        ind["price"],
+                        "chg_1d":       ind["chg_1d"],
+                        "rsi":          ind["rsi"],
+                        "vol_ratio":    ind["vol_ratio"],
+                        "volume":       int(volume) if volume else 0,
+                        "ema_trend":    ind["ema_trend"],
+                        "supertrend":   ind["supertrend"],
+                        "signal_hint":  screen["signal_hint"],
+                        "opportunity":  screen["opportunity"],
+                        "call_claude":  screen["call_claude"],
+                        "reason":       screen["reason"],
+                        "bull_score":   screen["bull_score"],
+                        "bear_score":   screen["bear_score"],
+                        "counter_trade": ct["counter_trade"],
+                        "confidence":   screen.get("confidence", ""),
+                    })
+                    continue
+
+                # ── FALLBACK: yfinance / Binance (slower, may 429) ──
+                df = safe_download(raw, period=cfg["period"], interval=cfg["interval"])
+                if "resample" in cfg and not df.empty:
+                    # Ensure DatetimeIndex before resample
+                    if not isinstance(df.index, pd.DatetimeIndex):
+                        df.index = pd.to_datetime(df.index)
                     df = df.resample(cfg["resample"]).agg(
                         {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
                     ).dropna()
@@ -2636,6 +2669,7 @@ def scan_list():
                     "chg_1d":       ind["chg_1d"],
                     "rsi":          ind["rsi"],
                     "vol_ratio":    ind["vol_ratio"],
+                    "volume":       int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
                     "ema_trend":    ind["ema_trend"],
                     "supertrend":   ind["supertrend"],
                     "signal_hint":  screen["signal_hint"],
@@ -2645,8 +2679,10 @@ def scan_list():
                     "bull_score":   screen["bull_score"],
                     "bear_score":   screen["bear_score"],
                     "counter_trade": ct["counter_trade"],
+                    "confidence":   screen.get("confidence", ""),
                 })
             except Exception as e:
+                print(f"[scan-list] Error for {ticker}: {e}")
                 results.append({"ticker": ticker, "error": str(e)[:80]})
 
         def sort_key(r):
