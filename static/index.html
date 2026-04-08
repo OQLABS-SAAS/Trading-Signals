@@ -1190,18 +1190,19 @@ body::before{
 
 /* ═══ INSTRUMENT CHIP BUTTONS ═══ */
 .inst-chip, #instGrid button, #inlineInstRow button, #instChips button {
-  padding:4px 11px;font-size:11px;font-weight:700;font-family:var(--mono);
-  border-radius:3px;border:1px solid var(--border);background:var(--bg2);
-  color:var(--muted2);cursor:pointer;white-space:nowrap;transition:all .15s;
+  padding:4px 11px;font-size:10px;font-weight:600;font-family:var(--mono);
+  border-radius:3px;border:1px solid var(--border2);background:var(--bg2);
+  color:var(--amber2);cursor:pointer;white-space:nowrap;transition:all .15s;
+  flex-shrink:0;
 }
 .inst-chip:hover, #instGrid button:hover, #inlineInstRow button:hover, #instChips button:hover {
-  border-color:var(--amber);color:var(--amber);background:var(--amber-dim);
+  border-color:var(--amber);color:var(--amber);background:rgba(245,166,35,.1);
 }
-.inst-chip.active {
+.inst-chip.active, #inlineInstRow button.active {
   border-color:var(--amber);color:#0C0A08;background:var(--amber);font-weight:700;
 }
-.inst-chip .chip-tf, .inst-chip span {
-  font-size:9px;opacity:.55;font-weight:400;margin-left:2px;
+.inst-chip .chip-tf, .inst-chip span, #inlineInstRow button span {
+  font-size:8px;opacity:.5;font-weight:400;margin-left:2px;color:var(--muted2);
 }
 
 
@@ -1389,46 +1390,43 @@ body::before{
       </div>
       </div><!-- /sigHeroWrap -->
 
-      <!-- TICKER SEARCH & ANALYZE BAR -->
-      <div style="display:flex; gap:10px; align-items:center; padding:12px 24px; border-bottom:1px solid var(--border); background:var(--bg1);">
-        <input id="tickerInput" type="text" placeholder="Enter ticker (BTC, AAPL, EUR/USD...)"
-          style="flex:1; padding:9px 12px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:13px; outline:none;"
-          onkeydown="if(event.key==='Enter') runAnalyze()">
-        <button id="analyzeBtn" onclick="runAnalyze()"
-          style="padding:9px 18px; background:var(--amber); color:#0C0A08; border:none; border-radius:3px; font-family:var(--mono); font-size:12px; font-weight:700; cursor:pointer; letter-spacing:.5px;">
-          ANALYZE
-        </button>
-      </div>
-
-      <!-- ASSET TYPE PILLS + INSTRUMENT QUICK-SELECT -->
-      <div style="padding:8px 24px 4px; border-bottom:1px solid var(--border); background:var(--bg1);">
-        <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
-          <button class="gpill active" data-sel="assetType" data-val="crypto" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-weight:700;cursor:pointer;">Crypto</button>
-          <button class="gpill" data-sel="assetType" data-val="stock" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Stock</button>
-          <button class="gpill" data-sel="assetType" data-val="forex" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Forex</button>
-          <button class="gpill" data-sel="assetType" data-val="commodity" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Commodity</button>
-          <button class="gpill" data-sel="assetType" data-val="index" onclick="setPill(this)" style="padding:4px 12px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Index</button>
-          <span style="width:1px;height:18px;background:var(--border);margin:0 4px;"></span>
-          <button class="gpill" data-sel="timeframe" data-val="15m" onclick="setPill(this)" style="padding:4px 8px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">15M</button>
-          <button class="gpill" data-sel="timeframe" data-val="1h" onclick="setPill(this)" style="padding:4px 8px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">1H</button>
-          <button class="gpill active" data-sel="timeframe" data-val="4h" onclick="setPill(this)" style="padding:4px 8px;font-size:10px;font-family:var(--mono);background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-weight:700;cursor:pointer;">4H</button>
-          <button class="gpill" data-sel="timeframe" data-val="1d" onclick="setPill(this)" style="padding:4px 8px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">1D</button>
+      <!-- COMMAND BAR — ticker input + pills + instruments -->
+      <div style="padding:10px 20px 0;background:var(--bg1);border-bottom:1px solid var(--border);">
+        <!-- Row 1: Input + Analyze -->
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <input id="tickerInput" type="text" placeholder="BTC, AAPL, EUR/USD ..."
+            style="flex:1;padding:8px 12px;background:var(--bg);border:1px solid var(--border2);color:var(--white);border-radius:3px;font-family:var(--mono);font-size:13px;outline:none;"
+            onkeydown="if(event.key==='Enter') runAnalyze()">
+          <button id="analyzeBtn" onclick="runAnalyze()"
+            style="padding:8px 20px;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.5px;white-space:nowrap;">
+            ⚡ ANALYZE
+          </button>
         </div>
-        <div id="instGrid" style="display:flex; gap:6px; flex-wrap:wrap; padding-bottom:8px;"></div>
-        <div id="inlineInstRow" style="display:flex; gap:6px; overflow-x:auto; padding-bottom:6px;"></div>
-        <div id="instChips" style="display:flex; gap:6px; flex-wrap:wrap; padding-bottom:4px;"></div>
-      </div>
-
-<div class="refresh-bar">
-        <span class="rb-label">Auto-Refresh</span>
-        <div class="rb-btns">
-          <button class="rb-btn active" onclick="setRefresh(0,this)">OFF</button>
-          <button class="rb-btn" onclick="setRefresh(60,this)">1m</button>
-          <button class="rb-btn" onclick="setRefresh(300,this)">5m</button>
-          <button class="rb-btn" onclick="setRefresh(900,this)">15m</button>
+        <!-- Row 2: Asset type + Timeframe pills (compact) -->
+        <div style="display:flex;gap:5px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+          <button class="gpill active" data-sel="assetType" data-val="crypto" onclick="setPill(this)" style="padding:3px 10px;font-size:10px;font-family:var(--mono);background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-weight:700;cursor:pointer;">Crypto</button>
+          <button class="gpill" data-sel="assetType" data-val="stock" onclick="setPill(this)" style="padding:3px 10px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Stock</button>
+          <button class="gpill" data-sel="assetType" data-val="forex" onclick="setPill(this)" style="padding:3px 10px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Forex</button>
+          <button class="gpill" data-sel="assetType" data-val="commodity" onclick="setPill(this)" style="padding:3px 10px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Commodity</button>
+          <button class="gpill" data-sel="assetType" data-val="index" onclick="setPill(this)" style="padding:3px 10px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">Index</button>
+          <span style="width:1px;height:14px;background:var(--border2);margin:0 2px;"></span>
+          <button class="gpill" data-sel="timeframe" data-val="15m" onclick="setPill(this)" style="padding:3px 7px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">15M</button>
+          <button class="gpill" data-sel="timeframe" data-val="1h" onclick="setPill(this)" style="padding:3px 7px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">1H</button>
+          <button class="gpill active" data-sel="timeframe" data-val="4h" onclick="setPill(this)" style="padding:3px 7px;font-size:10px;font-family:var(--mono);background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-weight:700;cursor:pointer;">4H</button>
+          <button class="gpill" data-sel="timeframe" data-val="1d" onclick="setPill(this)" style="padding:3px 7px;font-size:10px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;font-weight:600;cursor:pointer;">1D</button>
+          <span style="width:1px;height:14px;background:var(--border2);margin:0 2px;"></span>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.5px;">AUTO</span>
+          <button class="rb-btn active" onclick="setRefresh(0,this)" style="padding:2px 6px;font-size:9px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:2px;cursor:pointer;">OFF</button>
+          <button class="rb-btn" onclick="setRefresh(60,this)" style="padding:2px 6px;font-size:9px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:2px;cursor:pointer;">1m</button>
+          <button class="rb-btn" onclick="setRefresh(300,this)" style="padding:2px 6px;font-size:9px;font-family:var(--mono);background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:2px;cursor:pointer;">5m</button>
+          <div class="rb-spin" id="rbSpin" style="display:none;"></div>
+          <span class="rb-time" id="rbTime" style="font-family:var(--mono);font-size:9px;color:var(--muted);">—</span>
         </div>
-        <div class="rb-spin" id="rbSpin"></div>
-        <span class="rb-time" id="rbTime">—</span>
+        <!-- Row 3: Instrument quick-select (single scrollable row) -->
+        <div id="inlineInstRow" style="display:flex;gap:5px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
+        <!-- Hidden: keep for JS compat -->
+        <div id="instGrid" style="display:none;"></div>
+        <div id="instChips" style="display:none;"></div>
       </div>
 
       <!-- SIGNAL RESULTS (hidden until analysis runs — shown by renderResultsV2) -->
@@ -1930,10 +1928,16 @@ body::before{
       </div><!-- /signalResults -->
 
       <!-- EMPTY STATE (shown before analysis) -->
-      <div id="signalEmpty" style="padding:80px 20px;text-align:center;">
-        <div style="font-family:var(--disp);font-size:48px;color:var(--amber);margin-bottom:16px;letter-spacing:-2px;">dotverse</div>
-        <div style="font-family:var(--mono);font-size:11px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;">Enter a ticker · Select asset type · Hit Analyze</div>
-        <div style="font-size:13px;color:var(--muted);max-width:400px;margin:0 auto;">Real-time signals powered by TradingView data + Claude AI analysis across crypto, stocks, forex, commodities & indices.</div>
+      <div id="signalEmpty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;min-height:50vh;">
+        <svg viewBox="0 0 80 80" width="60" height="60" style="margin-bottom:24px;opacity:.4;">
+          <circle cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".7" fill="none" opacity=".3"/>
+          <circle cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".9" fill="none" opacity=".45"/>
+          <circle cx="40" cy="40" r="16" stroke="var(--amber)" stroke-width="1.1" fill="none" opacity=".6"/>
+          <circle cx="40" cy="40" r="7" stroke="var(--amber)" stroke-width="1.5" fill="none" opacity=".8"/>
+          <circle cx="40" cy="40" r="2.5" fill="var(--amber)"/>
+        </svg>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:2px;text-transform:uppercase;margin-bottom:20px;">Select an instrument above or type a ticker</div>
+        <div style="font-size:12px;color:var(--muted);max-width:360px;text-align:center;line-height:1.7;">Click any ticker button above — or type a symbol and hit <span style="color:var(--amber);font-family:var(--mono);font-weight:700;">⚡ ANALYZE</span> for real-time signals.</div>
       </div>
 
     </div><!-- /main-col -->
