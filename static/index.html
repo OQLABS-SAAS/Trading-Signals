@@ -1204,6 +1204,31 @@ body::before{
   font-size:9px;opacity:.55;font-weight:400;margin-left:2px;
 }
 
+
+/* ═══ CLICK-TO-EXPAND PANELS ═══ */
+.info-cell{cursor:pointer;position:relative;transition:background .15s;}
+.info-cell:hover{background:var(--bg2);}
+.info-cell.expanded{background:var(--bg2);border-bottom:2px solid var(--amber);}
+.expand-panel{
+  display:none;position:absolute;top:100%;left:0;right:0;z-index:100;
+  background:var(--bg1);border:1px solid var(--border2);border-radius:0 0 var(--r2) var(--r2);
+  padding:14px 16px;min-width:220px;box-shadow:0 8px 24px rgba(0,0,0,.5);
+  font-family:var(--mono);font-size:11px;line-height:1.7;
+}
+.info-cell.expanded .expand-panel{display:block;}
+.ep-title{font-family:var(--disp);font-weight:700;font-size:13px;color:var(--amber);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:6px;}
+.ep-row{display:flex;justify-content:space-between;padding:2px 0;}
+.ep-key{color:var(--muted2);}
+.ep-val{color:var(--white);font-weight:600;}
+.ep-val.g{color:var(--green);}.ep-val.r{color:var(--red);}.ep-val.a{color:var(--amber);}
+.ep-note{font-size:10px;color:var(--muted);margin-top:6px;font-style:italic;border-top:1px solid var(--border);padding-top:5px;}
+
+.ind-card{cursor:pointer;transition:all .15s;}
+.ind-card:hover{border-color:var(--amber);background:var(--bg2);}
+.ind-card.expanded{border-color:var(--amber);background:var(--bg2);}
+.ind-expand{display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;line-height:1.7;font-family:var(--mono);}
+.ind-card.expanded .ind-expand{display:block;}
+
 </style>
 </head>
 <body>
@@ -6623,6 +6648,7 @@ async function sendSMS() {
 /* Maps API response data to the visible Concept 5 v2 UI elements */
 function renderResultsV2(d) {
   if (!d) return;
+  try { storeExpandData(d); } catch(e) { console.warn('storeExpandData:', e); }
   
   // Signal badge
   var sigEl = _origGetById('sigLabel');
@@ -7935,6 +7961,155 @@ recalc();
     }, 80);
   });
 })();
+
+/* ═══ CLICK-TO-EXPAND ENGINE ═══ */
+var _expandData = {};
+
+function storeExpandData(d) {
+  if (!d) return;
+  _expandData = {
+    change: {
+      title: 'Price Change',
+      rows: [
+        ['1 Day', (d.chg_1d>=0?'+':'') + d.chg_1d + '%', d.chg_1d>=0?'g':'r'],
+        ['1 Week', (d.chg_1w>=0?'+':'') + d.chg_1w + '%', d.chg_1w>=0?'g':'r'],
+        ['1 Month', (d.chg_1m>=0?'+':'') + d.chg_1m + '%', d.chg_1m>=0?'g':'r'],
+        ['52W High', d.high_52w ? fmt(d.high_52w) : '—', 'a'],
+        ['52W Low', d.low_52w ? fmt(d.low_52w) : '—', 'a'],
+      ],
+      note: 'Multi-timeframe price performance. Green = positive, Red = negative.'
+    },
+    rr: {
+      title: 'Risk : Reward Analysis',
+      rows: [
+        ['Entry', fmt(d.entry), 'a'],
+        ['Stop Loss', fmt(d.stop_loss), 'r'],
+        ['TP1', fmt(d.tp1), 'g'],
+        ['TP2', fmt(d.tp2), 'g'],
+        ['TP3', fmt(d.tp3), 'g'],
+        ['Dollar Risk (2%)', '$' + ((d.entry && d.stop_loss) ? Math.abs(d.entry-d.stop_loss).toFixed(0) : '—'), 'r'],
+      ],
+      note: 'Risk:Reward calculated from entry to TP1. Min recommended: 1:2.'
+    },
+    atr: {
+      title: 'ATR — Average True Range',
+      rows: [
+        ['ATR (14)', fmt(d.atr), 'a'],
+        ['% of Price', d.atr && d.price ? (d.atr/d.price*100).toFixed(2)+'%' : '—', 'a'],
+        ['Volatility', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'Elevated' : 'Normal', d.atr && d.price && (d.atr/d.price*100)>2.5 ? 'r' : 'g'],
+        ['Support', fmt(d.support), 'a'],
+        ['Resistance', fmt(d.resistance), 'a'],
+      ],
+      note: 'ATR measures daily volatility. Elevated ATR > 2.5% of price — reduce position size.'
+    },
+    volume: {
+      title: 'Volume Analysis',
+      rows: [
+        ['Volume Ratio', d.vol_ratio ? d.vol_ratio + 'x avg' : '—', d.vol_ratio>=1.5?'g':'a'],
+        ['Confirmation', d.vol_ratio>=1.5 ? 'Institutional ✓' : d.vol_ratio>=1.0 ? 'Normal' : 'Weak', d.vol_ratio>=1.5?'g':d.vol_ratio>=1.0?'a':'r'],
+      ],
+      note: 'Volume ≥1.5x average = institutional-grade confirmation. Below 1x = weak conviction.'
+    },
+    macd: {
+      title: 'MACD (12, 26, 9)',
+      rows: [
+        ['Signal', d.macd_signal || '—', (d.macd_signal||'').includes('Bull')?'g':(d.macd_signal||'').includes('Bear')?'r':'a'],
+        ['MACD Line', d.macd_line != null ? d.macd_line.toFixed(2) : '—', ''],
+        ['Signal Line', d.macd_signal_line != null ? d.macd_signal_line.toFixed(2) : '—', ''],
+        ['Histogram', d.macd_hist != null ? d.macd_hist.toFixed(2) : '—', d.macd_hist>0?'g':'r'],
+      ],
+      note: 'MACD crossover above signal line = bullish momentum. Expanding histogram = acceleration.'
+    },
+    rsi: {
+      title: 'RSI — Relative Strength Index',
+      rows: [
+        ['RSI (14)', d.rsi != null ? d.rsi.toFixed(1) : '—', ''],
+        ['Zone', d.rsi>70?'Overbought':d.rsi>50?'Momentum':d.rsi>30?'Weak':'Oversold', d.rsi>70?'r':d.rsi>50?'g':d.rsi>30?'a':'r'],
+        ['Bias', d.rsi>50?'Bullish ↑':'Bearish ↓', d.rsi>50?'g':'r'],
+        ['Room to Run', d.rsi != null ? (70-d.rsi).toFixed(1)+' pts to OB' : '—', 'a'],
+      ],
+      note: 'RSI 50-70 = momentum zone (ideal for entries). Above 70 = overbought risk.'
+    },
+    timeframe: {
+      title: 'Timeframe Analysis',
+      rows: [
+        ['Primary TF', (d.timeframe||'4h').toUpperCase(), 'a'],
+        ['Trade Type', (d.timeframe||'').includes('5m')||d.timeframe=='15m'?'Scalp':'Swing (1-5 days)', ''],
+        ['Asset Type', (d.asset_type||'').toUpperCase(), 'a'],
+      ],
+      note: 'Higher timeframes provide more reliable signals. 4H/1D recommended for swing trading.'
+    }
+  };
+}
+
+// Make info strip cells expandable
+document.addEventListener('click', function(e) {
+  var cell = e.target.closest('.info-cell');
+  if (!cell) {
+    // Close all expanded
+    document.querySelectorAll('.info-cell.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+    document.querySelectorAll('.ind-card.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+    return;
+  }
+  
+  var cells = document.querySelectorAll('.info-cell');
+  var idx = Array.from(cells).indexOf(cell);
+  var keys = ['change','rr','atr','volume','macd','rsi','timeframe'];
+  
+  if (cell.classList.contains('expanded')) {
+    cell.classList.remove('expanded');
+    return;
+  }
+  
+  // Close others
+  document.querySelectorAll('.info-cell.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+  
+  var key = keys[idx];
+  var data = _expandData[key];
+  if (!data || !data.rows) return;
+  
+  // Create or update expand panel
+  var panel = cell.querySelector('.expand-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.className = 'expand-panel';
+    cell.appendChild(panel);
+    cell.style.position = 'relative';
+  }
+  
+  panel.innerHTML = '<div class="ep-title">' + data.title + '</div>' +
+    data.rows.map(function(r) {
+      return '<div class="ep-row"><span class="ep-key">' + r[0] + '</span><span class="ep-val ' + (r[2]||'') + '">' + r[1] + '</span></div>';
+    }).join('') +
+    (data.note ? '<div class="ep-note">' + data.note + '</div>' : '');
+  
+  cell.classList.add('expanded');
+});
+
+// Make indicator cards expandable
+document.addEventListener('click', function(e) {
+  var card = e.target.closest('.ind-card');
+  if (!card) return;
+  
+  if (card.classList.contains('expanded')) {
+    card.classList.remove('expanded');
+    return;
+  }
+  
+  document.querySelectorAll('.ind-card.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+  
+  // Create expand section if not exists
+  var expand = card.querySelector('.ind-expand');
+  if (!expand) {
+    expand = document.createElement('div');
+    expand.className = 'ind-expand';
+    expand.innerHTML = '<span style="color:var(--muted2);">Run analysis to see detailed indicator data</span>';
+    card.appendChild(expand);
+  }
+  
+  card.classList.add('expanded');
+});
+
 </script>
 
 <!-- Global Tooltip -->
