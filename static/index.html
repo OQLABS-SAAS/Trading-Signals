@@ -4629,11 +4629,8 @@ function renderIndicators(d) {
     },
   ];
 
-  // Map card names to WWH keys
-  var wwhKeys = ['rsi', 'rsi', 'ema_trend', 'macd', 'bollinger', 'supertrend', 'volume'];
   document.getElementById('indicatorsGrid').innerHTML = cards.map(function(c, idx) {
-    var wKey = wwhKeys[idx] || 'rsi';
-    return `<div class="ind-card" onclick="this.classList.toggle('expanded')">
+    return `<div class="ind-card">
       <div class="ind-card-hdr">
         <div>
           <div class="ind-plain">${c.plain}</div>
@@ -4644,7 +4641,7 @@ function renderIndicators(d) {
       <div class="ind-desc">${colorizeNumbers(c.desc)}</div>
       <div class="ind-raw">${c.raw}</div>
       ${c.bar}
-      <div class="ind-expand">${_wwhHTML(wKey, {value: c.bl}).replace('class="wwh-panel"','class="wwh-panel open"')}</div>
+      <div class="ind-expand"></div>
     </div>`;
   }).join('');
 }
@@ -4696,7 +4693,7 @@ function renderAlignment(d) {
     {name:'BB Position',key:'align_bb', ok: d.bb_pos!=null?(d.bb_pos<0.3 ? true : d.bb_pos>0.7 ? false : null):null,
                         note: d.bb_pos!=null ? (d.bb_pos*100).toFixed(0)+'%' : '—', val: d.bb_pos},
     {name:'Volume',     key:'align_volume', ok: d.vol_ratio!=null?(d.vol_ratio>=1.2 ? true : d.vol_ratio<0.7 ? false : null):null,
-                        note: d.vol_ratio!=null ? d.vol_ratio.toFixed(2)+'×' : '—', val: d.vol_ratio},
+                        note: (function(){ var r=d.vol_ratio,vu=d.vol_usd||(d.vol_raw&&d.price?d.vol_raw*d.price:0); var fv=function(n){return!n?'':n>=1e9?'$'+(n/1e9).toFixed(1)+'B':n>=1e6?'$'+(n/1e6).toFixed(1)+'M':n>=1e3?'$'+(n/1e3).toFixed(1)+'K':'$'+Math.round(n);}; return r!=null?(r.toFixed(2)+'× '+(vu?fv(vu):'')):'—'; })(), val: d.vol_ratio},
   ];
   document.getElementById('alignContent').innerHTML = checks.map(c => {
     const cls  = c.ok===null ? 'neut' : c.ok ? 'bull' : 'bear';
@@ -7080,6 +7077,7 @@ function renderFootprint(d) {
 
   // Format large numbers
   function fmtVol(num) {
+    if (!num || num === 0) return '0';
     if (Math.abs(num) >= 1e9) return (num/1e9).toFixed(1) + 'B';
     if (Math.abs(num) >= 1e6) return (num/1e6).toFixed(1) + 'M';
     if (Math.abs(num) >= 1e3) return (num/1e3).toFixed(1) + 'K';
@@ -7134,40 +7132,45 @@ function renderFootprint(d) {
 
     var statVals = card.querySelectorAll('.fp-stat-val');
     if (statVals.length >= 4) {
-      statVals[0].innerHTML = '<span class="metric-click" onclick="_toggleWWH(this)">' + fmtVol(trueBuyers) + '</span>' + _wwhHTML('buy_pressure', {value: fmtVol(trueBuyers)});
+      statVals[0].textContent = fmtVol(trueBuyers);
       statVals[0].className = 'fp-stat-val ' + (buyPct >= 50 ? 'g' : 'r');
-      statVals[1].innerHTML = '<span class="metric-click" onclick="_toggleWWH(this)">' + fmtVol(trueSellers) + '</span>' + _wwhHTML('sell_pressure', {value: fmtVol(trueSellers)});
+      statVals[1].textContent = fmtVol(trueSellers);
       statVals[1].className = 'fp-stat-val ' + (sellPct > 50 ? 'r' : 'g');
-      statVals[2].innerHTML = '<span class="metric-click" onclick="_toggleWWH(this)">' + (delta >= 0 ? '+' : '') + fmtVol(delta) + '</span>' + _wwhHTML('delta', {value: (delta >= 0 ? '+' : '') + fmtVol(delta)});
+      statVals[2].textContent = (delta >= 0 ? '+' : '') + fmtVol(delta);
       statVals[2].className = 'fp-stat-val ' + (delta >= 0 ? 'g' : 'r');
-      statVals[3].innerHTML = '<span class="metric-click" onclick="_toggleWWH(this)">' + cvdTrend + '</span>' + _wwhHTML('cvd', {value: cvdTrend});
+      statVals[3].textContent = cvdTrend;
       statVals[3].className = 'fp-stat-val ' + (cvdTrend.includes('Rising') ? 'g' : cvdTrend.includes('Falling') ? 'r' : 'a');
     }
 
-    // Poser/Real breakdown — append after stats
+    // Poser/Real breakdown — clean, compact display
     var fpExpandArea = card.querySelector('.fp-expand');
     if (fpExpandArea) {
+      var poserBuyVol = trueBuyers - realBuyers;
+      var poserSellVol = trueSellers - realSellers;
       fpExpandArea.innerHTML =
-        '<div style="margin-bottom:10px;font-size:10px;letter-spacing:1px;color:var(--amber);font-weight:700;">BUYER / SELLER AUTHENTICITY</div>' +
+        '<div style="font-size:10px;letter-spacing:1px;color:var(--amber);font-weight:700;margin-bottom:8px;">BUYER / SELLER AUTHENTICITY</div>' +
+        // Buyers row
         '<div class="fp-poser-row">' +
-          '<span style="font-size:10px;color:var(--green);min-width:60px;">BUYERS</span>' +
+          '<span style="font-size:10px;color:var(--green);min-width:55px;">BUYERS</span>' +
           '<div class="fp-poser-bar"><div class="fp-poser-real" style="width:' + realBuyPct + '%;background:var(--green);"></div><div class="fp-poser-fake" style="width:' + poserBuyPct + '%;background:var(--green);"></div></div>' +
-          '<span class="fp-poser-label" style="color:var(--green);">' + realBuyPct + '% real</span>' +
+          '<span style="font-family:var(--mono);font-size:10px;color:var(--green);min-width:80px;text-align:right;">' + realBuyPct + '% real</span>' +
         '</div>' +
-        '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin:-2px 0 4px 68px;">' +
-          '<span class="metric-click" onclick="_toggleWWH(this)">Real: ' + fmtVol(realBuyers) + '</span>' + _wwhHTML('poser_buyers', {value: poserBuyPct + '% posers, ' + realBuyPct + '% real'}) +
-          '<span style="opacity:.5;">Posers: ' + fmtVol(trueBuyers - realBuyers) + ' (' + poserBuyPct + '%)</span>' +
+        '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin:2px 0 6px 63px;">' +
+          '<span>Real: <strong style="color:var(--green);">' + fmtVol(realBuyers) + '</strong></span>' +
+          (poserBuyVol > 0 ? '<span style="opacity:.5;">Posers: ' + fmtVol(poserBuyVol) + ' (' + poserBuyPct + '%)</span>' : '') +
         '</div>' +
+        // Sellers row
         '<div class="fp-poser-row">' +
-          '<span style="font-size:10px;color:var(--red);min-width:60px;">SELLERS</span>' +
+          '<span style="font-size:10px;color:var(--red);min-width:55px;">SELLERS</span>' +
           '<div class="fp-poser-bar"><div class="fp-poser-real" style="width:' + realSellPct + '%;background:var(--red);"></div><div class="fp-poser-fake" style="width:' + poserSellPct + '%;background:var(--red);"></div></div>' +
-          '<span class="fp-poser-label" style="color:var(--red);">' + realSellPct + '% real</span>' +
+          '<span style="font-family:var(--mono);font-size:10px;color:var(--red);min-width:80px;text-align:right;">' + realSellPct + '% real</span>' +
         '</div>' +
-        '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin:-2px 0 4px 68px;">' +
-          '<span class="metric-click" onclick="_toggleWWH(this)">Real: ' + fmtVol(realSellers) + '</span>' + _wwhHTML('poser_sellers', {value: poserSellPct + '% posers, ' + realSellPct + '% real'}) +
-          '<span style="opacity:.5;">Posers: ' + fmtVol(trueSellers - realSellers) + ' (' + poserSellPct + '%)</span>' +
+        '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin:2px 0 6px 63px;">' +
+          '<span>Real: <strong style="color:var(--red);">' + fmtVol(realSellers) + '</strong></span>' +
+          (poserSellVol > 0 ? '<span style="opacity:.5;">Posers: ' + fmtVol(poserSellVol) + ' (' + poserSellPct + '%)</span>' : '') +
         '</div>' +
-        '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--muted2);">Net Real Delta: <strong style="color:' + (realBuyers > realSellers ? 'var(--green)' : 'var(--red)') + ';">' + (realBuyers > realSellers ? '+' : '') + fmtVol(realBuyers - realSellers) + '</strong></div>';
+        // Net delta
+        '<div style="padding-top:6px;border-top:1px solid var(--border);font-size:10px;color:var(--muted2);">Net Real Delta: <strong style="color:' + (realBuyers > realSellers ? 'var(--green)' : 'var(--red)') + ';">' + (realBuyers > realSellers ? '+' : '') + fmtVol(realBuyers - realSellers) + '</strong></div>';
     }
 
     // Signals
@@ -9966,11 +9969,16 @@ function storeIndicatorExpandData(d) {
     4: { // Volume
       title: 'Volume Analysis — Detailed',
       rows: (function() {
+        var volU = d.vol_usd || (d.vol_raw && d.price ? d.vol_raw * d.price : 0);
+        var avgU = d.vol_avg_usd || (d.vol_avg && d.price ? d.vol_avg * d.price : 0);
+        var fv = function(n) { return !n ? '—' : n >= 1e9 ? '$'+(n/1e9).toFixed(1)+'B' : n >= 1e6 ? '$'+(n/1e6).toFixed(1)+'M' : n >= 1e3 ? '$'+(n/1e3).toFixed(1)+'K' : '$'+Math.round(n).toLocaleString(); };
+        var fu = function(n) { return !n ? '—' : n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : Math.round(n).toLocaleString(); };
         var rows = [
+          ['Dollar Volume', fv(volU), d.vol_ratio>=1.5?'g':'a'],
+          ['Raw Units', fu(d.vol_raw||0), ''],
+          ['Avg Dollar Vol', fv(avgU), ''],
           ['Volume Ratio', d.vol_ratio ? d.vol_ratio + '× avg' : '—', d.vol_ratio>=1.5?'g':'a'],
           ['Confirmation', d.vol_ratio>=1.5?'Institutional ✓':d.vol_ratio>=1.0?'Normal':'Weak', d.vol_ratio>=1.5?'g':d.vol_ratio>=1.0?'a':'r'],
-          ['Breakout Quality', d.vol_ratio>=1.5?'Genuine (high vol)':'Suspect (low vol)', d.vol_ratio>=1.5?'g':'r'],
-          ['Price', d.price ? '$' + d.price.toLocaleString(undefined,{maximumFractionDigits:2}) : '—', 'a'],
         ];
         if (d.entry && d.stop_loss) {
           var rpu = Math.abs(d.entry - d.stop_loss);
@@ -9978,10 +9986,9 @@ function storeIndicatorExpandData(d) {
           rows.push(['Lot Size (2%)', lots >= 1 ? lots.toFixed(1) + ' lots' : lots.toFixed(2) + ' lots', 'a']);
           rows.push(['Position Value', '$' + (lots * (d.entry||d.price||0)).toFixed(0), 'a']);
         }
-        rows.push(['Signal Weight', 'High — most objective confirmer', 'a']);
         return rows;
       })(),
-      note: 'Volume ≥ 1.5× average = institutional participation. Lot size based on 2% account risk ($10k).'
+      note: 'Volume ≥ 1.5× average = institutional participation. Dollar volume shows real market depth.'
     },
     5: { // ATR / Supertrend
       title: 'ATR & Supertrend — Detailed',
@@ -10021,14 +10028,19 @@ document.addEventListener('click', function(e) {
     card.appendChild(expand);
   }
 
+  // Map card index to WWH key
+  var wwhKeyMap = {0:'rsi', 1:'macd', 2:'ema_trend', 3:'bollinger', 4:'volume', 5:'supertrend'};
+  var wKey = wwhKeyMap[idx];
+
   if (data && data.rows) {
     expand.innerHTML = '<div class="ep-title">' + data.title + '</div>' +
       data.rows.map(function(r) {
         return '<div class="ep-row"><span class="ep-key">' + r[0] + '</span><span class="ep-val ' + (r[2]||'') + '">' + r[1] + '</span></div>';
       }).join('') +
-      (data.note ? '<div class="ep-note">' + data.note + '</div>' : '');
+      (data.note ? '<div class="ep-note">' + data.note + '</div>' : '') +
+      (wKey ? '<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">' + _wwhHTML(wKey).replace('class="wwh-panel"','class="wwh-panel open"') + '</div>' : '');
   } else {
-    expand.innerHTML = '<span style="color:var(--muted2);">Run analysis to see detailed indicator data</span>';
+    expand.innerHTML = wKey ? _wwhHTML(wKey).replace('class="wwh-panel"','class="wwh-panel open"') : '<span style="color:var(--muted2);">Run analysis to see detailed indicator data</span>';
   }
 
   card.classList.add('expanded');
