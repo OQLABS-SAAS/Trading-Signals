@@ -2407,27 +2407,8 @@ shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">
       <div id="econCalList" style="margin-bottom:24px;font-size:12px;color:var(--muted2);">Loading events...</div>
 
       <!-- News Feed -->
-      <div class="section-hdr" style="margin-bottom:10px;">Latest News</div>
-      <div class="news-feed">
-        <div class="news-card">
-          <div class="nc-meta"><span class="nc-time">14 min ago</span><span class="nc-source">CoinDesk</span></div>
-          <div class="nc-title">BlackRock Bitcoin ETF Registers Record $840M Single-Day Inflow</div>
-          <div class="nc-body">The iShares Bitcoin Trust ETF posted its highest single-day inflow since inception, following the market dip to $80,980. Institutional demand surges ahead of halving anniversary.</div>
-          <div class="nc-tags"><span class="nc-tag">BTC</span><span class="nc-tag">ETF</span><span class="nc-tag">Institutional</span></div>
-        </div>
-        <div class="news-card">
-          <div class="nc-meta"><span class="nc-time">47 min ago</span><span class="nc-source">Reuters</span></div>
-          <div class="nc-title">Fed Officials Signal No Rate Cuts Before Q3 2026, Dollar Firms</div>
-          <div class="nc-body">Three Federal Reserve governors reiterated hawkish guidance, pushing back expected rate cuts and strengthening the USD across G7 pairs. Risk assets remain under macro pressure.</div>
-          <div class="nc-tags"><span class="nc-tag">Fed</span><span class="nc-tag">Rates</span><span class="nc-tag">USD</span></div>
-        </div>
-        <div class="news-card">
-          <div class="nc-meta"><span class="nc-time">1h 12min ago</span><span class="nc-source">Bloomberg</span></div>
-          <div class="nc-title">MicroStrategy Adds 15,000 BTC — Total Holding Now 214,400 Bitcoin</div>
-          <div class="nc-body">Strategy (formerly MicroStrategy) disclosed a new purchase of 15,000 Bitcoin at an average price of $81,200, financed via convertible note offering worth $1.2B.</div>
-          <div class="nc-tags"><span class="nc-tag">BTC</span><span class="nc-tag">MSTR</span><span class="nc-tag">Corporate</span></div>
-        </div>
-      </div>
+      <div class="section-hdr" style="margin-bottom:10px;">Analysis Feed</div>
+      <div id="newsFeedItems" style="padding:20px;"><div style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;">Run analysis on tickers to populate news feed</div></div>
     </div>
     <div class="news-side">
       <div class="side-heading">Sentiment</div>
@@ -6898,20 +6879,26 @@ function renderResultsV2(d) {
   }
   
   // MTF grid
-  if (d.mtf) {
-    var mtfCells = document.querySelectorAll('.mtf-cell');
+  if (d.mtf && typeof d.mtf === 'object') {
+    var mtfCells = document.querySelectorAll('#mtfContent .mtf-cell');
     var tfKeys = Object.keys(d.mtf);
     mtfCells.forEach(function(cell, i) {
       if (i < tfKeys.length) {
         var key = tfKeys[i];
         var val = d.mtf[key];
         var tfLabel = cell.querySelector('.mtf-tf');
-        var biasEl = cell.querySelector('.mtf-bias');
+        var sigEl = cell.querySelector('.mtf-sig');
+        var rsiEl = cell.querySelector('.mtf-rsi');
         if (tfLabel) tfLabel.textContent = key.toUpperCase();
-        if (biasEl && typeof val === 'object') {
-          biasEl.textContent = val.bias || val.trend || '—';
-          biasEl.style.color = (val.bias||'').toLowerCase().includes('bull') ? 'var(--green)' : (val.bias||'').toLowerCase().includes('bear') ? 'var(--red)' : 'var(--amber)';
+        if (sigEl && val) {
+          var trend = (val.trend || '').toLowerCase();
+          var isBull = trend.includes('bull') || trend.includes('up');
+          var isBear = trend.includes('bear') || trend.includes('down');
+          sigEl.textContent = isBull ? 'BUY' : isBear ? 'SELL' : 'HOLD';
+          sigEl.className = 'mtf-sig ' + (isBull ? 'buy' : isBear ? 'sell' : 'hold');
+          sigEl.style.color = isBull ? 'var(--green)' : isBear ? 'var(--red)' : 'var(--amber)';
         }
+        if (rsiEl && val && val.rsi != null) rsiEl.textContent = 'RSI ' + parseFloat(val.rsi).toFixed(1);
       }
     });
   }
@@ -7030,6 +7017,19 @@ function renderResultsV2(d) {
 
   // Render chart (Chart.js)
   try { renderChart(d); } catch(e) { console.warn('renderChart:', e); }
+
+  // Also update News tab feed
+  var nfi = document.getElementById('newsFeedItems');
+  if (nfi && d.ticker) {
+    var newsHtml = '<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-family:var(--body);font-size:13px;">';
+    newsHtml += '<div style="color:var(--muted);font-size:10px;font-family:var(--mono);margin-bottom:4px;">' + new Date().toLocaleTimeString() + '</div>';
+    newsHtml += '<div style="color:var(--white);">' + d.ticker + ' analysis: <span style="color:' + (d.signal === 'BUY' ? 'var(--green)' : d.signal === 'SELL' ? 'var(--red)' : 'var(--amber)') + ';font-weight:700;">' + (d.signal||'HOLD') + '</span> signal at $' + parseFloat(d.price||0).toLocaleString() + '</div>';
+    if (d.summary) newsHtml += '<div style="color:var(--muted2);font-size:12px;margin-top:4px;">' + d.summary + '</div>';
+    newsHtml += '</div>';
+    // Prepend (newest first), remove placeholder
+    if (nfi.querySelector('div[style*="text-align:center"]')) nfi.innerHTML = '';
+    nfi.insertAdjacentHTML('afterbegin', newsHtml);
+  }
 
   console.log('[dotverse] renderResultsV2 complete for', d.ticker);
 }
@@ -8121,6 +8121,48 @@ function seRunEngine() {
       if (d.tp2) levels[3].textContent = '$' + parseFloat(d.tp2).toLocaleString();
       if (d.tp3) levels[4].textContent = '$' + parseFloat(d.tp3).toLocaleString();
     }
+    // ── Populate gate status ──
+    var gateVals = document.querySelectorAll('#seGateRows .se-gate-val');
+    if (gateVals.length >= 5) {
+      // Gate 1: HTF Trend aligned
+      var htfOk = d.ema_trend === 'bullish' || (d.mtf && d.mtf['1D'] && (d.mtf['1D'].trend||'').toLowerCase().includes('bull'));
+      gateVals[0].textContent = htfOk ? 'PASS' : 'FAIL';
+      gateVals[0].style.color = htfOk ? 'var(--green)' : 'var(--red)';
+
+      // Gate 2: Min R:R >= 2
+      var rr = d.rr1 || 0;
+      var rrOk = rr >= 2;
+      gateVals[1].textContent = rr ? ('1:' + parseFloat(rr).toFixed(1) + (rrOk ? ' PASS' : ' FAIL')) : '—';
+      gateVals[1].style.color = rrOk ? 'var(--green)' : rr ? 'var(--red)' : 'var(--muted)';
+
+      // Gate 3: ATR filter
+      var atr = d.atr || 0;
+      var price = d.price || 1;
+      var atrPct = (atr / price) * 100;
+      var atrOk = atrPct > 0.5 && atrPct < 8;
+      gateVals[2].textContent = atr ? (atrPct.toFixed(1) + '% ' + (atrOk ? 'PASS' : 'FAIL')) : '—';
+      gateVals[2].style.color = atrOk ? 'var(--green)' : atr ? 'var(--red)' : 'var(--muted)';
+
+      // Gate 4: Volume confirmation
+      var volOk = (d.vol_ratio || 0) >= 1.2;
+      gateVals[3].textContent = d.vol_ratio ? (parseFloat(d.vol_ratio).toFixed(1) + 'x ' + (volOk ? 'PASS' : 'FAIL')) : '—';
+      gateVals[3].style.color = volOk ? 'var(--green)' : d.vol_ratio ? 'var(--red)' : 'var(--muted)';
+
+      // Gate 5: Session filter (always pass for now — crypto 24/7)
+      gateVals[4].textContent = 'PASS';
+      gateVals[4].style.color = 'var(--green)';
+    }
+    // Update verdict badge count
+    var passCount = 0;
+    if (gateVals.length >= 5) {
+      for (var gi = 0; gi < 5; gi++) { if (gateVals[gi].textContent.includes('PASS')) passCount++; }
+    }
+    var verdictBadge = document.getElementById('seVerdictBadge');
+    if (verdictBadge) {
+      verdictBadge.textContent = passCount + '/5 ' + (passCount >= 3 ? 'GO' : 'NO-GO');
+      verdictBadge.className = 'sev-label ' + (passCount >= 3 ? 'go' : 'nogo');
+    }
+
     // Update last updated
     const lu = document.getElementById('seLastUpdated');
     if (lu) lu.textContent = 'Updated: ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
