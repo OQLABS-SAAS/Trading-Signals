@@ -4615,7 +4615,16 @@ function renderIndicators(d) {
       badge: volBull ? 'bull' : (d.vol_ratio||0) < 0.7 ? 'warn' : 'neut',
       bl: volBull ? 'High Volume' : (d.vol_ratio||0) < 0.7 ? 'Low Volume' : 'Average',
       desc: d.volume_assessment || 'Trading volume relative to the 20-bar average.',
-      raw: `${lbl('Ratio:')} <span style="color:${volBull?'#00c98d':'#4d9fff'};font-weight:700;">${d.vol_ratio||'—'}× avg</span>`,
+      raw: (function(){
+        var volU = d.vol_usd || (d.vol_raw && d.price ? d.vol_raw * d.price : 0);
+        var avgU = d.vol_avg_usd || (d.vol_avg && d.price ? d.vol_avg * d.price : 0);
+        var fv = function(n) { return !n ? '—' : n >= 1e9 ? '$'+(n/1e9).toFixed(1)+'B' : n >= 1e6 ? '$'+(n/1e6).toFixed(1)+'M' : n >= 1e3 ? '$'+(n/1e3).toFixed(1)+'K' : '$'+Math.round(n).toLocaleString(); };
+        var fu = function(n) { return !n ? '—' : n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : Math.round(n).toLocaleString(); };
+        return lbl('Volume:') + ' <span style="color:' + (volBull?'#00c98d':'#4d9fff') + ';font-weight:700;">' + fv(volU) + '</span>' + dot +
+               lbl('Units:') + ' ' + fu(d.vol_raw||0) + dot +
+               lbl('Ratio:') + ' <span style="font-weight:700;">' + (d.vol_ratio||'—') + '× avg</span>' + dot +
+               lbl('Avg:') + ' ' + fv(avgU);
+      })(),
       bar: bar(Math.min((d.vol_ratio||0) * 50, 100), volBull ? '#00c98d' : '#4d9fff')
     },
   ];
@@ -7458,22 +7467,33 @@ function renderResultsV2(d) {
     }
     // ATR
     infoCells[2].textContent = '$' + (d.atr ? d.atr.toLocaleString() : '—');
-    // Volume — with lot size and price
-    if (d.vol_ratio) {
-      infoCells[3].textContent = (d.vol_ratio >= 1.2 ? '↑ ' : '↓ ') + d.vol_ratio + '×';
-      infoCells[3].style.color = d.vol_ratio >= 1.5 ? 'var(--green)' : d.vol_ratio >= 1.0 ? 'var(--amber)' : 'var(--muted2)';
+    // Volume — with actual numbers in currency + ratio
+    if (d.vol_ratio || d.vol_raw || d.vol_usd) {
+      // Main value: dollar volume
+      var volUsd = d.vol_usd || (d.vol_raw && d.price ? d.vol_raw * d.price : 0);
+      var volAvgUsd = d.vol_avg_usd || (d.vol_avg && d.price ? d.vol_avg * d.price : 0);
+      var fmtVolUsd = function(n) {
+        if (!n) return '—';
+        if (Math.abs(n) >= 1e12) return '$' + (n/1e12).toFixed(1) + 'T';
+        if (Math.abs(n) >= 1e9) return '$' + (n/1e9).toFixed(1) + 'B';
+        if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(1) + 'M';
+        if (Math.abs(n) >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
+        return '$' + Math.round(n).toLocaleString();
+      };
+      var fmtVolUnits = function(n) {
+        if (!n) return '—';
+        if (Math.abs(n) >= 1e9) return (n/1e9).toFixed(1) + 'B';
+        if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1) + 'M';
+        if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(1) + 'K';
+        return Math.round(n).toLocaleString();
+      };
+      var ratio = d.vol_ratio || 1;
+      infoCells[3].textContent = fmtVolUsd(volUsd);
+      infoCells[3].style.color = ratio >= 1.5 ? 'var(--green)' : ratio >= 1.0 ? 'var(--amber)' : 'var(--muted2)';
       var volSub = infoCells[3].parentElement.querySelector('.ic-sub');
-      // Calculate lot size: 2% of $10k account / risk per unit
-      var lotSize = '—';
-      if (d.entry && d.stop_loss) {
-        var riskPerUnit = Math.abs(d.entry - d.stop_loss);
-        if (riskPerUnit > 0) {
-          var acctRisk = 200; // 2% of $10k
-          var lots = acctRisk / riskPerUnit;
-          lotSize = lots >= 1 ? lots.toFixed(1) : lots.toFixed(2);
-        }
+      if (volSub) {
+        volSub.textContent = fmtVolUnits(d.vol_raw || 0) + ' units · ' + ratio + '× avg';
       }
-      if (volSub) volSub.textContent = lotSize + ' lots · $' + (d.price ? d.price.toLocaleString(undefined,{maximumFractionDigits:2}) : '—');
     }
     // MACD
     if (d.macd_signal) {
