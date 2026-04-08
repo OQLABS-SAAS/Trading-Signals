@@ -1579,7 +1579,7 @@ body::before{
       <div class="section-hdr">What the indicators say</div>
       <div class="indicators-grid" id="indicatorsGrid">
         <!-- RSI -->
-        <div class="ind-card">
+        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="rsi">
           <div class="ind-card-top">
             <div><div class="ind-plain">Momentum Tracker</div><div class="ind-tech">RSI (14)</div></div>
             <span class="ind-badge">—</span>
@@ -1588,9 +1588,10 @@ body::before{
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
           <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
+          <div class="ind-expand" id="indExpandRsi"></div>
         </div>
         <!-- MACD -->
-        <div class="ind-card">
+        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="macd">
           <div class="ind-card-top">
             <div><div class="ind-plain">Trend Momentum</div><div class="ind-tech">MACD (12,26,9)</div></div>
             <span class="ind-badge">—</span>
@@ -1599,9 +1600,10 @@ body::before{
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
           <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
+          <div class="ind-expand" id="indExpandMacd"></div>
         </div>
         <!-- EMA -->
-        <div class="ind-card">
+        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="ema">
           <div class="ind-card-top">
             <div><div class="ind-plain">Trend Direction</div><div class="ind-tech">EMA 20/50</div></div>
             <span class="ind-badge">—</span>
@@ -1610,9 +1612,10 @@ body::before{
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
           <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
+          <div class="ind-expand" id="indExpandEma"></div>
         </div>
         <!-- BB -->
-        <div class="ind-card">
+        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="bb">
           <div class="ind-card-top">
             <div><div class="ind-plain">Volatility Bands</div><div class="ind-tech">Bollinger Bands (20,2)</div></div>
             <span class="ind-badge">—</span>
@@ -1621,9 +1624,10 @@ body::before{
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
           <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
+          <div class="ind-expand" id="indExpandBb"></div>
         </div>
         <!-- Volume -->
-        <div class="ind-card">
+        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="volume">
           <div class="ind-card-top">
             <div><div class="ind-plain">Buying Pressure</div><div class="ind-tech">Volume Analysis</div></div>
             <span class="ind-badge">—</span>
@@ -1632,9 +1636,10 @@ body::before{
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
           <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
+          <div class="ind-expand" id="indExpandVolume"></div>
         </div>
         <!-- ATR / Supertrend -->
-        <div class="ind-card">
+        <div class="ind-card" onclick="this.classList.toggle('expanded')" data-ind="supertrend">
           <div class="ind-card-top">
             <div><div class="ind-plain">Trend Strength</div><div class="ind-tech">Supertrend (ATR 10,3)</div></div>
             <span class="ind-badge">—</span>
@@ -1643,6 +1648,7 @@ body::before{
           <div class="ind-desc">Analyze a ticker to see data</div>
           <div class="ind-raw">—</div>
           <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
+          <div class="ind-expand" id="indExpandSupertrend"></div>
         </div>
       </div>
 
@@ -7158,6 +7164,39 @@ function renderResultsV2(d) {
     // Prepend (newest first), remove placeholder
     if (nfi.querySelector('div[style*="text-align:center"]')) nfi.innerHTML = '';
     nfi.insertAdjacentHTML('afterbegin', newsHtml);
+  }
+
+  // ── Populate beginner-friendly expandable sections on indicator cards ──
+  var expandStyle = 'font-size:12px;color:var(--white2);line-height:1.7;';
+  var labelStyle = 'display:block;font-family:var(--mono);font-size:9px;color:var(--amber);letter-spacing:1px;margin-bottom:6px;';
+
+  function setExpand(id, assessment, beginner) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var html = '';
+    if (assessment) html += '<div style="' + expandStyle + '">' + assessment + '</div>';
+    if (beginner) html += '<div style="margin-top:8px;padding:8px 10px;background:rgba(245,166,35,.06);border-radius:4px;border-left:2px solid var(--amber);">' +
+      '<span style="' + labelStyle + '">In simple terms</span>' +
+      '<div style="font-size:12px;color:var(--muted2);line-height:1.6;">' + beginner + '</div></div>';
+    if (!html) html = '<div style="color:var(--muted);font-size:11px;">Analyze a ticker to see details</div>';
+    el.innerHTML = html;
+  }
+
+  setExpand('indExpandRsi', d.rsi_assessment, d.rsi_beginner);
+  setExpand('indExpandMacd', d.macd_assessment, d.macd_beginner);
+  setExpand('indExpandEma', d.trend_assessment, d.ema_beginner);
+  setExpand('indExpandBb', d.bb_pos ? ('Bollinger position: ' + d.bb_pos + (d.bb_width ? ', width: ' + parseFloat(d.bb_width).toFixed(4) : '')) : null, d.bb_beginner);
+  setExpand('indExpandVolume', d.volume_assessment, d.volume_beginner);
+  setExpand('indExpandSupertrend', d.supertrend_assessment, d.atr_beginner);
+
+  // Overall beginner summary in narrative
+  if (d.overall_beginner) {
+    var narEl = document.getElementById('narrativeText');
+    if (narEl && d.narrative) {
+      narEl.innerHTML = d.narrative + '<div style="margin-top:12px;padding:10px 12px;background:rgba(245,166,35,.06);border-radius:4px;border-left:2px solid var(--amber);">' +
+        '<span style="' + labelStyle + '">What this means for you</span>' +
+        '<div style="font-size:12.5px;color:var(--muted2);line-height:1.6;">' + d.overall_beginner + '</div></div>';
+    }
   }
 
   console.log('[dotverse] renderResultsV2 complete for', d.ticker);

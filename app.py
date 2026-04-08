@@ -1324,8 +1324,9 @@ STRICT RULES:
 - ONLY reference the exact numbers provided below. Do not invent or estimate any data.
 - Do not predict future price movement. Do not say "price will" or "expect to."
 - Do not add information not present in the data.
-- Write as a professional trader explaining indicators to another trader.
-- Be concise. Use the actual numbers.
+- Your audience is BEGINNER traders. Explain every trading term in simple everyday language.
+- Avoid jargon. If you must use a term (RSI, MACD, etc.), immediately explain what it means.
+- Be concise. Use the actual numbers. Make it feel like a smart friend explaining the chart.
 
 TICKER: {ticker} ({asset_type}, {timeframe} timeframe)
 SIGNAL: {result['signal']} | CONFIDENCE: {result['confidence']}
@@ -1342,13 +1343,20 @@ ENTRY: {result.get('entry')} | STOP LOSS: {result.get('stop_loss')}
 TP1: {result.get('tp1')} | TP2: {result.get('tp2')} | TP3: {result.get('tp3')}
 
 Return JSON with these keys ONLY:
-- "summary": 2 sentences describing the current state using the numbers above
-- "narrative": 3 sentences explaining the trade setup referencing specific indicator values
-- "rsi_assessment": 1 sentence about RSI using the exact value
-- "trend_assessment": 1 sentence about EMA trend using exact EMA values
-- "macd_assessment": 1 sentence about MACD using exact histogram value
-- "volume_assessment": 1 sentence about volume using exact ratio
-- "supertrend_assessment": 1 sentence about supertrend
+- "summary": 2 sentences for a beginner — what is happening with this asset right now, using the numbers above
+- "narrative": 3 sentences explaining the trade setup in simple language, referencing specific values
+- "rsi_assessment": 1 sentence explaining RSI {ind.get('rsi')} in plain English (e.g. "RSI is at 65 — think of it as a momentum meter from 0-100. Right now it shows moderate buying energy, not yet overheated.")
+- "trend_assessment": 1 sentence explaining the EMA trend simply (e.g. "The short-term average price ({ind.get('ema20')}) is above the longer-term average ({ind.get('ema50')}), which means the overall direction is upward.")
+- "macd_assessment": 1 sentence explaining MACD in beginner terms (e.g. "MACD measures if momentum is speeding up or slowing down. The reading of X means...")
+- "volume_assessment": 1 sentence explaining volume ratio simply (e.g. "Trading activity is 1.8x higher than usual — more people are trading this than normal, which adds weight to the signal.")
+- "supertrend_assessment": 1 sentence explaining supertrend simply (e.g. "The Supertrend indicator acts like a safety line — price is currently above it, meaning the uptrend is intact.")
+- "rsi_beginner": 1 sentence — what RSI means for someone who has never traded (no jargon at all)
+- "macd_beginner": 1 sentence — what MACD means for a complete beginner
+- "ema_beginner": 1 sentence — what the EMA trend means for a complete beginner
+- "volume_beginner": 1 sentence — what the volume ratio means for a complete beginner
+- "atr_beginner": 1 sentence — explain ATR as "how much the price typically moves" for a beginner
+- "bb_beginner": 1 sentence — explain Bollinger Bands position in the simplest possible way
+- "overall_beginner": 2 sentences — the big picture in the simplest terms a non-trader would understand
 
 Return ONLY valid JSON. No markdown."""
 
@@ -1363,7 +1371,7 @@ Return ONLY valid JSON. No markdown."""
                 "model": "gpt-4o-mini",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
-                "max_tokens": 600
+                "max_tokens": 900
             },
             timeout=(10, 25)
         )
@@ -1390,7 +1398,14 @@ Return ONLY valid JSON. No markdown."""
             "trend_assessment",
             "macd_assessment",
             "volume_assessment",
-            "supertrend_assessment"
+            "supertrend_assessment",
+            "rsi_beginner",
+            "macd_beginner",
+            "ema_beginner",
+            "volume_beginner",
+            "atr_beginner",
+            "bb_beginner",
+            "overall_beginner",
         }
 
         # Merge ONLY the text keys into result, preserving all other fields
