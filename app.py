@@ -2971,60 +2971,108 @@ def scan_list():
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def api_chat():
-    """Context-aware AI chat — uses current signal data to answer questions."""
+    """Context-aware AI chat — uses ALL current page data to answer questions accurately."""
     data = request.get_json(force=True)
     message = data.get("message", "")
     context = data.get("context", {})
 
-    ticker = context.get("ticker", "")
-    signal = context.get("signal", "HOLD")
-    price  = context.get("price")
-    rsi    = context.get("rsi")
-    tf     = context.get("timeframe", "4h")
-    atype  = context.get("asset_type", "crypto")
-    conf   = context.get("confidence", "")
-    entry  = context.get("entry")
-    sl     = context.get("stop_loss")
-    tp1    = context.get("tp1")
-    trend  = context.get("ema_trend", "")
-    narr   = context.get("narrative", "")
-
-    tab = context.get("tab", "signals")
-    vol_ratio = context.get("vol_ratio")
-    macd_hist = context.get("macd_hist")
+    ticker     = context.get("ticker", "")
+    signal     = context.get("signal", "HOLD")
+    price      = context.get("price")
+    rsi        = context.get("rsi")
+    tf         = context.get("timeframe", "4h")
+    atype      = context.get("asset_type", "crypto")
+    conf       = context.get("confidence", "")
+    entry      = context.get("entry")
+    sl         = context.get("stop_loss")
+    tp1        = context.get("tp1")
+    tp2        = context.get("tp2")
+    tp3        = context.get("tp3")
+    trend      = context.get("ema_trend", "")
+    narr       = context.get("narrative", "")
+    tab        = context.get("tab", "signals")
+    vol_ratio  = context.get("vol_ratio")
+    macd_hist  = context.get("macd_hist")
     supertrend = context.get("supertrend")
-    tp2 = context.get("tp2")
-    tp3 = context.get("tp3")
 
-    # Build a rich context prompt for the AI
-    ctx_parts = []
-    if ticker: ctx_parts.append(f"Ticker: {ticker} ({atype})")
-    if price:  ctx_parts.append(f"Price: ${price}")
-    if signal: ctx_parts.append(f"Signal: {signal}")
-    if conf:   ctx_parts.append(f"Confidence: {conf}")
-    if rsi:    ctx_parts.append(f"RSI: {rsi}")
-    if trend:  ctx_parts.append(f"EMA Trend: {trend}")
-    if entry:  ctx_parts.append(f"Entry: ${entry}")
-    if sl:     ctx_parts.append(f"Stop Loss: ${sl}")
-    if tp1:    ctx_parts.append(f"TP1: ${tp1}")
-    if tp2:    ctx_parts.append(f"TP2: ${tp2}")
-    if tp3:    ctx_parts.append(f"TP3: ${tp3}")
-    if vol_ratio: ctx_parts.append(f"Volume Ratio: {vol_ratio}x avg")
-    if macd_hist is not None: ctx_parts.append(f"MACD Histogram: {macd_hist}")
-    if supertrend: ctx_parts.append(f"Supertrend: {supertrend}")
-    ctx_str = " | ".join(ctx_parts) if ctx_parts else "No instrument loaded"
+    # Extended indicators
+    atr        = context.get("atr")
+    bb_pos     = context.get("bb_pos")
+    support    = context.get("support")
+    resistance = context.get("resistance")
+    chg_1d     = context.get("chg_1d")
+    rr1        = context.get("rr1")
+    rr2        = context.get("rr2")
+    rr3        = context.get("rr3")
+    adx        = context.get("adx")
 
-    # Tab-specific instructions so AI only references what's on screen
+    # ── Build comprehensive data snapshot ──
+    data_lines = []
+    if ticker: data_lines.append(f"Ticker: {ticker} ({atype}) on {tf}")
+    if price:  data_lines.append(f"Current Price: ${price}")
+    if signal: data_lines.append(f"Signal: {signal}" + (f" ({conf} confidence)" if conf else ""))
+    if rsi:    data_lines.append(f"RSI(14): {rsi}" + (" — oversold (<30)" if float(rsi) < 30 else " — overbought (>70)" if float(rsi) > 70 else ""))
+    if trend:  data_lines.append(f"EMA Trend: {trend}")
+    if supertrend: data_lines.append(f"Supertrend: {supertrend}")
+    if macd_hist is not None: data_lines.append(f"MACD Histogram: {macd_hist}" + (" (positive=bullish momentum)" if float(macd_hist or 0) > 0 else " (negative=bearish momentum)"))
+    if vol_ratio: data_lines.append(f"Volume: {vol_ratio}x average" + (" — HIGH" if float(vol_ratio or 0) > 1.5 else ""))
+    if bb_pos is not None: data_lines.append(f"Bollinger Band Position: {round(float(bb_pos)*100)}%" + (" (near lower band — oversold zone)" if float(bb_pos) < 0.2 else " (near upper band — overbought zone)" if float(bb_pos) > 0.8 else ""))
+    if atr:    data_lines.append(f"ATR (volatility): {atr}")
+    if adx:    data_lines.append(f"ADX (trend strength): {adx}" + (" — strong trend" if float(adx or 0) > 25 else " — weak/no trend"))
+    if support:    data_lines.append(f"Support: ${support}")
+    if resistance: data_lines.append(f"Resistance: ${resistance}")
+    if chg_1d is not None: data_lines.append(f"24h Change: {chg_1d}%")
+    if entry: data_lines.append(f"Entry Price: ${entry}")
+    if sl:    data_lines.append(f"Stop Loss: ${sl}")
+    if tp1:   data_lines.append(f"TP1: ${tp1}" + (f" (R:R {rr1}:1)" if rr1 else ""))
+    if tp2:   data_lines.append(f"TP2: ${tp2}" + (f" (R:R {rr2}:1)" if rr2 else ""))
+    if tp3:   data_lines.append(f"TP3: ${tp3}" + (f" (R:R {rr3}:1)" if rr3 else ""))
+
+    # ── Backtest data (sent when user is on backtest tab or asks about it) ──
+    bt = context.get("backtest")
+    if bt:
+        data_lines.append("\n--- BACKTEST RESULTS ---")
+        data_lines.append(f"Win Rate: {bt.get('win_rate')}% ({bt.get('wins')} wins, {bt.get('losses')} losses out of {bt.get('total_trades')} trades)")
+        data_lines.append(f"Total Return: ${bt.get('total_pnl_usd')} ({bt.get('total_pnl_pct')}%)")
+        data_lines.append(f"Total R: {bt.get('total_r')}R | Avg Win: +{bt.get('avg_win_r')}R | Avg Loss: -{bt.get('avg_loss_r')}R")
+        data_lines.append(f"Profit Factor: {bt.get('profit_factor')}")
+        data_lines.append(f"Max Drawdown: ${bt.get('max_dd_usd')} ({bt.get('max_dd_pct')}%)")
+        data_lines.append(f"Period: {bt.get('period')}")
+        if bt.get("expectancy_r"): data_lines.append(f"Expectancy: {round(bt['expectancy_r'], 2)}R per trade")
+        if bt.get("best_trade_r"): data_lines.append(f"Best Trade: +{bt['best_trade_r']}R | Worst: {bt['worst_trade_r']}R")
+        if bt.get("tp1_exits"):    data_lines.append(f"Exit Breakdown: TP1={bt['tp1_exits']}, TP2={bt['tp2_exits']}, TP3={bt['tp3_exits']}")
+
+    # ── Scanner data ──
+    scan = context.get("scanner")
+    if scan:
+        data_lines.append("\n--- SCANNER RESULTS ---")
+        data_lines.append(f"Scanned {scan.get('total_scanned')} instruments: {scan.get('buy_signals')} BUY, {scan.get('sell_signals')} SELL, {scan.get('hold_signals')} HOLD")
+        if scan.get("top_buys"): data_lines.append(f"Top BUY signals: {scan['top_buys']}")
+        if scan.get("top_sells"): data_lines.append(f"Top SELL signals: {scan['top_sells']}")
+
+    # ── Simulation targets ──
+    bull_target = context.get("bull_target")
+    bear_target = context.get("bear_target")
+    base_target = context.get("base_target")
+    if bull_target or bear_target:
+        data_lines.append("\n--- SIMULATION ---")
+        if bull_target: data_lines.append(f"Bull case: ${bull_target} ({context.get('bull_prob','')}%)")
+        if base_target: data_lines.append(f"Base case: ${base_target} ({context.get('base_prob','')}%)")
+        if bear_target: data_lines.append(f"Bear case: ${bear_target} ({context.get('bear_prob','')}%)")
+
+    data_str = "\n".join(data_lines) if data_lines else "No instrument loaded"
+
+    # ── Tab-specific instructions ──
     tab_instructions = {
-        "signals": "The user is on the SIGNALS page showing indicators (RSI, MACD, EMA, Bollinger, Volume, Supertrend), signal alignment, and chart. ONLY discuss these indicators and the overall signal. Do NOT mention backtest results, strategy patterns, or simulation scenarios.",
-        "order": "The user is on the ORDER FLOW page showing candle footprint (buy/sell pressure, delta, CVD), buyer/seller authenticity (posers vs real), stacked imbalances, and liquidity zones. ONLY discuss order flow and volume dynamics. Do NOT mention strategy patterns or backtest stats.",
-        "flow": "The user is on the ORDER FLOW page showing candle footprint (buy/sell pressure, delta, CVD), buyer/seller authenticity (posers vs real), stacked imbalances, and liquidity zones. ONLY discuss order flow and volume dynamics.",
-        "strateg": "The user is on the STRATEGY ENGINE page showing detected patterns (FCR, MSL, LF, FVG, FF, BFR, QFVG) and gate conditions. ONLY discuss which strategies triggered and their gate requirements. Do NOT mention backtest or simulation results.",
-        "backtest": "The user is on the BACKTEST page showing historical performance: win rate, total return, max drawdown, profit factor, trade count, and equity curve. ONLY discuss backtest statistics and historical performance.",
-        "simul": "The user is on the SIMULATION page showing Bull/Base/Bear probability scenarios with projected prices. ONLY discuss the three scenarios and their probabilities.",
-        "trade": "The user is on the TRADE MANAGEMENT page showing entry, stop loss, TP1/TP2/TP3, position sizing, and risk management. ONLY discuss the trade plan and risk management.",
-        "manage": "The user is on the TRADE MANAGEMENT page showing entry, stop loss, TP1/TP2/TP3, position sizing, and risk management. ONLY discuss the trade plan and risk management.",
-        "scan": "The user is on the MARKET SCANNER page showing signals across multiple instruments and timeframes. ONLY discuss which instruments have active signals and cross-market comparisons.",
+        "signals": "The user is on the SIGNALS page showing 6 indicators (RSI, MACD, EMA Trend, Bollinger Bands, Volume, Supertrend), signal alignment scorecard, price chart with overlays, and trade levels. Answer using the exact indicator values provided. Explain what each indicator means in plain language.",
+        "order": "The user is on the ORDER FLOW page showing candle footprint (buy vs sell volume), buyer/seller authenticity (real vs fake/posing volume), stacked imbalances, and liquidity zones. Explain order flow concepts simply.",
+        "flow": "The user is on the ORDER FLOW page. Same as 'order' above.",
+        "strateg": "The user is on the STRATEGY ENGINE page showing pattern detection: FCR (Fair Candle Reversal), MSL (Market Structure Low), LF (Liquidity Fill), FVG (Fair Value Gap), FF (Fibonacci Fill), BFR (Break-Fail-Reversal), QFVG (Qualified FVG). Also shows gate conditions (trend, volume, RSI, momentum, structure). Explain which patterns triggered and what they mean.",
+        "backtest": "The user is on the BACKTEST page. Use the exact backtest statistics provided (win rate, PnL, drawdown, profit factor, trades). Explain what each metric means and whether this strategy is viable. Be specific with numbers.",
+        "simul": "The user is on the SIMULATION page. Use the exact Bull/Base/Bear scenario data with probabilities. Explain the risk/reward of each scenario in practical terms.",
+        "trade": "The user is on the TRADE MANAGEMENT page showing the complete trade plan: entry, stop loss, TP1/TP2/TP3, position sizing, and risk/reward ratios. Give practical advice about executing the trade.",
+        "manage": "Same as 'trade' — TRADE MANAGEMENT page.",
+        "scan": "The user is on the MARKET SCANNER page. Use the scanner results summary (how many BUY/SELL/HOLD signals, which tickers). Help them identify the strongest opportunities from the scan.",
     }
     tab_ctx = ""
     for key, instruction in tab_instructions.items():
@@ -3032,19 +3080,22 @@ def api_chat():
             tab_ctx = instruction
             break
     if not tab_ctx:
-        tab_ctx = "The user is viewing signal data. Only reference the metrics provided in the context below."
+        tab_ctx = "The user is viewing signal data. Use the exact metrics provided below — do not invent numbers."
 
     system_prompt = (
-        "You are DotVerse AI, a trading assistant embedded in a signal analysis platform. "
-        "You explain trading concepts in simple, beginner-friendly language. Avoid jargon — if you must use a technical term, immediately explain what it means in parentheses. "
-        "Answer concisely (2-4 sentences max). Use specific numbers from the context. "
-        "CRITICAL: " + tab_ctx + " "
-        "Never make up data that isn't in the context. If asked about something not on the current page, tell the user which tab to check.\n"
-        f"Current page: {tab}\n"
-        f"Data: {ctx_str}"
+        "You are DotVerse AI, a professional trading assistant. "
+        "RULES:\n"
+        "1. Use ONLY the data provided below — never make up prices, percentages, or indicator values.\n"
+        "2. If a number is in the data, cite it exactly. If data is missing, say 'that data isn't available on this page' and suggest which tab to check.\n"
+        "3. Explain trading concepts in clear, beginner-friendly language. When using a technical term, briefly explain what it means.\n"
+        "4. Keep answers concise but thorough — 3-5 sentences. Use bullet points for multi-part answers.\n"
+        "5. Give actionable insights, not just data recitation. Say what the numbers MEAN for the trade.\n"
+        "6. " + tab_ctx + "\n\n"
+        f"CURRENT PAGE: {tab}\n\n"
+        f"PAGE DATA:\n{data_str}"
     )
     if narr:
-        system_prompt += f"\nGenerated narrative: {narr[:400]}"
+        system_prompt += f"\n\nAI NARRATIVE (for reference): {narr[:600]}"
 
     try:
         import openai
@@ -3055,8 +3106,8 @@ def api_chat():
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message},
             ],
-            max_tokens=300,
-            temperature=0.7,
+            max_tokens=500,
+            temperature=0.5,
         )
         reply = resp.choices[0].message.content.strip()
         return jsonify({"reply": reply})

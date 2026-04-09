@@ -10102,40 +10102,112 @@ function chatSend() {
   addMsg(txt, 'user');
   inp.value = '';
 
-  // Build context-aware response based on current page data
+  // Build FULL context from current page — collect everything visible
   var activeTab = document.querySelector('.nav-tab.active');
   var tabName = activeTab ? activeTab.textContent.trim().toLowerCase() : 'signals';
   var d = currentData;
-  var contextInfo = '';
 
+  // Core instrument data
+  var ctx = {
+    tab: tabName,
+    ticker: d ? d.ticker : null,
+    signal: d ? d.signal : null,
+    price: d ? d.price : null,
+    rsi: d ? d.rsi : null,
+    timeframe: d ? d.timeframe : null,
+    asset_type: d ? d.asset_type : null,
+    confidence: d ? d.confidence : null,
+    entry: d ? d.entry : null,
+    stop_loss: d ? d.stop_loss : null,
+    tp1: d ? d.tp1 : null,
+    tp2: d ? d.tp2 : null,
+    tp3: d ? d.tp3 : null,
+    ema_trend: d ? d.ema_trend : null,
+    vol_ratio: d ? d.vol_ratio : null,
+    macd_hist: d ? d.macd_hist : null,
+    supertrend: d ? d.supertrend : null,
+    narrative: d ? d.narrative : null
+  };
+
+  // Extended indicator data — everything the user can see on the signals page
   if (d) {
-    contextInfo = d.ticker + ' (' + (d.asset_type||'') + ') on ' + (d.timeframe||'') + ' — Signal: ' + (d.signal||'HOLD') + ', RSI: ' + (d.rsi||'—') + ', Price: $' + (d.price||'—');
+    ctx.atr = d.atr || null;
+    ctx.bb_pos = d.bb_pos != null ? d.bb_pos : null;
+    ctx.support = d.support || null;
+    ctx.resistance = d.resistance || null;
+    ctx.chg_1d = d.chg_1d || null;
+    ctx.rr1 = d.rr1 || null;
+    ctx.rr2 = d.rr2 || null;
+    ctx.rr3 = d.rr3 || null;
+    ctx.adx = d.adx || null;
+    ctx.macd_line = d.macd_line || null;
+    ctx.macd_signal = d.macd_signal || null;
+    ctx.volume = d.volume || null;
+    // Indicator alignment — collect which indicators agree
+    ctx.alignment = d.alignment || null;
+    // Strategy data
+    ctx.strategies = d.strategies || null;
+    ctx.gate_pass = d.gate_pass || null;
+    // Simulation data
+    ctx.bull_target = d.bull_target || null;
+    ctx.bear_target = d.bear_target || null;
+    ctx.base_target = d.base_target || null;
+    ctx.bull_prob = d.bull_prob || null;
+    ctx.bear_prob = d.bear_prob || null;
+    ctx.base_prob = d.base_prob || null;
   }
 
-  // Send to AI endpoint with full page-aware context
-  var aiPayload = {
-    message: txt,
-    context: {
-      tab: tabName,
-      ticker: d ? d.ticker : null,
-      signal: d ? d.signal : null,
-      price: d ? d.price : null,
-      rsi: d ? d.rsi : null,
-      timeframe: d ? d.timeframe : null,
-      asset_type: d ? d.asset_type : null,
-      confidence: d ? d.confidence : null,
-      entry: d ? d.entry : null,
-      stop_loss: d ? d.stop_loss : null,
-      tp1: d ? d.tp1 : null,
-      tp2: d ? d.tp2 : null,
-      tp3: d ? d.tp3 : null,
-      ema_trend: d ? d.ema_trend : null,
-      vol_ratio: d ? d.vol_ratio : null,
-      macd_hist: d ? d.macd_hist : null,
-      supertrend: d ? d.supertrend : null,
-      narrative: d ? d.narrative : null
+  // Backtest data — from the last completed backtest
+  var bt = window._lastBt;
+  if (bt && (tabName.includes('backtest') || txt.toLowerCase().match(/backtest|win rate|drawdown|profit|historical|trades/))) {
+    ctx.backtest = {
+      win_rate: bt.win_rate,
+      total_trades: bt.total_trades,
+      wins: bt.wins,
+      losses: bt.losses,
+      total_r: bt.total_r,
+      avg_win_r: bt.avg_win_r,
+      avg_loss_r: bt.avg_loss_r,
+      profit_factor: bt.profit_factor,
+      total_pnl_usd: bt.total_pnl_usd,
+      total_pnl_pct: bt.total_pnl_pct,
+      max_dd_usd: bt.max_dd_usd,
+      max_dd_pct: bt.max_dd_pct,
+      period: bt.period,
+      bars_tested: bt.bars_tested
+    };
+    // Include trade summary (not all trades, just key stats)
+    if (bt.trades_list && bt.trades_list.length) {
+      var bestTrade = Math.max.apply(null, bt.trades_list.map(function(t){return t.r;}));
+      var worstTrade = Math.min.apply(null, bt.trades_list.map(function(t){return t.r;}));
+      var tp1Exits = bt.trades_list.filter(function(t){return t.outcome==='win_tp1';}).length;
+      var tp2Exits = bt.trades_list.filter(function(t){return t.outcome==='win_tp2';}).length;
+      var tp3Exits = bt.trades_list.filter(function(t){return t.outcome==='win_tp3';}).length;
+      ctx.backtest.best_trade_r = bestTrade;
+      ctx.backtest.worst_trade_r = worstTrade;
+      ctx.backtest.tp1_exits = tp1Exits;
+      ctx.backtest.tp2_exits = tp2Exits;
+      ctx.backtest.tp3_exits = tp3Exits;
+      ctx.backtest.expectancy_r = bt.total_trades ? (bt.total_r / bt.total_trades) : 0;
     }
-  };
+  }
+
+  // Scanner results summary — if on scanner tab
+  if (tabName.includes('scan') && _lastScanResults && _lastScanResults.length) {
+    var buyCount = _lastScanResults.filter(function(r){var h=(r.signal_hint||'').toUpperCase();return h==='BUY'||h==='POSSIBLE_BUY'||h==='COUNTER_BUY';}).length;
+    var sellCount = _lastScanResults.filter(function(r){var h=(r.signal_hint||'').toUpperCase();return h==='SELL'||h==='POSSIBLE_SELL';}).length;
+    var holdCount = _lastScanResults.filter(function(r){return (r.signal_hint||'').toUpperCase()==='HOLD';}).length;
+    ctx.scanner = {
+      total_scanned: _lastScanResults.length,
+      buy_signals: buyCount,
+      sell_signals: sellCount,
+      hold_signals: holdCount,
+      top_buys: _lastScanResults.filter(function(r){var h=(r.signal_hint||'').toUpperCase();return h==='BUY';}).slice(0,5).map(function(r){return r.ticker + ' (conf:' + (r.confidence||'—') + ', RSI:' + (r.rsi||'—') + ')';}).join(', '),
+      top_sells: _lastScanResults.filter(function(r){var h=(r.signal_hint||'').toUpperCase();return h==='SELL';}).slice(0,5).map(function(r){return r.ticker + ' (conf:' + (r.confidence||'—') + ', RSI:' + (r.rsi||'—') + ')';}).join(', ')
+    };
+  }
+
+  var aiPayload = { message: txt, context: ctx };
 
   fetch('/api/chat', {
     method: 'POST',
@@ -10154,72 +10226,126 @@ function chatSend() {
 }
 
 function _buildContextReply(question, d, tab) {
-  if (!d) return "No instrument loaded yet. Analyze a ticker first, then I can answer questions about it.";
+  if (!d && !(tab||'').includes('scan')) return "No instrument loaded yet. Analyze a ticker first, then I can answer questions about it.";
   var q = question.toLowerCase();
-  var sig = (d.signal||'HOLD').toUpperCase();
-  var ticker = d.ticker || '—';
-  var price = d.price ? '$' + parseFloat(d.price).toLocaleString() : '—';
+  var sig = d ? (d.signal||'HOLD').toUpperCase() : 'HOLD';
+  var ticker = d ? (d.ticker||'') : '';
+  var price = d && d.price ? '$' + parseFloat(d.price).toLocaleString(undefined,{maximumFractionDigits:4}) : '—';
   var t = (tab||'').toLowerCase();
+  var bt = window._lastBt;
+  var fNum = function(v) { return v != null ? parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:4}) : '—'; };
+  var fPct = function(v) { return v != null ? (parseFloat(v) >= 0 ? '+' : '') + parseFloat(v).toFixed(2) + '%' : '—'; };
 
-  // Tab-specific responses — only reference what's on the current page
-  if (t.includes('order') || t.includes('flow')) {
-    if (q.includes('buy') || q.includes('sell') || q.includes('who')) return 'On ' + ticker + ': The footprint shows the buy/sell split from candle structure. Check the buyer/seller authenticity section to see how much is real vs posing (fake) volume. Real delta tells you who actually has control.';
-    if (q.includes('fake') || q.includes('poser')) return 'Posing volume comes from large wick candles — orders placed to move price but quickly withdrawn. The authenticity bars show what % of buying/selling is genuine. Higher real % = more trustworthy move.';
-    if (q.includes('delta')) return 'Delta is the difference between buying and selling volume on ' + ticker + '. Positive delta = more buyers. Negative = more sellers. Combined with CVD trend, it shows whether accumulation or distribution is happening.';
-    if (q.includes('imbalance') || q.includes('stack')) return 'Stacked imbalances show consecutive candles dominated by one side. 3+ buy stacks = strong bullish pressure building. Check the dot indicators — green = buy dominance, red = sell dominance.';
-    if (q.includes('liquid')) return 'Liquidity zones show where stop-loss orders are clustered. Liquidity above = short stops (price magnet). Liquidity below = long stops (support). "NEAR" means price is close to triggering these clusters.';
-    return 'You\'re on the Order Flow page for ' + ticker + '. This shows candle footprint (buy/sell pressure), buyer/seller authenticity (real vs posing volume), stacked imbalances, and liquidity zones. Click any highlighted term for details.';
+  // ── BACKTEST tab — use real backtest numbers ──
+  if (t.includes('backtest') && bt) {
+    if (q.includes('win') || q.includes('rate')) {
+      return ticker + ' backtest win rate: <strong>' + bt.win_rate + '%</strong> (' + bt.wins + ' wins, ' + bt.losses + ' losses out of ' + bt.total_trades + ' trades). ' +
+        (bt.win_rate >= 55 ? 'This is a solid win rate — combined with a ' + bt.profit_factor + ' profit factor, the strategy is profitable.' : bt.win_rate >= 45 ? 'Slightly below average, but if the average win is larger than the average loss, it can still be profitable.' : 'Low win rate — check if the R:R compensates. Avg win: ' + bt.avg_win_r + 'R, avg loss: ' + bt.avg_loss_r + 'R.');
+    }
+    if (q.includes('draw') || q.includes('worst') || q.includes('bad')) {
+      return 'Max drawdown on ' + ticker + ': <strong>-$' + Math.abs(bt.max_dd_usd).toFixed(2) + '</strong> (' + bt.max_dd_pct.toFixed(2) + '% of peak equity). This means the biggest loss streak from peak to trough. ' +
+        (bt.max_dd_pct < 10 ? 'Under 10% drawdown is very good risk management.' : bt.max_dd_pct < 20 ? 'Manageable, but keep position sizes small.' : 'This is significant — consider tighter stops or smaller positions.');
+    }
+    if (q.includes('profit') || q.includes('return') || q.includes('pnl') || q.includes('money')) {
+      return ticker + ' strategy total return: <strong>' + (bt.total_pnl_usd >= 0 ? '+' : '') + '$' + bt.total_pnl_usd.toFixed(2) + '</strong> (' + fPct(bt.total_pnl_pct) + ') over ' + bt.total_trades + ' trades. ' +
+        'Profit factor: ' + bt.profit_factor + ' (above 1.5 is good). Expectancy: ' + (bt.total_trades ? (bt.total_r / bt.total_trades).toFixed(2) : '—') + 'R per trade.';
+    }
+    if (q.includes('trade') && (q.includes('list') || q.includes('detail') || q.includes('click'))) {
+      return 'Click any trade row in the list below to expand its details. You\'ll see the entry price, exit type (TP1/TP2/TP3 or Stop Loss), R-multiple, P&L in dollars, and cumulative profit up to that trade.';
+    }
+    return ticker + ' backtest: ' + bt.win_rate + '% win rate, ' + bt.total_trades + ' trades, ' + (bt.total_pnl_usd >= 0 ? '+' : '') + '$' + bt.total_pnl_usd.toFixed(2) + ' P&L (' + fPct(bt.total_pnl_pct) + '), profit factor ' + bt.profit_factor + ', max drawdown -$' + Math.abs(bt.max_dd_usd).toFixed(2) + '. Click any stat card for a beginner-friendly explanation.';
   }
-  if (t.includes('strateg')) {
-    return 'Strategy Engine for ' + ticker + ': The signal is ' + sig + ' at ' + (d.confidence||'—') + ' confidence. This page shows which trading patterns were detected (like structure breaks, fair value gaps, etc.) and whether the gate conditions are met. All gates must pass for a high-conviction setup.';
-  }
-  if (t.includes('backtest')) {
-    return 'Backtest for ' + ticker + ': This page shows how the ' + sig + ' strategy would have performed historically. Check win rate, total return, max drawdown (biggest loss streak), and profit factor. Click any stat card for a beginner-friendly breakdown.';
-  }
-  if (t.includes('simul')) {
-    return 'Simulation for ' + ticker + ': Three scenarios are modeled — Bull (price goes up), Base (stays flat/small move), and Bear (price drops). Each shows a projected price with probability. Click each card to see the reasoning.';
-  }
-  if (t.includes('trade') || t.includes('manage')) {
-    return 'Trade plan for ' + ticker + ': Entry at ' + (d.entry ? '$'+parseFloat(d.entry).toLocaleString() : price) +
-      (d.stop_loss ? ', Stop Loss at $'+parseFloat(d.stop_loss).toLocaleString() : '') +
-      (d.tp1 ? ', first target (TP1) at $'+parseFloat(d.tp1).toLocaleString() : '') +
-      '. This page shows exactly where to enter, where to place your safety exit, and your profit targets.';
-  }
+
+  // ── SCANNER tab — use real scan numbers ──
   if (t.includes('scan')) {
-    return 'Market Scanner shows signals across multiple instruments and timeframes. Look for instruments with BUY or SELL signals at high confidence. Click any row to load that instrument for full analysis.';
+    if (_lastScanResults && _lastScanResults.length) {
+      var buyList = _lastScanResults.filter(function(r){var h=(r.signal_hint||'').toUpperCase();return h==='BUY'||h==='POSSIBLE_BUY'||h==='COUNTER_BUY';});
+      var sellList = _lastScanResults.filter(function(r){var h=(r.signal_hint||'').toUpperCase();return h==='SELL'||h==='POSSIBLE_SELL';});
+      if (q.includes('buy') || q.includes('best') || q.includes('opportunity') || q.includes('strong')) {
+        if (!buyList.length) return 'No BUY signals found in the current scan of ' + _lastScanResults.length + ' instruments. This could mean the market is in a corrective phase. Try scanning a different preset or timeframe.';
+        return buyList.length + ' BUY signals found: ' + buyList.slice(0,5).map(function(r){return '<strong>' + r.ticker + '</strong> (conf:' + (r.confidence||'—') + ', RSI:' + (r.rsi ? parseFloat(r.rsi).toFixed(1) : '—') + ')';}).join(', ') + '. Click any row to load the full analysis.';
+      }
+      if (q.includes('sell') || q.includes('short')) {
+        if (!sellList.length) return 'No SELL signals found in the current scan. Most instruments are either holding or showing buy potential.';
+        return sellList.length + ' SELL signals: ' + sellList.slice(0,5).map(function(r){return '<strong>' + r.ticker + '</strong> (conf:' + (r.confidence||'—') + ', RSI:' + (r.rsi ? parseFloat(r.rsi).toFixed(1) : '—') + ')';}).join(', ') + '.';
+      }
+      return 'Scanned ' + _lastScanResults.length + ' instruments: <strong>' + buyList.length + ' BUY</strong>, <strong>' + sellList.length + ' SELL</strong>, ' + (_lastScanResults.length - buyList.length - sellList.length) + ' HOLD. Use the filter buttons above to focus on BUY or SELL only. Click any instrument row for full analysis.';
+    }
+    return 'No scan results yet. Select a preset (like Top Crypto or Forex Majors), choose a timeframe, and click RUN SCAN to search for trading signals across multiple instruments.';
   }
 
-  // Signals page (default) — answer common questions using indicator data
+  // ── ORDER FLOW tab ──
+  if (t.includes('order') || t.includes('flow')) {
+    if (q.includes('buy') || q.includes('sell') || q.includes('who')) return 'On ' + ticker + ': The footprint shows the buy/sell split from candle structure. Check the buyer/seller authenticity section — it reveals how much is real vs posing (fake) volume. Real delta tells you who actually has control.';
+    if (q.includes('fake') || q.includes('poser')) return 'Posing volume comes from large wick candles — orders that move price then get withdrawn. The authenticity bars show what percentage of buying/selling is genuine. Higher real % = more trustworthy price move.';
+    if (q.includes('delta')) return 'Delta on ' + ticker + ' = difference between buying and selling volume. Positive delta = more buyers. Negative = more sellers. CVD (Cumulative Volume Delta) shows the running total over time — rising CVD = sustained buying.';
+    return 'Order Flow for ' + ticker + ': This page shows candle footprint (buy/sell pressure), buyer/seller authenticity, stacked imbalances, and liquidity zones. Click any section to expand details. Ask about delta, posers, or liquidity for specifics.';
+  }
+
+  // ── TRADE MANAGEMENT tab ──
+  if (t.includes('trade') || t.includes('manage')) {
+    if (!d) return 'Analyze a ticker first to see the trade plan.';
+    var entryStr = d.entry ? '$' + fNum(d.entry) : price;
+    var slStr = d.stop_loss ? '$' + fNum(d.stop_loss) : 'not set';
+    var tp1Str = d.tp1 ? '$' + fNum(d.tp1) : 'not set';
+    if (q.includes('entry') || q.includes('where') || q.includes('plan')) {
+      return ticker + ' ' + sig + ' trade plan: Enter at <strong>' + entryStr + '</strong>, Stop Loss at ' + slStr + ', TP1 at ' + tp1Str + (d.tp2 ? ', TP2 at $' + fNum(d.tp2) : '') + (d.tp3 ? ', TP3 at $' + fNum(d.tp3) : '') + '. ' +
+        (d.rr1 ? 'Risk/Reward: 1:' + d.rr1 + ' at TP1.' : '') + ' Never risk more than 1-2% of your account on one trade.';
+    }
+    return ticker + ' trade plan: ' + sig + ' entry at ' + entryStr + ', SL at ' + slStr + ', targets: ' + tp1Str + (d.tp2 ? ' / $'+fNum(d.tp2) : '') + (d.tp3 ? ' / $'+fNum(d.tp3) : '') + '. ' + (d.rr1 ? 'R:R at TP1 is 1:' + d.rr1 + '.' : '');
+  }
+
+  // ── SIGNALS page (default) — comprehensive indicator-based answers ──
+  if (!d) return 'No instrument loaded. Enter a ticker above and click Analyze.';
+
   if (q.includes('why') && (q.includes('buy') || q.includes('sell') || q.includes('signal'))) {
-    return ticker + ' is showing a ' + sig + ' signal because: ' +
-      (d.rsi ? 'RSI (momentum) at ' + parseFloat(d.rsi).toFixed(1) + (d.rsi < 40 ? ' — oversold, suggesting a bounce.' : d.rsi > 60 ? ' — overbought, suggesting caution.' : ' — neutral zone.') + ' ' : '') +
-      (d.ema_trend ? 'Trend direction is ' + d.ema_trend + '. ' : '') +
-      (d.confidence ? 'Overall confidence: ' + d.confidence + '.' : '');
+    var reasons = [];
+    if (d.rsi) reasons.push('RSI at ' + parseFloat(d.rsi).toFixed(1) + (d.rsi < 35 ? ' (oversold — bounce potential)' : d.rsi > 65 ? ' (overbought — caution)' : ' (neutral)'));
+    if (d.ema_trend) reasons.push('EMA trend: ' + d.ema_trend);
+    if (d.supertrend) reasons.push('Supertrend: ' + d.supertrend);
+    if (d.macd_hist) reasons.push('MACD: ' + (parseFloat(d.macd_hist) > 0 ? 'bullish momentum' : 'bearish momentum'));
+    if (d.vol_ratio) reasons.push('Volume: ' + d.vol_ratio + 'x average' + (parseFloat(d.vol_ratio) >= 1.5 ? ' (high activity)' : ''));
+    if (d.bb_pos != null) reasons.push('Bollinger: ' + Math.round(d.bb_pos*100) + '% position' + (d.bb_pos < 0.2 ? ' (near lower band)' : d.bb_pos > 0.8 ? ' (near upper band)' : ''));
+    return ticker + ' shows <strong>' + sig + '</strong> at ' + (d.confidence||'—') + ' confidence because: ' + reasons.join('; ') + '.';
   }
-  if (q.includes('entry') || (q.includes('where') && q.includes('enter'))) {
-    return 'For ' + ticker + ': Check the Trade Management tab for the full plan. Entry at ' + (d.entry ? '$'+parseFloat(d.entry).toLocaleString() : price) +
-      (d.stop_loss ? ', safety exit (stop loss) at $'+parseFloat(d.stop_loss).toLocaleString() : '') +
-      (d.tp1 ? ', first profit target at $'+parseFloat(d.tp1).toLocaleString() : '') + '.';
+  if (q.includes('rsi')) {
+    return ticker + ' RSI(14) = <strong>' + (d.rsi ? parseFloat(d.rsi).toFixed(1) : '—') + '</strong>. ' +
+      (d.rsi < 30 ? 'This is in the oversold zone (below 30), which often signals a potential bounce. Historically, extreme oversold readings are buying opportunities.' : d.rsi > 70 ? 'This is in the overbought zone (above 70), meaning momentum is stretched. Could see a pullback or consolidation.' : d.rsi > 50 ? 'Above 50 indicates bullish momentum. The higher toward 70, the stronger but also closer to exhaustion.' : 'Below 50 indicates bearish momentum. The lower toward 30, the more oversold.');
   }
-  if (q.includes('risk') || q.includes('stop') || q.includes('loss')) {
-    return 'Risk on ' + ticker + ': ' +
-      (d.stop_loss ? 'Safety exit at $'+parseFloat(d.stop_loss).toLocaleString()+'. ' : '') +
-      'Never risk more than 1-2% of your total account on one trade. Check the Trade Management tab for position sizing details.';
+  if (q.includes('macd')) {
+    return ticker + ' MACD histogram: <strong>' + (d.macd_hist || '—') + '</strong>. ' +
+      (d.macd_hist && parseFloat(d.macd_hist) > 0 ? 'Positive histogram means bullish momentum — the fast moving average is above the slow one. If the bars are growing, momentum is accelerating.' : 'Negative histogram means bearish momentum. If bars are shrinking (becoming less negative), the selling pressure is weakening.');
   }
   if (q.includes('volume') || q.includes('activity')) {
-    return ticker + ' volume is ' + (d.vol_ratio ? d.vol_ratio + '× the average' : 'not available') + '. ' +
-      (d.vol_ratio >= 1.5 ? 'This is elevated — big players are likely active, which makes the signal more reliable.' : 'Normal activity — the signal may need more volume confirmation.');
+    return ticker + ' volume ratio: <strong>' + (d.vol_ratio ? d.vol_ratio + 'x' : '—') + '</strong> the 20-period average. ' +
+      (d.vol_ratio && parseFloat(d.vol_ratio) >= 2 ? 'Very high volume — institutions are likely involved. This confirms the current move is significant.' : d.vol_ratio && parseFloat(d.vol_ratio) >= 1.3 ? 'Above average — decent participation. The signal has reasonable volume backing.' : 'Below average volume. The current move may lack conviction — watch for a volume spike to confirm.');
   }
-  if (q.includes('indicator') || q.includes('aligned') || q.includes('alignment')) {
-    return 'Signal alignment for ' + ticker + ': ' +
-      (d.rsi ? 'RSI ' + (d.rsi > 50 ? 'bullish' : 'bearish') + ' (' + parseFloat(d.rsi).toFixed(1) + '). ' : '') +
-      (d.ema_trend ? 'EMA trend ' + d.ema_trend + '. ' : '') +
-      (d.supertrend ? 'Supertrend ' + d.supertrend + '. ' : '') +
-      'When most indicators agree, the signal is stronger.';
+  if (q.includes('support') || q.includes('resistance') || q.includes('level')) {
+    return ticker + ' key levels: Support at <strong>$' + fNum(d.support) + '</strong>, Resistance at <strong>$' + fNum(d.resistance) + '</strong>. Current price ' + price + ' is ' +
+      (d.price && d.support && parseFloat(d.price) < parseFloat(d.support) * 1.02 ? 'near support — potential bounce zone.' : d.price && d.resistance && parseFloat(d.price) > parseFloat(d.resistance) * 0.98 ? 'near resistance — potential rejection zone.' : 'between key levels.');
   }
-  return 'Viewing ' + ticker + ' at ' + price + ' — ' + sig + ' signal' + (d.confidence ? ', ' + d.confidence + ' confidence' : '') + '. ' +
+  if (q.includes('indicator') || q.includes('aligned') || q.includes('alignment') || q.includes('overview')) {
+    var inds = [];
+    if (d.rsi) inds.push('RSI ' + parseFloat(d.rsi).toFixed(1) + ' (' + (d.rsi > 50 ? 'bullish' : 'bearish') + ')');
+    if (d.ema_trend) inds.push('EMA ' + d.ema_trend);
+    if (d.supertrend) inds.push('Supertrend ' + d.supertrend);
+    if (d.macd_hist) inds.push('MACD ' + (parseFloat(d.macd_hist) > 0 ? 'bullish' : 'bearish'));
+    if (d.vol_ratio) inds.push('Vol ' + d.vol_ratio + 'x');
+    if (d.bb_pos != null) inds.push('BB ' + Math.round(d.bb_pos*100) + '%');
+    return ticker + ' indicator alignment: ' + inds.join(' | ') + '. Signal: <strong>' + sig + '</strong> at ' + (d.confidence||'—') + ' confidence. The more indicators that agree, the stronger the signal.';
+  }
+  if (q.includes('risk') || q.includes('stop') || q.includes('loss')) {
+    return 'Risk on ' + ticker + ': Stop loss at <strong>$' + fNum(d.stop_loss) + '</strong>' + (d.atr ? ' (based on ' + d.atr + ' ATR volatility)' : '') + '. Risk per trade should be 1-2% of your total account. ' + (d.entry && d.stop_loss ? 'Risk distance: $' + Math.abs(parseFloat(d.entry) - parseFloat(d.stop_loss)).toFixed(2) + ' per unit.' : '');
+  }
+  if (q.includes('entry') || (q.includes('where') && q.includes('enter'))) {
+    return ticker + ' entry: <strong>$' + fNum(d.entry) + '</strong>, SL: $' + fNum(d.stop_loss) + ', TP1: $' + fNum(d.tp1) + (d.rr1 ? ' (R:R 1:' + d.rr1 + ')' : '') + '. Go to the Trade Management tab for the full plan with position sizing.';
+  }
+  // Default — show a summary with real data
+  return ticker + ' at ' + price + ' — <strong>' + sig + '</strong> signal (' + (d.confidence||'—') + ' confidence). ' +
     (d.rsi ? 'RSI: ' + parseFloat(d.rsi).toFixed(1) + '. ' : '') +
-    'What would you like to know? Try asking about entry points, risk management, or why this signal was generated.';
+    (d.ema_trend ? 'Trend: ' + d.ema_trend + '. ' : '') +
+    (d.chg_1d != null ? '24h: ' + fPct(d.chg_1d) + '. ' : '') +
+    'Ask me about any specific indicator, the trade plan, risk, or what any section on this page means.';
 }
 
 function addMsg(text, type) {
