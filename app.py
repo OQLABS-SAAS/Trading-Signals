@@ -279,7 +279,7 @@ def safe_download(ticker, period="1y", interval="1d", **kwargs):
                 "range":    yf_range,
                 "includePrePost": "false",
                 "events":   "div,splits",
-            }, timeout=8)  # reduced from 15s — fail fast on rate-limited IPs
+            }, timeout=5)  # fail fast on rate-limited IPs — Stooq/FMP fallback handles stocks
             if r.status_code == 429:
                 print(f"[yahoo] {sym} rate-limited (429) — skipping retry")
                 _rate_limited[0] = True
@@ -311,7 +311,8 @@ def safe_download(ticker, period="1y", interval="1d", **kwargs):
 
     df = _fetch(ticker)
 
-    # Only retry on genuine errors (not rate-limiting — retrying 429 just wastes time)
+    # Skip retry if rate-limited (429) — retrying just wastes 5 more seconds.
+    # The fallback chain (Stooq → FMP → Yahoo v8) will handle chart data.
     if df.empty and not _rate_limited[0]:
         df = _fetch(ticker)
 
@@ -956,6 +957,70 @@ def _fetch_yahoo_v8(ticker, asset_type, timeframe):
         return None
 
 
+def _fetch_fmp(ticker, asset_type, timeframe):
+    """Financial Modeling Prep — reliable for stocks/forex/indices on cloud servers.
+    Free tier: 250 calls/day. Set FMP_API_KEY env var to enable."""
+    fmp_key = os.environ.get("FMP_API_KEY", "").strip()
+    if not fmp_key:
+        return None
+
+    # Map timeframes to FMP intervals
+    fmp_map = {"5m": "5min", "15m": "15min", "30m": "30min",
+               "1h": "1hour", "4h": "4hour", "1d": "1day"}
+    fmp_iv = fmp_map.get(timeframe, "1day")
+
+    # FMP ticker format
+    sym = ticker.upper()
+    if asset_type == "forex":
+        clean = sym.replace("=X", "").replace("/", "").replace("-", "")
+        sym = clean[:3] + clean[3:]
+    elif asset_type == "crypto":
+        return None  # Binance is better for crypto
+
+    try:
+        url = f"https://financialmodelingprep.com/api/v3/historical-chart/{fmp_iv}/{sym}"
+        r = requests.get(url, params={"apikey": fmp_key}, timeout=(5, 10))
+        if r.status_code != 200:
+            print(f"[fmp] HTTP {r.status_code} for {sym}")
+            return None
+
+        data = r.json()
+        if not data or not isinstance(data, list) or len(data) < 10:
+            print(f"[fmp] insufficient data for {sym}: {len(data) if data else 0} bars")
+            return None
+
+        # FMP returns newest first — reverse to chronological
+        data = list(reversed(data[-200:]))
+
+        dt_fmt = "%H:%M" if timeframe in ("5m", "15m", "30m", "1h") else "%b %d"
+        dates, prices, vols, opens, highs, lows = [], [], [], [], [], []
+        for bar in data:
+            try:
+                d_str = bar.get("date", "")
+                if "T" in d_str or " " in d_str:
+                    from datetime import datetime as dt_cls
+                    d_parsed = dt_cls.strptime(d_str.split(".")[0].replace("T", " "), "%Y-%m-%d %H:%M:%S")
+                    dates.append(d_parsed.strftime(dt_fmt))
+                else:
+                    dates.append(d_str[:10])
+                prices.append(round(float(bar["close"]), 6))
+                opens.append(round(float(bar.get("open", bar["close"])), 6))
+                highs.append(round(float(bar.get("high", bar["close"])), 6))
+                lows.append(round(float(bar.get("low", bar["close"])), 6))
+                vols.append(int(float(bar.get("volume", 0) or 0)))
+            except (ValueError, KeyError):
+                continue
+
+        if len(prices) < 10:
+            return None
+        print(f"[fmp] OK — {sym} {fmp_iv}: {len(prices)} bars")
+        return _build_chart_output(dates, prices, vols, timeframe,
+                                   opens_raw=opens, highs_raw=highs, lows_raw=lows)
+    except Exception as e:
+        print(f"[fmp] error {sym}: {e}")
+        return None
+
+
 def fetch_chart_direct(ticker, asset_type, timeframe):
     """Try multiple free data sources in priority order.
     Returns (dates, prices, vols, ema20, ema50) or None if all fail."""
@@ -965,18 +1030,29 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
         if result:
             return result
 
-    # 2. Stooq — works for stocks, indices, some forex
+    # 2. Stooq — works for stocks, indices, some forex (daily only)
     if asset_type in ("stock", "index", "forex", "commodity"):
+        print(f"[chart] trying Stooq for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_stooq(ticker, asset_type, timeframe)
         if result:
             return result
+        print(f"[chart] Stooq failed for {ticker}")
 
-    # 3. Yahoo Finance v8 — last resort (likely 429 on Railway)
+    # 3. FMP — reliable for stocks on cloud servers (needs API key)
+    if asset_type in ("stock", "index", "forex", "commodity"):
+        print(f"[chart] trying FMP for {ticker} ({asset_type}) {timeframe}")
+        result = _fetch_fmp(ticker, asset_type, timeframe)
+        if result:
+            return result
+        print(f"[chart] FMP failed for {ticker}")
+
+    # 4. Yahoo Finance v8 — last resort (likely 429 on Railway)
+    print(f"[chart] trying Yahoo v8 for {ticker} ({asset_type}) {timeframe}")
     result = _fetch_yahoo_v8(ticker, asset_type, timeframe)
     if result:
         return result
 
-    print(f"[chart] all sources failed for {ticker} {timeframe}")
+    print(f"[chart] ALL sources failed for {ticker} {timeframe}")
     return None
 
 # ─── MULTI-TIMEFRAME TREND ────────────────────────────────────
@@ -2412,6 +2488,13 @@ def analyze():
             **counter,
             "tv": tv,
         })
+        # Log key response fields for debugging
+        print(f"[analyze] RESPONSE FIELDS: signal={response_data.get('signal')} "
+              f"price={response_data.get('price')} rsi={response_data.get('rsi')} "
+              f"entry={response_data.get('entry')} sl={response_data.get('stop_loss')} "
+              f"tp1={response_data.get('tp1')} chart_bars={len(response_data.get('chart_prices', []))} "
+              f"ema_trend={response_data.get('ema_trend')} atr={response_data.get('atr')}")
+
         # Validate JSON serialisability before sending — if this raises we get a
         # clean error log instead of a silent bad-JSON response to the browser.
         try:
@@ -2437,6 +2520,77 @@ def analyze():
         import traceback
         print(f"[analyze] UNHANDLED ERROR: {traceback.format_exc()}")
         return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+@app.route("/api/diag", methods=["GET"])
+def diag():
+    """Diagnostic endpoint — test data source connectivity from this server."""
+    import traceback
+    ticker = request.args.get("ticker", "AAPL")
+    results = {"ticker": ticker, "server_time": datetime.utcnow().isoformat()}
+
+    # 1. TradingView scanner
+    try:
+        t0 = time.time()
+        tv = fetch_tv_data(ticker, "stock", "4h")
+        dt = round(time.time() - t0, 2)
+        if tv and tv.get("tv_price"):
+            results["tv"] = {"ok": True, "time_s": dt, "price": tv["tv_price"], "rsi": tv.get("tv_rsi")}
+        else:
+            results["tv"] = {"ok": False, "time_s": dt, "detail": "No data returned"}
+    except Exception as e:
+        results["tv"] = {"ok": False, "error": str(e)}
+
+    # 2. Yahoo Finance v8 direct
+    try:
+        t0 = time.time()
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        r = _browser_session.get(url, params={"interval": "1d", "range": "5d"}, timeout=8)
+        dt = round(time.time() - t0, 2)
+        results["yahoo_v8"] = {"ok": r.status_code == 200, "status": r.status_code, "time_s": dt,
+                               "body_len": len(r.text)}
+    except Exception as e:
+        results["yahoo_v8"] = {"ok": False, "error": str(e)}
+
+    # 3. Stooq
+    try:
+        t0 = time.time()
+        r = requests.get(f"https://stooq.com/q/d/l/?s={ticker.lower()}.us&i=d",
+                         headers={"User-Agent": "Mozilla/5.0 (compatible)"}, timeout=8)
+        dt = round(time.time() - t0, 2)
+        lines = r.text.strip().split("\n") if r.status_code == 200 else []
+        results["stooq"] = {"ok": r.status_code == 200 and len(lines) > 10,
+                            "status": r.status_code, "time_s": dt, "lines": len(lines),
+                            "sample": lines[:3] if lines else []}
+    except Exception as e:
+        results["stooq"] = {"ok": False, "error": str(e)}
+
+    # 4. Binance (for crypto comparison)
+    try:
+        t0 = time.time()
+        r = requests.get("https://api.binance.com/api/v3/klines",
+                         params={"symbol": "BTCUSDT", "interval": "1d", "limit": 5}, timeout=5)
+        dt = round(time.time() - t0, 2)
+        results["binance"] = {"ok": r.status_code == 200, "time_s": dt, "bars": len(r.json()) if r.status_code == 200 else 0}
+    except Exception as e:
+        results["binance"] = {"ok": False, "error": str(e)}
+
+    # 5. FMP (Financial Modeling Prep) — free tier
+    fmp_key = os.environ.get("FMP_API_KEY", "").strip()
+    if fmp_key:
+        try:
+            t0 = time.time()
+            r = requests.get(f"https://financialmodelingprep.com/api/v3/historical-chart/1hour/{ticker}",
+                             params={"apikey": fmp_key}, timeout=8)
+            dt = round(time.time() - t0, 2)
+            data = r.json() if r.status_code == 200 else []
+            results["fmp"] = {"ok": r.status_code == 200 and len(data) > 0, "time_s": dt, "bars": len(data)}
+        except Exception as e:
+            results["fmp"] = {"ok": False, "error": str(e)}
+    else:
+        results["fmp"] = {"ok": False, "detail": "FMP_API_KEY not set"}
+
+    return jsonify(results)
+
 
 @app.route("/api/screen", methods=["POST"])
 @login_required

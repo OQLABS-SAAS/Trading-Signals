@@ -3433,12 +3433,18 @@ async function doAnalyze(ticker, assetType, timeframe) {
       showError(errMsg); return;
     }
     const d = await r.json();
+    console.log('[dotverse] API response:', JSON.stringify({
+      ticker: d.ticker, signal: d.signal, price: d.price, rsi: d.rsi,
+      entry: d.entry, stop_loss: d.stop_loss, tp1: d.tp1,
+      ema_trend: d.ema_trend, atr: d.atr, chg_1d: d.chg_1d,
+      chart_bars: (d.chart_prices||[]).length, error: d.error
+    }));
     if (d.error) { showError(d.error); return; }
     currentData = d;
     isWatching = false;
     pushRecentInstrument(d.ticker, d.asset_type, d.timeframe);
     // Always update the visible Concept 5 v2 UI first
-    try { renderResultsV2(d); } catch(e) { console.warn('renderResultsV2:', e); }
+    try { renderResultsV2(d); } catch(e) { console.error('[dotverse] renderResultsV2 CRASHED:', e, e.stack); }
     // old renderResults removed — Concept 5 v2 only
     try { addToHistory(d); } catch(e) {}
     try { runBacktest(d, true); } catch(e) {}
