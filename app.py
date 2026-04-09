@@ -1113,12 +1113,12 @@ def calculate_win_rate(df, signal):
 
 # ─── FREE PRE-SCREEN (no API call) ───────────────────────────
 def pre_screen(ind):
-    rsi       = ind["rsi"]
-    bb_pos    = ind["bb_pos"]
-    macd_hist = ind["macd_hist"]
-    ema_trend = ind["ema_trend"]
-    st        = ind["supertrend"]
-    vol_ratio = ind["vol_ratio"]
+    rsi       = ind.get("rsi", 50)
+    bb_pos    = ind.get("bb_pos", 0.5)
+    macd_hist = ind.get("macd_hist", 0)
+    ema_trend = ind.get("ema_trend", "MIXED")
+    st        = ind.get("supertrend", "NEUTRAL")
+    vol_ratio = ind.get("vol_ratio", 1.0)
 
     bull_score = 0
     bear_score = 0
@@ -1183,17 +1183,19 @@ def pre_screen(ind):
 
 # ─── COUNTER-TREND BOUNCE DETECTION ─────────────────────────
 def detect_counter_trade(ind):
-    is_bear_ema   = ind["ema_trend"] in ("BEAR", "STRONG BEAR")
-    is_bear_st    = ind["supertrend"] == "BEARISH"
-    is_oversold   = ind["rsi"] < 33
-    near_lower_bb = ind["bb_pos"] < 0.18
+    is_bear_ema   = ind.get("ema_trend", "MIXED") in ("BEAR", "STRONG BEAR")
+    is_bear_st    = ind.get("supertrend", "NEUTRAL") == "BEARISH"
+    is_oversold   = (ind.get("rsi") or 50) < 33
+    near_lower_bb = (ind.get("bb_pos") or 0.5) < 0.18
 
     if not ((is_bear_ema or is_bear_st) and is_oversold and near_lower_bb):
         return {"counter_trade": False}
 
-    price  = ind["price"]
-    atr    = ind["atr"]
-    sup    = ind["support"]
+    price  = ind.get("price", 0)
+    atr    = ind.get("atr", 0)
+    sup    = ind.get("support", price * 0.98)
+    if not price or not atr:
+        return {"counter_trade": False}
     entry  = price
     sl     = round(min(sup - atr * 0.3, price - atr * 1.5), 4)
     risk   = entry - sl
@@ -2904,8 +2906,8 @@ def scan_list():
                         "rsi":          ind["rsi"],
                         "vol_ratio":    ind["vol_ratio"],
                         "volume":       int(volume) if volume else 0,
-                        "ema_trend":    ind["ema_trend"],
-                        "supertrend":   ind["supertrend"],
+                        "ema_trend":    ind.get("ema_trend", "MIXED"),
+                        "supertrend":   ind.get("supertrend", "NEUTRAL"),
                         "signal_hint":  screen["signal_hint"],
                         "opportunity":  screen["opportunity"],
                         "call_claude":  screen["call_claude"],
@@ -3372,6 +3374,29 @@ def backtest_route():
                 print(f"[backtest] Stooq OHLC: {len(prices_hist)} bars")
         except Exception as e:
             print(f"[backtest] Stooq OHLC error: {e}")
+
+    # ── Source 2b: FMP OHLC (stocks/indices/forex — reliable on cloud servers) ──
+    if asset_type in ("stock","index","forex","commodity") and not prices_hist:
+        fmp_key = os.environ.get("FMP_API_KEY", "").strip()
+        if fmp_key:
+            try:
+                fmp_iv_map = {"5m":"5min","15m":"15min","30m":"30min","1h":"1hour","4h":"4hour","1d":"1day"}
+                fmp_iv = fmp_iv_map.get(timeframe, "1day")
+                fmp_sym = ticker_n.upper()
+                r_fmp = requests.get(f"https://financialmodelingprep.com/api/v3/historical-chart/{fmp_iv}/{fmp_sym}",
+                                     params={"apikey": fmp_key}, timeout=(5,10))
+                if r_fmp.status_code == 200:
+                    fmp_data = r_fmp.json()
+                    if isinstance(fmp_data, list) and len(fmp_data) > 10:
+                        fmp_data = list(reversed(fmp_data[-500:]))  # chronological
+                        for bar in fmp_data:
+                            dates_hist.append(bar.get("date",""))
+                            prices_hist.append(float(bar["close"]))
+                            highs_hist.append(float(bar.get("high", bar["close"])))
+                            lows_hist.append(float(bar.get("low", bar["close"])))
+                        print(f"[backtest] FMP OHLC: {len(prices_hist)} bars")
+            except Exception as e:
+                print(f"[backtest] FMP OHLC error: {e}")
 
     # ── Source 3: yfinance OHLC ──
     if not prices_hist:
