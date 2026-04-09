@@ -5049,6 +5049,16 @@ function filterScanResults(filter, btn) {
       '</div>';
   }
 
+  // Helper: check if a pill label matches the active filter
+  function pillMatchesFilter(pillText, f) {
+    if (f === 'all') return true;
+    var p = (pillText || '').toUpperCase().trim();
+    if (f === 'buy') return p === 'BUY' || p === 'PBY' || p === 'CTR';
+    if (f === 'sell') return p === 'SELL' || p === 'PSL';
+    if (f === 'highconf') return true; // can't determine from pill alone
+    return true;
+  }
+
   if (_lastScanIsMultiTF) {
     var src = _lastScanResultsByTicker;
     if (!src) return;
@@ -5062,10 +5072,22 @@ function filterScanResults(filter, btn) {
       if (Object.values(src[tk]).some(function(r){ return matchSignal(r, filter); })) filtered[tk] = src[tk];
     });
     if (!Object.keys(filtered).length) { showNoResults(totalCount); return; }
-    // Show count label
+    // Render filtered tickers
     _origRenderScanResultsMultiTF(filtered, _lastScanAssetType);
-    // Prepend filter count info
+
+    // Post-render: dim non-matching cells so only BUY/SELL signals stand out
     var sr = document.getElementById('scanResults');
+    if (filter === 'buy' || filter === 'sell') {
+      sr.querySelectorAll('.scan-mtf-cell').forEach(function(cell) {
+        var pill = cell.querySelector('.scan-mtf-pill');
+        if (pill && !pillMatchesFilter(pill.textContent, filter)) {
+          cell.style.opacity = '0.15';
+          cell.style.pointerEvents = 'none';
+        }
+      });
+    }
+
+    // Prepend filter count info
     var info = document.createElement('div');
     info.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--amber);margin-bottom:4px;';
     info.textContent = 'Showing ' + Object.keys(filtered).length + '/' + totalCount + ' — ' + filterLabel + ' only';
@@ -10801,71 +10823,82 @@ document.addEventListener('click', function(e) {
     }
 
     // Build Real vs Posing comparison from stored data (NOT from innerHTML)
+    // Always show this section — percentages come from wick analysis even when volume is 0
     var pd = window._fpPoserData || {};
     var _fv = pd.fmtVol || function(n) { return n ? n.toLocaleString() : '0'; };
-    var poserCompareHTML = '';
-    if (pd.trueBuyers || pd.trueSellers) {
-      poserCompareHTML =
-        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
-          '<div style="font-size:10px;letter-spacing:1px;color:var(--amber);font-weight:700;margin-bottom:10px;">REAL vs POSING — WHO\'S FAKING IT?</div>' +
-          // Explanation
-          '<div style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;">' +
-            'Posing orders are fake buy/sell walls that get pulled before execution. They trick other traders into thinking there\'s real demand or supply. Higher "Real %" = more trustworthy volume.' +
+    var hasVol = (pd.trueBuyers || pd.trueSellers);
+    var buyVolStr = hasVol ? _fv(pd.trueBuyers) + ' total' : bLbl;
+    var sellVolStr = hasVol ? _fv(pd.trueSellers) + ' total' : sLbl;
+    var realBuyVolStr = hasVol ? _fv(pd.realBuyers) : '';
+    var realSellVolStr = hasVol ? _fv(pd.realSellers) : '';
+    var poserBuyVolStr = hasVol ? _fv(pd.poserBuyVol) : '';
+    var poserSellVolStr = hasVol ? _fv(pd.poserSellVol) : '';
+
+    var poserCompareHTML =
+      '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
+        '<div style="font-size:10px;letter-spacing:1px;color:var(--amber);font-weight:700;margin-bottom:10px;">REAL vs POSING — WHO\'S FAKING IT?</div>' +
+        // Explanation
+        '<div style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;">' +
+          'Posing orders are fake buy/sell walls that get pulled before execution. They trick other traders into thinking there\'s real demand or supply. Higher "Real %" = more trustworthy volume. ' +
+          (!hasVol ? '<span style="color:var(--amber);">Raw volume unavailable for this instrument — percentages derived from candle wick analysis.</span>' : '') +
+        '</div>' +
+        // BUYERS comparison
+        '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(0,201,141,.04);border-radius:6px;border:1px solid rgba(0,201,141,.1);">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+            '<span style="font-size:11px;font-weight:700;color:var(--green);">BUYERS</span>' +
+            '<span style="font-family:var(--mono);font-size:11px;color:var(--green);">' + buyVolStr + '</span>' +
           '</div>' +
-          // BUYERS comparison
-          '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(0,201,141,.04);border-radius:6px;border:1px solid rgba(0,201,141,.1);">' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
-              '<span style="font-size:11px;font-weight:700;color:var(--green);">BUYERS</span>' +
-              '<span style="font-family:var(--mono);font-size:11px;color:var(--green);">' + _fv(pd.trueBuyers) + ' total</span>' +
+          '<div style="display:flex;gap:8px;margin-bottom:4px;">' +
+            '<div style="flex:1;padding:6px;background:rgba(0,201,141,.08);border-radius:4px;text-align:center;">' +
+              '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">REAL BUYERS</div>' +
+              '<div style="font-size:15px;font-weight:700;color:var(--green);">' + (pd.realBuyPct || 0) + '%</div>' +
+              (realBuyVolStr ? '<div style="font-size:10px;color:var(--green);opacity:.8;">' + realBuyVolStr + '</div>' : '') +
             '</div>' +
-            '<div style="display:flex;gap:8px;margin-bottom:4px;">' +
-              '<div style="flex:1;padding:6px;background:rgba(0,201,141,.08);border-radius:4px;text-align:center;">' +
-                '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">REAL BUYERS</div>' +
-                '<div style="font-size:15px;font-weight:700;color:var(--green);">' + (pd.realBuyPct || 0) + '%</div>' +
-                '<div style="font-size:10px;color:var(--green);opacity:.8;">' + _fv(pd.realBuyers) + '</div>' +
-              '</div>' +
-              '<div style="flex:0 0 20px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);">vs</div>' +
-              '<div style="flex:1;padding:6px;background:rgba(255,255,255,.03);border-radius:4px;text-align:center;opacity:.7;">' +
-                '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">POSING BUYERS</div>' +
-                '<div style="font-size:15px;font-weight:700;color:var(--amber);">' + (pd.poserBuyPct || 0) + '%</div>' +
-                '<div style="font-size:10px;color:var(--muted);">' + _fv(pd.poserBuyVol) + '</div>' +
-              '</div>' +
-            '</div>' +
-            '<div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;">' +
-              '<div style="height:100%;width:' + (pd.realBuyPct || 0) + '%;background:var(--green);border-radius:2px;"></div>' +
-            '</div>' +
-          '</div>' +
-          // SELLERS comparison
-          '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(255,68,89,.04);border-radius:6px;border:1px solid rgba(255,68,89,.1);">' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
-              '<span style="font-size:11px;font-weight:700;color:var(--red);">SELLERS</span>' +
-              '<span style="font-family:var(--mono);font-size:11px;color:var(--red);">' + _fv(pd.trueSellers) + ' total</span>' +
-            '</div>' +
-            '<div style="display:flex;gap:8px;margin-bottom:4px;">' +
-              '<div style="flex:1;padding:6px;background:rgba(255,68,89,.08);border-radius:4px;text-align:center;">' +
-                '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">REAL SELLERS</div>' +
-                '<div style="font-size:15px;font-weight:700;color:var(--red);">' + (pd.realSellPct || 0) + '%</div>' +
-                '<div style="font-size:10px;color:var(--red);opacity:.8;">' + _fv(pd.realSellers) + '</div>' +
-              '</div>' +
-              '<div style="flex:0 0 20px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);">vs</div>' +
-              '<div style="flex:1;padding:6px;background:rgba(255,255,255,.03);border-radius:4px;text-align:center;opacity:.7;">' +
-                '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">POSING SELLERS</div>' +
-                '<div style="font-size:15px;font-weight:700;color:var(--amber);">' + (pd.poserSellPct || 0) + '%</div>' +
-                '<div style="font-size:10px;color:var(--muted);">' + _fv(pd.poserSellVol) + '</div>' +
-              '</div>' +
-            '</div>' +
-            '<div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;">' +
-              '<div style="height:100%;width:' + (pd.realSellPct || 0) + '%;background:var(--red);border-radius:2px;"></div>' +
+            '<div style="flex:0 0 20px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);">vs</div>' +
+            '<div style="flex:1;padding:6px;background:rgba(255,255,255,.03);border-radius:4px;text-align:center;opacity:.7;">' +
+              '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">POSING BUYERS</div>' +
+              '<div style="font-size:15px;font-weight:700;color:var(--amber);">' + (pd.poserBuyPct || 0) + '%</div>' +
+              (poserBuyVolStr ? '<div style="font-size:10px;color:var(--muted);">' + poserBuyVolStr + '</div>' : '') +
             '</div>' +
           '</div>' +
-          // Net Real Delta
-          '<div style="padding:6px 8px;background:rgba(255,255,255,.02);border-radius:4px;font-size:10px;color:var(--muted2);text-align:center;">' +
+          '<div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;">' +
+            '<div style="height:100%;width:' + (pd.realBuyPct || 0) + '%;background:var(--green);border-radius:2px;"></div>' +
+          '</div>' +
+        '</div>' +
+        // SELLERS comparison
+        '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(255,68,89,.04);border-radius:6px;border:1px solid rgba(255,68,89,.1);">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+            '<span style="font-size:11px;font-weight:700;color:var(--red);">SELLERS</span>' +
+            '<span style="font-family:var(--mono);font-size:11px;color:var(--red);">' + sellVolStr + '</span>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;margin-bottom:4px;">' +
+            '<div style="flex:1;padding:6px;background:rgba(255,68,89,.08);border-radius:4px;text-align:center;">' +
+              '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">REAL SELLERS</div>' +
+              '<div style="font-size:15px;font-weight:700;color:var(--red);">' + (pd.realSellPct || 0) + '%</div>' +
+              (realSellVolStr ? '<div style="font-size:10px;color:var(--red);opacity:.8;">' + realSellVolStr + '</div>' : '') +
+            '</div>' +
+            '<div style="flex:0 0 20px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);">vs</div>' +
+            '<div style="flex:1;padding:6px;background:rgba(255,255,255,.03);border-radius:4px;text-align:center;opacity:.7;">' +
+              '<div style="font-size:9px;color:var(--muted);margin-bottom:2px;">POSING SELLERS</div>' +
+              '<div style="font-size:15px;font-weight:700;color:var(--amber);">' + (pd.poserSellPct || 0) + '%</div>' +
+              (poserSellVolStr ? '<div style="font-size:10px;color:var(--muted);">' + poserSellVolStr + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;">' +
+            '<div style="height:100%;width:' + (pd.realSellPct || 0) + '%;background:var(--red);border-radius:2px;"></div>' +
+          '</div>' +
+        '</div>' +
+        // Net Real Delta
+        '<div style="padding:6px 8px;background:rgba(255,255,255,.02);border-radius:4px;font-size:10px;color:var(--muted2);text-align:center;">' +
+          (hasVol ?
             'Net Real Delta: <strong style="color:' + ((pd.realBuyers||0) > (pd.realSellers||0) ? 'var(--green)' : 'var(--red)') + ';">' +
             ((pd.realBuyers||0) > (pd.realSellers||0) ? '+' : '') + _fv((pd.realBuyers||0) - (pd.realSellers||0)) + '</strong>' +
-            ' — ' + ((pd.realBuyers||0) > (pd.realSellers||0) ? 'Real buyers outweigh real sellers' : 'Real sellers outweigh real buyers') +
-          '</div>' +
-        '</div>';
-    }
+            ' — ' + ((pd.realBuyers||0) > (pd.realSellers||0) ? 'Real buyers outweigh real sellers' : 'Real sellers outweigh real buyers')
+          :
+            'Authenticity: <strong style="color:var(--green);">Buyers ' + (pd.realBuyPct||0) + '% real</strong> · <strong style="color:var(--red);">Sellers ' + (pd.realSellPct||0) + '% real</strong> — based on candle wick-to-body ratio'
+          ) +
+        '</div>' +
+      '</div>';
 
     expand.innerHTML = '<div class="ep-title" style="margin-bottom:10px;">Candle Footprint — What\'s Happening</div>' +
       // Main interpretation — plain English
