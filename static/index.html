@@ -2476,6 +2476,12 @@ body::before{
         <option value="all" selected>ALL TF</option>
         <option value="15m">15m</option><option value="1h">1H</option><option value="4h">4H</option><option value="1d">1D</option><option value="1w">1W</option>
       </select>
+      <select id="scanSignalFilter" style="padding:7px 10px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:11px;">
+        <option value="all">ALL SIGNALS</option>
+        <option value="BUY">BUY ONLY</option>
+        <option value="SELL">SELL ONLY</option>
+        <option value="HOLD">HOLD ONLY</option>
+      </select>
       <button id="scanBtn" onclick="runScanner()" style="padding:7px 16px; background:var(--amber); color:#0C0A08; border:none; border-radius:3px; font-family:var(--mono); font-size:11px; font-weight:700; cursor:pointer;">RUN SCAN</button>
     </div>
     <div class="scan-filter-row" id="scanFilterRow" style="display:flex;position:sticky;top:0;z-index:10;background:var(--bg1);padding:8px 0;">
@@ -2633,57 +2639,22 @@ body::before{
         </table>
       </div>
     </div>
-    <!-- Pine Script -->
-    <div class="pine-section">
-      <div class="pine-head">
+    <!-- Pine Script (collapsible) -->
+    <div class="pine-section" id="btPineSection">
+      <div class="pine-head" onclick="toggleBtPine()" style="cursor:pointer;">
         <span class="pine-title">Pine Script v5</span>
-        <div class="pine-tab-btns">
-          <button class="ptb active">Strategy</button>
-          <button class="ptb">Indicator</button>
-          <button class="ptb">Alert</button>
+        <span id="btPineToggleIcon" style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-left:6px;">▼ Show</span>
+        <div class="pine-tab-btns" id="btPineTabBtns" style="display:none;" onclick="event.stopPropagation();">
+          <button class="ptb active" onclick="switchBtPineTab('strategy',this)">Strategy</button>
+          <button class="ptb" onclick="switchBtPineTab('indicator',this)">Indicator</button>
+          <button class="ptb" onclick="switchBtPineTab('alert',this)">Alert</button>
         </div>
-        <button class="btn-ghost" onclick="var c=this.closest('.pine-section').querySelector('.pine-code');navigator.clipboard.writeText(c.textContent);this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy',2000);" style="margin-left:auto;padding:5px 14px;font-size:11px;">Copy</button>
+        <button class="btn-ghost" id="btPineCopyBtn" style="margin-left:auto;padding:5px 14px;font-size:11px;display:none;" onclick="event.stopPropagation();var c=document.getElementById('btPineCode');navigator.clipboard.writeText(c.textContent);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000);">Copy</button>
       </div>
-      <pre class="pine-code"><span class="pc">// dotverse — FCR + FVG Strategy</span>
-<span class="pc">// Auto-generated · BTC/USD 4H</span>
-<span class="pk">//@version=5</span>
-<span class="pf">strategy</span>(<span class="ps">"dotverse FCR+FVG"</span>, overlay=<span class="pk">true</span>, initial_capital=<span class="pn">10000</span>,
-         default_qty_type=strategy.percent_of_equity, default_qty_value=<span class="pn">2</span>)
-
-<span class="pc">// ─── Inputs ───</span>
-atrLength  = <span class="pf">input.int</span>(<span class="pn">14</span>, <span class="ps">"ATR Length"</span>)
-emaFast    = <span class="pf">input.int</span>(<span class="pn">20</span>, <span class="ps">"EMA Fast"</span>)
-emaSlow    = <span class="pf">input.int</span>(<span class="pn">50</span>, <span class="ps">"EMA Slow"</span>)
-rsiLen     = <span class="pf">input.int</span>(<span class="pn">14</span>, <span class="ps">"RSI Length"</span>)
-rsiOB      = <span class="pf">input.float</span>(<span class="pn">65.0</span>, <span class="ps">"RSI Max Entry"</span>)
-
-<span class="pc">// ─── Calculations ───</span>
-atr    = <span class="pf">ta.atr</span>(atrLength)
-ema20  = <span class="pf">ta.ema</span>(close, emaFast)
-ema50  = <span class="pf">ta.ema</span>(close, emaSlow)
-rsi    = <span class="pf">ta.rsi</span>(close, rsiLen)
-
-<span class="pc">// ─── FVG Detection ───</span>
-bullFVG   = low[<span class="pn">0</span>] > high[<span class="pn">2</span>]
-bearFVG   = high[<span class="pn">0</span>] < low[<span class="pn">2</span>]
-
-<span class="pc">// ─── Trend Filter ───</span>
-bullTrend = close > ema20 <span class="pk">and</span> ema20 > ema50
-bearTrend = close < ema20 <span class="pk">and</span> ema20 < ema50
-
-<span class="pc">// ─── Entry Conditions ───</span>
-longCondition  = bullTrend <span class="pk">and</span> bullFVG <span class="pk">and</span> rsi < rsiOB
-shortCondition = bearTrend <span class="pk">and</span> bearFVG <span class="pk">and</span> rsi > (<span class="pn">100</span> - rsiOB)
-
-<span class="pk">if</span> longCondition
-    sl  = close - atr * <span class="pn">1.5</span>
-    tp1 = close + atr * <span class="pn">2.5</span>
-    tp2 = close + atr * <span class="pn">4.0</span>
-    tp3 = close + atr * <span class="pn">6.0</span>
-    <span class="pf">strategy.entry</span>(<span class="ps">"Long"</span>, strategy.long)
-    <span class="pf">strategy.exit</span>(<span class="ps">"L TP1"</span>, <span class="ps">"Long"</span>, qty_percent=<span class="pn">50</span>, stop=sl, limit=tp1)
-    <span class="pf">strategy.exit</span>(<span class="ps">"L TP2"</span>, <span class="ps">"Long"</span>, qty_percent=<span class="pn">30</span>, stop=sl, limit=tp2)
-    <span class="pf">strategy.exit</span>(<span class="ps">"L TP3"</span>, <span class="ps">"Long"</span>, qty_percent=<span class="pn">20</span>, stop=sl, limit=tp3)</pre>
+      <div id="btPineBody" style="display:none;">
+        <div id="btPineDesc" style="padding:10px 16px 6px;font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.5;border-bottom:1px solid var(--border);"></div>
+        <pre class="pine-code" id="btPineCode" style="margin:0;">// Select a tab above to view Pine Script</pre>
+      </div>
     </div>
     </div><!-- /backtestResults -->
   </div><!-- /btContent -->
@@ -4910,14 +4881,35 @@ async function runScanner() {
 }
 
 function renderScanResults(results, assetType) {
-  if (!results.length) { document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);">No results.</div>'; return; }
+  // Apply signal type filter from dropdown BEFORE rendering
+  var sigFilter = (document.getElementById('scanSignalFilter') || {}).value || 'all';
+  var filtered = results;
+  if (sigFilter !== 'all') {
+    filtered = results.filter(function(r) {
+      var hint = (r.signal_hint || 'HOLD').toUpperCase();
+      if (sigFilter === 'BUY') return hint === 'BUY' || hint === 'POSSIBLE_BUY' || hint === 'COUNTER_BUY';
+      if (sigFilter === 'SELL') return hint === 'SELL' || hint === 'POSSIBLE_SELL';
+      if (sigFilter === 'HOLD') return hint === 'HOLD';
+      return true;
+    });
+  }
+  if (!filtered.length) {
+    var filterLabel = sigFilter !== 'all' ? sigFilter : '';
+    document.getElementById('scanResults').innerHTML = '<div style="text-align:center;padding:40px 20px;">' +
+      '<div style="font-family:var(--mono);font-size:13px;color:var(--muted2);margin-bottom:8px;">No ' + filterLabel + ' signals found</div>' +
+      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">' + results.length + ' instruments scanned — none matched ' + (filterLabel || 'your criteria') + '. Try a different timeframe or signal type.</div>' +
+      '</div>';
+    return;
+  }
   // Hide static mock table (outside scanResults) but keep filter buttons visible
   document.querySelectorAll('#tab-scanner > .scanner-layout > .scan-table').forEach(function(t) { t.style.display = 'none'; });
   var mf = document.getElementById('scanFilterRow') || document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
   var fmt = function(v) { return v != null ? parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:4}) : '—'; };
-  document.getElementById('scanResults').innerHTML = '<table class="scan-table"><thead><tr>' +
+  var countLabel = sigFilter !== 'all' ? (' — showing ' + filtered.length + '/' + results.length + ' ' + sigFilter) : '';
+  document.getElementById('scanResults').innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + filtered.length + ' results' + countLabel + '</div>' +
+    '<table class="scan-table"><thead><tr>' +
     '<th>Symbol</th><th>Signal</th><th>Confidence</th><th>Price</th><th>RSI</th><th>EMA Trend</th><th>Volume</th><th>Change 1D</th><th>TF</th>' +
-    '</tr></thead><tbody>' + results.map(r => {
+    '</tr></thead><tbody>' + filtered.map(r => {
     if (r.error) return '<tr><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm hold">ERR</span></td><td colspan="7" style="color:var(--muted);">' + (r.error||'Failed') + '</td></tr>';
     const hint = r.signal_hint || 'HOLD';
     const chg  = r.chg_1d != null ? (r.chg_1d >= 0 ? '+' + r.chg_1d + '%' : r.chg_1d + '%') : '—';
@@ -4944,12 +4936,38 @@ function renderScanResults(results, assetType) {
 }
 
 function renderScanResultsMultiTF(resultsByTicker, assetType) {
-  var tickers = Object.keys(resultsByTicker).sort();
-  if (!tickers.length) { document.getElementById('scanResults').innerHTML = '<div style="font-size:11px;color:var(--muted);">No results.</div>'; return; }
+  // Apply signal type filter from dropdown BEFORE rendering
+  var sigFilter = (document.getElementById('scanSignalFilter') || {}).value || 'all';
+  var allTickers = Object.keys(resultsByTicker).sort();
+  var totalScanned = allTickers.length;
+  var tickers = allTickers;
+  if (sigFilter !== 'all') {
+    tickers = allTickers.filter(function(tk) {
+      var tfResults = resultsByTicker[tk];
+      return Object.values(tfResults).some(function(r) {
+        if (!r) return false;
+        var hint = (r.signal_hint || 'HOLD').toUpperCase();
+        if (sigFilter === 'BUY') return hint === 'BUY' || hint === 'POSSIBLE_BUY' || hint === 'COUNTER_BUY';
+        if (sigFilter === 'SELL') return hint === 'SELL' || hint === 'POSSIBLE_SELL';
+        if (sigFilter === 'HOLD') return hint === 'HOLD';
+        return true;
+      });
+    });
+  }
+  if (!tickers.length) {
+    var filterLabel = sigFilter !== 'all' ? sigFilter : '';
+    document.getElementById('scanResults').innerHTML = '<div style="text-align:center;padding:40px 20px;">' +
+      '<div style="font-family:var(--mono);font-size:13px;color:var(--muted2);margin-bottom:8px;">No ' + filterLabel + ' signals found</div>' +
+      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">' + totalScanned + ' instruments scanned across all timeframes — none matched ' + (filterLabel || 'your criteria') + '. Try a different signal type.</div>' +
+      '</div>';
+    return;
+  }
   document.querySelectorAll('#tab-scanner > .scanner-layout > .scan-table').forEach(function(t) { t.style.display = 'none'; });
   var mf = document.getElementById('scanFilterRow') || document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
   var tfList = ['15m','1h','4h','1d','1w'];
-  var html = '<table class="scan-mtf-table"><thead><tr><th>Symbol</th>';
+  var countLabel = sigFilter !== 'all' ? (' — showing ' + tickers.length + '/' + totalScanned + ' ' + sigFilter) : '';
+  var html = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + tickers.length + ' results' + countLabel + '</div>';
+  html += '<table class="scan-mtf-table"><thead><tr><th>Symbol</th>';
   tfList.forEach(function(tf) { html += '<th>' + tf.toUpperCase() + '</th>'; });
   html += '</tr></thead><tbody>';
   tickers.forEach(function(ticker) {
@@ -9871,13 +9889,47 @@ document.querySelectorAll('.scan-filter-btn').forEach(btn => {
   });
 });
 
-// ─── PINE TABS ───
-document.querySelectorAll('.ptb').forEach(tab => {
-  tab.addEventListener('click', function() {
-    this.closest('.pine-tab-btns').querySelectorAll('.ptb').forEach(t => t.classList.remove('active'));
-    this.classList.add('active');
-  });
-});
+// ─── PINE TABS (signals tab — handled inline) ───
+// (backtest tab pine tabs are handled by switchBtPineTab below)
+
+// ─── BACKTEST PINE SCRIPT: Toggle + Tab switching ───
+function toggleBtPine() {
+  var body = document.getElementById('btPineBody');
+  var icon = document.getElementById('btPineToggleIcon');
+  var tabs = document.getElementById('btPineTabBtns');
+  var copyBtn = document.getElementById('btPineCopyBtn');
+  var isHidden = (body.style.display === 'none');
+  body.style.display = isHidden ? 'block' : 'none';
+  tabs.style.display = isHidden ? 'flex' : 'none';
+  copyBtn.style.display = isHidden ? '' : 'none';
+  icon.textContent = isHidden ? '▲ Hide' : '▼ Show';
+  // Load default tab content if first open
+  if (isHidden && document.getElementById('btPineCode').textContent === '// Select a tab above to view Pine Script') {
+    switchBtPineTab('strategy', document.querySelector('#btPineTabBtns .ptb.active'));
+  }
+}
+
+function switchBtPineTab(tab, btn) {
+  // Update active button
+  document.querySelectorAll('#btPineTabBtns .ptb').forEach(function(t) { t.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  var codeEl = document.getElementById('btPineCode');
+  var descEl = document.getElementById('btPineDesc');
+  if (tab === 'strategy') {
+    descEl.innerHTML = '<b style="color:var(--amber);">STRATEGY</b> — Full backtest strategy with EMA, RSI, Supertrend, MACD, ADX confluence. ' +
+      'Includes multi-TP exits with stop-loss management. Paste into TradingView Pine Editor and run Strategy Tester to see historical performance on any ticker/timeframe.';
+    codeEl.textContent = PINE_STRATEGY;
+  } else if (tab === 'indicator') {
+    descEl.innerHTML = '<b style="color:var(--amber);">INDICATOR</b> — Overlay indicator that plots Buy/Sell signals, EMAs, Supertrend, ' +
+      'Bollinger Bands, and a real-time dashboard showing all indicator values and signal conditions. ' +
+      'Works on any ticker and timeframe. Add to chart to see live signals.';
+    codeEl.textContent = PINE_SIGNALS;
+  } else if (tab === 'alert') {
+    descEl.innerHTML = '<b style="color:var(--amber);">RSI DIVERGENCE</b> — Detects Regular Bullish/Bearish and Hidden Bullish/Bearish divergences ' +
+      'between price and RSI. Includes alert conditions so you can set TradingView alerts for divergence signals. Great for spotting potential reversals.';
+    codeEl.textContent = PINE_DIVERGENCE;
+  }
+}
 
 // ─── CHAT ───
 function toggleChat() {
