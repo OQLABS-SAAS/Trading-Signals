@@ -4252,20 +4252,55 @@ function renderChart(d) {
       responsive:true, maintainAspectRatio:false,
       interaction:{ mode:'index', intersect:false },
       plugins:{ legend:{ display:false }, tooltip:{
-        backgroundColor:'rgba(20,20,20,.96)', borderColor:'rgba(245,166,35,.2)', borderWidth:1,
-        titleColor:'#888', bodyColor:'#f2f2f2', padding:12,
-        filter: item => ['Price','EMA20','EMA50'].includes(item.dataset.label),
-        callbacks:{
-          title: items => labels[items[0]?.dataIndex] || '',
-          label: ctx => {
-            if (ctx.dataset.label === 'Price' && hasCandleData) {
-              const i = ctx.dataIndex;
-              const o = chartOHLC.opens[i],  h = chartOHLC.highs[i],
-                    l = chartOHLC.lows[i],   c = chartOHLC.closes[i];
-              return [` O: ${fmt(o)}  H: ${fmt(h)}`, ` L: ${fmt(l)}  C: ${fmt(c)}`];
-            }
-            return ` ${ctx.dataset.label}: ${fmt(ctx.raw)}`;
+        enabled: false,
+        external: function(context) {
+          var tip = document.getElementById('chartTooltipCustom');
+          if (!tip) {
+            tip = document.createElement('div');
+            tip.id = 'chartTooltipCustom';
+            tip.style.cssText = 'position:absolute;pointer-events:none;background:rgba(20,20,20,.96);border:1px solid rgba(245,166,35,.2);border-radius:4px;padding:10px 14px;font-family:var(--mono);font-size:12px;z-index:9999;transition:opacity .15s;white-space:nowrap;';
+            document.body.appendChild(tip);
           }
+          var model = context.tooltip;
+          if (model.opacity === 0) { tip.style.opacity = '0'; return; }
+          var items = (model.dataPoints || []).filter(function(dp) {
+            return ['Price','EMA20','EMA50'].includes(dp.dataset.label);
+          });
+          if (!items.length) { tip.style.opacity = '0'; return; }
+          var titleText = labels[items[0].dataIndex] || '';
+          var html = '<div style="color:#888;margin-bottom:6px;">' + titleText + '</div>';
+          items.forEach(function(dp) {
+            if (dp.dataset.label === 'Price' && hasCandleData) {
+              var idx = dp.dataIndex;
+              var o = chartOHLC.opens[idx], h = chartOHLC.highs[idx],
+                  l = chartOHLC.lows[idx],  c = chartOHLC.closes[idx];
+              var bull = c >= o;
+              var oColor = bull ? '#00c98d' : '#ff4459';
+              var cColor = bull ? '#00c98d' : '#ff4459';
+              html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
+                '<span style="display:inline-block;width:10px;height:10px;background:' + (bull ? '#00c98d' : '#ff4459') + ';border-radius:2px;"></span>' +
+                '<span style="color:#999;">O:</span> <span style="color:' + oColor + ';">' + fmt(o) + '</span>' +
+                '&nbsp;&nbsp;<span style="color:#999;">H:</span> <span style="color:#00c98d;">' + fmt(h) + '</span></div>';
+              html += '<div style="margin-left:16px;">' +
+                '<span style="color:#999;">L:</span> <span style="color:#ff4459;">' + fmt(l) + '</span>' +
+                '&nbsp;&nbsp;<span style="color:#999;">C:</span> <span style="color:' + cColor + ';">' + fmt(c) + '</span>' +
+                (bull ? '<span style="color:#00c98d;margin-left:4px;">&#9650;</span>' : '<span style="color:#ff4459;margin-left:4px;">&#9660;</span>') +
+                '</div>';
+            } else if (dp.dataset.label === 'EMA20') {
+              html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
+                '<span style="display:inline-block;width:10px;height:10px;background:#f5a623;border-radius:2px;"></span>' +
+                '<span style="color:#f5a623;">EMA20: ' + fmt(dp.raw) + '</span></div>';
+            } else if (dp.dataset.label === 'EMA50') {
+              html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
+                '<span style="display:inline-block;width:10px;height:10px;background:#a78bfa;border-radius:2px;"></span>' +
+                '<span style="color:#a78bfa;">EMA50: ' + fmt(dp.raw) + '</span></div>';
+            }
+          });
+          tip.innerHTML = html;
+          tip.style.opacity = '1';
+          var pos = context.chart.canvas.getBoundingClientRect();
+          tip.style.left = pos.left + window.scrollX + model.caretX + 12 + 'px';
+          tip.style.top = pos.top + window.scrollY + model.caretY - 20 + 'px';
         }
       }},
       scales:{
@@ -4889,7 +4924,7 @@ function renderScanResults(results, assetType) {
   document.getElementById('scanResults').innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + results.length + ' results</div>' +
     '<table class="scan-table"><thead><tr>' +
     '<th>Symbol</th><th>Signal</th><th>Confidence</th><th>Price</th><th>RSI</th><th>EMA Trend</th><th>Volume</th><th>Change 1D</th><th>TF</th>' +
-    '</tr></thead><tbody>' + filtered.map(r => {
+    '</tr></thead><tbody>' + results.map(r => {
     if (r.error) return '<tr><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm hold">ERR</span></td><td colspan="7" style="color:var(--muted);">' + (r.error||'Failed') + '</td></tr>';
     const hint = r.signal_hint || 'HOLD';
     const chg  = r.chg_1d != null ? (r.chg_1d >= 0 ? '+' + r.chg_1d + '%' : r.chg_1d + '%') : '—';
@@ -10041,28 +10076,8 @@ function updateChatContext(d, tabOverride) {
     _chatLastTab = activeTab;
   }
 
-  // Update welcome message
-  if (welcome && d) {
-    var bubble = welcome.querySelector('.cd-bubble');
-    if (bubble) {
-      var tabLabel = '';
-      if (activeTab.includes('backtest')) tabLabel = ' You\'re on the <strong>Backtest</strong> tab — ask about historical performance.';
-      else if (activeTab.includes('simul')) tabLabel = ' You\'re on the <strong>Simulation</strong> tab — ask about price scenarios.';
-      else if (activeTab.includes('scan')) tabLabel = ' You\'re on the <strong>Scanner</strong> tab — ask about market-wide signals.';
-      else if (activeTab.includes('order') || activeTab.includes('flow')) tabLabel = ' You\'re on <strong>Order Flow</strong> — ask about buy/sell pressure.';
-      else if (activeTab.includes('strateg')) tabLabel = ' You\'re on the <strong>Strategy Engine</strong> — ask about pattern detection.';
-      else if (activeTab.includes('trade') || activeTab.includes('manage')) tabLabel = ' You\'re on <strong>Trade Management</strong> — ask about entry/exit planning.';
-
-      if (sig === 'BUY' || sig === 'SELL' || sig === 'POSSIBLE_BUY' || sig === 'POSSIBLE_SELL' || sig === 'COUNTER_BUY') {
-        bubble.innerHTML = '<strong>' + sig.replace('_',' ') + '</strong> signal on <strong>' + ticker + '</strong> at ' + price + ' — ' + conf + ' confidence.' + tabLabel + (tabLabel ? '' : ' Ask me anything about this setup.');
-      } else {
-        bubble.innerHTML = '<strong>' + ticker + '</strong> is at ' + price + ' with a <strong>HOLD</strong> signal.' + tabLabel + (tabLabel ? '' : ' No clear entry right now. Ask me what to watch for.');
-      }
-    }
-  } else if (welcome && !d && activeTab.includes('scan')) {
-    var bubble = welcome.querySelector('.cd-bubble');
-    if (bubble) bubble.innerHTML = 'You\'re on the <strong>Market Scanner</strong>. Run a scan to find BUY/SELL signals across instruments, then ask me about the results.';
-  }
+  // Welcome message stays STATIC — never mutate it per tab/ticker
+  // (only chips change per context)
 
   // Build dynamic chips based on tab + signal
   var chipList = [];
@@ -10086,6 +10101,8 @@ function updateChatContext(d, tabOverride) {
     chipList = ['Explain the entry plan', 'Where are the TPs?', 'Risk per trade?', 'When to move stop?', 'Scaling strategy?'];
   } else if (activeTab.includes('scan')) {
     chipList = ['Best opportunity now?', 'Strongest signal?', 'Which sector is hot?', 'Crypto vs stocks?', 'High confidence picks?'];
+  } else if (activeTab.includes('news') || activeTab.includes('intel')) {
+    chipList = ['Market sentiment today?', 'Key economic events?', 'Impact on my position?', 'Rate decision outlook?', 'Sector rotation?'];
   } else {
     chipList = d ? ['Explain the signal', 'Key indicators', 'Risk assessment', 'Trade plan'] : ['How does this work?', 'What can I ask?'];
   }
