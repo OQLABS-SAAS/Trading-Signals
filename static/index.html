@@ -110,11 +110,11 @@ body::before{
   border-right:1px solid rgba(245,166,35,.07);
   font-family:var(--mono);font-size:12px;
 }
-.ti-sym{color:var(--amber);font-weight:600;letter-spacing:.3px;}
-.ti-price{color:var(--white);font-weight:500;}
-.ti-chg{font-size:11px;font-weight:600;}
-.ti-chg.up{color:var(--green);}
-.ti-chg.dn{color:var(--red);}
+.ti-sym,.tape-symbol{color:var(--amber);font-weight:600;letter-spacing:.3px;}
+.ti-price,.tape-price{color:var(--white);font-weight:500;}
+.ti-chg,.tape-chg{font-size:11px;font-weight:600;}
+.ti-chg.up,.tape-chg.up{color:var(--green);}
+.ti-chg.dn,.tape-chg.dn,.tape-chg.down{color:var(--red);}
 
 /* ═══════════════════════════════════════════════
    HEADER
@@ -2475,12 +2475,6 @@ body::before{
       <select id="scanTF" style="padding:7px 10px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:11px;">
         <option value="all" selected>ALL TF</option>
         <option value="15m">15m</option><option value="1h">1H</option><option value="4h">4H</option><option value="1d">1D</option><option value="1w">1W</option>
-      </select>
-      <select id="scanSignalFilter" style="padding:7px 10px; background:var(--bg2); border:1px solid var(--border2); color:var(--white); border-radius:3px; font-family:var(--mono); font-size:11px;">
-        <option value="all">ALL SIGNALS</option>
-        <option value="BUY">BUY ONLY</option>
-        <option value="SELL">SELL ONLY</option>
-        <option value="HOLD">HOLD ONLY</option>
       </select>
       <button id="scanBtn" onclick="runScanner()" style="padding:7px 16px; background:var(--amber); color:#0C0A08; border:none; border-radius:3px; font-family:var(--mono); font-size:11px; font-weight:700; cursor:pointer;">RUN SCAN</button>
     </div>
@@ -4881,23 +4875,10 @@ async function runScanner() {
 }
 
 function renderScanResults(results, assetType) {
-  // Apply signal type filter from dropdown BEFORE rendering
-  var sigFilter = (document.getElementById('scanSignalFilter') || {}).value || 'all';
-  var filtered = results;
-  if (sigFilter !== 'all') {
-    filtered = results.filter(function(r) {
-      var hint = (r.signal_hint || 'HOLD').toUpperCase();
-      if (sigFilter === 'BUY') return hint === 'BUY' || hint === 'POSSIBLE_BUY' || hint === 'COUNTER_BUY';
-      if (sigFilter === 'SELL') return hint === 'SELL' || hint === 'POSSIBLE_SELL';
-      if (sigFilter === 'HOLD') return hint === 'HOLD';
-      return true;
-    });
-  }
-  if (!filtered.length) {
-    var filterLabel = sigFilter !== 'all' ? sigFilter : '';
+  if (!results.length) {
     document.getElementById('scanResults').innerHTML = '<div style="text-align:center;padding:40px 20px;">' +
-      '<div style="font-family:var(--mono);font-size:13px;color:var(--muted2);margin-bottom:8px;">No ' + filterLabel + ' signals found</div>' +
-      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">' + results.length + ' instruments scanned — none matched ' + (filterLabel || 'your criteria') + '. Try a different timeframe or signal type.</div>' +
+      '<div style="font-family:var(--mono);font-size:13px;color:var(--muted2);margin-bottom:8px;">No signals found</div>' +
+      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">Try a different preset or timeframe.</div>' +
       '</div>';
     return;
   }
@@ -4905,8 +4886,7 @@ function renderScanResults(results, assetType) {
   document.querySelectorAll('#tab-scanner > .scanner-layout > .scan-table').forEach(function(t) { t.style.display = 'none'; });
   var mf = document.getElementById('scanFilterRow') || document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
   var fmt = function(v) { return v != null ? parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:4}) : '—'; };
-  var countLabel = sigFilter !== 'all' ? (' — showing ' + filtered.length + '/' + results.length + ' ' + sigFilter) : '';
-  document.getElementById('scanResults').innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + filtered.length + ' results' + countLabel + '</div>' +
+  document.getElementById('scanResults').innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + results.length + ' results</div>' +
     '<table class="scan-table"><thead><tr>' +
     '<th>Symbol</th><th>Signal</th><th>Confidence</th><th>Price</th><th>RSI</th><th>EMA Trend</th><th>Volume</th><th>Change 1D</th><th>TF</th>' +
     '</tr></thead><tbody>' + filtered.map(r => {
@@ -4936,37 +4916,18 @@ function renderScanResults(results, assetType) {
 }
 
 function renderScanResultsMultiTF(resultsByTicker, assetType) {
-  // Apply signal type filter from dropdown BEFORE rendering
-  var sigFilter = (document.getElementById('scanSignalFilter') || {}).value || 'all';
-  var allTickers = Object.keys(resultsByTicker).sort();
-  var totalScanned = allTickers.length;
-  var tickers = allTickers;
-  if (sigFilter !== 'all') {
-    tickers = allTickers.filter(function(tk) {
-      var tfResults = resultsByTicker[tk];
-      return Object.values(tfResults).some(function(r) {
-        if (!r) return false;
-        var hint = (r.signal_hint || 'HOLD').toUpperCase();
-        if (sigFilter === 'BUY') return hint === 'BUY' || hint === 'POSSIBLE_BUY' || hint === 'COUNTER_BUY';
-        if (sigFilter === 'SELL') return hint === 'SELL' || hint === 'POSSIBLE_SELL';
-        if (sigFilter === 'HOLD') return hint === 'HOLD';
-        return true;
-      });
-    });
-  }
+  var tickers = Object.keys(resultsByTicker).sort();
   if (!tickers.length) {
-    var filterLabel = sigFilter !== 'all' ? sigFilter : '';
     document.getElementById('scanResults').innerHTML = '<div style="text-align:center;padding:40px 20px;">' +
-      '<div style="font-family:var(--mono);font-size:13px;color:var(--muted2);margin-bottom:8px;">No ' + filterLabel + ' signals found</div>' +
-      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">' + totalScanned + ' instruments scanned across all timeframes — none matched ' + (filterLabel || 'your criteria') + '. Try a different signal type.</div>' +
+      '<div style="font-family:var(--mono);font-size:13px;color:var(--muted2);margin-bottom:8px;">No signals found</div>' +
+      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">Try a different preset or signal type.</div>' +
       '</div>';
     return;
   }
   document.querySelectorAll('#tab-scanner > .scanner-layout > .scan-table').forEach(function(t) { t.style.display = 'none'; });
   var mf = document.getElementById('scanFilterRow') || document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
   var tfList = ['15m','1h','4h','1d','1w'];
-  var countLabel = sigFilter !== 'all' ? (' — showing ' + tickers.length + '/' + totalScanned + ' ' + sigFilter) : '';
-  var html = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + tickers.length + ' results' + countLabel + '</div>';
+  var html = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + tickers.length + ' results</div>';
   html += '<table class="scan-mtf-table"><thead><tr><th>Symbol</th>';
   tfList.forEach(function(tf) { html += '<th>' + tf.toUpperCase() + '</th>'; });
   html += '</tr></thead><tbody>';
@@ -5029,38 +4990,67 @@ function filterScanResults(filter, btn) {
   _activeScanFilter = filter;  // remember for next scan
   document.querySelectorAll('.scan-filter-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+
+  var filterLabels = {buy:'BUY',sell:'SELL',highconf:'High Confidence',crypto:'Crypto',forex:'Forex',equities:'Equities',commodities:'Commodities'};
+  var filterLabel = filterLabels[filter] || '';
+
+  function matchSignal(r, f) {
+    if (f === 'all') return true;
+    var hint = (r.signal_hint || 'HOLD').toUpperCase();
+    if (f === 'buy') return hint === 'BUY' || hint === 'POSSIBLE_BUY' || hint === 'COUNTER_BUY';
+    if (f === 'sell') return hint === 'SELL' || hint === 'POSSIBLE_SELL';
+    if (f === 'highconf') return r.confidence && parseInt(r.confidence) >= 65;
+    if (f === 'crypto') return r.asset_type === 'crypto';
+    if (f === 'forex') return r.asset_type === 'forex';
+    if (f === 'equities') return r.asset_type === 'stock';
+    if (f === 'commodities') return r.asset_type === 'commodity';
+    return true;
+  }
+
+  function showNoResults(totalCount) {
+    document.getElementById('scanResults').innerHTML = '<div style="text-align:center;padding:40px 20px;">' +
+      '<div style="font-family:var(--mono);font-size:14px;color:var(--muted2);margin-bottom:8px;">No ' + filterLabel + ' signals found</div>' +
+      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">' + totalCount + ' instruments scanned — none matched ' + filterLabel + '. Try a different filter or timeframe.</div>' +
+      '</div>';
+  }
+
   if (_lastScanIsMultiTF) {
-    var filtered = {};
     var src = _lastScanResultsByTicker;
-    if (filter === 'all') { filtered = src; }
-    else if (filter === 'buy') {
-      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.signal_hint && r.signal_hint.includes('BUY'); })) filtered[tk] = src[tk]; });
-    } else if (filter === 'sell') {
-      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.signal_hint && r.signal_hint.includes('SELL'); })) filtered[tk] = src[tk]; });
-    } else if (filter === 'highconf') {
-      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.confidence && parseInt(r.confidence) >= 65; })) filtered[tk] = src[tk]; });
-    } else if (filter === 'crypto') {
-      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.asset_type === 'crypto'; })) filtered[tk] = src[tk]; });
-    } else if (filter === 'forex') {
-      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.asset_type === 'forex'; })) filtered[tk] = src[tk]; });
-    } else if (filter === 'equities') {
-      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.asset_type === 'stock'; })) filtered[tk] = src[tk]; });
-    } else if (filter === 'commodities') {
-      Object.keys(src).forEach(function(tk) { if (Object.values(src[tk]).some(function(r){ return r.asset_type === 'commodity'; })) filtered[tk] = src[tk]; });
-    } else { filtered = src; }
+    if (!src) return;
+    if (filter === 'all') {
+      _origRenderScanResultsMultiTF(src, _lastScanAssetType);
+      return;
+    }
+    var filtered = {};
+    var totalCount = Object.keys(src).length;
+    Object.keys(src).forEach(function(tk) {
+      if (Object.values(src[tk]).some(function(r){ return matchSignal(r, filter); })) filtered[tk] = src[tk];
+    });
+    if (!Object.keys(filtered).length) { showNoResults(totalCount); return; }
+    // Show count label
     _origRenderScanResultsMultiTF(filtered, _lastScanAssetType);
+    // Prepend filter count info
+    var sr = document.getElementById('scanResults');
+    var info = document.createElement('div');
+    info.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--amber);margin-bottom:4px;';
+    info.textContent = 'Showing ' + Object.keys(filtered).length + '/' + totalCount + ' — ' + filterLabel + ' only';
+    sr.insertBefore(info, sr.firstChild);
   } else {
-    // For single-TF results, apply original filters
-    if (!_lastScanResults.length) return;
-    var filtered = _lastScanResults;
-    if (filter === 'buy') filtered = _lastScanResults.filter(r => r.signal_hint && (r.signal_hint.includes('BUY')));
-    else if (filter === 'sell') filtered = _lastScanResults.filter(r => r.signal_hint && (r.signal_hint.includes('SELL')));
-    else if (filter === 'highconf') filtered = _lastScanResults.filter(r => r.confidence && parseInt(r.confidence) >= 65);
-    else if (filter === 'crypto') filtered = _lastScanResults.filter(r => r.asset_type === 'crypto');
-    else if (filter === 'forex') filtered = _lastScanResults.filter(r => r.asset_type === 'forex');
-    else if (filter === 'equities') filtered = _lastScanResults.filter(r => r.asset_type === 'stock');
-    else if (filter === 'commodities') filtered = _lastScanResults.filter(r => r.asset_type === 'commodity');
+    if (!_lastScanResults || !_lastScanResults.length) return;
+    if (filter === 'all') {
+      _origRenderScanResults(_lastScanResults, _lastScanAssetType);
+      return;
+    }
+    var totalCount = _lastScanResults.length;
+    var filtered = _lastScanResults.filter(function(r) { return matchSignal(r, filter); });
+    if (!filtered.length) { showNoResults(totalCount); return; }
     _origRenderScanResults(filtered, _lastScanAssetType);
+    // Prepend filter count info
+    var sr = document.getElementById('scanResults');
+    var info = document.createElement('div');
+    info.style.cssText = 'font-family:var(--mono);font-size:10px;color:var(--amber);margin-bottom:4px;';
+    info.textContent = 'Showing ' + filtered.length + '/' + totalCount + ' — ' + filterLabel + ' only';
+    sr.insertBefore(info, sr.firstChild);
   }
 }
 
@@ -8485,25 +8475,62 @@ async function runBacktest(d, showPanel = true) {
     // ── Equity chart ──
     requestAnimationFrame(() => renderEquityChart(bt.equity_curve));
 
-    // ── List of trades ──
+    // ── List of trades (clickable rows with expandable details) ──
     const tbody = document.getElementById('btTradesTbody');
     if (tbody && bt.trades_list) {
-      const exitLabel = { win_tp1:'TP1', win_tp2:'TP2', win_tp3:'TP3', loss:'SL' };
-      tbody.innerHTML = bt.trades_list.map(t => {
-        const win   = t.outcome !== 'loss';
-        const col   = win ? green : red;
-        const exit  = exitLabel[t.outcome] || t.outcome;
-        const badge = win
-          ? `<span style="background:rgba(48,209,88,.18);color:${green};padding:1px 7px;border-radius:10px;font-size:10px;">${exit}</span>`
-          : `<span style="background:rgba(255,82,70,.18);color:${red};padding:1px 7px;border-radius:10px;font-size:10px;">${exit}</span>`;
-        return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
-          <td style="padding:7px 12px;color:var(--muted);">${t.n}</td>
-          <td style="padding:7px 12px;color:var(--text);white-space:nowrap;">${t.date}</td>
-          <td style="padding:7px 12px;color:var(--accent);">${d.signal}</td>
-          <td style="padding:7px 12px;text-align:center;">${badge}</td>
-          <td style="padding:7px 12px;text-align:right;color:${col};">${fR(t.r)}</td>
-          <td style="padding:7px 12px;text-align:right;color:${col};">${fUSD(t.pnl_usd)}</td>
-        </tr>`;
+      const exitLabel = { win_tp1:'TP1', win_tp2:'TP2', win_tp3:'TP3', loss:'SL', timeout:'TIMEOUT' };
+      // Store trades data for click handler
+      window._btTradesList = bt.trades_list;
+      window._btTradesSignal = d.signal;
+      window._btTradesTicker = d.ticker;
+      window._btTradesSL = d.stop_loss;
+      window._btTradesTP1 = d.tp1;
+      window._btTradesTP2 = d.tp2;
+      window._btTradesTP3 = d.tp3;
+      window._btTradesEntry = d.entry;
+
+      tbody.innerHTML = bt.trades_list.map(function(t) {
+        var win   = t.outcome !== 'loss' && t.outcome !== 'timeout';
+        var col   = win ? green : red;
+        var exit  = exitLabel[t.outcome] || t.outcome;
+        var badge = win
+          ? '<span style="background:rgba(48,209,88,.18);color:' + green + ';padding:1px 7px;border-radius:10px;font-size:10px;">' + exit + '</span>'
+          : '<span style="background:rgba(255,82,70,.18);color:' + red + ';padding:1px 7px;border-radius:10px;font-size:10px;">' + exit + '</span>';
+        // R-bar: visual width proportional to R-multiple (max 5R = 100%)
+        var barWidth = Math.min(Math.abs(t.r) / 5 * 100, 100);
+        var barColor = win ? 'rgba(48,209,88,.3)' : 'rgba(255,82,70,.3)';
+        // Cumulative P&L up to this trade
+        var cumPnl = 0;
+        for (var ci = 0; ci < bt.trades_list.length; ci++) {
+          cumPnl += bt.trades_list[ci].pnl_usd;
+          if (bt.trades_list[ci].n === t.n) break;
+        }
+        var cumCol = cumPnl >= 0 ? green : red;
+        return '<tr class="bt-trade-row" data-trade-n="' + t.n + '" onclick="toggleTradeDetail(' + t.n + ')" style="border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;transition:background .15s;" onmouseover="this.style.background=\'rgba(245,166,35,.06)\'" onmouseout="this.style.background=\'transparent\'">' +
+          '<td style="padding:7px 12px;color:var(--muted);">' + t.n + '</td>' +
+          '<td style="padding:7px 12px;color:var(--text);white-space:nowrap;">' + t.date + '</td>' +
+          '<td style="padding:7px 12px;color:var(--accent);">' + d.signal + '</td>' +
+          '<td style="padding:7px 12px;text-align:center;">' + badge + '</td>' +
+          '<td style="padding:7px 12px;text-align:right;color:' + col + ';">' + fR(t.r) + '</td>' +
+          '<td style="padding:7px 12px;text-align:right;color:' + col + ';">' + fUSD(t.pnl_usd) + '</td>' +
+          '</tr>' +
+          '<tr id="trade-detail-' + t.n + '" style="display:none;">' +
+          '<td colspan="6" style="padding:0 12px 12px;background:var(--bg2);border-bottom:1px solid rgba(245,166,35,.15);">' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 16px;padding:12px;font-family:var(--mono);font-size:11px;">' +
+              '<div><span style="color:var(--muted);display:block;font-size:9px;letter-spacing:1px;margin-bottom:2px;">ENTRY PRICE</span><span style="color:var(--amber);">' + (t.entry != null ? t.entry : '—') + '</span></div>' +
+              '<div><span style="color:var(--muted);display:block;font-size:9px;letter-spacing:1px;margin-bottom:2px;">EXIT TYPE</span><span style="color:' + col + ';">' + exit + (t.outcome === 'win_tp1' ? ' (50% closed)' : t.outcome === 'win_tp2' ? ' (25% closed)' : t.outcome === 'win_tp3' ? ' (25% closed)' : t.outcome === 'loss' ? ' (full stop)' : '') + '</span></div>' +
+              '<div><span style="color:var(--muted);display:block;font-size:9px;letter-spacing:1px;margin-bottom:2px;">R-MULTIPLE</span><span style="color:' + col + ';font-weight:700;">' + fR(t.r) + '</span></div>' +
+              '<div><span style="color:var(--muted);display:block;font-size:9px;letter-spacing:1px;margin-bottom:2px;">P&amp;L ($100 RISK)</span><span style="color:' + col + ';font-weight:700;">' + fUSD(t.pnl_usd) + '</span></div>' +
+              '<div><span style="color:var(--muted);display:block;font-size:9px;letter-spacing:1px;margin-bottom:2px;">CUMULATIVE P&amp;L</span><span style="color:' + cumCol + ';">' + (cumPnl >= 0 ? '+' : '') + '$' + Math.abs(cumPnl).toFixed(2) + '</span></div>' +
+              '<div><span style="color:var(--muted);display:block;font-size:9px;letter-spacing:1px;margin-bottom:2px;">RISK/REWARD</span><span style="color:var(--white2);">' + (win ? '1:' + Math.abs(t.r).toFixed(1) : 'Loss') + '</span></div>' +
+            '</div>' +
+            '<div style="padding:0 12px 4px;">' +
+              '<div style="height:4px;background:var(--bg);border-radius:2px;overflow:hidden;">' +
+                '<div style="width:' + barWidth + '%;height:100%;background:' + barColor + ';border-radius:2px;"></div>' +
+              '</div>' +
+            '</div>' +
+          '</td>' +
+          '</tr>';
       }).join('');
     }
 
@@ -8524,6 +8551,23 @@ async function runBacktest(d, showPanel = true) {
       errEl.style.display = '';
       panel.style.display = '';
     }
+  }
+}
+
+/* ════════════════════════════════════════════
+   BACKTEST TRADE DETAIL TOGGLE
+════════════════════════════════════════════ */
+function toggleTradeDetail(n) {
+  var detail = document.getElementById('trade-detail-' + n);
+  if (!detail) return;
+  var isOpen = detail.style.display !== 'none';
+  // Close all other open details first
+  document.querySelectorAll('[id^="trade-detail-"]').forEach(function(el) {
+    el.style.display = 'none';
+  });
+  // Toggle this one
+  if (!isOpen) {
+    detail.style.display = '';
   }
 }
 
@@ -9974,9 +10018,12 @@ function chipAsk(chip) {
 }
 
 /* ── Dynamic chat context — updates welcome + chips per page/tab/signal ── */
+var _chatLastTicker = null;
+var _chatLastTab = null;
 function updateChatContext(d, tabOverride) {
   var welcome = document.getElementById('cdWelcome');
   var chips = document.getElementById('cdChips');
+  var msgsEl = document.getElementById('cdMsgs');
   if (!chips) return;
   var activeTab = tabOverride || (document.querySelector('.nav-tab.active') ? document.querySelector('.nav-tab.active').textContent.trim().toLowerCase() : 'signals');
   var sig = d ? (d.signal||'HOLD').toUpperCase() : 'HOLD';
@@ -9984,16 +10031,37 @@ function updateChatContext(d, tabOverride) {
   var price = d && d.price ? '$' + parseFloat(d.price).toLocaleString(undefined,{maximumFractionDigits:4}) : '';
   var conf = d ? (d.confidence||'') : '';
 
+  // Clear old messages when ticker or tab changes so chat stays contextual
+  var contextChanged = (ticker && ticker !== _chatLastTicker) || (activeTab !== _chatLastTab);
+  if (contextChanged && msgsEl) {
+    // Remove all messages except the welcome message
+    var msgs = msgsEl.querySelectorAll('.cd-msg:not(#cdWelcome)');
+    msgs.forEach(function(m) { m.remove(); });
+    _chatLastTicker = ticker;
+    _chatLastTab = activeTab;
+  }
+
   // Update welcome message
   if (welcome && d) {
     var bubble = welcome.querySelector('.cd-bubble');
     if (bubble) {
+      var tabLabel = '';
+      if (activeTab.includes('backtest')) tabLabel = ' You\'re on the <strong>Backtest</strong> tab — ask about historical performance.';
+      else if (activeTab.includes('simul')) tabLabel = ' You\'re on the <strong>Simulation</strong> tab — ask about price scenarios.';
+      else if (activeTab.includes('scan')) tabLabel = ' You\'re on the <strong>Scanner</strong> tab — ask about market-wide signals.';
+      else if (activeTab.includes('order') || activeTab.includes('flow')) tabLabel = ' You\'re on <strong>Order Flow</strong> — ask about buy/sell pressure.';
+      else if (activeTab.includes('strateg')) tabLabel = ' You\'re on the <strong>Strategy Engine</strong> — ask about pattern detection.';
+      else if (activeTab.includes('trade') || activeTab.includes('manage')) tabLabel = ' You\'re on <strong>Trade Management</strong> — ask about entry/exit planning.';
+
       if (sig === 'BUY' || sig === 'SELL' || sig === 'POSSIBLE_BUY' || sig === 'POSSIBLE_SELL' || sig === 'COUNTER_BUY') {
-        bubble.innerHTML = '<strong>' + sig.replace('_',' ') + '</strong> signal on <strong>' + ticker + '</strong> at ' + price + ' — ' + conf + ' confidence. Ask me anything about this setup.';
+        bubble.innerHTML = '<strong>' + sig.replace('_',' ') + '</strong> signal on <strong>' + ticker + '</strong> at ' + price + ' — ' + conf + ' confidence.' + tabLabel + (tabLabel ? '' : ' Ask me anything about this setup.');
       } else {
-        bubble.innerHTML = '<strong>' + ticker + '</strong> is at ' + price + ' with a <strong>HOLD</strong> signal. No clear entry right now. Ask me what to watch for or about the indicators.';
+        bubble.innerHTML = '<strong>' + ticker + '</strong> is at ' + price + ' with a <strong>HOLD</strong> signal.' + tabLabel + (tabLabel ? '' : ' No clear entry right now. Ask me what to watch for.');
       }
     }
+  } else if (welcome && !d && activeTab.includes('scan')) {
+    var bubble = welcome.querySelector('.cd-bubble');
+    if (bubble) bubble.innerHTML = 'You\'re on the <strong>Market Scanner</strong>. Run a scan to find BUY/SELL signals across instruments, then ask me about the results.';
   }
 
   // Build dynamic chips based on tab + signal
