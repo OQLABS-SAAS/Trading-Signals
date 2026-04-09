@@ -7417,12 +7417,35 @@ function renderFootprint(d) {
     }
 
     // Signals
+    // Signal-aware pill labels — cross-reference candle data with active signal
     var signals = card.querySelectorAll('.fp-pill');
     if (signals.length >= 3) {
-      signals[0].textContent = delta > 0 ? '⬆ Strong buying delta on breakout candle' : '⬇ Selling pressure on current candle';
-      signals[0].className = 'fp-pill ' + (delta > 0 ? 'g' : 'r');
-      signals[1].textContent = cvdTrend.includes('Rising') ? '⬆ CVD trending up — accumulation' : cvdTrend.includes('Falling') ? '⬇ CVD declining — distribution' : '~ CVD flat — no clear bias';
-      signals[1].className = 'fp-pill ' + (cvdTrend.includes('Rising') ? 'g' : cvdTrend.includes('Falling') ? 'r' : 'a');
+      var sig = d.signal ? d.signal.toUpperCase() : 'HOLD';
+      var isSellSig = sig === 'SELL' || sig === 'POSSIBLE_SELL';
+      var isBuySig = sig === 'BUY' || sig === 'POSSIBLE_BUY' || sig === 'COUNTER_BUY';
+
+      if (delta > 0 && isSellSig) {
+        signals[0].textContent = '⚠ Buying delta vs SELL signal — possible relief bounce';
+        signals[0].className = 'fp-pill a';
+      } else if (delta < 0 && isBuySig) {
+        signals[0].textContent = '⚠ Selling delta vs BUY signal — possible pullback';
+        signals[0].className = 'fp-pill a';
+      } else {
+        signals[0].textContent = delta > 0 ? '⬆ Strong buying delta on breakout candle' : '⬇ Selling pressure on current candle';
+        signals[0].className = 'fp-pill ' + (delta > 0 ? 'g' : 'r');
+      }
+
+      if (cvdTrend.includes('Rising') && isSellSig) {
+        signals[1].textContent = '⚠ CVD rising but signal is SELL — watch for reversal';
+        signals[1].className = 'fp-pill a';
+      } else if (cvdTrend.includes('Falling') && isBuySig) {
+        signals[1].textContent = '⚠ CVD falling but signal is BUY — watch for bounce';
+        signals[1].className = 'fp-pill a';
+      } else {
+        signals[1].textContent = cvdTrend.includes('Rising') ? '⬆ CVD trending up — accumulation' : cvdTrend.includes('Falling') ? '⬇ CVD declining — distribution' : '~ CVD flat — no clear bias';
+        signals[1].className = 'fp-pill ' + (cvdTrend.includes('Rising') ? 'g' : cvdTrend.includes('Falling') ? 'r' : 'a');
+      }
+
       var absorp = d.vol_ratio >= 1.5 ? '~ High volume absorption detected' : '~ Normal volume profile';
       signals[2].textContent = absorp;
       signals[2].className = 'fp-pill ' + (d.vol_ratio >= 1.5 ? 'a' : 'm');
@@ -10751,13 +10774,31 @@ document.addEventListener('click', function(e) {
     var cvdRising = cvdVal.includes('Rising');
     var cvdFalling = cvdVal.includes('Falling');
 
-    // Simple interpretation
+    // Signal-aware interpretation — cross-reference candle footprint with active signal
     var interpretation = '';
-    if (dPositive && cvdRising) interpretation = '<span style="color:var(--green);">Buyers are in control.</span> Volume confirms the upward push — this is real buying activity, not fake orders.';
-    else if (!dPositive && cvdFalling) interpretation = '<span style="color:var(--red);">Sellers are dominating.</span> Selling pressure is genuine and increasing. Caution for longs.';
-    else if (dPositive && cvdFalling) interpretation = '<span style="color:var(--amber);">Mixed signals.</span> Current candle shows buying, but the broader trend of money flow is downward. Could be a temporary bounce.';
-    else if (!dPositive && cvdRising) interpretation = '<span style="color:var(--amber);">Mixed signals.</span> Current candle shows selling, but overall money flow is still upward. Likely a pullback, not a reversal.';
-    else interpretation = '<span style="color:var(--muted2);">No clear direction.</span> Buyers and sellers are roughly balanced. Wait for a clearer setup.';
+    var activeSig = currentData ? (currentData.signal || 'HOLD').toUpperCase() : 'HOLD';
+    var isBuySig = activeSig === 'BUY' || activeSig === 'POSSIBLE_BUY' || activeSig === 'COUNTER_BUY';
+    var isSellSig = activeSig === 'SELL' || activeSig === 'POSSIBLE_SELL';
+
+    if (dPositive && cvdRising) {
+      if (isSellSig) {
+        interpretation = '<span style="color:var(--amber);">Candle shows buying pressure, but the overall signal is <strong style="color:var(--red);">SELL</strong>.</span> This is likely a relief bounce or dead-cat bounce within a downtrend. Smart money often sells into buying spikes — the indicators (RSI, EMA, MACD) still point down. Treat this as a potential short entry, not a reversal.';
+      } else {
+        interpretation = '<span style="color:var(--green);">Buyers are in control.</span> Volume confirms the upward push — this is real buying activity, not fake orders.' + (isBuySig ? ' This aligns with the active <strong>BUY</strong> signal.' : '');
+      }
+    } else if (!dPositive && cvdFalling) {
+      if (isBuySig) {
+        interpretation = '<span style="color:var(--amber);">Candle shows selling pressure, but the overall signal is <strong style="color:var(--green);">BUY</strong>.</span> This could be a healthy pullback or shakeout within an uptrend. Indicators still lean bullish — watch for a bounce at support for a better entry.';
+      } else {
+        interpretation = '<span style="color:var(--red);">Sellers are dominating.</span> Selling pressure is genuine and increasing. Caution for longs.' + (isSellSig ? ' This aligns with the active <strong>SELL</strong> signal.' : '');
+      }
+    } else if (dPositive && cvdFalling) {
+      interpretation = '<span style="color:var(--amber);">Mixed signals.</span> Current candle shows buying, but the broader trend of money flow is downward.' + (isSellSig ? ' With a <strong style="color:var(--red);">SELL</strong> signal active, this buying is likely a temporary bounce — not a reversal.' : ' Could be a temporary bounce.');
+    } else if (!dPositive && cvdRising) {
+      interpretation = '<span style="color:var(--amber);">Mixed signals.</span> Current candle shows selling, but overall money flow is still upward.' + (isBuySig ? ' With a <strong style="color:var(--green);">BUY</strong> signal active, this is likely a pullback — not a breakdown.' : ' Likely a pullback, not a reversal.');
+    } else {
+      interpretation = '<span style="color:var(--muted2);">No clear direction.</span> Buyers and sellers are roughly balanced. Wait for a clearer setup.';
+    }
 
     // Build Real vs Posing comparison from stored data (NOT from innerHTML)
     var pd = window._fpPoserData || {};
