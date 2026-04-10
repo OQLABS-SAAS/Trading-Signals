@@ -4188,6 +4188,9 @@ function renderChart(d) {
           }
           var model = context.tooltip;
           if (model.opacity === 0) { tip.style.opacity = '0'; return; }
+          // Suppress OHLC/EMA tooltip while signal tooltip is visible — prevents overlap
+          var sigTip = document.getElementById('chartTooltip');
+          if (sigTip && sigTip.classList.contains('visible')) { tip.style.opacity = '0'; return; }
           var items = (model.dataPoints || []).filter(function(dp) {
             return ['Price','EMA20','EMA50'].includes(dp.dataset.label);
           });
@@ -8119,7 +8122,59 @@ function updateTradeAlert(d) {
       '</div>';
       banner.style.display = 'flex';
     } else {
-      banner.style.display = 'none';
+      // ── HOLD → show upcoming trade info (projected next buy) ──
+      var ema20  = parseFloat(d.ema20);
+      var ema50  = parseFloat(d.ema50);
+      var support = parseFloat(d.support);
+      var resist  = parseFloat(d.resistance);
+      var atr    = parseFloat(d.atr) || 0;
+
+      // Build candidate buy triggers: level + human-readable reason
+      var cands = [];
+      if (support && support < price) cands.push({level: support, reason: 'Bounce off support', type: 'support'});
+      if (ema50 && ema50 < price)     cands.push({level: ema50,   reason: 'Pullback to EMA50',    type: 'ema'});
+      if (ema20 && ema20 < price)     cands.push({level: ema20,   reason: 'Pullback to EMA20',    type: 'ema'});
+      // If price is under EMA50, a reclaim would be the trigger
+      if (ema50 && ema50 > price)     cands.push({level: ema50,   reason: 'EMA50 reclaim (breakout)', type: 'ema'});
+
+      // Pick the candidate with the smallest distance to current price
+      var best = null;
+      for (var i = 0; i < cands.length; i++) {
+        var dist = Math.abs(price - cands[i].level);
+        if (!best || dist < best.dist) { best = cands[i]; best.dist = dist; }
+      }
+
+      if (best && price) {
+        var distPct = ((best.level - price) / price * 100);
+        var distAbs = Math.abs(distPct).toFixed(2);
+        var direction = distPct < 0 ? 'below' : 'above';
+        var atrMove = atr > 0 ? (best.dist / atr).toFixed(1) + '× ATR' : '';
+        // Suggested SL = 1.5×ATR below the trigger level, TP1 = 2×ATR above
+        var projSL  = atr > 0 ? best.level - 1.5 * atr : null;
+        var projTP1 = atr > 0 ? best.level + 2.0 * atr : (resist || null);
+        var projRR  = (projSL && projTP1) ? ((projTP1 - best.level) / (best.level - projSL)).toFixed(2) : null;
+
+        banner.innerHTML = '<div style="flex:1;">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+            '<span style="color:var(--amber);font-weight:700;">⏳ UPCOMING TRADE</span>' +
+            '<span>HOLD — next buy when price ' + direction + ' at <strong style="color:var(--green);">' + currSym + _fmtP(best.level) + '</strong></span>' +
+            '<span style="opacity:.6;">· ' + best.reason + '</span>' +
+          '</div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:4px;font-size:10px;">' +
+            '<span style="color:var(--muted);">Distance: <strong style="color:var(--amber);">' + distAbs + '%</strong>' + (atrMove ? ' <span style="opacity:.55;">(' + atrMove + ')</span>' : '') + '</span>' +
+            '<span style="color:var(--muted);">Projected entry: <strong style="color:var(--amber);">' + currSym + _fmtP(best.level) + '</strong></span>' +
+            (projSL  ? '<span style="color:var(--muted);">SL: <strong style="color:var(--red);">'   + currSym + _fmtP(projSL)  + '</strong></span>' : '') +
+            (projTP1 ? '<span style="color:var(--muted);">TP1: <strong style="color:var(--green);">' + currSym + _fmtP(projTP1) + '</strong></span>' : '') +
+            (projRR  ? '<span style="color:var(--muted);">R:R: <strong style="color:var(--white);">1 : ' + projRR + '</strong></span>' : '') +
+          '</div>' +
+        '</div>';
+        // Use a calmer amber tint for the upcoming-trade variant
+        banner.style.background = 'rgba(245,166,35,.05)';
+        banner.style.borderColor = 'rgba(245,166,35,.22)';
+        banner.style.display = 'flex';
+      } else {
+        banner.style.display = 'none';
+      }
     }
   }
 }
@@ -8936,15 +8991,46 @@ function _showTooltip(e, html, accentClass) {
     'div-bear':'rgba(255,82,74,.35)',
   };
   _tooltipEl.style.borderColor = colors[accentClass] || 'rgba(255,255,255,.13)';
-  // Position: follow cursor, keep inside viewport
+
+  // ── Anti-overlap fix ──
+  // Hide Chart.js OHLC/EMA tooltip while the signal tooltip is visible so they
+  // can never stack. Also pin the signal tooltip to the chart's top-right
+  // corner (not the cursor) so the user's cursor area stays clean.
+  const ohlcTip = document.getElementById('chartTooltipCustom');
+  if (ohlcTip) ohlcTip.style.opacity = '0';
+
+  const canvas = e.currentTarget || e.target;
+  const rect   = (canvas && canvas.getBoundingClientRect) ? canvas.getBoundingClientRect() : null;
   const W = window.innerWidth, H = window.innerHeight;
-  const tw = 240, th = 130;
-  let lx = e.clientX + 14, ly = e.clientY - 14;
-  if (lx + tw > W - 10) lx = e.clientX - tw - 14;
-  if (ly + th > H - 10) ly = e.clientY - th - 14;
+  // Measure actual tooltip size after content is set
+  _tooltipEl.style.visibility = 'hidden';
+  _tooltipEl.classList.add('visible');
+  const tw = _tooltipEl.offsetWidth  || 260;
+  const th = _tooltipEl.offsetHeight || 150;
+  _tooltipEl.style.visibility = '';
+
+  let lx, ly;
+  if (rect) {
+    // Pin to chart top-right with a small inset
+    lx = rect.right - tw - 12;
+    ly = rect.top + 12;
+    // If the cursor is inside that top-right zone, flip to top-left instead
+    if (e.clientX >= lx - 8 && e.clientX <= rect.right && e.clientY <= ly + th + 8) {
+      lx = rect.left + 12;
+    }
+  } else {
+    lx = e.clientX + 14; ly = e.clientY - 14;
+    if (lx + tw > W - 10) lx = e.clientX - tw - 14;
+    if (ly + th > H - 10) ly = e.clientY - th - 14;
+  }
+  // Final viewport clamp
+  if (lx < 8) lx = 8;
+  if (ly < 8) ly = 8;
+  if (lx + tw > W - 8) lx = W - tw - 8;
+  if (ly + th > H - 8) ly = H - th - 8;
+
   _tooltipEl.style.left = lx + 'px';
   _tooltipEl.style.top  = ly + 'px';
-  _tooltipEl.classList.add('visible');
 }
 
 function _hideTooltip() {
