@@ -3379,8 +3379,14 @@ def backtest_route():
     tp2        = body.get("tp2")
     tp3        = body.get("tp3")
 
-    if signal == "HOLD" or entry is None or stop_loss is None or tp1 is None:
-        return jsonify({"error": "No trade levels — backtest only available for BUY/SELL signals"}), 400
+    # Accept HOLD if caller synthesized default long-bias levels (entry/SL/TP1 present).
+    # The backtest engine only needs % distances to simulate historical RSI-cross entries,
+    # so we don't need a live BUY/SELL signal to generate a full historical report.
+    if entry is None or stop_loss is None or tp1 is None:
+        return jsonify({"error": "No trade levels provided — entry/stop_loss/tp1 required"}), 400
+    if signal == "HOLD":
+        # Default to BUY direction when caller passes HOLD with synthesized levels
+        signal = "BUY"
 
     ticker_n = normalise_ticker(ticker, asset_type)
 

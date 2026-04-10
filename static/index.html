@@ -8419,71 +8419,46 @@ async function runBacktest(d, showPanel = true) {
 
   if (!panel) return;
 
-  if (d.signal === 'HOLD' || d.entry == null) {
-    // HOLD → no live metrics, but Pine scripts are still generic templates
-    // that work on any ticker/timeframe. Show the panel with only the
-    // Pine Script section + a short explainer, hide stats/equity/trades.
-    var btEmptyEl = document.getElementById('btEmpty');
-    if (btEmptyEl) btEmptyEl.style.display = 'none';
-    loading.style.display = 'none';
-    errEl.style.display = 'none';
-    if (tradesTab) tradesTab.style.display = 'none';
-
-    // Hide the live-metrics UI inside results
-    var btCtrls   = document.getElementById('btControls');
-    var btStats   = document.querySelector('#backtestResults .bt-stats-row');
-    var btCards   = document.querySelectorAll('#backtestResults > .section-card');
-    if (btCtrls) btCtrls.style.display = 'none';
-    if (btStats) btStats.style.display = 'none';
-    btCards.forEach(function(c){ c.style.display = 'none'; });
-
-    // Header label
-    var nameElH = document.getElementById('btStratName');
-    if (nameElH) nameElH.textContent = 'HOLD — ' + (d.ticker || 'this instrument') + ' ' + (d.timeframe ? d.timeframe.toUpperCase() : '');
-    var periodH = document.getElementById('backtestPeriod');
-    if (periodH) periodH.textContent = 'No active signal';
-
-    // Inject a HOLD explainer right above the Pine Script section (once)
-    var holdNote = document.getElementById('btHoldNote');
-    if (!holdNote) {
-      holdNote = document.createElement('div');
-      holdNote.id = 'btHoldNote';
-      holdNote.style.cssText = 'margin-bottom:20px;padding:16px 20px;background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.22);border-left:3px solid var(--amber);border-radius:4px;font-family:var(--mono);font-size:11.5px;color:var(--muted2);line-height:1.7;';
-      var pineSec = document.getElementById('btPineSection');
-      if (pineSec && pineSec.parentNode) pineSec.parentNode.insertBefore(holdNote, pineSec);
+  // ── HOLD handling ─────────────────────────────────────────────────
+  // HOLD doesn't have live entry/SL/TP levels, but the backtest engine
+  // only needs % distances to simulate historical RSI-cross entries.
+  // Synthesize long-bias defaults from current price + ATR (or fixed %)
+  // so the full report + equity curve + trade list are still generated,
+  // matching how TradingView's Strategy Tester runs regardless of current
+  // signal state.
+  var isHoldRun = (d.signal === 'HOLD' || d.entry == null);
+  if (isHoldRun) {
+    var _price = parseFloat(d.price) || 0;
+    var _atr   = parseFloat(d.atr)   || 0;
+    if (_price > 0) {
+      // Prefer ATR-based levels when available (1.5R stop, 2R/4R/6R targets),
+      // otherwise fall back to fixed % distances (2% SL, 4/8/12% TPs).
+      var hEntry = _price;
+      var hSL, hTP1, hTP2, hTP3;
+      if (_atr > 0 && _atr < _price) {
+        hSL  = _price - 1.5 * _atr;
+        hTP1 = _price + 2.0 * _atr;
+        hTP2 = _price + 4.0 * _atr;
+        hTP3 = _price + 6.0 * _atr;
+      } else {
+        hSL  = _price * 0.98;
+        hTP1 = _price * 1.04;
+        hTP2 = _price * 1.08;
+        hTP3 = _price * 1.12;
+      }
+      // Clone d so we don't mutate the live signal state elsewhere in the UI
+      d = Object.assign({}, d, {
+        signal:    'BUY',
+        entry:     hEntry,
+        stop_loss: hSL,
+        tp1:       hTP1,
+        tp2:       hTP2,
+        tp3:       hTP3
+      });
     }
-    holdNote.innerHTML =
-      '<div style="color:var(--amber);font-weight:700;letter-spacing:1px;margin-bottom:6px;">⏳ NO ACTIVE TRADE SIGNAL</div>' +
-      'Current signal for <strong style="color:var(--white);">' + (d.ticker || 'this instrument') + '</strong> is <strong>HOLD</strong>, so live backtest metrics aren\'t generated. ' +
-      'The Pine Script templates below still work on any ticker — paste them into TradingView\'s Pine Editor and run the Strategy Tester there, or switch to a different ticker/timeframe above for a live backtest.';
-    holdNote.style.display = '';
-
-    // Make sure the Pine Script section is visible + auto-opened
-    var pineSec2 = document.getElementById('btPineSection');
-    if (pineSec2) pineSec2.style.display = '';
-    var pineBody = document.getElementById('btPineBody');
-    var pineTabs = document.getElementById('btPineTabBtns');
-    var pineCopy = document.getElementById('btPineCopyBtn');
-    var pineIcon = document.getElementById('btPineToggleIcon');
-    if (pineBody && pineBody.style.display === 'none') {
-      pineBody.style.display = 'block';
-      if (pineTabs) pineTabs.style.display = 'flex';
-      if (pineCopy) pineCopy.style.display = '';
-      if (pineIcon) pineIcon.textContent = '▲ Hide';
-    }
-    // Load strategy tab by default
-    try {
-      var activeBtn = document.querySelector('#btPineTabBtns .ptb.active') || document.querySelector('#btPineTabBtns .ptb');
-      switchBtPineTab('strategy', activeBtn);
-    } catch(e) {}
-
-    // Reveal the panel + results container so the Pine section is actually on-screen
-    panel.style.display = '';
-    results.style.display = '';
-    return;
   }
 
-  // Non-HOLD path: make sure HOLD-mode elements are restored
+  // Restore any HOLD-mode UI elements from older runs (stats/equity/trades)
   var btCtrlsR = document.getElementById('btControls');
   var btStatsR = document.querySelector('#backtestResults .bt-stats-row');
   var btCardsR = document.querySelectorAll('#backtestResults > .section-card');
@@ -8492,6 +8467,8 @@ async function runBacktest(d, showPanel = true) {
   btCardsR.forEach(function(c){ c.style.display = ''; });
   var holdNoteR = document.getElementById('btHoldNote');
   if (holdNoteR) holdNoteR.style.display = 'none';
+  var btEmptyEl = document.getElementById('btEmpty');
+  if (btEmptyEl) btEmptyEl.style.display = 'none';
 
   // ── Keep panel fully hidden until results arrive ─────────────────────────
   panel.style.display = 'none';
@@ -8509,7 +8486,11 @@ async function runBacktest(d, showPanel = true) {
   // Set strategy name header (populated before panel shows)
   if (period) period.textContent = '';
   const nameEl = document.getElementById('btStratName');
-  if (nameEl) nameEl.textContent = 'DotVerse ' + d.signal + ' \u2014 ' + d.ticker + ' ' + d.timeframe.toUpperCase();
+  if (nameEl) {
+    var hdrLabel = 'DotVerse ' + d.signal + ' \u2014 ' + d.ticker + ' ' + d.timeframe.toUpperCase();
+    if (isHoldRun) hdrLabel += ' (HOLD \u2014 default long-bias params)';
+    nameEl.textContent = hdrLabel;
+  }
 
   try {
     const r = await fetch('/api/backtest', {
