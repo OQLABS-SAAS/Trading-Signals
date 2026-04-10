@@ -3904,10 +3904,28 @@ const levelLinesPlugin = {
     //   Classic (default)     → draw only the most recent divergence (clean).
     //   History  (toggled on) → draw every detected divergence in the window,
     //                           fading older ones so the newest stays prominent.
+    // Fallback: if history mode is on but the backend didn't return a full
+    // history list (old deploy, or only the most-recent divergence was found),
+    // still include the classic single divergence so the toggle always shows
+    // SOMETHING when data is available.
     if (chartOverlays.RSI) {
-      const _toDraw = divHistoryMode
-        ? (chartDivergenceAll || [])
-        : (chartDivergence ? [chartDivergence] : []);
+      let _toDraw;
+      if (divHistoryMode) {
+        _toDraw = (chartDivergenceAll && chartDivergenceAll.length)
+          ? chartDivergenceAll.slice()
+          : (chartDivergence ? [chartDivergence] : []);
+        // Dedupe: make sure the classic "most recent" is present as the last
+        // entry (newest). If chartDivergence isn't already in the list, append.
+        if (chartDivergence && _toDraw.length) {
+          const _last = _toDraw[_toDraw.length - 1];
+          const _same = _last && _last.priceBars && chartDivergence.priceBars &&
+                        _last.priceBars[0] === chartDivergence.priceBars[0] &&
+                        _last.priceBars[1] === chartDivergence.priceBars[1];
+          if (!_same) _toDraw.push(chartDivergence);
+        }
+      } else {
+        _toDraw = chartDivergence ? [chartDivergence] : [];
+      }
 
       if (_toDraw.length) {
         ctx.save();
@@ -4312,9 +4330,24 @@ function renderChart(d) {
         // Collect the divergences to draw:
         //   History mode → all historical divergences (both bull+bear co-exist)
         //   Classic mode → only the most recent divergence (clean)
-        const toDraw = divHistoryMode
-          ? (chartDivergenceAll || [])
-          : (chartDivergence ? [chartDivergence] : []);
+        // Fallback: if history mode is on but the backend didn't return a full
+        // history list, still fall back to the classic single divergence so the
+        // toggle never leaves the chart blank when data exists.
+        let toDraw;
+        if (divHistoryMode) {
+          toDraw = (chartDivergenceAll && chartDivergenceAll.length)
+            ? chartDivergenceAll.slice()
+            : (chartDivergence ? [chartDivergence] : []);
+          if (chartDivergence && toDraw.length) {
+            const _last = toDraw[toDraw.length - 1];
+            const _same = _last && _last.rsiBars && chartDivergence.rsiBars &&
+                          _last.rsiBars[0] === chartDivergence.rsiBars[0] &&
+                          _last.rsiBars[1] === chartDivergence.rsiBars[1];
+            if (!_same) toDraw.push(chartDivergence);
+          }
+        } else {
+          toDraw = chartDivergence ? [chartDivergence] : [];
+        }
         if (!toDraw.length) return;
 
         ctx.save();
@@ -6536,6 +6569,10 @@ lineWidth   = input.int(2,    "Line Width",          minval=1, maxval=4, group="
 showLabels  = input.bool(true,"Show Labels",         group=" Style")
 showStrength= input.bool(true,"Show Strength Label", group=" Style")
 showDash    = input.bool(true,"Show Info Panel",     group=" Style")
+// History mode: when enabled, every confirmed divergence in the lookback window
+// remains drawn on the chart (similar to Binary Destroyer-style indicators).
+// Turn OFF for a clean single-divergence view.
+showHistory = input.bool(true,"History Mode (keep every divergence)", group=" Style", tooltip="ON  = persistent multi-divergence view (Binary Destroyer style). Bullish lines at the bottom of RSI and bearish lines at the top co-exist across history.\\nOFF = classic single-divergence view (only the most recent is drawn).")
 
 
 // ===============================================================
@@ -6676,37 +6713,77 @@ hidBearStr = hidBearOk ? math.min(math.round(math.abs(rPH1_val - rPH2_val) * 2.5
 // ===============================================================
 // DRAW DIVERGENCE LINES ON RSI PANE
 // Lines connect the two RSI pivot points.
+//
+// Two modes:
+//   History (showHistory = true, default) : every confirmed divergence in the
+//     lookback window is drawn on the bar its right-pivot becomes valid and
+//     persists forever. This gives the "framed" look where a bullish line at
+//     the bottom and a bearish line at the top co-exist.
+//   Classic (showHistory = false)         : only the single most recent
+//     divergence is drawn. Prior lines are deleted on every new bar.
 // ===============================================================
-var line divLine1 = na
+var line divLine1 = na   // classic-mode reusable slots
 var line divLine2 = na
 var line divLine3 = na
 var line divLine4 = na
 
-if barstate.islast
-    line.delete(divLine1)
-    line.delete(divLine2)
-    line.delete(divLine3)
-    line.delete(divLine4)
+// Track which RSI pivot pairs we've already stamped in history mode so the
+// same divergence isn't redrawn on every bar it remains "active".
+var int lastHistRegBullIdx = na
+var int lastHistRegBearIdx = na
+var int lastHistHidBullIdx = na
+var int lastHistHidBearIdx = na
 
-    if showRegBull and regBullOk
-        divLine1 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+if showHistory
+    if showRegBull and regBullOk and (na(lastHistRegBullIdx) or rPL1_idx != lastHistRegBullIdx)
+        line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
             color=C_REG_BULL, width=lineWidth, style=line.style_solid,
             extend=extend.none)
+        lastHistRegBullIdx := rPL1_idx
 
-    if showRegBear and regBearOk
-        divLine2 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+    if showRegBear and regBearOk and (na(lastHistRegBearIdx) or rPH1_idx != lastHistRegBearIdx)
+        line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
             color=C_REG_BEAR, width=lineWidth, style=line.style_solid,
             extend=extend.none)
+        lastHistRegBearIdx := rPH1_idx
 
-    if showHidBull and hidBullOk
-        divLine3 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+    if showHidBull and hidBullOk and (na(lastHistHidBullIdx) or rPL1_idx != lastHistHidBullIdx)
+        line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
             color=C_HID_BULL, width=lineWidth, style=line.style_dashed,
             extend=extend.none)
+        lastHistHidBullIdx := rPL1_idx
 
-    if showHidBear and hidBearOk
-        divLine4 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+    if showHidBear and hidBearOk and (na(lastHistHidBearIdx) or rPH1_idx != lastHistHidBearIdx)
+        line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
             color=C_HID_BEAR, width=lineWidth, style=line.style_dashed,
             extend=extend.none)
+        lastHistHidBearIdx := rPH1_idx
+else
+    if barstate.islast
+        line.delete(divLine1)
+        line.delete(divLine2)
+        line.delete(divLine3)
+        line.delete(divLine4)
+
+        if showRegBull and regBullOk
+            divLine1 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+                color=C_REG_BULL, width=lineWidth, style=line.style_solid,
+                extend=extend.none)
+
+        if showRegBear and regBearOk
+            divLine2 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+                color=C_REG_BEAR, width=lineWidth, style=line.style_solid,
+                extend=extend.none)
+
+        if showHidBull and hidBullOk
+            divLine3 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+                color=C_HID_BULL, width=lineWidth, style=line.style_dashed,
+                extend=extend.none)
+
+        if showHidBear and hidBearOk
+            divLine4 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+                color=C_HID_BEAR, width=lineWidth, style=line.style_dashed,
+                extend=extend.none)
 
 
 // ===============================================================
@@ -9032,46 +9109,23 @@ function copyDivergence() {
   const ticker  = d.ticker;
   const tf      = d.timeframe.toUpperCase();
 
-  let lines = [];
-  lines.push('//@version=5');
-  lines.push('indicator("DotVerse RSI Divergence \u2014 ' + ticker + ' ' + tf + '", overlay=false, max_lines_count=100, max_labels_count=50)');
-  lines.push('');
-  lines.push('// Current RSI: ' + (d.rsi||'\u2014') + ' | Divergence: ' + (divType !== 'none' ? divType : 'None detected'));
-  lines.push('');
-  lines.push('rsiLen   = input.int(14, "RSI Length", minval=2, maxval=50)');
-  lines.push('src      = input.source(close, "Source")');
-  lines.push('lookback = input.int(5,  "Pivot Lookback", minval=2, maxval=20)');
-  lines.push('obLevel  = input.int(70, "Overbought", minval=50, maxval=100)');
-  lines.push('osLevel  = input.int(30, "Oversold",   minval=0,  maxval=50)');
-  lines.push('');
-  lines.push('rsi = ta.rsi(src, rsiLen)');
-  lines.push('plot(rsi, "RSI", color.new(color.purple, 0), 2)');
-  lines.push('hline(obLevel, "OB",  color.new(color.red,   0), linestyle=hline.style_dashed)');
-  lines.push('hline(50,      "Mid", color.new(color.gray,  0), linestyle=hline.style_dotted)');
-  lines.push('hline(osLevel, "OS",  color.new(color.green, 0), linestyle=hline.style_dashed)');
-  lines.push('');
-  lines.push('// Pivot detection');
-  lines.push('rsiH = ta.pivothigh(rsi,   lookback, lookback)');
-  lines.push('rsiL = ta.pivotlow (rsi,   lookback, lookback)');
-  lines.push('prH  = ta.pivothigh(close, lookback, lookback)');
-  lines.push('prL  = ta.pivotlow (close, lookback, lookback)');
-  lines.push('');
-  lines.push('// Bearish divergence: price makes higher high, RSI makes lower high');
-  lines.push('bearDiv = not na(rsiH) and not na(prH) and');
-  lines.push('          prH  > ta.valuewhen(not na(prH),  prH,  1) and');
-  lines.push('          rsiH < ta.valuewhen(not na(rsiH), rsiH, 1)');
-  lines.push('');
-  lines.push('// Bullish divergence: price makes lower low, RSI makes higher low');
-  lines.push('bullDiv = not na(rsiL) and not na(prL) and');
-  lines.push('          prL  < ta.valuewhen(not na(prL),  prL,  1) and');
-  lines.push('          rsiL > ta.valuewhen(not na(rsiL), rsiL, 1)');
-  lines.push('');
-  lines.push('plotshape(bearDiv, "Bear Div", shape.labeldown, location.abovebar, color.new(color.red,   0), text="DIV\u25bc",  textcolor=color.white, size=size.small)');
-  lines.push('plotshape(bullDiv, "Bull Div", shape.labelup,   location.belowbar, color.new(color.green, 0), text="DIV\u25b2", textcolor=color.white, size=size.small)');
-  lines.push('');
-  lines.push('bgcolor(bearDiv ? color.new(color.red, 90) : bullDiv ? color.new(color.green, 90) : na)');
+  // Use the full pivot-based multi-line historical divergence engine
+  // (same logic as the in-app chart and the standalone .pine file).
+  // History Mode is ON by default so the TradingView output immediately
+  // shows the Binary Destroyer-style framed view with every divergence
+  // line drawn across the lookback window.
+  const header = [
+    '// ===============================================================',
+    '// DotVerse - RSI Divergence Indicator  (History Mode)',
+    '// Ticker:    ' + ticker + '  |  Timeframe: ' + tf,
+    '// Current RSI: ' + (d.rsi || '—') + '  |  Latest Divergence: ' + (divType !== 'none' ? divType : 'None detected'),
+    '// Paste into TradingView -> Pine Editor -> Add to chart.',
+    '// Toggle "Show Historical Divergences" in settings for Binary Destroyer-style framed view.',
+    '// ===============================================================',
+    ''
+  ].join('\n');
 
-  const pine = lines.join('\n');
+  const pine = header + PINE_DIVERGENCE;
   const pre = document.getElementById('pineCodePre');
   if (pre) pre.textContent = pine;
 
