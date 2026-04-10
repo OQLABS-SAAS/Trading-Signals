@@ -8420,22 +8420,78 @@ async function runBacktest(d, showPanel = true) {
   if (!panel) return;
 
   if (d.signal === 'HOLD' || d.entry == null) {
-    // Show a helpful HOLD message — instrument picker stays visible above
-    panel.style.display = 'none';
-    results.style.display = 'none';
-    if (tradesTab) tradesTab.style.display = 'none';
+    // HOLD → no live metrics, but Pine scripts are still generic templates
+    // that work on any ticker/timeframe. Show the panel with only the
+    // Pine Script section + a short explainer, hide stats/equity/trades.
+    var btEmptyEl = document.getElementById('btEmpty');
+    if (btEmptyEl) btEmptyEl.style.display = 'none';
     loading.style.display = 'none';
     errEl.style.display = 'none';
-    var btEmptyEl = document.getElementById('btEmpty');
-    if (btEmptyEl) {
-      btEmptyEl.style.display = 'flex';
-      btEmptyEl.innerHTML =
-        '<svg viewBox="0 0 80 80" width="50" height="50" style="opacity:0.12;"><circle cx="40" cy="40" r="36" stroke="var(--amber)" stroke-width=".6" fill="none"/><circle cx="40" cy="40" r="26" stroke="var(--amber)" stroke-width=".8" fill="none"/><circle cx="40" cy="40" r="2.5" fill="var(--amber)"/></svg>' +
-        '<div style="font-family:var(--body);font-size:14px;color:var(--muted2);margin:10px 0 6px;">No active trade signal for <strong style="color:var(--amber);">' + (d.ticker||'this instrument') + '</strong></div>' +
-        '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.7;max-width:400px;margin:0 auto;">Backtest requires a BUY or SELL signal with entry/exit levels.<br>Current signal is <strong>HOLD</strong> — try a different ticker or timeframe above.</div>';
+    if (tradesTab) tradesTab.style.display = 'none';
+
+    // Hide the live-metrics UI inside results
+    var btCtrls   = document.getElementById('btControls');
+    var btStats   = document.querySelector('#backtestResults .bt-stats-row');
+    var btCards   = document.querySelectorAll('#backtestResults > .section-card');
+    if (btCtrls) btCtrls.style.display = 'none';
+    if (btStats) btStats.style.display = 'none';
+    btCards.forEach(function(c){ c.style.display = 'none'; });
+
+    // Header label
+    var nameElH = document.getElementById('btStratName');
+    if (nameElH) nameElH.textContent = 'HOLD — ' + (d.ticker || 'this instrument') + ' ' + (d.timeframe ? d.timeframe.toUpperCase() : '');
+    var periodH = document.getElementById('backtestPeriod');
+    if (periodH) periodH.textContent = 'No active signal';
+
+    // Inject a HOLD explainer right above the Pine Script section (once)
+    var holdNote = document.getElementById('btHoldNote');
+    if (!holdNote) {
+      holdNote = document.createElement('div');
+      holdNote.id = 'btHoldNote';
+      holdNote.style.cssText = 'margin-bottom:20px;padding:16px 20px;background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.22);border-left:3px solid var(--amber);border-radius:4px;font-family:var(--mono);font-size:11.5px;color:var(--muted2);line-height:1.7;';
+      var pineSec = document.getElementById('btPineSection');
+      if (pineSec && pineSec.parentNode) pineSec.parentNode.insertBefore(holdNote, pineSec);
     }
+    holdNote.innerHTML =
+      '<div style="color:var(--amber);font-weight:700;letter-spacing:1px;margin-bottom:6px;">⏳ NO ACTIVE TRADE SIGNAL</div>' +
+      'Current signal for <strong style="color:var(--white);">' + (d.ticker || 'this instrument') + '</strong> is <strong>HOLD</strong>, so live backtest metrics aren\'t generated. ' +
+      'The Pine Script templates below still work on any ticker — paste them into TradingView\'s Pine Editor and run the Strategy Tester there, or switch to a different ticker/timeframe above for a live backtest.';
+    holdNote.style.display = '';
+
+    // Make sure the Pine Script section is visible + auto-opened
+    var pineSec2 = document.getElementById('btPineSection');
+    if (pineSec2) pineSec2.style.display = '';
+    var pineBody = document.getElementById('btPineBody');
+    var pineTabs = document.getElementById('btPineTabBtns');
+    var pineCopy = document.getElementById('btPineCopyBtn');
+    var pineIcon = document.getElementById('btPineToggleIcon');
+    if (pineBody && pineBody.style.display === 'none') {
+      pineBody.style.display = 'block';
+      if (pineTabs) pineTabs.style.display = 'flex';
+      if (pineCopy) pineCopy.style.display = '';
+      if (pineIcon) pineIcon.textContent = '▲ Hide';
+    }
+    // Load strategy tab by default
+    try {
+      var activeBtn = document.querySelector('#btPineTabBtns .ptb.active') || document.querySelector('#btPineTabBtns .ptb');
+      switchBtPineTab('strategy', activeBtn);
+    } catch(e) {}
+
+    // Reveal the panel + results container so the Pine section is actually on-screen
+    panel.style.display = '';
+    results.style.display = '';
     return;
   }
+
+  // Non-HOLD path: make sure HOLD-mode elements are restored
+  var btCtrlsR = document.getElementById('btControls');
+  var btStatsR = document.querySelector('#backtestResults .bt-stats-row');
+  var btCardsR = document.querySelectorAll('#backtestResults > .section-card');
+  if (btCtrlsR) btCtrlsR.style.display = '';
+  if (btStatsR) btStatsR.style.display = '';
+  btCardsR.forEach(function(c){ c.style.display = ''; });
+  var holdNoteR = document.getElementById('btHoldNote');
+  if (holdNoteR) holdNoteR.style.display = 'none';
 
   // ── Keep panel fully hidden until results arrive ─────────────────────────
   panel.style.display = 'none';
