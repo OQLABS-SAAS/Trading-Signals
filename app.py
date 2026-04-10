@@ -355,15 +355,24 @@ def detect_rsi_divergence(high, low, rsi_series, pivot_len=5, lookback=60):
     Detect regular and hidden RSI divergence over recent bars.
     pivot_len : bars on each side required to confirm a swing pivot
     lookback  : how many recent bars to scan for pivots
-    Returns dict: type, label, strength (0-100), desc, rsi_pivot_vals
+    Returns dict with:
+      - top-level fields for the most recent divergence (backward compat):
+        type, label, strength (0-100), desc, rsi_pivot_vals, price_pivot_bars,
+        rsi_pivot_bars, price_pivot_vals, rsi_pivots
+      - "all": list of every divergence detected within the lookback window,
+        each entry having the same shape as the top-level fields (minus "all").
+        Ordered from oldest -> newest. Includes both bullish (bottom) and
+        bearish (top) divergences concurrently, matching indicators that
+        persist historical divergence lines.
     """
     h = high.values
     l = low.values
     r = rsi_series.values
     n = len(r)
+    empty = {"type": "none", "label": "None", "strength": 0, "desc": "", "all": []}
     min_bars = pivot_len * 2 + 4
     if n < min_bars:
-        return {"type": "none", "label": "None", "strength": 0, "desc": ""}
+        return empty
 
     # scan window: don't include last pivot_len bars (no confirmation yet)
     start = max(pivot_len, n - lookback - pivot_len)
@@ -387,74 +396,90 @@ def detect_rsi_divergence(high, low, rsi_series, pivot_len=5, lookback=60):
         if not candidates: return None
         return min(candidates, key=lambda x: abs(x - price_idx))
 
-    result = {"type": "none", "label": "None", "strength": 0, "desc": ""}
+    all_divs = []  # every divergence found, ordered oldest -> newest
 
-    # ── Check BEARISH divergences (swing highs) ─────────────────
-    if len(ph_idx) >= 2:
-        ph1, ph2 = ph_idx[-2], ph_idx[-1]
-        rh1 = nearest_rsi_pivot(ph1, rh_idx)
-        rh2 = nearest_rsi_pivot(ph2, rh_idx)
-        if rh1 and rh2 and rh1 != rh2:
-            price_up = h[ph2] > h[ph1]
-            rsi_up   = r[rh2] > r[rh1]
-            if price_up and not rsi_up:
-                strength = min(int(abs(r[rh2] - r[rh1]) * 2.5), 100)
-                result = {
-                    "type": "bearish", "label": "Regular Bearish", "strength": strength,
-                    "rsi_pivots": [round(r[rh1],1), round(r[rh2],1)],
-                    "price_pivot_bars": [ph1, ph2],
-                    "price_pivot_vals": [round(float(h[ph1]),4), round(float(h[ph2]),4)],
-                    "rsi_pivot_bars":   [rh1, rh2],
-                    "desc": (f"Price made higher high ({h[ph2]:.5g} > {h[ph1]:.5g}) "
-                             f"but RSI made lower high ({r[rh2]:.1f} < {r[rh1]:.1f}). "
-                             f"Momentum weakening — watch for reversal or pullback.")
-                }
-            elif not price_up and rsi_up:
-                strength = min(int(abs(r[rh2] - r[rh1]) * 2.5), 100)
-                result = {
-                    "type": "hidden_bearish", "label": "Hidden Bearish", "strength": strength,
-                    "rsi_pivots": [round(r[rh1],1), round(r[rh2],1)],
-                    "price_pivot_bars": [ph1, ph2],
-                    "price_pivot_vals": [round(float(h[ph1]),4), round(float(h[ph2]),4)],
-                    "rsi_pivot_bars":   [rh1, rh2],
-                    "desc": (f"Price made lower high ({h[ph2]:.5g} < {h[ph1]:.5g}) "
-                             f"but RSI made higher high ({r[rh2]:.1f} > {r[rh1]:.1f}). "
-                             f"Bearish trend continuation signal — downtrend likely resuming.")
-                }
+    # ── Walk every consecutive pair of pivot HIGHS → bearish + hidden bearish
+    for k in range(1, len(ph_idx)):
+        p1, p2 = ph_idx[k-1], ph_idx[k]
+        rp1 = nearest_rsi_pivot(p1, rh_idx)
+        rp2 = nearest_rsi_pivot(p2, rh_idx)
+        if not rp1 or not rp2 or rp1 == rp2:
+            continue
+        price_up = h[p2] > h[p1]
+        rsi_up   = r[rp2] > r[rp1]
+        if price_up and not rsi_up:
+            strength = min(int(abs(r[rp2] - r[rp1]) * 2.5), 100)
+            all_divs.append({
+                "type": "bearish", "label": "Regular Bearish", "strength": strength,
+                "rsi_pivots": [round(r[rp1],1), round(r[rp2],1)],
+                "price_pivot_bars": [int(p1), int(p2)],
+                "price_pivot_vals": [round(float(h[p1]),4), round(float(h[p2]),4)],
+                "rsi_pivot_bars":   [int(rp1), int(rp2)],
+                "confirm_bar":      int(p2),
+                "desc": (f"Price made higher high ({h[p2]:.5g} > {h[p1]:.5g}) "
+                         f"but RSI made lower high ({r[rp2]:.1f} < {r[rp1]:.1f}). "
+                         f"Momentum weakening — watch for reversal or pullback.")
+            })
+        elif (not price_up) and rsi_up:
+            strength = min(int(abs(r[rp2] - r[rp1]) * 2.5), 100)
+            all_divs.append({
+                "type": "hidden_bearish", "label": "Hidden Bearish", "strength": strength,
+                "rsi_pivots": [round(r[rp1],1), round(r[rp2],1)],
+                "price_pivot_bars": [int(p1), int(p2)],
+                "price_pivot_vals": [round(float(h[p1]),4), round(float(h[p2]),4)],
+                "rsi_pivot_bars":   [int(rp1), int(rp2)],
+                "confirm_bar":      int(p2),
+                "desc": (f"Price made lower high ({h[p2]:.5g} < {h[p1]:.5g}) "
+                         f"but RSI made higher high ({r[rp2]:.1f} > {r[rp1]:.1f}). "
+                         f"Bearish trend continuation signal — downtrend likely resuming.")
+            })
 
-    # ── Check BULLISH divergences (swing lows) ──────────────────
-    if len(pl_idx) >= 2 and result["type"] == "none":
-        pl1, pl2 = pl_idx[-2], pl_idx[-1]
-        rl1 = nearest_rsi_pivot(pl1, rl_idx)
-        rl2 = nearest_rsi_pivot(pl2, rl_idx)
-        if rl1 and rl2 and rl1 != rl2:
-            price_dn = l[pl2] < l[pl1]
-            rsi_dn   = r[rl2] < r[rl1]
-            if price_dn and not rsi_dn:
-                strength = min(int(abs(r[rl2] - r[rl1]) * 2.5), 100)
-                result = {
-                    "type": "bullish", "label": "Regular Bullish", "strength": strength,
-                    "rsi_pivots": [round(r[rl1],1), round(r[rl2],1)],
-                    "price_pivot_bars": [pl1, pl2],
-                    "price_pivot_vals": [round(float(l[pl1]),4), round(float(l[pl2]),4)],
-                    "rsi_pivot_bars":   [rl1, rl2],
-                    "desc": (f"Price made lower low ({l[pl2]:.5g} < {l[pl1]:.5g}) "
-                             f"but RSI made higher low ({r[rl2]:.1f} > {r[rl1]:.1f}). "
-                             f"Selling pressure fading — potential reversal higher.")
-                }
-            elif not price_dn and rsi_dn:
-                strength = min(int(abs(r[rl2] - r[rl1]) * 2.5), 100)
-                result = {
-                    "type": "hidden_bullish", "label": "Hidden Bullish", "strength": strength,
-                    "rsi_pivots": [round(r[rl1],1), round(r[rl2],1)],
-                    "price_pivot_bars": [pl1, pl2],
-                    "price_pivot_vals": [round(float(l[pl1]),4), round(float(l[pl2]),4)],
-                    "rsi_pivot_bars":   [rl1, rl2],
-                    "desc": (f"Price made higher low ({l[pl2]:.5g} > {l[pl1]:.5g}) "
-                             f"but RSI made lower low ({r[rl2]:.1f} < {r[rl1]:.1f}). "
-                             f"Bullish trend continuation — dip buying opportunity.")
-                }
+    # ── Walk every consecutive pair of pivot LOWS → bullish + hidden bullish
+    for k in range(1, len(pl_idx)):
+        p1, p2 = pl_idx[k-1], pl_idx[k]
+        rp1 = nearest_rsi_pivot(p1, rl_idx)
+        rp2 = nearest_rsi_pivot(p2, rl_idx)
+        if not rp1 or not rp2 or rp1 == rp2:
+            continue
+        price_dn = l[p2] < l[p1]
+        rsi_dn   = r[rp2] < r[rp1]
+        if price_dn and not rsi_dn:
+            strength = min(int(abs(r[rp2] - r[rp1]) * 2.5), 100)
+            all_divs.append({
+                "type": "bullish", "label": "Regular Bullish", "strength": strength,
+                "rsi_pivots": [round(r[rp1],1), round(r[rp2],1)],
+                "price_pivot_bars": [int(p1), int(p2)],
+                "price_pivot_vals": [round(float(l[p1]),4), round(float(l[p2]),4)],
+                "rsi_pivot_bars":   [int(rp1), int(rp2)],
+                "confirm_bar":      int(p2),
+                "desc": (f"Price made lower low ({l[p2]:.5g} < {l[p1]:.5g}) "
+                         f"but RSI made higher low ({r[rp2]:.1f} > {r[rp1]:.1f}). "
+                         f"Selling pressure fading — potential reversal higher.")
+            })
+        elif (not price_dn) and rsi_dn:
+            strength = min(int(abs(r[rp2] - r[rp1]) * 2.5), 100)
+            all_divs.append({
+                "type": "hidden_bullish", "label": "Hidden Bullish", "strength": strength,
+                "rsi_pivots": [round(r[rp1],1), round(r[rp2],1)],
+                "price_pivot_bars": [int(p1), int(p2)],
+                "price_pivot_vals": [round(float(l[p1]),4), round(float(l[p2]),4)],
+                "rsi_pivot_bars":   [int(rp1), int(rp2)],
+                "confirm_bar":      int(p2),
+                "desc": (f"Price made higher low ({l[p2]:.5g} > {l[p1]:.5g}) "
+                         f"but RSI made lower low ({r[rp2]:.1f} < {r[rp1]:.1f}). "
+                         f"Bullish trend continuation — dip buying opportunity.")
+            })
 
+    # Sort oldest -> newest by confirmation bar so the frontend can fade older ones
+    all_divs.sort(key=lambda d: d.get("confirm_bar", 0))
+
+    if not all_divs:
+        return empty
+
+    # Most recent divergence becomes the top-level result (backward compat).
+    latest = all_divs[-1]
+    result = dict(latest)
+    result["all"] = all_divs
     return result
 
 # ─── INDICATOR CALCULATION ────────────────────────────────────
@@ -587,6 +612,24 @@ def calculate_indicators(df, timeframe="1d"):
         rsi_div["chart_price_pivot_bars"] = []
         rsi_div["chart_rsi_pivot_bars"]   = []
 
+    # Also map ALL historical divergences into chart-window coordinates so the
+    # frontend can render the full divergence history (both bullish and bearish
+    # lines visible at the same time, like Binary Destroyer-style indicators).
+    mapped_all = []
+    for _dv in rsi_div.get("all", []):
+        pb2 = _dv.get("price_pivot_bars", []) or []
+        rb2 = _dv.get("rsi_pivot_bars", []) or []
+        if len(pb2) < 2 or len(rb2) < 2:
+            continue
+        # Keep only divergences where BOTH price pivots fall inside the chart window.
+        if pb2[0] < chart_start_idx or pb2[1] < chart_start_idx:
+            continue
+        _dv_copy = dict(_dv)
+        _dv_copy["chart_price_pivot_bars"] = [b - chart_start_idx for b in pb2]
+        _dv_copy["chart_rsi_pivot_bars"]   = [b - chart_start_idx for b in rb2]
+        mapped_all.append(_dv_copy)
+    rsi_div["all"] = mapped_all
+
     return {
         "price":        round(p, 4),
         "chg_1d":       round((p / p1 - 1) * 100, 2),
@@ -664,7 +707,7 @@ def build_ind_from_tv(tv):
         "high_52w":       round(p * 1.3, 4),
         "low_52w":        round(p * 0.7, 4),
         "rsi":            round(float(rsi), 1),
-        "rsi_divergence": {"type": "none", "label": "", "strength": 0, "desc": ""},
+        "rsi_divergence": {"type": "none", "label": "", "strength": 0, "desc": "", "all": []},
         "ema20":          round(float(e20),  4),
         "ema50":          round(float(e50),  4),
         "ema200":         round(float(e200), 4),

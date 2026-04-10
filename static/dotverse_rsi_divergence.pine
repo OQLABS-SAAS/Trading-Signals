@@ -32,6 +32,10 @@ lineWidth   = input.int(2,    "Line Width",          minval=1, maxval=4, group="
 showLabels  = input.bool(true,"Show Labels",         group=" Style")
 showStrength= input.bool(true,"Show Strength Label", group=" Style")
 showDash    = input.bool(true,"Show Info Panel",     group=" Style")
+// History mode: when enabled, every confirmed divergence in the lookback window
+// remains drawn on the chart (similar to Binary Destroyer-style indicators).
+// When disabled, only the most recent divergence is shown (classic DotVerse behaviour).
+showHistory = input.bool(false,"History Mode (keep every divergence)", group=" Style", tooltip="Draws and persists every detected divergence on the chart so you can see historical context. Turn off for a clean single-divergence view.")
 
 
 // ===============================================================
@@ -172,37 +176,81 @@ hidBearStr = hidBearOk ? math.min(math.round(math.abs(rPH1_val - rPH2_val) * 2.5
 // ===============================================================
 // DRAW DIVERGENCE LINES ON RSI PANE
 // Lines connect the two RSI pivot points.
+//
+// Two modes:
+//   Classic (showHistory = false) : only the most recent divergence is drawn.
+//                                   Prior lines are deleted on every new bar.
+//   History (showHistory = true)  : every confirmed divergence is drawn on the
+//                                   bar where its right-pivot becomes valid and
+//                                   is left on the chart forever. This gives
+//                                   you the Binary Destroyer-style historical
+//                                   "frame" where a bullish line at the bottom
+//                                   and a bearish line at the top can coexist.
 // ===============================================================
-var line divLine1 = na
+var line divLine1 = na   // classic-mode reusable slots
 var line divLine2 = na
 var line divLine3 = na
 var line divLine4 = na
 
-if barstate.islast
-    line.delete(divLine1)
-    line.delete(divLine2)
-    line.delete(divLine3)
-    line.delete(divLine4)
+// Track which RSI pivot pairs we've already drawn in history mode so we don't
+// stamp the same divergence twice as the pivot is re-detected on later bars.
+var int lastHistRegBullIdx = na
+var int lastHistRegBearIdx = na
+var int lastHistHidBullIdx = na
+var int lastHistHidBearIdx = na
 
-    if showRegBull and regBullOk
-        divLine1 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+if showHistory
+    // ── HISTORY MODE ── persistent lines, fire once per unique pivot pair.
+    if showRegBull and regBullOk and (na(lastHistRegBullIdx) or rPL1_idx != lastHistRegBullIdx)
+        line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
             color=C_REG_BULL, width=lineWidth, style=line.style_solid,
             extend=extend.none)
+        lastHistRegBullIdx := rPL1_idx
 
-    if showRegBear and regBearOk
-        divLine2 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+    if showRegBear and regBearOk and (na(lastHistRegBearIdx) or rPH1_idx != lastHistRegBearIdx)
+        line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
             color=C_REG_BEAR, width=lineWidth, style=line.style_solid,
             extend=extend.none)
+        lastHistRegBearIdx := rPH1_idx
 
-    if showHidBull and hidBullOk
-        divLine3 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+    if showHidBull and hidBullOk and (na(lastHistHidBullIdx) or rPL1_idx != lastHistHidBullIdx)
+        line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
             color=C_HID_BULL, width=lineWidth, style=line.style_dashed,
             extend=extend.none)
+        lastHistHidBullIdx := rPL1_idx
 
-    if showHidBear and hidBearOk
-        divLine4 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+    if showHidBear and hidBearOk and (na(lastHistHidBearIdx) or rPH1_idx != lastHistHidBearIdx)
+        line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
             color=C_HID_BEAR, width=lineWidth, style=line.style_dashed,
             extend=extend.none)
+        lastHistHidBearIdx := rPH1_idx
+else
+    // ── CLASSIC MODE ── only the most recent divergence is visible.
+    if barstate.islast
+        line.delete(divLine1)
+        line.delete(divLine2)
+        line.delete(divLine3)
+        line.delete(divLine4)
+
+        if showRegBull and regBullOk
+            divLine1 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+                color=C_REG_BULL, width=lineWidth, style=line.style_solid,
+                extend=extend.none)
+
+        if showRegBear and regBearOk
+            divLine2 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+                color=C_REG_BEAR, width=lineWidth, style=line.style_solid,
+                extend=extend.none)
+
+        if showHidBull and hidBullOk
+            divLine3 := line.new(rPL2_idx, rPL2_val, rPL1_idx, rPL1_val,
+                color=C_HID_BULL, width=lineWidth, style=line.style_dashed,
+                extend=extend.none)
+
+        if showHidBear and hidBearOk
+            divLine4 := line.new(rPH2_idx, rPH2_val, rPH1_idx, rPH1_val,
+                color=C_HID_BEAR, width=lineWidth, style=line.style_dashed,
+                extend=extend.none)
 
 
 // ===============================================================
