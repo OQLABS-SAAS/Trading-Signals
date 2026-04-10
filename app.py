@@ -1590,8 +1590,85 @@ Return ONLY valid JSON. No markdown."""
 
 
 # ─── CLAUDE ANALYSIS ─────────────────────────────────────────
-def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
-    """Generate trading analysis using pure template logic — no API calls."""
+def _compute_footprint_dominance(ind):
+    """Compute buyer/seller dominance from the last candle's wick geometry.
+    Returns (buyer_pct, seller_pct) — both 0..100, or (None, None) if unavailable.
+    Used as a sanity check against the proposed signal direction."""
+    try:
+        opens  = ind.get("chart_opens")  or []
+        highs  = ind.get("chart_highs")  or []
+        lows   = ind.get("chart_lows")   or []
+        closes = ind.get("chart_prices") or []
+        if not (opens and highs and lows and closes):
+            return None, None
+        # Use the last 3 candles, weighted toward the most recent
+        n = min(3, len(closes))
+        if n == 0:
+            return None, None
+        total_buy = 0.0
+        total_sell = 0.0
+        weights = [0.5, 0.3, 0.2][:n]  # most recent gets most weight
+        for i in range(n):
+            idx = -(i + 1)
+            try:
+                o = float(opens[idx]); h = float(highs[idx])
+                l = float(lows[idx]);  c = float(closes[idx])
+            except Exception:
+                continue
+            rng = h - l
+            if rng <= 0:
+                continue
+            upper_wick = h - max(o, c)
+            lower_wick = min(o, c) - l
+            body       = abs(c - o)
+            body_sign  = 1.0 if c >= o else -1.0
+            # Buying pressure: lower wick (rejected lows) + bullish body
+            buy_pressure = lower_wick + (body if body_sign > 0 else 0)
+            # Selling pressure: upper wick (rejected highs) + bearish body
+            sell_pressure = upper_wick + (body if body_sign < 0 else 0)
+            tot = buy_pressure + sell_pressure
+            if tot <= 0:
+                continue
+            total_buy  += weights[i] * (buy_pressure  / tot)
+            total_sell += weights[i] * (sell_pressure / tot)
+        w_sum = total_buy + total_sell
+        if w_sum <= 0:
+            return None, None
+        buyer_pct  = round(100.0 * total_buy  / w_sum, 1)
+        seller_pct = round(100.0 * total_sell / w_sum, 1)
+        return buyer_pct, seller_pct
+    except Exception as e:
+        print(f"[footprint] compute error: {e}")
+        return None, None
+
+
+def _htf_trend_bias(mtf, timeframe):
+    """Return 'BULLISH' / 'BEARISH' / 'NEUTRAL' from higher-TF MTF data.
+    For a 4H request we check 1D; for 1H we check 4H; for 1D we check 1D itself."""
+    if not mtf:
+        return "NEUTRAL"
+    tf = (timeframe or "").lower()
+    # Pick the HTF one level above the current request
+    if tf in ("1m", "5m", "15m", "30m", "1h"):
+        htf_key = "4H"
+    elif tf in ("2h", "4h"):
+        htf_key = "1D"
+    else:  # 1d or higher — use its own read
+        htf_key = "1D"
+    htf = mtf.get(htf_key) or mtf.get("1D") or mtf.get("4H") or {}
+    return (htf.get("trend") or "NEUTRAL").upper()
+
+
+def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
+    """Generate trading signal using gated template logic.
+
+    Accuracy fixes (v2):
+      • Fixed Bollinger Band logic (overbought = bearish, not bullish)
+      • Net-score comparison (bullish vs bearish count, not just bullish threshold)
+      • Confidence floor — weak signals downgraded to HOLD
+      • Higher-timeframe trend gate — blocks counter-trend signals
+      • Candle footprint sanity check — rejects signals that contradict order flow
+    """
     # Safe defaults for missing/None values
     price = ind.get("price", 0) or 0
     rsi = ind.get("rsi", 50) or 50
@@ -1613,74 +1690,132 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
     bullish_count = 0
     bearish_count = 0
 
-    # RSI logic
-    if 40 <= rsi <= 70:
-        bullish_count += 1
-        rsi_assessment = f"RSI at {rsi} shows moderately bullish momentum without overbought extremes."
-    elif rsi > 75:
+    # ── RSI logic (trend-aware) ──
+    # In a strong uptrend, RSI 60-80 is continuation, not reversal.
+    # In a downtrend, RSI 20-40 is continuation, not bounce.
+    if rsi >= 75:
         bearish_count += 1
         rsi_assessment = f"RSI at {rsi} signals overbought conditions; pullback risk is elevated."
-    elif rsi < 25:
+    elif 55 <= rsi < 75:
+        bullish_count += 1
+        rsi_assessment = f"RSI at {rsi} shows strong bullish momentum in the continuation zone."
+    elif 45 <= rsi < 55:
+        rsi_assessment = f"RSI at {rsi} is neutral; looking for directional confirmation."
+    elif 25 < rsi < 45:
+        bearish_count += 1
+        rsi_assessment = f"RSI at {rsi} shows bearish momentum below the midline."
+    else:  # rsi <= 25
         bullish_count += 1
         rsi_assessment = f"RSI at {rsi} indicates oversold conditions; bounce potential is present."
-    else:
-        rsi_assessment = f"RSI at {rsi} is neutral; looking for directional confirmation."
 
-    # EMA Trend logic
+    # ── EMA Trend logic (higher weight: counts as 2) ──
     if ema_trend.lower() == "bullish":
-        bullish_count += 1
+        bullish_count += 2
         trend_assessment = "EMA stack is bullish; uptrend structure is intact and price is above key moving averages."
     elif ema_trend.lower() == "bearish":
-        bearish_count += 1
+        bearish_count += 2
         trend_assessment = "EMA stack is bearish; downtrend structure dominates and price remains below key MAs."
     else:
         trend_assessment = "EMAs are mixed; trend definition is unclear at current price."
 
-    # MACD logic
+    # ── MACD logic ──
     if macd_hist > 0:
         bullish_count += 1
         macd_assessment = "MACD histogram is positive; bullish momentum is building."
-    else:
+    elif macd_hist < 0:
         bearish_count += 1
         macd_assessment = "MACD histogram is negative; bearish momentum dominates the tape."
+    else:
+        macd_assessment = "MACD histogram is flat; momentum is transitioning."
 
-    # Volume logic
+    # ── Volume logic ──
     if vol_ratio > 1.2:
-        bullish_count += 1
-        volume_assessment = f"Volume ratio at {vol_ratio:.2f}x confirms buying interest above average."
+        # High volume confirms the prevailing EMA trend direction
+        if ema_trend.lower() == "bullish":
+            bullish_count += 1
+        elif ema_trend.lower() == "bearish":
+            bearish_count += 1
+        volume_assessment = f"Volume ratio at {vol_ratio:.2f}x confirms participation above average."
     else:
         volume_assessment = f"Volume ratio at {vol_ratio:.2f}x suggests weak conviction; confirmation needed."
 
-    # Supertrend logic
+    # ── Supertrend logic ──
     if supertrend.lower() == "bullish":
         bullish_count += 1
         supertrend_assessment = "Supertrend is bullish; upside continuation is likely unless support breaks."
-    else:
+    elif supertrend.lower() == "bearish":
         bearish_count += 1
         supertrend_assessment = "Supertrend is bearish; downside is protected and rallies face selling."
-
-    # Bollinger Bands logic
-    if bb_pos > 0.8:
-        bullish_count += 1
-    elif bb_pos < 0.2:
-        bullish_count += 1
-    # Neutral BB doesn't add to score but we note it
-
-    # Determine signal based on bullish indicator count
-    if bullish_count >= 4:
-        signal = "BUY"
-    elif bullish_count >= 2:
-        signal = "HOLD"
     else:
-        signal = "SELL"
+        supertrend_assessment = "Supertrend is neutral; waiting for directional confirmation."
 
-    # Determine confidence
-    if bullish_count >= 5 or bearish_count >= 5:
+    # ── Bollinger Bands (FIXED — overbought is bearish, oversold is bullish) ──
+    if bb_pos > 0.85:
+        bearish_count += 1  # Near upper band = overbought, mean reversion risk
+    elif bb_pos < 0.15:
+        bullish_count += 1  # Near lower band = oversold, bounce potential
+
+    # ── Net score → raw signal ──
+    net = bullish_count - bearish_count
+    if net >= 3:
+        signal = "BUY"
+    elif net <= -3:
+        signal = "SELL"
+    else:
+        signal = "HOLD"
+
+    # ── Confidence from absolute net score ──
+    if abs(net) >= 5:
         confidence = "HIGH"
-    elif bullish_count >= 3 or bearish_count >= 3:
+    elif abs(net) >= 3:
         confidence = "MEDIUM"
     else:
         confidence = "LOW"
+
+    # ══════════════════════════════════════════════════════════════
+    # GATE 1: Higher-timeframe trend filter
+    # Block any signal that fights the HTF trend.
+    # ══════════════════════════════════════════════════════════════
+    htf_bias = _htf_trend_bias(mtf, timeframe)
+    gate_note = ""
+    if signal == "SELL" and htf_bias == "BULLISH":
+        print(f"[gate] HTF trend BULLISH — blocking SELL on {ticker} {timeframe}")
+        signal = "HOLD"
+        confidence = "LOW"
+        gate_note = "HTF trend is bullish — counter-trend SELL suppressed."
+    elif signal == "BUY" and htf_bias == "BEARISH":
+        print(f"[gate] HTF trend BEARISH — blocking BUY on {ticker} {timeframe}")
+        signal = "HOLD"
+        confidence = "LOW"
+        gate_note = "HTF trend is bearish — counter-trend BUY suppressed."
+
+    # ══════════════════════════════════════════════════════════════
+    # GATE 2: Candle footprint sanity check
+    # If the last few candles show strong one-sided pressure that
+    # contradicts the proposed signal direction, downgrade to HOLD.
+    # ══════════════════════════════════════════════════════════════
+    buyer_pct, seller_pct = _compute_footprint_dominance(ind)
+    if buyer_pct is not None:
+        if signal == "SELL" and buyer_pct >= 70:
+            print(f"[gate] footprint shows {buyer_pct}% buyers — blocking SELL on {ticker}")
+            signal = "HOLD"
+            confidence = "LOW"
+            gate_note = f"Footprint shows {buyer_pct}% buyer pressure — SELL contradicts order flow."
+        elif signal == "BUY" and seller_pct >= 70:
+            print(f"[gate] footprint shows {seller_pct}% sellers — blocking BUY on {ticker}")
+            signal = "HOLD"
+            confidence = "LOW"
+            gate_note = f"Footprint shows {seller_pct}% seller pressure — BUY contradicts order flow."
+
+    # ══════════════════════════════════════════════════════════════
+    # GATE 3: Confidence floor
+    # Any signal that survives the gates but still scores LOW is
+    # not actionable — downgrade to HOLD so we don't mislead users.
+    # ══════════════════════════════════════════════════════════════
+    if signal != "HOLD" and confidence == "LOW":
+        print(f"[gate] confidence floor — downgrading {signal} to HOLD on {ticker}")
+        signal = "HOLD"
+        gate_note = gate_note or "Indicator conviction is too weak for an actionable signal."
 
     # Generate trade levels based on ATR
     if signal != "HOLD" and atr > 0:
@@ -1778,6 +1913,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
     else:
         micro_lesson = "Mixed signals are market's way of saying 'wait'—the best traders sit out indecision and reload on clarity."
 
+    # If gates fired, prepend the gate note to narrative/summary so user sees WHY
+    if gate_note:
+        summary = f"{gate_note} {summary}"
+        narrative = f"{gate_note}\n\n{narrative}"
+
     result = {
         "signal": signal,
         "confidence": confidence,
@@ -1802,6 +1942,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None):
         "macd_assessment": macd_assessment,
         "volume_assessment": volume_assessment,
         "supertrend_assessment": supertrend_assessment,
+        "gate_note": gate_note,
+        "htf_bias": htf_bias,
+        "footprint_buyer_pct": buyer_pct,
+        "footprint_seller_pct": seller_pct,
+        "bullish_count": bullish_count,
+        "bearish_count": bearish_count,
+        "net_score": net,
     }
 
     # Call OpenAI to narrate data if API key is configured
@@ -2280,10 +2427,21 @@ def analyze():
 
         # ── STEP 1: TradingView — preferred signal source ─────────────────
         # TV gives real-time RSI, EMA, MACD, BB, ATR for any timeframe.
-        # If the TV scanner is rate-limiting Railway's IP for this asset type,
-        # we fall through gracefully to yfinance/Stooq in STEP 2.
+        # For most asset types we fall through to yfinance/Stooq if TV fails,
+        # but FOREX data from yfinance/Stooq is unreliable (bid-only, delayed,
+        # session-mismatched) so forex is locked to TradingView only.
         tv = fetch_tv_data(ticker, asset_type, timeframe)
         tv_ok = bool(tv and tv.get("tv_price"))
+
+        # Forex data-source lock — reject if TradingView is unavailable.
+        if asset_type == "forex" and not tv_ok:
+            return jsonify({
+                "error": (
+                    f"Live market data for {ticker} is temporarily unavailable from "
+                    f"our primary source. For forex accuracy, we do not fall back to "
+                    f"secondary feeds. Please try again in a minute."
+                )
+            }), 503
 
         ind  = {}
         mtf  = {}
@@ -2468,7 +2626,7 @@ def analyze():
         # ── STEP 3: Claude analysis (always runs, uses best available ind) ───
         _t2 = time.time()
         print(f"[analyze] data ready [{_t2-_t1:.1f}s] — calling Claude...")
-        analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv)
+        analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv, mtf=mtf)
         _t3 = time.time()
         print(f"[analyze] Claude done [{_t3-_t2:.1f}s] — returning response")
         counter  = detect_counter_trade(ind)
