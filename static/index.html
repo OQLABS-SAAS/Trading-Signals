@@ -3322,7 +3322,25 @@ function quickLoad(ticker, assetType, timeframe) {
   document.getElementById('timeframe').value   = timeframe;
   doAnalyze(ticker, assetType, timeframe);
 }
+
+// AbortController for in-flight analysis requests.
+// If a new analysis starts while one is already running the old request is
+// cancelled so its response never overwrites the fresh one.
+var _analysisAbortCtrl = null;
+
 async function doAnalyze(ticker, assetType, timeframe) {
+  // ── Cancel any previous in-flight request ──────────────────────────────
+  if (_analysisAbortCtrl) {
+    _analysisAbortCtrl.abort();
+  }
+  _analysisAbortCtrl = new AbortController();
+  const _signal = _analysisAbortCtrl.signal;
+
+  // ── Clear stale currentData immediately ────────────────────────────────
+  // Prevents old ticker's data from being readable by watch/auto-refresh
+  // code while the new request is in flight.
+  currentData = null;
+
   setLoading(true, `Analyzing ${ticker} on ${timeframe.toUpperCase()}…`);
   { const _es = document.getElementById('emptyState'); if (_es) _es.style.display = 'none'; }
   { const _ra = document.getElementById('resultsArea'); if (_ra) _ra.style.display = 'none'; }
@@ -3333,7 +3351,7 @@ async function doAnalyze(ticker, assetType, timeframe) {
   // Win rate badge is NOT reset here — it persists with the last known value
   // so it doesn't flash away during analysis. runBacktest() updates it on click.
   try {
-    const r = await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker,asset_type:assetType,timeframe})});
+    const r = await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker,asset_type:assetType,timeframe}),signal:_signal});
     if (!r.ok) {
       let errMsg = `Server error ${r.status}`;
       try { const ed = await r.json(); if (ed.error) errMsg = ed.error; } catch(_) {}
@@ -3367,10 +3385,17 @@ async function doAnalyze(ticker, assetType, timeframe) {
     var stE = document.getElementById('stratEmpty'); if (stE) stE.style.display = 'none';
     var stM = document.getElementById('stratMain'); if (stM) stM.style.display = '';
   } catch(e) {
+    // AbortError is intentional (newer request superseded this one) — swallow silently
+    if (e && e.name === 'AbortError') { return; }
     console.error('[dotverse] fetch error:', e);
     showError(e && e.message && !e.message.includes('fetch') ? 'Error: ' + e.message : 'Network error — check connection and try again.');
   }
-  finally { setLoading(false); }
+  finally {
+    // _signal is the AbortSignal for THIS invocation (closed over above).
+    // Only dismiss the spinner if this request was NOT aborted — i.e., it
+    // completed (success or network error) rather than being superseded.
+    if (!_signal.aborted) setLoading(false);
+  }
 }
 
 /* ════════════════════════════════════════════

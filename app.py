@@ -34,7 +34,7 @@ _browser_session.headers.update({
 # Caches yfinance + TradingView results for 5 min to reduce API hammering.
 _cache      = {}
 _cache_lock = threading.Lock()
-CACHE_TTL   = 300  # seconds
+CACHE_TTL   = int(os.environ.get("CACHE_TTL_SECONDS", "300"))  # override via Railway env var
 
 def cache_get(key):
     with _cache_lock:
@@ -2847,6 +2847,7 @@ def analyze():
         return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 @app.route("/api/diag", methods=["GET"])
+@login_required
 def diag():
     """Diagnostic endpoint — test data source connectivity from this server."""
     import traceback
