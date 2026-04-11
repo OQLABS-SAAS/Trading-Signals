@@ -2412,7 +2412,11 @@ def normalise_ticker(ticker, asset_type):
 # ─── ROUTES ──────────────────────────────────────────────────
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    resp = send_from_directory("static", "index.html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 # ─── AUTH ROUTES (no login_required) ─────────────────────────
 @app.route("/api/login", methods=["POST"])

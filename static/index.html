@@ -1638,6 +1638,7 @@ body::before{
         <div id="rsiChartWrap" style="position:relative;height:90px;background:var(--bg);border-top:1px solid var(--border);">
           <div id="rsiChart" style="width:100%;height:100%;"></div>
           <canvas id="divOverlayRsi" style="position:absolute;top:0;left:0;pointer-events:none;width:100%;height:100%;"></canvas>
+          <div id="divDebugBadge" style="display:none;position:absolute;top:4px;left:6px;font-size:9px;font-family:monospace;color:#f5a623;background:rgba(0,0,0,.7);padding:2px 5px;border-radius:3px;pointer-events:none;z-index:10;"></div>
         </div>
 
         <!-- TradingView embed fallback (hidden by default) -->
@@ -3853,27 +3854,37 @@ function _drawDivOverlays() {
   const canvasR = document.getElementById('divOverlayRsi');
 
   // Collect divergences to draw based on mode
-  let toDraw;
-  if (divHistoryMode) {
-    toDraw = (chartDivergenceAll && chartDivergenceAll.length)
-      ? chartDivergenceAll.slice()
-      : (chartDivergence ? [chartDivergence] : []);
-    console.log('[div] historyMode toDraw:', toDraw.length, 'chartDivergenceAll:', chartDivergenceAll.length, 'chartDivergence:', chartDivergence);
-    if (chartDivergence && toDraw.length) {
-      const _last = toDraw[toDraw.length - 1];
-      const _same = _last && _last.priceBars && chartDivergence.priceBars &&
-                    _last.priceBars[0] === chartDivergence.priceBars[0] &&
-                    _last.priceBars[1] === chartDivergence.priceBars[1];
-      if (!_same) toDraw.push(chartDivergence);
-    }
-  } else {
-    toDraw = chartDivergence ? [chartDivergence] : [];
+  // Always include chartDivergenceAll entries + current divergence (deduped)
+  let toDraw = [];
+  if (chartDivergenceAll && chartDivergenceAll.length) {
+    toDraw = chartDivergenceAll.slice();
+  }
+  if (chartDivergence) {
+    const _last = toDraw[toDraw.length - 1];
+    const _same = _last && _last.priceBars && chartDivergence.priceBars &&
+                  _last.priceBars[0] === chartDivergence.priceBars[0] &&
+                  _last.priceBars[1] === chartDivergence.priceBars[1];
+    if (!_same) toDraw.push(chartDivergence);
   }
 
+  // Update debug badge (always visible after analysis)
+  const badge = document.getElementById('divDebugBadge');
+  if (badge) {
+    const allCnt = chartDivergenceAll ? chartDivergenceAll.length : 0;
+    const curType = chartDivergence ? chartDivergence.type : 'none';
+    badge.textContent = `DIV: ${toDraw.length} detected | current: ${curType} | labels: ${labels.length}`;
+    badge.style.display = '';
+  }
+
+  console.log('[div] draw called — toDraw:', toDraw.length, 'historyMode:', divHistoryMode,
+    'chartDivAll:', chartDivergenceAll && chartDivergenceAll.length,
+    'chartDiv:', chartDivergence && chartDivergence.type,
+    'labels:', labels.length);
+
   const drawOnCanvas = (canvas, chart, series, getX, getY) => {
-    if (!canvas || !chart || !series) return;
+    if (!canvas || !chart || !series) { console.warn('[div] missing canvas/chart/series for', getX); return; }
     const w = canvas.offsetWidth, h = canvas.offsetHeight;
-    if (!w || !h) return;
+    if (!w || !h) { console.warn('[div] canvas has zero size for', getX, w, h); return; }
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, w, h);
@@ -3883,15 +3894,18 @@ function _drawDivOverlays() {
     toDraw.forEach((div, idx) => {
       const bars  = getX === 'price' ? div.priceBars : div.rsiBars;
       const vals  = getX === 'price' ? div.priceVals : div.rsiVals;
-      if (!bars || bars.length < 2) return;
-      const t0 = toTimeVal(labels[bars[0]]), t1 = toTimeVal(labels[bars[1]]);
-      if (!t0 || !t1) { console.warn('[div] toTimeVal null', labels[bars[0]], labels[bars[1]]); return; }
+      if (!bars || bars.length < 2) { console.warn('[div] bad bars for', getX, bars); return; }
+      const rawL0 = labels[bars[0]], rawL1 = labels[bars[1]];
+      const t0 = toTimeVal(rawL0), t1 = toTimeVal(rawL1);
+      if (!t0 || !t1) { console.warn('[div] toTimeVal null', rawL0, '→', t0, '|', rawL1, '→', t1); return; }
       const x0 = chart.timeScale().timeToCoordinate(t0);
       const x1 = chart.timeScale().timeToCoordinate(t1);
       const y0 = series.priceToCoordinate(vals[0]);
       const y1 = series.priceToCoordinate(vals[1]);
-      console.log('[div] coords', getX, {t0,t1,x0,x1,y0,y1,bars,vals});
-      if (x0 == null || x1 == null || y0 == null || y1 == null) { console.warn('[div] null coord — skipping', {x0,x1,y0,y1}); return; }
+      console.log('[div]', getX, idx, '| bars:', bars, '| t:', t0, t1, '| x:', x0, x1, '| y:', y0, y1);
+      if (x0 == null || x1 == null || y0 == null || y1 == null) {
+        console.warn('[div] null coord for', getX, {x0,x1,y0,y1}); return;
+      }
 
       const color = div.isBull ? '#00c98d' : '#ff524a';
       const isNewest = idx === total - 1;
@@ -3943,14 +3957,10 @@ function _drawDivOverlays() {
     ctx.restore();
   };
 
-  if (chartOverlays.RSI || !divHistoryMode) {
-    // Price chart divergence
-    drawOnCanvas(canvasP, lwcPrice, lwcCandleSeries || lwcLineSeries, 'price', 'price');
-    // RSI chart divergence
+  // Always draw divergences on both charts — no gate on divHistoryMode or RSI overlay
+  drawOnCanvas(canvasP, lwcPrice, lwcCandleSeries || lwcLineSeries, 'price', 'price');
+  if (lwcRsi && lwcRsiSeries) {
     drawOnCanvas(canvasR, lwcRsi, lwcRsiSeries, 'rsi', 'rsi');
-  } else {
-    // Clear overlays when RSI is off
-    [canvasP, canvasR].forEach(c => { if (c) { c.width = c.offsetWidth; c.height = c.offsetHeight; c.getContext('2d').clearRect(0, 0, c.width, c.height); }});
   }
 }
 
