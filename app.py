@@ -2701,6 +2701,28 @@ def analyze():
             else:
                 print(f"[analyze] chart fallback also failed — chart will show 'unavailable'")
 
+        # ── STEP 2c: RSI divergence safety net ──────────────────────────────────
+        # detect_rsi_divergence only runs inside calculate_indicators() (yfinance path).
+        # When yfinance fails and the fallback chart paths fire, divergence is never
+        # computed — ind["rsi_divergence"] stays as {"type":"none"}.
+        # Fix: if we now have chart_highs/lows/rsi from ANY path, run it here.
+        if ind.get("rsi_divergence", {}).get("type") == "none":
+            _h = ind.get("chart_highs") or []
+            _l = ind.get("chart_lows")  or []
+            _r = ind.get("chart_rsi")   or []
+            # filter out None entries and align lengths
+            _valid = [(h,l,r) for h,l,r in zip(_h,_l,_r) if h is not None and l is not None and r is not None]
+            if len(_valid) >= 20:
+                _hh = pd.Series([v[0] for v in _valid])
+                _ll = pd.Series([v[1] for v in _valid])
+                _rr = pd.Series([v[2] for v in _valid])
+                try:
+                    _div = detect_rsi_divergence(_hh, _ll, _rr, pivot_len=3, lookback=100)
+                    ind["rsi_divergence"] = _div
+                    print(f"[analyze] divergence safety-net: type={_div.get('type')} all={len(_div.get('all',[]))}")
+                except Exception as _de:
+                    print(f"[analyze] divergence safety-net failed: {_de}")
+
         # Hard fail only when BOTH TV and yfinance/Stooq are unavailable
         if not tv_ok and not yf_ok:
             return jsonify({"error": f"Could not fetch data for '{ticker}'. "
