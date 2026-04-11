@@ -3388,10 +3388,11 @@ function renderResults(d) {
   document.getElementById('hdrTimestamp').innerHTML = `<span style="color:var(--text2);font-size:10px;margin-left:4px;">${d.timestamp}</span>`;
   document.getElementById('hdrPrice').textContent     = fmt(d.price);
   const chgEl = document.getElementById('hdrChg');
-  chgEl.textContent = (d.chg_1d >= 0 ? '▲' : '▼') + Math.abs(d.chg_1d).toFixed(2) + '%';
-  chgEl.className   = 'asset-chg ' + (d.chg_1d >= 0 ? 'up' : 'down');
+  const _chg1d = (d.chg_1d != null && isFinite(d.chg_1d)) ? d.chg_1d : 0;
+  chgEl.textContent = (_chg1d >= 0 ? '▲' : '▼') + Math.abs(_chg1d).toFixed(2) + '%';
+  chgEl.className   = 'asset-chg ' + (_chg1d >= 0 ? 'up' : 'down');
 
-  const fmtChg = v => `<span class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${v}%</span>`;
+  const fmtChg = v => { const n = (v != null && isFinite(v)) ? v : 0; return `<span class="${n >= 0 ? 'up' : 'down'}">${n >= 0 ? '+' : ''}${n}%</span>`; };
   document.getElementById('stat1d').innerHTML  = fmtChg(d.chg_1d);
   document.getElementById('stat1w').innerHTML  = fmtChg(d.chg_1w);
   document.getElementById('stat1m').innerHTML  = fmtChg(d.chg_1m);
@@ -4038,33 +4039,61 @@ function renderChart(d) {
   const volContEl     = document.getElementById('volChart');
   const rsiContEl     = document.getElementById('rsiChart');
 
+  // ── Time conversion: LWC needs Unix timestamps (seconds) for intraday data ──
+  // Daily "YYYY-MM-DD" strings are passed as-is (LWC handles those natively).
+  // Anything with a time component must be converted to a Unix timestamp,
+  // otherwise LWC silently drops the data point.
+  function toTimeVal(dateStr) {
+    if (!dateStr) return null;
+    const s = String(dateStr);
+    // Pure ISO date "YYYY-MM-DD" — LWC handles natively
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // Already a number (Unix seconds)
+    if (typeof dateStr === 'number') return dateStr;
+    // ── Backend 4H format: "AprDD HH:MM" (no space between month and day) ──
+    // e.g. "Apr08 16:00", "Mar31 09:30" — JS Date can't parse "Apr08" directly.
+    // Fix: insert space → "Apr 08 2026 16:00:00"
+    const mondd = s.match(/^([A-Za-z]{3})(\d{2})\s+(\d{2}:\d{2})$/);
+    if (mondd) {
+      const d = new Date(`${mondd[1]} ${mondd[2]} ${new Date().getFullYear()} ${mondd[3]}:00`);
+      if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+    }
+    // ISO datetime "YYYY-MM-DD HH:MM" or RFC strings
+    let d = new Date(s);
+    if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+    // Last resort: append year
+    d = new Date(s + ' ' + new Date().getFullYear());
+    if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+    return null;
+  }
+
   // ── Time-indexed data helpers ──
-  // LWC requires data sorted by time with no duplicates
-  const toSeriesData = (arr, valueKey) =>
-    labels.map((t, i) => ({ time: t, value: arr[i] })).filter(p => p.value != null);
+  const toSeriesData = (arr) =>
+    labels.map((t, i) => ({ time: toTimeVal(t), value: arr[i] }))
+          .filter(p => p.time != null && p.value != null);
 
   // ── Build price data ──
   let candleData = [];
   if (hasCandleData) {
     candleData = labels.map((t, i) => ({
-      time: t,
+      time:  toTimeVal(t),
       open:  chartOHLC.opens[i],
       high:  chartOHLC.highs[i],
       low:   chartOHLC.lows[i],
       close: chartOHLC.closes[i],
-    })).filter(c => c.open != null && c.high != null && c.low != null && c.close != null);
+    })).filter(c => c.time != null && c.open != null && c.high != null && c.low != null && c.close != null);
   }
-  const priceLineData = toSeriesData(prices, 'value');
-  const ema20Data     = toSeriesData(ema20,  'value');
-  const ema50Data     = toSeriesData(ema50,  'value');
-  const bbUpperData   = toSeriesData(bbUpper,'value');
-  const bbLowerData   = toSeriesData(bbLower,'value');
-  _lwcRsiData         = toSeriesData(rsiData, 'value');
+  const priceLineData = toSeriesData(prices);
+  const ema20Data     = toSeriesData(ema20);
+  const ema50Data     = toSeriesData(ema50);
+  const bbUpperData   = toSeriesData(bbUpper);
+  const bbLowerData   = toSeriesData(bbLower);
+  _lwcRsiData         = toSeriesData(rsiData);
   _lwcVolData         = labels.map((t, i) => ({
-    time:  t,
+    time:  toTimeVal(t),
     value: vols[i] || 0,
     color: (chartOHLC && chartOHLC.closes[i] >= chartOHLC.opens[i]) ? 'rgba(0,210,130,0.6)' : 'rgba(255,60,70,0.6)',
-  })).filter(v => v.value != null);
+  })).filter(v => v.time != null && v.value != null);
 
   // ── Create PRICE chart ──
   if (priceContEl) {
@@ -4120,9 +4149,28 @@ function renderChart(d) {
     // Buy/Sell signal markers
     if (mainSeries && chartSignals && chartOverlays.SIG) {
       const markers = [];
-      const dataMap = hasCandleData ? candleData : priceLineData;
-      (chartSignals.buys  || []).forEach(i => { if (labels[i]) markers.push({ time: labels[i], position: 'belowBar', color: '#f5a623', shape: 'arrowUp',   text: 'B' }); });
-      (chartSignals.sells || []).forEach(i => { if (labels[i]) markers.push({ time: labels[i], position: 'aboveBar', color: '#ff524a', shape: 'arrowDown', text: 'S' }); });
+      window._lwcSigMap = {};  // time → signal info (for tooltip lookup)
+      const sigEntry = d.entry   != null ? fmt(d.entry)     : '—';
+      const sigSL    = d.stop_loss != null ? fmt(d.stop_loss) : '—';
+      const sigTP1   = d.tp1    != null ? fmt(d.tp1)       : '—';
+      const sigTP2   = d.tp2    != null ? fmt(d.tp2)       : '—';
+      const sigTP3   = d.tp3    != null ? fmt(d.tp3)       : '—';
+      (chartSignals.buys || []).forEach(i => {
+        if (!labels[i]) return;
+        const t = toTimeVal(labels[i]);
+        if (t == null) return;
+        const txt = 'BUY' + (d.entry != null ? ' $' + fmt(d.entry) : '');
+        markers.push({ time: t, position: 'belowBar', color: '#00c98d', shape: 'arrowUp', text: txt });
+        window._lwcSigMap[t] = { type: 'BUY', entry: sigEntry, sl: sigSL, tp1: sigTP1, tp2: sigTP2, tp3: sigTP3, rr1: d.rr1, rr2: d.rr2, rr3: d.rr3, rsi: d.rsi };
+      });
+      (chartSignals.sells || []).forEach(i => {
+        if (!labels[i]) return;
+        const t = toTimeVal(labels[i]);
+        if (t == null) return;
+        const txt = 'SELL' + (d.entry != null ? ' $' + fmt(d.entry) : '');
+        markers.push({ time: t, position: 'aboveBar', color: '#ff524a', shape: 'arrowDown', text: txt });
+        window._lwcSigMap[t] = { type: 'SELL', entry: sigEntry, sl: sigSL, tp1: sigTP1, tp2: sigTP2, tp3: sigTP3, rr1: d.rr1, rr2: d.rr2, rr3: d.rr3, rsi: d.rsi };
+      });
       markers.sort((a, b) => a.time < b.time ? -1 : 1);
       mainSeries.setMarkers(markers);
     }
@@ -4199,14 +4247,23 @@ function renderChart(d) {
       if (!param || !param.time) {
         if (lwcRsi) lwcRsi.clearCrosshairPosition();
         if (lwcVol) lwcVol.clearCrosshairPosition();
+        _lwcHideTooltip();
         return;
       }
       const rsiPt = _lwcRsiData.find(p => p.time === param.time);
       const volPt = _lwcVolData.find(p => p.time === param.time);
       if (lwcRsi && lwcRsiSeries && rsiPt) lwcRsi.setCrosshairPosition(rsiPt.value, param.time, lwcRsiSeries);
       if (lwcVol && lwcVolSeries && volPt) lwcVol.setCrosshairPosition(volPt.value, param.time, lwcVolSeries);
-      // Update custom tooltip
       _lwcUpdateTooltip(param, labels, prices, rsiPt, volPt, hasCandleData);
+    });
+  }
+  // Also subscribe RSI chart crosshair so tooltip shows when hovering RSI pane
+  if (lwcRsi) {
+    lwcRsi.subscribeCrosshairMove(param => {
+      if (!param || !param.time) { _lwcHideTooltip(); return; }
+      const rsiPt = _lwcRsiData.find(p => p.time === param.time);
+      const volPt = _lwcVolData.find(p => p.time === param.time);
+      _lwcUpdateTooltip(param, labels, prices, rsiPt, volPt, hasCandleData, true);
     });
   }
 
@@ -4220,53 +4277,105 @@ function renderChart(d) {
   volChartInst   = lwcVol   ? { _isLWC: true } : null;
 }
 
+/* Lightweight Charts tooltip — hide helper */
+function _lwcHideTooltip() {
+  var tip = document.getElementById('chartTooltipCustom');
+  if (tip) tip.style.opacity = '0';
+}
+
 /* Lightweight Charts tooltip handler */
-function _lwcUpdateTooltip(param, labels, prices, rsiPt, volPt, hasCandleData) {
+function _lwcUpdateTooltip(param, labels, prices, rsiPt, volPt, hasCandleData, fromRsi) {
   var tip = document.getElementById('chartTooltipCustom');
   if (!tip) {
     tip = document.createElement('div');
     tip.id = 'chartTooltipCustom';
-    tip.style.cssText = 'position:fixed;pointer-events:none;background:rgba(20,20,20,.96);border:1px solid rgba(245,166,35,.2);border-radius:4px;padding:10px 14px;font-family:var(--mono);font-size:12px;z-index:9999;transition:opacity .15s;white-space:nowrap;';
+    tip.style.cssText = 'position:fixed;pointer-events:none;background:rgba(14,14,22,.97);border:1px solid rgba(245,166,35,.22);border-radius:6px;padding:0;font-family:var(--mono);font-size:11px;z-index:9999;transition:opacity .12s;min-width:180px;box-shadow:0 8px 28px rgba(0,0,0,.55);overflow:hidden;';
     document.body.appendChild(tip);
   }
   if (!param || !param.time) { tip.style.opacity = '0'; return; }
 
-  // Position near cursor
-  var el = document.getElementById('priceChart');
-  if (!el) return;
-  var rect = el.getBoundingClientRect();
-  var px = (param.point ? param.point.x : 0) + rect.left + 20;
-  var py = (param.point ? param.point.y : 0) + rect.top  - 20;
-  // Flip if near right edge
-  if (px + 200 > window.innerWidth) px -= 230;
-  tip.style.left = px + 'px'; tip.style.top = py + 'px';
+  // Position near cursor — anchor to whichever pane we're in
+  var anchorEl = document.getElementById(fromRsi ? 'rsiChart' : 'priceChart');
+  if (!anchorEl) return;
+  var rect = anchorEl.getBoundingClientRect();
+  var px = (param.point ? param.point.x : 0) + rect.left + 18;
+  var py = (param.point ? param.point.y : 0) + rect.top  - 10;
+  tip.style.opacity = '1';
+  // Defer positioning so we know the rendered height
+  requestAnimationFrame(function() {
+    var tw = tip.offsetWidth || 200, th = tip.offsetHeight || 120;
+    if (px + tw > window.innerWidth - 8) px = px - tw - 36;
+    if (py + th > window.innerHeight - 8) py = window.innerHeight - th - 8;
+    if (py < 4) py = 4;
+    tip.style.left = px + 'px'; tip.style.top = py + 'px';
+  });
 
   var timeLabel = param.time || '';
-  var html = '<div style="color:#888;margin-bottom:6px;">' + timeLabel + '</div>';
+  // Check if this bar has a signal
+  var sigInfo = window._lwcSigMap && window._lwcSigMap[param.time];
+  var isBuy = sigInfo && sigInfo.type === 'BUY';
+  var sigCol = isBuy ? '#00c98d' : '#ff524a';
 
-  if (hasCandleData && lwcCandleSeries) {
+  // Header bar
+  var hdrBg = sigInfo ? (isBuy ? 'rgba(0,201,141,.12)' : 'rgba(255,82,74,.1)') : 'rgba(245,166,35,.07)';
+  var hdrBorder = sigInfo ? (isBuy ? 'rgba(0,201,141,.25)' : 'rgba(255,82,74,.22)') : 'rgba(245,166,35,.15)';
+  var hdrTitle = sigInfo ? (isBuy ? '▲ BUY SIGNAL' : '▼ SELL SIGNAL') : '';
+  var html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;background:' + hdrBg + ';border-bottom:1px solid ' + hdrBorder + ';">';
+  if (sigInfo) html += '<span style="color:' + sigCol + ';font-weight:700;font-size:10px;letter-spacing:.06em;">' + hdrTitle + '</span>';
+  else html += '<span style="color:#888;font-size:10px;"></span>';
+  html += '<span style="color:#666;font-size:9px;">' + timeLabel + '</span></div>';
+  html += '<div style="padding:8px 11px;">';
+
+  // OHLC
+  if (hasCandleData && lwcCandleSeries && !fromRsi) {
     var bar = param.seriesData.get(lwcCandleSeries);
     if (bar) {
       var bull = bar.close >= bar.open;
       var clr  = bull ? '#00c98d' : '#ff4459';
-      html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px;">' +
-        '<span style="display:inline-block;width:10px;height:10px;background:' + clr + ';border-radius:2px;"></span>' +
-        '<span style="color:#999;">O:</span><span style="color:' + clr + ';">' + fmt(bar.open) + '</span>&nbsp;' +
-        '<span style="color:#999;">H:</span><span style="color:#00c98d;">' + fmt(bar.high) + '</span></div>';
-      html += '<div style="margin-left:16px;"><span style="color:#999;">L:</span><span style="color:#ff4459;">' +
-        fmt(bar.low) + '</span>&nbsp;<span style="color:#999;">C:</span><span style="color:' + clr + ';">' + fmt(bar.close) + '</span></div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;margin-bottom:5px;">';
+      html += '<div><span style="color:#555;">O </span><span style="color:' + clr + ';">' + fmt(bar.open) + '</span></div>';
+      html += '<div><span style="color:#555;">H </span><span style="color:#00c98d;">' + fmt(bar.high) + '</span></div>';
+      html += '<div><span style="color:#555;">L </span><span style="color:#ff4459;">' + fmt(bar.low) + '</span></div>';
+      html += '<div><span style="color:#555;">C </span><span style="color:' + clr + ';font-weight:700;">' + fmt(bar.close) + '</span></div>';
+      html += '</div>';
     }
-  } else if (lwcLineSeries) {
+  } else if (lwcLineSeries && !fromRsi) {
     var lv = param.seriesData.get(lwcLineSeries);
-    if (lv) html += '<div>Price: <span style="color:#4d9fff;">' + fmt(lv.value) + '</span></div>';
+    if (lv) html += '<div style="margin-bottom:5px;"><span style="color:#555;">Price </span><span style="color:#4d9fff;">' + fmt(lv.value) + '</span></div>';
   }
-  if (lwcEma20Series) { var e2 = param.seriesData.get(lwcEma20Series); if (e2) html += '<div><span style="color:#ffc346;">EMA20 ' + fmt(e2.value) + '</span></div>'; }
-  if (lwcEma50Series) { var e5 = param.seriesData.get(lwcEma50Series); if (e5) html += '<div><span style="color:#a78bfa;">EMA50 ' + fmt(e5.value) + '</span></div>'; }
-  if (rsiPt) html += '<div><span style="color:#a878ff;">RSI ' + rsiPt.value.toFixed(1) + '</span></div>';
-  if (volPt) html += '<div style="color:#666;font-size:10px;">Vol ' + (volPt.value >= 1e6 ? (volPt.value/1e6).toFixed(1)+'M' : volPt.value >= 1e3 ? (volPt.value/1e3).toFixed(0)+'K' : volPt.value.toFixed(0)) + '</div>';
+
+  // Indicator row
+  var indParts = [];
+  if (lwcEma20Series && !fromRsi) { var e2 = param.seriesData.get(lwcEma20Series); if (e2) indParts.push('<span style="color:#ffc346;">EMA20 ' + fmt(e2.value) + '</span>'); }
+  if (lwcEma50Series && !fromRsi) { var e5 = param.seriesData.get(lwcEma50Series); if (e5) indParts.push('<span style="color:#a78bfa;">EMA50 ' + fmt(e5.value) + '</span>'); }
+  if (rsiPt) {
+    var rv = rsiPt.value, rsiCol = rv >= 70 ? '#ffaa00' : rv <= 30 ? '#00c9c9' : '#a878ff';
+    indParts.push('<span style="color:' + rsiCol + ';">RSI ' + rv.toFixed(1) + (rv >= 70 ? ' OB' : rv <= 30 ? ' OS' : '') + '</span>');
+  }
+  if (volPt && !fromRsi) indParts.push('<span style="color:#555;">Vol ' + (volPt.value >= 1e6 ? (volPt.value/1e6).toFixed(1)+'M' : volPt.value >= 1e3 ? (volPt.value/1e3).toFixed(0)+'K' : volPt.value.toFixed(0)) + '</span>');
+  if (indParts.length) html += '<div style="font-size:10px;color:#666;display:flex;flex-wrap:wrap;gap:6px;' + (hasCandleData && !fromRsi ? 'border-top:1px solid rgba(255,255,255,.05);padding-top:5px;' : '') + '">' + indParts.join('') + '</div>';
+
+  // ── Signal card ─────────────────────────────────────────────────────────────
+  if (sigInfo) {
+    var s = sigInfo;
+    html += '<div style="border-top:1px solid ' + (isBuy ? 'rgba(0,201,141,.2)' : 'rgba(255,82,74,.18)') + ';margin-top:7px;padding-top:7px;">';
+    var row = function(lbl, val, col) {
+      return '<div style="display:flex;justify-content:space-between;margin-bottom:2px;"><span style="color:#555;">' + lbl + '</span><span style="color:' + (col||'#ccc') + ';font-weight:600;">' + val + '</span></div>';
+    };
+    html += row('Entry',    '$' + s.entry,       '#f5a623');
+    html += row('Stop',     '$' + s.sl,           '#ff4459');
+    html += row('TP1',      '$' + s.tp1 + (s.rr1 ? '  <span style="color:#555;font-weight:400;">' + s.rr1 + 'R</span>' : ''), '#00c98d');
+    if (s.tp2 && s.tp2 !== '—') html += row('TP2', '$' + s.tp2 + (s.rr2 ? '  <span style="color:#555;font-weight:400;">' + s.rr2 + 'R</span>' : ''), '#00c98d');
+    if (s.tp3 && s.tp3 !== '—') html += row('TP3', '$' + s.tp3 + (s.rr3 ? '  <span style="color:#555;font-weight:400;">' + s.rr3 + 'R</span>' : ''), '#00874e');
+    if (s.rsi != null) html += row('RSI', parseFloat(s.rsi).toFixed(1), '#a878ff');
+    html += '</div>';
+    // Bottom colour bar
+    html += '</div><div style="height:3px;background:' + sigCol + '44;"></div>';
+  } else {
+    html += '</div>';
+  }
 
   tip.innerHTML = html;
-  tip.style.opacity = '1';
 }
 
 /* ════════════════════════════════════════════
@@ -7597,8 +7706,9 @@ function renderResultsV2(d) {
   var infoCells = document.querySelectorAll('.info-cell .ic-val');
   if (infoCells.length >= 7) {
     // Change
-    infoCells[0].innerHTML = (d.chg_1d >= 0 ? '+' : '') + d.chg_1d + '%';
-    infoCells[0].style.color = d.chg_1d >= 0 ? 'var(--green)' : 'var(--red)';
+    var _c1d = (d.chg_1d != null && isFinite(d.chg_1d)) ? d.chg_1d : 0;
+    infoCells[0].innerHTML = (_c1d >= 0 ? '+' : '') + _c1d + '%';
+    infoCells[0].style.color = _c1d >= 0 ? 'var(--green)' : 'var(--red)';
     // R:R
     if (d.entry && d.stop_loss && d.tp1) {
       var risk = Math.abs(d.entry - d.stop_loss);
@@ -8524,15 +8634,15 @@ async function runBacktest(d, showPanel = true) {
           if (bt.trades_list[ci].n === t.n) break;
         }
         var cumCol = cumPnl >= 0 ? green : red;
-        return '<tr class="bt-trade-row" data-trade-n="' + t.n + '" onclick="toggleTradeDetail(' + t.n + ')" style="border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;transition:background .15s;" onmouseover="this.style.background=\'rgba(245,166,35,.06)\'" onmouseout="this.style.background=\'transparent\'">' +
-          '<td style="padding:7px 12px;color:var(--muted);">' + t.n + '</td>' +
+        return '<tr class="bt-trade-row" data-trade-n="' + t.n + '" id="bt-trade-row-' + t.n + '" onclick="toggleTradeDetail(' + t.n + ')" style="border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;transition:background .15s,border-left .15s;" onmouseover="if(!this.classList.contains(\'bt-active\')){this.style.background=\'rgba(245,166,35,.04)\'}" onmouseout="if(!this.classList.contains(\'bt-active\')){this.style.background=\'\'}">' +
+          '<td style="padding:7px 12px;color:var(--muted);"><span class="bt-trade-arrow" style="display:inline-block;transition:transform .2s;margin-right:5px;color:var(--muted2);font-size:9px;">▶</span>' + t.n + '</td>' +
           '<td style="padding:7px 12px;color:var(--text);white-space:nowrap;">' + t.date + '</td>' +
           '<td style="padding:7px 12px;color:var(--accent);">' + d.signal + '</td>' +
           '<td style="padding:7px 12px;text-align:center;">' + badge + '</td>' +
           '<td style="padding:7px 12px;text-align:right;color:' + col + ';">' + fR(t.r) + '</td>' +
           '<td style="padding:7px 12px;text-align:right;color:' + col + ';">' + fUSD(t.pnl_usd) + '</td>' +
           '</tr>' +
-          '<tr id="trade-detail-' + t.n + '" style="display:none;">' +
+          '<tr id="trade-detail-' + t.n + '" class="bt-trade-detail" style="display:none;">' +
           '<td colspan="6" style="padding:0 12px 12px;background:var(--bg2);border-bottom:1px solid rgba(245,166,35,.15);">' +
             '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 16px;padding:12px;font-family:var(--mono);font-size:11px;">' +
               '<div><span style="color:var(--muted);display:block;font-size:9px;letter-spacing:1px;margin-bottom:2px;">ENTRY PRICE</span><span style="color:var(--amber);">' + (t.entry != null ? t.entry : '—') + '</span></div>' +
@@ -8577,16 +8687,36 @@ async function runBacktest(d, showPanel = true) {
 ════════════════════════════════════════════ */
 function toggleTradeDetail(n) {
   var detail = document.getElementById('trade-detail-' + n);
+  var clickedRow = document.getElementById('bt-trade-row-' + n);
   if (!detail) return;
-  var isOpen = detail.style.display !== 'none';
-  // Close all other open details first
-  document.querySelectorAll('[id^="trade-detail-"]').forEach(function(el) {
+
+  // Is THIS row currently open? Check explicitly against 'table-row'
+  var isOpen = detail.style.display === 'table-row';
+
+  // Close ALL open details and reset all row visuals
+  document.querySelectorAll('.bt-trade-detail').forEach(function(el) {
     el.style.display = 'none';
   });
-  // Toggle this one
+  document.querySelectorAll('.bt-trade-row').forEach(function(el) {
+    el.classList.remove('bt-active');
+    el.style.background = '';
+    el.style.borderLeft = '';
+    var arr = el.querySelector('.bt-trade-arrow');
+    if (arr) { arr.style.transform = ''; arr.style.color = ''; }
+  });
+
+  // If it was closed, open it now
   if (!isOpen) {
-    detail.style.display = '';
+    detail.style.display = 'table-row';
+    if (clickedRow) {
+      clickedRow.classList.add('bt-active');
+      clickedRow.style.background = 'rgba(245,166,35,.07)';
+      clickedRow.style.borderLeft = '2px solid var(--amber)';
+      var arr = clickedRow.querySelector('.bt-trade-arrow');
+      if (arr) { arr.style.transform = 'rotate(90deg)'; arr.style.color = 'var(--amber)'; }
+    }
   }
+  // If it was open → we already closed it above, nothing more to do
 }
 
 /* ════════════════════════════════════════════
