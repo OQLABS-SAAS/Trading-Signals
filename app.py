@@ -2535,9 +2535,14 @@ def analyze():
                 ind_full = calculate_indicators(df, timeframe)
                 if tv_ok:
                     # TV is primary — only take chart arrays + win rate from yfinance
+                    # rsi_divergence MUST be included: build_ind_from_tv hardcodes it
+                    # to type="none", so the real pivot-based detection only lives in
+                    # ind_full (calculate_indicators).  Without this, divergences never show.
                     for k in ("chart_dates","chart_prices","chart_ema20","chart_ema50",
                               "chart_volumes","chart_bb_upper","chart_bb_lower",
-                              "chart_rsi","chart_buy_signals","chart_sell_signals"):
+                              "chart_rsi","chart_buy_signals","chart_sell_signals",
+                              "chart_opens","chart_highs","chart_lows",
+                              "rsi_divergence"):
                         ind[k] = ind_full.get(k, [])
                 else:
                     # TV failed — yfinance is primary; use full indicator set
