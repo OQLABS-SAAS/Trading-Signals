@@ -2705,38 +2705,48 @@ def analyze():
         # detect_rsi_divergence only runs inside calculate_indicators() (yfinance path).
         # When yfinance fails and fallback chart paths fire, divergence is never
         # computed — ind["rsi_divergence"] stays as {"type":"none"}.
-        # Fix: run divergence on whatever chart data we have from ANY path.
-        # If real highs/lows aren't available (Stooq/Yahoo close-only fallbacks),
-        # approximate them from closes — divergence still fires correctly.
+        # Fix: run divergence on the chart arrays from ANY path and produce the
+        # same chart_price_pivot_bars / chart_rsi_pivot_bars fields the frontend expects.
         if ind.get("rsi_divergence", {}).get("type") == "none":
-            _prices = ind.get("chart_prices") or []
-            _rsi_raw = ind.get("chart_rsi")   or []
-            _h_raw   = ind.get("chart_highs") or []
-            _l_raw   = ind.get("chart_lows")  or []
+            _prices  = ind.get("chart_prices") or []
+            _rsi_raw = ind.get("chart_rsi")    or []
+            _h_raw   = ind.get("chart_highs")  or []
+            _l_raw   = ind.get("chart_lows")   or []
 
             # Approximate highs/lows from closes when real OHLC not available
             if len(_prices) >= 20 and (not _h_raw or len(_h_raw) < len(_prices)):
                 _h_raw = [max(_prices[i], _prices[i-1]) if i > 0 else _prices[i] for i in range(len(_prices))]
                 _l_raw = [min(_prices[i], _prices[i-1]) if i > 0 else _prices[i] for i in range(len(_prices))]
 
-            # Align all three arrays, drop None entries
-            _valid = [
-                (h, l, r)
-                for h, l, r in zip(_h_raw, _l_raw, _rsi_raw)
-                if h is not None and l is not None and r is not None
-            ]
-            if len(_valid) >= 20:
-                _hh = pd.Series([v[0] for v in _valid])
-                _ll = pd.Series([v[1] for v in _valid])
-                _rr = pd.Series([v[2] for v in _valid])
+            # Replace None with neutral placeholders — preserve index alignment with chart_dates
+            _n = min(len(_h_raw), len(_l_raw), len(_rsi_raw), len(_prices) if _prices else 9999)
+            if _n >= 20:
+                _hh = pd.Series([v if v is not None else 0.0 for v in _h_raw[:_n]])
+                _ll = pd.Series([v if v is not None else 0.0 for v in _l_raw[:_n]])
+                _rr = pd.Series([v if v is not None else 50.0 for v in _rsi_raw[:_n]])
                 try:
                     _div = detect_rsi_divergence(_hh, _ll, _rr, pivot_len=3, lookback=100)
+                    # Rename raw index fields → chart_price_pivot_bars / chart_rsi_pivot_bars
+                    # so the frontend (which expects these names) can draw the lines.
+                    # Indices are already 0-based into chart_dates since we used chart arrays.
+                    def _remap_div(dv):
+                        dv = dict(dv)
+                        dv["chart_price_pivot_bars"] = dv.get("price_pivot_bars", [])
+                        dv["chart_rsi_pivot_bars"]   = dv.get("rsi_pivot_bars",   [])
+                        return dv
+                    if _div.get("price_pivot_bars"):
+                        _div = _remap_div(_div)
+                    else:
+                        _div["chart_price_pivot_bars"] = []
+                        _div["chart_rsi_pivot_bars"]   = []
+                    _div["all"] = [_remap_div(dv) for dv in _div.get("all", [])
+                                   if len(dv.get("price_pivot_bars", [])) >= 2]
                     ind["rsi_divergence"] = _div
                     print(f"[analyze] divergence safety-net: type={_div.get('type')} all={len(_div.get('all',[]))}")
                 except Exception as _de:
                     print(f"[analyze] divergence safety-net failed: {_de}")
             else:
-                print(f"[analyze] divergence safety-net: not enough data ({len(_valid)} valid bars)")
+                print(f"[analyze] divergence safety-net: not enough data ({_n} bars)")
 
         # Hard fail only when BOTH TV and yfinance/Stooq are unavailable
         if not tv_ok and not yf_ok:
