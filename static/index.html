@@ -3858,6 +3858,7 @@ function _drawDivOverlays() {
     toDraw = (chartDivergenceAll && chartDivergenceAll.length)
       ? chartDivergenceAll.slice()
       : (chartDivergence ? [chartDivergence] : []);
+    console.log('[div] historyMode toDraw:', toDraw.length, 'chartDivergenceAll:', chartDivergenceAll.length, 'chartDivergence:', chartDivergence);
     if (chartDivergence && toDraw.length) {
       const _last = toDraw[toDraw.length - 1];
       const _same = _last && _last.priceBars && chartDivergence.priceBars &&
@@ -3884,12 +3885,13 @@ function _drawDivOverlays() {
       const vals  = getX === 'price' ? div.priceVals : div.rsiVals;
       if (!bars || bars.length < 2) return;
       const t0 = toTimeVal(labels[bars[0]]), t1 = toTimeVal(labels[bars[1]]);
-      if (!t0 || !t1) return;
+      if (!t0 || !t1) { console.warn('[div] toTimeVal null', labels[bars[0]], labels[bars[1]]); return; }
       const x0 = chart.timeScale().timeToCoordinate(t0);
       const x1 = chart.timeScale().timeToCoordinate(t1);
       const y0 = series.priceToCoordinate(vals[0]);
       const y1 = series.priceToCoordinate(vals[1]);
-      if (x0 == null || x1 == null || y0 == null || y1 == null) return;
+      console.log('[div] coords', getX, {t0,t1,x0,x1,y0,y1,bars,vals});
+      if (x0 == null || x1 == null || y0 == null || y1 == null) { console.warn('[div] null coord — skipping', {x0,x1,y0,y1}); return; }
 
       const color = div.isBull ? '#00c98d' : '#ff524a';
       const isNewest = idx === total - 1;

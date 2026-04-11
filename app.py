@@ -350,7 +350,7 @@ def get_rsi(close):
     return 100 - 100 / (1 + rma(gain, 14) / rma(loss, 14))
 
 
-def detect_rsi_divergence(high, low, rsi_series, pivot_len=5, lookback=60):
+def detect_rsi_divergence(high, low, rsi_series, pivot_len=3, lookback=100):
     """
     Detect regular and hidden RSI divergence over recent bars.
     pivot_len : bars on each side required to confirm a swing pivot
