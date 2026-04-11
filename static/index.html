@@ -3854,17 +3854,25 @@ function _drawDivOverlays() {
   const canvasR = document.getElementById('divOverlayRsi');
 
   // Collect divergences to draw based on mode
-  // Always include chartDivergenceAll entries + current divergence (deduped)
+  // History OFF → only most-recent divergence (guaranteed valid coords)
+  // History ON  → all historical divergences (oldest→newest, with fade)
   let toDraw = [];
-  if (chartDivergenceAll && chartDivergenceAll.length) {
-    toDraw = chartDivergenceAll.slice();
-  }
-  if (chartDivergence) {
-    const _last = toDraw[toDraw.length - 1];
-    const _same = _last && _last.priceBars && chartDivergence.priceBars &&
-                  _last.priceBars[0] === chartDivergence.priceBars[0] &&
-                  _last.priceBars[1] === chartDivergence.priceBars[1];
-    if (!_same) toDraw.push(chartDivergence);
+  if (divHistoryMode) {
+    // Show every divergence detected in the lookback window
+    if (chartDivergenceAll && chartDivergenceAll.length) {
+      toDraw = chartDivergenceAll.slice();
+    }
+    // Append current if it differs from the last entry
+    if (chartDivergence) {
+      const _last = toDraw[toDraw.length - 1];
+      const _same = _last && _last.priceBars && chartDivergence.priceBars &&
+                    _last.priceBars[0] === chartDivergence.priceBars[0] &&
+                    _last.priceBars[1] === chartDivergence.priceBars[1];
+      if (!_same) toDraw.push(chartDivergence);
+    }
+  } else {
+    // Classic mode: only the single most-recent divergence
+    if (chartDivergence) toDraw = [chartDivergence];
   }
 
   console.log('[div] draw called — toDraw:', toDraw.length, 'historyMode:', divHistoryMode,
@@ -3956,6 +3964,13 @@ function _drawDivOverlays() {
 }
 
 function renderChart(d) {
+  // ── Always clear stale divergence state first ──
+  // Prevents old-ticker divergence lines bleeding onto a new chart
+  // (especially visible when EURUSD loads with empty chart_prices but
+  //  BTC divergence is still in chartDivergence from the previous analysis).
+  chartDivergence    = null;
+  chartDivergenceAll = [];
+
   // ── Store all chart data (unchanged — keep existing data processing) ──
   chartLevels = (d.entry || d.stop_loss || d.tp1)
     ? { entry: d.entry, stop_loss: d.stop_loss, tp1: d.tp1, tp2: d.tp2, tp3: d.tp3 }
@@ -4868,7 +4883,7 @@ function renderScanResults(results, assetType) {
     var trendColor = trend.toLowerCase().includes('bull') ? 'var(--green)' : trend.toLowerCase().includes('bear') ? 'var(--red)' : 'var(--muted2)';
     var vol = r.volume ? (r.volume > 1e9 ? (r.volume/1e9).toFixed(1)+'B' : r.volume > 1e6 ? (r.volume/1e6).toFixed(1)+'M' : r.volume > 1e3 ? (r.volume/1e3).toFixed(1)+'K' : r.volume) : '—';
     var tf = (document.getElementById('scanTF')||{}).value || '4h';
-    return '<tr style="cursor:pointer;" onclick="quickLoad(\'' + r.ticker + '\',\'' + assetType + '\',\'' + tf + '\')">' +
+    return '<tr style="cursor:pointer;" onclick="scannerLoadTicker(\'' + r.ticker + '\',\'' + assetType + '\')">' +
       '<td class="st-sym">' + r.ticker + '</td>' +
       '<td><span class="sig-badge-sm ' + sigCls + '" title="Pre-screen only — HTF gates not applied">' + pillLbl + '</span></td>' +
       '<td style="font-family:var(--mono);font-size:11px;color:var(--muted2);" title="Bull score / Bear score">' + (r.bull_score||0) + 'B / ' + (r.bear_score||0) + 'S</td>' +
@@ -4900,7 +4915,7 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
   html += '</tr></thead><tbody>';
   tickers.forEach(function(ticker) {
     var tfResults = resultsByTicker[ticker];
-    html += '<tr onclick="quickLoad(\'' + ticker + '\',\'' + assetType + '\',\'4h\')" style="cursor:pointer;">';
+    html += '<tr onclick="scannerLoadTicker(\'' + ticker + '\',\'' + assetType + '\')" style="cursor:pointer;">';
     html += '<td style="text-align:left;font-weight:700;color:var(--amber);">' + ticker + '</td>';
     tfList.forEach(function(tf) {
       var res = tfResults[tf];
@@ -4918,6 +4933,17 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
   });
   html += '</tbody></table>';
   document.getElementById('scanResults').innerHTML = html;
+}
+
+// Helper: load ticker from scanner using signals-tab timeframe, then switch to signals tab
+function scannerLoadTicker(ticker, assetType) {
+  // Use the signals-tab timeframe selector (not the scanner's scanTF)
+  var sigTF = (document.getElementById('timeframe')||{}).value || '4h';
+  // Switch to signals tab first so the chart renders in the visible panel
+  var firstNavTab = document.querySelector('.nav-tab');
+  switchMainTab('signals', firstNavTab);
+  // Load the ticker with the signals timeframe
+  quickLoad(ticker, assetType, sigTF);
 }
 
 // Scanner filter buttons
