@@ -1460,6 +1460,7 @@ def fetch_tv_data(raw_ticker, asset_type, timeframe="1d"):
         rec_osc  = g("Recommend.Other")
         adx      = g("ADX")
 
+        vol_raw = g("volume")
         result = {
             "tv_symbol":      tv_sym,
             "tv_price":       round(close,   6) if close    is not None else None,
@@ -1473,6 +1474,7 @@ def fetch_tv_data(raw_ticker, asset_type, timeframe="1d"):
             "tv_bb_lower":    round(bb_lower,4) if bb_lower is not None else None,
             "tv_atr":         round(atr_val, 6) if atr_val  is not None else None,
             "tv_adx":         round(adx,     2) if adx      is not None else None,
+            "tv_volume":      int(vol_raw)       if vol_raw  is not None else None,
             "tv_rec_all":     round(rec_all, 3) if rec_all  is not None else None,
             "tv_rec_label":   _rec_label(rec_all),
             "tv_rec_ma":      round(rec_ma,  3) if rec_ma   is not None else None,
