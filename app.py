@@ -101,12 +101,12 @@ def login_required(f):
 
 # ─── TIMEFRAME CONFIG ─────────────────────────────────────────
 TIMEFRAME_CONFIG = {
-    "5m":  {"interval": "5m",  "period": "5d",  "chart_bars": 100, "date_fmt": "%H:%M"},
-    "15m": {"interval": "15m", "period": "5d",  "chart_bars": 100, "date_fmt": "%H:%M"},
-    "30m": {"interval": "30m", "period": "5d",  "chart_bars": 100, "date_fmt": "%b%d %H:%M"},
-    "1h":  {"interval": "1h",  "period": "30d", "chart_bars": 100, "date_fmt": "%b%d %H:%M"},
-    "4h":  {"interval": "1h",  "period": "60d", "chart_bars": 90,  "date_fmt": "%b %d", "resample": "4h"},
-    "1d":  {"interval": "1d",  "period": "1y",  "chart_bars": 90,  "date_fmt": "%b %d"},
+    "5m":  {"interval": "5m",  "period": "5d",  "chart_bars": 100, "date_fmt": "%Y-%m-%d %H:%M"},
+    "15m": {"interval": "15m", "period": "5d",  "chart_bars": 100, "date_fmt": "%Y-%m-%d %H:%M"},
+    "30m": {"interval": "30m", "period": "5d",  "chart_bars": 100, "date_fmt": "%Y-%m-%d %H:%M"},
+    "1h":  {"interval": "1h",  "period": "30d", "chart_bars": 100, "date_fmt": "%Y-%m-%d %H:%M"},
+    "4h":  {"interval": "1h",  "period": "60d", "chart_bars": 90,  "date_fmt": "%Y-%m-%d %H:%M", "resample": "4h"},
+    "1d":  {"interval": "1d",  "period": "1y",  "chart_bars": 90,  "date_fmt": "%Y-%m-%d"},
 }
 
 # How often to re-run the screen per timeframe (seconds)
