@@ -835,7 +835,7 @@ def _fetch_binance(ticker, timeframe):
         if not klines or isinstance(klines, dict):  # error dict
             return None
 
-        dt_fmt = "%H:%M" if timeframe in ("5m","15m","30m","1h") else "%b %d"
+        dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
         dates, opens, highs, lows, prices, vols = [], [], [], [], [], []
         for k in klines:
             ts = int(k[0]) // 1000
@@ -896,7 +896,6 @@ def _fetch_stooq(ticker, asset_type, timeframe):
         if not rows or "Close" not in rows[0]:
             return None
 
-        dt_fmt = "%b %d" if timeframe in ("1d","1w") else "%b %d"
         dates, opens, highs, lows, prices, vols = [], [], [], [], [], []
         for row in rows[-200:]:
             try:
@@ -976,7 +975,7 @@ def _fetch_yahoo_v8(ticker, asset_type, timeframe):
             lows_  = [min(lk[t]) for t in ts_l]
             vols   = [vk[t]     for t in ts_l]
 
-        dt_fmt = "%H:%M" if timeframe in ("5m","15m","30m","1h") else "%b %d"
+        dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
         dates, prices, volumes, o_out, h_out, l_out = [], [], [], [], [], []
         for i, (t, c, v) in enumerate(zip(ts_l, closes, vols or [0]*len(ts_l))):
             if c and not (isinstance(c, float) and math.isnan(c)):
@@ -1035,7 +1034,7 @@ def _fetch_fmp(ticker, asset_type, timeframe):
         # FMP returns newest first — reverse to chronological
         data = list(reversed(data[-200:]))
 
-        dt_fmt = "%H:%M" if timeframe in ("5m", "15m", "30m", "1h") else "%b %d"
+        dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m", "15m", "30m", "1h", "4h") else "%Y-%m-%d"
         dates, prices, vols, opens, highs, lows = [], [], [], [], [], []
         for bar in data:
             try:
@@ -2566,8 +2565,9 @@ def analyze():
                 if not df_binance.empty:
                     print(f"[analyze] Exception handler Binance fallback — got {len(df_binance)} bars")
                     # Convert DataFrame back to chart format — include OHLC for footprint
+                    _exc_dt_fmt = "%Y-%m-%d %H:%M" if cfg.get("interval","1d") in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
                     chart_result = _build_chart_output(
-                        df_binance.index.strftime("%b %d").tolist(),
+                        df_binance.index.strftime(_exc_dt_fmt).tolist(),
                         df_binance["Close"].tolist(),
                         df_binance["Volume"].astype(int).tolist(),
                         timeframe,
@@ -3451,7 +3451,7 @@ def backtest_route():
                                  timeout=(5, 15))
             if r_bin.status_code == 200:
                 klines = r_bin.json()
-                dt_fmt = "%H:%M" if timeframe in ("5m","15m","30m","1h") else "%b %d"
+                dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
                 for k in klines:
                     ts = int(k[0]) // 1000
                     dates_hist.append(datetime.utcfromtimestamp(ts).strftime(dt_fmt))
