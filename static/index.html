@@ -3837,7 +3837,13 @@ function toggleChartOverlay(key) {
 
 function _lwcCommonOpts(height) {
   return {
-    width: 0,   // 0 = auto-fill container
+    // autoSize:true — LWC v4 attaches a ResizeObserver to the container.
+    // This self-heals the "zero-width chart" bug that occurs when the signals
+    // tab was display:none at the moment createChart() ran (e.g. navigating
+    // here from the Scanner tab on a cache-hit response where the browser
+    // hasn't reflowed yet). As soon as the container gets real dimensions the
+    // ResizeObserver fires and LWC re-renders at the correct size.
+    autoSize: true,
     height: height,
     layout: {
       background: { type: 'solid', color: 'transparent' },
@@ -4965,13 +4971,20 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
 //              otherwise fall back to whatever the signals-tab TF dropdown says.
 function scannerLoadTicker(ticker, assetType, overrideTF) {
   var sigTF = overrideTF || (document.getElementById('timeframe')||{}).value || '4h';
-  // Switch to signals tab FIRST — charts must be visible before LWC creates them
+  // Switch to signals tab FIRST — the tab must be display:block so the browser
+  // can compute layout dimensions for the LWC chart containers.
   var firstNavTab = document.querySelector('.nav-tab');
   switchMainTab('signals', firstNavTab);
   // Sync the TF dropdown to match what we're about to load
   var tfEl = document.getElementById('timeframe');
   if (tfEl && sigTF) tfEl.value = sigTF;
-  quickLoad(ticker, assetType, sigTF);
+  // requestAnimationFrame defers quickLoad until AFTER the browser has painted
+  // the newly-visible signals tab. This ensures lwcPriceWrap has real dimensions
+  // when LightweightCharts.createChart() runs, preventing the zero-width blank
+  // chart bug on cache-hit responses (where the fetch returns near-instantly).
+  requestAnimationFrame(function() {
+    quickLoad(ticker, assetType, sigTF);
+  });
 }
 
 // Scanner filter buttons
@@ -8077,9 +8090,6 @@ function renderResultsV2(d) {
     sideNewsItems.innerHTML = newsBlocks;
   }
 
-  // Render chart (Chart.js)
-  try { renderChart(d); } catch(e) { console.warn('renderChart:', e); }
-
   // Also update News tab feed
   var nfi = document.getElementById('newsFeedItems');
   if (nfi && d.ticker) {
@@ -9748,7 +9758,7 @@ function _renderScanResults(results, filterSignal, errors) {
       else html += 'Wait for a clearer signal before taking a position. Monitor for breakout.';
       html += '</div>';
       // Analyze button
-      html += '<button onclick="event.stopPropagation();switchMainTab(\'signals\',document.querySelector(\'.nav-tab\'));quickLoad(\'' + r.ticker + '\',\'' + (r.asset_type||'crypto') + '\',\'4h\')" style="width:100%;padding:6px;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.3);border-radius:3px;color:var(--amber);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;">ANALYZE ' + r.ticker + ' →</button>';
+      html += '<button onclick="event.stopPropagation();scannerLoadTicker(\'' + r.ticker + '\',\'' + (r.asset_type||'crypto') + '\')" style="width:100%;padding:6px;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.3);border-radius:3px;color:var(--amber);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;">ANALYZE ' + r.ticker + ' →</button>';
       html += '</div></div>';
     });
     html += '</div>';
@@ -10169,8 +10179,10 @@ document.querySelectorAll('.scan-table tbody tr').forEach(row => {
     const sym = this.querySelector('.st-sym');
     if (sym) {
       const ticker = sym.textContent.trim().replace('/', '-');
-      const inp = document.getElementById('tickerInput');
-      if (inp) { inp.value = ticker; doAnalyze(); switchMainTab('signals', document.querySelector('.nav-tab')); }
+      // Use scannerLoadTicker so the tab switch + rAF guard runs correctly,
+      // preventing the zero-width LWC chart bug. assetType defaults to 'stock'
+      // for the static pre-screen table (all rows are equities).
+      scannerLoadTicker(ticker, 'stock');
     }
   });
 });
