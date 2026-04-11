@@ -4051,24 +4051,37 @@ function renderChart(d) {
   // otherwise LWC silently drops the data point.
   function toTimeVal(dateStr) {
     if (!dateStr) return null;
-    const s = String(dateStr);
-    // Pure ISO date "YYYY-MM-DD" — LWC handles natively
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    // Already a number (Unix seconds)
+    // Already a Unix timestamp (number)
     if (typeof dateStr === 'number') return dateStr;
-    // ── Backend 4H format: "AprDD HH:MM" (no space between month and day) ──
-    // e.g. "Apr08 16:00", "Mar31 09:30" — JS Date can't parse "Apr08" directly.
-    // Fix: insert space → "Apr 08 2026 16:00:00"
+    const s = String(dateStr).trim();
+    // Pure ISO date "YYYY-MM-DD" — LWC handles natively as a string
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // ISO datetime with space "YYYY-MM-DD HH:MM" (backend intraday format)
+    // Normalize space → T so Safari can parse it correctly
+    const isoSpace = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/);
+    if (isoSpace) {
+      const d = new Date(`${isoSpace[1]}T${isoSpace[2]}:00`);
+      if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+    }
+    // ISO datetime with T separator "YYYY-MM-DDTHH:MM..."
+    if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+    }
+    // Legacy backend format "AprDD HH:MM" (no space between month+day)
     const mondd = s.match(/^([A-Za-z]{3})(\d{2})\s+(\d{2}:\d{2})$/);
     if (mondd) {
       const d = new Date(`${mondd[1]} ${mondd[2]} ${new Date().getFullYear()} ${mondd[3]}:00`);
       if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
     }
-    // ISO datetime "YYYY-MM-DD HH:MM" or RFC strings
-    let d = new Date(s);
-    if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
-    // Last resort: append year
-    d = new Date(s + ' ' + new Date().getFullYear());
+    // Legacy daily "Apr 08" or "Apr  8"
+    const monD = s.match(/^([A-Za-z]{3})\s+(\d{1,2})$/);
+    if (monD) {
+      const d = new Date(`${monD[1]} ${monD[2]} ${new Date().getFullYear()}`);
+      if (!isNaN(d.getTime())) return s; // Return string so LWC treats as daily
+    }
+    // Generic fallback
+    const d = new Date(s);
     if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
     return null;
   }
