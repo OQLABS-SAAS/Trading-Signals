@@ -1623,19 +1623,21 @@ body::before{
           </div>
         </div>
 
-        <!-- Chart.js Price Canvas -->
-        <div style="position:relative;height:300px;background:var(--bg);">
-          <canvas id="priceChart" style="width:100%;height:100%;"></canvas>
+        <!-- LWC Price Chart -->
+        <div style="position:relative;height:300px;background:var(--bg);" id="lwcPriceWrap">
+          <div id="priceChart" style="width:100%;height:100%;"></div>
+          <canvas id="divOverlayPrice" style="position:absolute;top:0;left:0;pointer-events:none;width:100%;height:100%;"></canvas>
         </div>
 
-        <!-- Chart.js Volume Canvas -->
-        <div style="position:relative;height:80px;background:var(--bg);border-top:1px solid var(--border);">
-          <canvas id="volChart" style="width:100%;height:100%;"></canvas>
+        <!-- LWC Volume Chart -->
+        <div id="lwcVolWrap" style="position:relative;height:60px;background:var(--bg);border-top:1px solid var(--border);">
+          <div id="volChart" style="width:100%;height:100%;"></div>
         </div>
 
-        <!-- Chart.js RSI sub-chart -->
-        <div id="rsiChartWrap" style="position:relative;height:80px;background:var(--bg);border-top:1px solid var(--border);">
-          <canvas id="rsiChart" style="width:100%;height:100%;"></canvas>
+        <!-- LWC RSI sub-chart -->
+        <div id="rsiChartWrap" style="position:relative;height:90px;background:var(--bg);border-top:1px solid var(--border);">
+          <div id="rsiChart" style="width:100%;height:100%;"></div>
+          <canvas id="divOverlayRsi" style="position:absolute;top:0;left:0;pointer-events:none;width:100%;height:100%;"></canvas>
         </div>
 
         <!-- TradingView embed fallback (hidden by default) -->
@@ -2727,7 +2729,7 @@ body::before{
 <!-- ══════════════════════════════════
    JAVASCRIPT
 ══════════════════════════════════ -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 /* Safe element getter - prevents crashes on missing elements */
 function _el(id) { return document.getElementById(id) || document.createElement('div'); }
@@ -3647,6 +3649,22 @@ function renderTVPanel(tv, signal) {
 /* ════════════════════════════════════════════
    CHART — LEVEL-LINES + CROSSHAIR PLUGINS
 ════════════════════════════════════════════ */
+/* ── Lightweight Charts instances ── */
+let lwcPrice         = null;   // IChartApi — price chart
+let lwcRsi           = null;   // IChartApi — RSI sub-chart
+let lwcVol           = null;   // IChartApi — volume sub-chart
+let lwcCandleSeries  = null;   // candlestick series
+let lwcLineSeries    = null;   // fallback line (no OHLC)
+let lwcEma20Series   = null;
+let lwcEma50Series   = null;
+let lwcBbUpperSeries = null;
+let lwcBbLowerSeries = null;
+let lwcVolSeries     = null;
+let lwcRsiSeries     = null;
+let _lwcRsiData      = [];     // cached RSI data for crosshair sync
+let _lwcVolData      = [];     // cached vol data for crosshair sync
+let _lwcSyncing      = false;  // prevents recursive timeScale sync
+
 let chartLevels      = null; // set by renderChart(), read by plugin
 let chartSignals     = null; // { buys:[], sells:[], prices:[] } for arrow markers
 let chartDivergence  = null; // most recent divergence pivot data (for current-mode overlay)
@@ -3654,7 +3672,10 @@ let chartDivergenceAll = [];  // ALL divergences in lookback window (for history
 let divHistoryMode   = false; // when true, draw every historical divergence line with fade
 let chartOverlays    = { BB: true, RSI: true, SIG: true, VOL: true };
 let chartOHLC        = null; // {opens, highs, lows, closes} for candlestick plugin
+/* Legacy shims — keep these so existing overlay toggle code compiles */
+let priceChartInst   = null;   // not used for Chart.js anymore
 let rsiChartInst     = null;
+let volChartInst     = null;
 let tvMode           = false; // kept for compatibility, always false now
 let tvStudies        = { BB: true, RSI: true, SIG: true };
 let tvParams         = { sym: '', ivl: 'D', theme: 'dark' };
@@ -3722,458 +3743,287 @@ function toggleChartOverlay(key) {
     return;
   }
 
-  // ── Chart.js mode ──
+  // ── LWC mode ──
   chartOverlays[key] = !chartOverlays[key];
   _syncIndButtons(key, chartOverlays[key]);
 
-  if (key === 'BB' && priceChartInst) {
-    // datasets: 0=Price, 1=EMA20, 2=EMA50, 3=BB Upper, 4=BB Lower
-    [3, 4].forEach(i => {
-      const ds = priceChartInst.data.datasets[i];
-      if (ds) { ds.hidden = !chartOverlays.BB; }
-    });
-    priceChartInst.update();
+  if (key === 'BB') {
+    if (lwcBbUpperSeries) lwcBbUpperSeries.applyOptions({ visible: chartOverlays.BB });
+    if (lwcBbLowerSeries) lwcBbLowerSeries.applyOptions({ visible: chartOverlays.BB });
   }
   if (key === 'RSI') {
     const wrap = document.getElementById('rsiChartWrap');
     if (wrap) wrap.style.display = chartOverlays.RSI ? '' : 'none';
+    requestAnimationFrame(_drawDivOverlays);
   }
   if (key === 'SIG') {
-    if (priceChartInst) priceChartInst.update();
+    // Re-render entire chart to update markers
+    if (currentData) renderChart(currentData);
   }
   if (key === 'VOL') {
-    const volWrap = document.getElementById('volChart') ? document.getElementById('volChart').parentElement : null;
+    const volWrap = document.getElementById('lwcVolWrap');
     if (volWrap) volWrap.style.display = chartOverlays.VOL ? '' : 'none';
   }
 }
 
-/* ── Candlestick plugin — draws OHLC bars over the price line ── */
-const candlestickPlugin = {
-  id: 'candlestick',
-  afterDatasetsDraw(chart) {
-    if (!chartOHLC) return;
-    const { ctx, scales: { x: xAx, y: yAx }, chartArea } = chart;
-    if (!xAx || !yAx) return;
-    const { opens, highs, lows, closes } = chartOHLC;
-    const n = closes.length;
-    if (!n) return;
+/* ── Lightweight Charts helpers ── */
 
-    // Bar width: gap between two adjacent bar centres × 0.72 gives natural spacing
-    const x0 = xAx.getPixelForValue(0);
-    const x1 = xAx.getPixelForValue(Math.min(1, n - 1));
-    const barW = Math.max(2, Math.abs(x1 - x0) * 0.72);
-    const halfW = barW / 2;
+function _lwcCommonOpts(height) {
+  return {
+    width: 0,   // 0 = auto-fill container
+    height: height,
+    layout: {
+      background: { type: 'solid', color: 'transparent' },
+      textColor: '#555',
+      fontFamily: "'JetBrains Mono','Fira Code',monospace",
+      fontSize: 10,
+    },
+    grid: {
+      vertLines: { color: 'rgba(255,255,255,0.04)' },
+      horzLines: { color: 'rgba(255,255,255,0.04)' },
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine: { color: 'rgba(245,166,35,0.55)', labelBackgroundColor: 'rgba(20,16,10,0.95)', style: 0, width: 1 },
+      horzLine: { color: 'rgba(245,166,35,0.3)',  labelBackgroundColor: 'rgba(20,16,10,0.95)', style: 2, width: 1 },
+    },
+    rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)', scaleMargins: { top: 0.08, bottom: 0.08 } },
+    timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: true, secondsVisible: false, rightOffset: 5, barSpacing: 8, minBarSpacing: 2 },
+    handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+    handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: false } },
+  };
+}
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
-    ctx.clip();
+function _destroyLwcCharts() {
+  if (lwcPrice) { try { lwcPrice.remove(); } catch(e){} lwcPrice = null; }
+  if (lwcRsi)   { try { lwcRsi.remove();   } catch(e){} lwcRsi   = null; }
+  if (lwcVol)   { try { lwcVol.remove();   } catch(e){} lwcVol   = null; }
+  lwcCandleSeries = null; lwcLineSeries = null;
+  lwcEma20Series = null;  lwcEma50Series = null;
+  lwcBbUpperSeries = null; lwcBbLowerSeries = null;
+  lwcVolSeries = null;    lwcRsiSeries = null;
+  _lwcRsiData = [];       _lwcVolData = [];
+}
 
-    for (let i = 0; i < n; i++) {
-      const o = opens[i], h = highs[i], l = lows[i], c = closes[i];
-      if (o == null || h == null || l == null || c == null) continue;
+/* Draw RSI divergence lines on overlay canvases (both price chart and RSI chart) */
+function _drawDivOverlays() {
+  const labels  = (currentData && currentData.chart_dates) || [];
+  const canvasP = document.getElementById('divOverlayPrice');
+  const canvasR = document.getElementById('divOverlayRsi');
 
-      const x  = xAx.getPixelForValue(i);
-      const yH = yAx.getPixelForValue(h);
-      const yL = yAx.getPixelForValue(l);
-      const yO = yAx.getPixelForValue(o);
-      const yC = yAx.getPixelForValue(c);
-
-      const isBull = c >= o;
-      const bodyColor  = isBull ? 'rgba(0,210,130,0.88)'  : 'rgba(255,60,70,0.88)';
-      const wickColor  = isBull ? 'rgba(0,210,130,0.70)'  : 'rgba(255,60,70,0.70)';
-      const bodyTop    = Math.min(yO, yC);
-      const bodyHeight = Math.max(1.5, Math.abs(yC - yO));
-
-      // Wick
-      ctx.beginPath();
-      ctx.strokeStyle = wickColor;
-      ctx.lineWidth = Math.max(0.8, barW * 0.12);
-      ctx.moveTo(x, yH);
-      ctx.lineTo(x, bodyTop);
-      ctx.moveTo(x, bodyTop + bodyHeight);
-      ctx.lineTo(x, yL);
-      ctx.stroke();
-
-      // Body
-      ctx.fillStyle = bodyColor;
-      ctx.fillRect(x - halfW, bodyTop, barW, bodyHeight);
+  // Collect divergences to draw based on mode
+  let toDraw;
+  if (divHistoryMode) {
+    toDraw = (chartDivergenceAll && chartDivergenceAll.length)
+      ? chartDivergenceAll.slice()
+      : (chartDivergence ? [chartDivergence] : []);
+    if (chartDivergence && toDraw.length) {
+      const _last = toDraw[toDraw.length - 1];
+      const _same = _last && _last.priceBars && chartDivergence.priceBars &&
+                    _last.priceBars[0] === chartDivergence.priceBars[0] &&
+                    _last.priceBars[1] === chartDivergence.priceBars[1];
+      if (!_same) toDraw.push(chartDivergence);
     }
-    ctx.restore();
+  } else {
+    toDraw = chartDivergence ? [chartDivergence] : [];
   }
-};
 
-const levelLinesPlugin = {
-  id: 'levelLines',
-  afterDraw(chart) {
-    const ctx  = chart.ctx;
-    const yAx  = chart.scales.y;
-    const xAx  = chart.scales.x;
-    if (!yAx || !xAx) return;
+  const drawOnCanvas = (canvas, chart, series, getX, getY) => {
+    if (!canvas || !chart || !series) return;
+    const w = canvas.offsetWidth, h = canvas.offsetHeight;
+    if (!w || !h) return;
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+    if (!toDraw.length) return;
+    const total = toDraw.length;
+    ctx.save();
+    toDraw.forEach((div, idx) => {
+      const bars  = getX === 'price' ? div.priceBars : div.rsiBars;
+      const vals  = getX === 'price' ? div.priceVals : div.rsiVals;
+      if (!bars || bars.length < 2) return;
+      const t0 = labels[bars[0]], t1 = labels[bars[1]];
+      if (!t0 || !t1) return;
+      const x0 = chart.timeScale().timeToCoordinate(t0);
+      const x1 = chart.timeScale().timeToCoordinate(t1);
+      const y0 = series.priceToCoordinate(vals[0]);
+      const y1 = series.priceToCoordinate(vals[1]);
+      if (x0 == null || x1 == null || y0 == null || y1 == null) return;
 
-    // ── Level lines (Entry / SL / TPs) ──
-    if (chartLevels) {
-      const lvls = [
-        { val: chartLevels.entry,     color: '#f5a623', label: 'Entry', dash: [7,3] },
-        { val: chartLevels.stop_loss, color: '#ff4459', label: 'SL',    dash: [4,4] },
-        { val: chartLevels.tp1,       color: '#00c98d', label: 'TP1',   dash: [6,3] },
-        { val: chartLevels.tp2,       color: '#009d6f', label: 'TP2',   dash: [6,3] },
-        { val: chartLevels.tp3,       color: '#006e4e', label: 'TP3',   dash: [6,3] },
-      ];
-      ctx.save();
-      lvls.forEach(({ val, color, label, dash }) => {
-        if (val == null) return;
-        const y = yAx.getPixelForValue(val);
-        if (y < yAx.top - 2 || y > yAx.bottom + 2) return;
+      const color = div.isBull ? '#00c98d' : '#ff524a';
+      const isNewest = idx === total - 1;
+      const t = total > 1 ? idx / (total - 1) : 1;
+      const lineAlpha = divHistoryMode && total > 1 ? 0.25 + t * 0.60 : 0.88;
+      const dotAlpha  = divHistoryMode && total > 1 ? 0.35 + t * 0.55 : 1;
+      const showLabel = !divHistoryMode || isNewest;
+
+      // Dashed divergence line
+      ctx.beginPath();
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = isNewest ? 1.8 : 1.4;
+      ctx.globalAlpha = lineAlpha;
+      ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Dots at pivot points
+      [[x0, y0, vals[0]], [x1, y1, vals[1]]].forEach(([px, py, pv]) => {
         ctx.beginPath();
-        ctx.setLineDash(dash);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.3;
-        ctx.globalAlpha = 0.72;
-        ctx.moveTo(xAx.left, y);
-        ctx.lineTo(xAx.right, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 1;
-        const txt = `${label} ${fmt(val)}`;
-        ctx.font = 'bold 9px JetBrains Mono,monospace';
-        const tw  = ctx.measureText(txt).width;
-        ctx.fillStyle = 'rgba(8,8,8,0.85)';
-        ctx.fillRect(xAx.right - tw - 10, y - 9, tw + 8, 14);
+        ctx.arc(px, py, isNewest ? 3.5 : 2.8, 0, Math.PI * 2);
         ctx.fillStyle = color;
-        ctx.textAlign = 'right';
-        ctx.fillText(txt, xAx.right - 3, y + 3.5);
-      });
-      ctx.restore();
-    }
-
-    // ── Signal arrows (RSI crossover/under markers) ──
-    // Clear in-place (NOT reassign) so the event-listener closure keeps its reference
-    _priceHits.length = 0;
-    if (chartSignals && chartOverlays.SIG) {
-      const prices = chartSignals.prices || [];
-      const highs  = chartSignals.highs  || prices;
-      const lows   = chartSignals.lows   || prices;
-      ctx.save();
-
-      const drawArrow = (barIdx, price, isBuy) => {
-        if (barIdx < 0 || barIdx >= prices.length) return;
-        // Anchor arrows to wick tips for cleaner look on candlestick chart
-        const anchorPrice = isBuy ? (lows[barIdx] || price) : (highs[barIdx] || price);
-        const x = xAx.getPixelForValue(barIdx);
-        const y = yAx.getPixelForValue(anchorPrice);
-        if (x == null || y == null) return;
-        const color  = isBuy ? '#f5a623' : '#ff524a';
-        const offset = isBuy ? 18 : -18;
-        const ay     = y + offset;
-
-        // Triangle arrow
-        ctx.beginPath();
-        if (isBuy) {
-          ctx.moveTo(x,     ay - 8);
-          ctx.lineTo(x - 5, ay);
-          ctx.lineTo(x + 5, ay);
-        } else {
-          ctx.moveTo(x,     ay + 8);
-          ctx.lineTo(x - 5, ay);
-          ctx.lineTo(x + 5, ay);
-        }
-        ctx.closePath();
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.9;
+        ctx.globalAlpha = dotAlpha;
         ctx.fill();
+        if (showLabel) {
+          ctx.globalAlpha = 1;
+          ctx.font = 'bold 7px JetBrains Mono,monospace';
+          ctx.fillStyle = color;
+          ctx.textAlign = 'center';
+          ctx.fillText(pv != null ? pv.toFixed(getX === 'price' ? 2 : 1) : '', px, py - 6);
+        }
+      });
 
-        // Label
+      // Centre label (newest only in history mode)
+      if (showLabel) {
+        const mx = (x0 + x1) / 2, my = (y0 + y1) / 2 - 10;
         ctx.globalAlpha = 1;
         ctx.font = 'bold 8px JetBrains Mono,monospace';
+        const lbl = div.label || (div.isBull ? 'Bull Div' : 'Bear Div');
+        const tw  = ctx.measureText(lbl).width;
+        ctx.fillStyle = 'rgba(8,8,12,0.82)';
+        ctx.fillRect(mx - tw/2 - 3, my - 9, tw + 6, 12);
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
-        ctx.fillText(isBuy ? 'B' : 'S', x, isBuy ? ay + 12 : ay - 4);
-
-        // Register hit target for tooltip
-        _priceHits.push({ x, y: ay, type: isBuy ? 'buy' : 'sell', price });
-      };
-
-      (chartSignals.buys  || []).forEach(i => drawArrow(i, prices[i], true));
-      (chartSignals.sells || []).forEach(i => drawArrow(i, prices[i], false));
-      ctx.restore();
-    }
-
-    // ── RSI Divergence lines on price chart ──
-    // Two modes:
-    //   Classic (default)     → draw only the most recent divergence (clean).
-    //   History  (toggled on) → draw every detected divergence in the window,
-    //                           fading older ones so the newest stays prominent.
-    // Fallback: if history mode is on but the backend didn't return a full
-    // history list (old deploy, or only the most-recent divergence was found),
-    // still include the classic single divergence so the toggle always shows
-    // SOMETHING when data is available.
-    if (chartOverlays.RSI) {
-      let _toDraw;
-      if (divHistoryMode) {
-        _toDraw = (chartDivergenceAll && chartDivergenceAll.length)
-          ? chartDivergenceAll.slice()
-          : (chartDivergence ? [chartDivergence] : []);
-        // Dedupe: make sure the classic "most recent" is present as the last
-        // entry (newest). If chartDivergence isn't already in the list, append.
-        if (chartDivergence && _toDraw.length) {
-          const _last = _toDraw[_toDraw.length - 1];
-          const _same = _last && _last.priceBars && chartDivergence.priceBars &&
-                        _last.priceBars[0] === chartDivergence.priceBars[0] &&
-                        _last.priceBars[1] === chartDivergence.priceBars[1];
-          if (!_same) _toDraw.push(chartDivergence);
-        }
-      } else {
-        _toDraw = chartDivergence ? [chartDivergence] : [];
+        ctx.fillText(lbl, mx, my);
       }
-
-      if (_toDraw.length) {
-        ctx.save();
-        const _total = _toDraw.length;
-        _toDraw.forEach((div, idx) => {
-          if (!div || !div.priceBars || div.priceBars.length < 2) return;
-          const pb    = div.priceBars, pv = div.priceVals;
-          const b0    = Math.max(0, pb[0]), b1 = Math.max(0, pb[1]);
-          const x0    = xAx.getPixelForValue(b0), x1 = xAx.getPixelForValue(b1);
-          const y0    = yAx.getPixelForValue(pv[0] || 0), y1 = yAx.getPixelForValue(pv[1] || 0);
-          if (!(x0 && x1 && y0 && y1)) return;
-          const color = div.isBull ? '#00c98d' : '#ff524a';
-          // Fade older divergences (only in history mode). Newest = full opacity.
-          // Step from ~0.28 (oldest) up to 0.85 (newest). Classic mode → 0.75 fixed.
-          let lineAlpha, dotAlpha, labelAlpha;
-          const isNewest = (idx === _total - 1);
-          if (divHistoryMode && _total > 1) {
-            const t = idx / (_total - 1); // 0 oldest → 1 newest
-            lineAlpha  = 0.28 + t * 0.57;
-            dotAlpha   = 0.35 + t * 0.55;
-            labelAlpha = isNewest ? 1 : 0;  // only label the newest in history mode
-          } else {
-            lineAlpha  = 0.75;
-            dotAlpha   = 0.9;
-            labelAlpha = 1;
-          }
-          // Dashed divergence line
-          ctx.beginPath();
-          ctx.setLineDash([5, 4]);
-          ctx.strokeStyle = color;
-          ctx.lineWidth   = isNewest ? 1.8 : 1.4;
-          ctx.globalAlpha = lineAlpha;
-          ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          // Dot markers
-          [{ x:x0, y:y0 }, { x:x1, y:y1 }].forEach(pt => {
-            ctx.beginPath();
-            ctx.arc(pt.x, pt.y, isNewest ? 4 : 3, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.globalAlpha = dotAlpha;
-            ctx.fill();
-            // Register hit target (larger radius — 10px in hit test)
-            _priceHits.push({ x: pt.x, y: pt.y, type: 'div', div });
-          });
-          // Label near second pivot (newest only when in history mode)
-          if (labelAlpha > 0) {
-            ctx.globalAlpha = labelAlpha;
-            ctx.font = 'bold 8px JetBrains Mono,monospace';
-            ctx.fillStyle = color;
-            ctx.textAlign = 'center';
-            ctx.fillText(div.isBull ? '▲ DIV' : '▼ DIV', x1, y1 + (div.isBull ? 14 : -6));
-          }
-        });
-        ctx.restore();
-      }
-    }
-  }
-};
-
-const crosshairPlugin = {
-  id: 'crosshair',
-  afterEvent(chart, args) {
-    const t = args.event.type;
-    if (t === 'mousemove') { chart._xhX = args.event.x; }
-    else if (t === 'mouseout') { chart._xhX = null; }
-    else { return; }
-    args.changed = true;
-  },
-  afterDraw(chart) {
-    if (chart._xhX == null) return;
-    const { ctx, chartArea: { top, bottom, left, right } } = chart;
-    const x = chart._xhX;
-    if (x < left || x > right) return;
-    ctx.save();
-    ctx.beginPath();
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.stroke();
+    });
     ctx.restore();
+  };
+
+  if (chartOverlays.RSI || !divHistoryMode) {
+    // Price chart divergence
+    drawOnCanvas(canvasP, lwcPrice, lwcCandleSeries || lwcLineSeries, 'price', 'price');
+    // RSI chart divergence
+    drawOnCanvas(canvasR, lwcRsi, lwcRsiSeries, 'rsi', 'rsi');
+  } else {
+    // Clear overlays when RSI is off
+    [canvasP, canvasR].forEach(c => { if (c) { c.width = c.offsetWidth; c.height = c.offsetHeight; c.getContext('2d').clearRect(0, 0, c.width, c.height); }});
   }
-};
+}
 
 function renderChart(d) {
-  // Store levels for the plugin
+  // ── Store all chart data (unchanged — keep existing data processing) ──
   chartLevels = (d.entry || d.stop_loss || d.tp1)
     ? { entry: d.entry, stop_loss: d.stop_loss, tp1: d.tp1, tp2: d.tp2, tp3: d.tp3 }
     : null;
 
-  // Store OHLC for candlestick plugin
   chartOHLC = (d.chart_opens && d.chart_opens.length)
     ? { opens: d.chart_opens, highs: d.chart_highs, lows: d.chart_lows, closes: d.chart_prices }
     : null;
 
-  // Store signal bars — use highs/lows for precise arrow placement on candles
   chartSignals = (d.chart_prices && d.chart_prices.length)
-    ? {
-        buys:   d.chart_buy_signals  || [],
-        sells:  d.chart_sell_signals || [],
-        prices: d.chart_prices,
-        highs:  d.chart_highs  || d.chart_prices,
-        lows:   d.chart_lows   || d.chart_prices,
-      }
+    ? { buys: d.chart_buy_signals || [], sells: d.chart_sell_signals || [],
+        prices: d.chart_prices, highs: d.chart_highs || d.chart_prices, lows: d.chart_lows || d.chart_prices }
     : null;
 
-  // Store divergence pivot data for overlay lines
   const div = d.rsi_divergence || {};
   chartDivergence = (div.type && div.type !== 'none' && (div.chart_price_pivot_bars || []).length >= 2)
-    ? {
-        type:       div.type,
-        label:      div.label || div.type,
-        desc:       div.desc  || '',
-        strength:   div.strength || 0,
-        priceBars:  div.chart_price_pivot_bars || [],
-        priceVals:  div.price_pivot_vals || [],
-        rsiBars:    div.chart_rsi_pivot_bars   || [],
-        rsiVals:    div.rsi_pivots || [],
-        isBull:     div.type === 'bullish' || div.type === 'hidden_bullish',
-      }
+    ? { type: div.type, label: div.label || div.type, desc: div.desc || '',
+        strength: div.strength || 0, priceBars: div.chart_price_pivot_bars || [],
+        priceVals: div.price_pivot_vals || [], rsiBars: div.chart_rsi_pivot_bars || [],
+        rsiVals: div.rsi_pivots || [], isBull: div.type === 'bullish' || div.type === 'hidden_bullish' }
     : null;
 
-  // Full historical divergence list (ordered oldest -> newest). Drives "History mode".
   chartDivergenceAll = (Array.isArray(div.all) ? div.all : [])
     .filter(dv => (dv.chart_price_pivot_bars || []).length >= 2)
     .map(dv => ({
-      type:       dv.type,
-      label:      dv.label || dv.type,
-      desc:       dv.desc  || '',
-      strength:   dv.strength || 0,
-      priceBars:  dv.chart_price_pivot_bars || [],
-      priceVals:  dv.price_pivot_vals || [],
-      rsiBars:    dv.chart_rsi_pivot_bars   || [],
-      rsiVals:    dv.rsi_pivots || [],
-      isBull:     dv.type === 'bullish' || dv.type === 'hidden_bullish',
+      type: dv.type, label: dv.label || dv.type, desc: dv.desc || '',
+      strength: dv.strength || 0, priceBars: dv.chart_price_pivot_bars || [],
+      priceVals: dv.price_pivot_vals || [], rsiBars: dv.chart_rsi_pivot_bars || [],
+      rsiVals: dv.rsi_pivots || [], isBull: dv.type === 'bullish' || dv.type === 'hidden_bullish',
     }));
 
-  // Toggle candle vs price-line legend label
+  // ── Legend / badge updates (keep existing logic) ──
   const _legPrice   = document.getElementById('legendPriceLine');
   const _legCandles = document.getElementById('legendCandles');
   const _hasCandlesNow = !!(d.chart_opens && d.chart_opens.length);
   if (_legPrice)   _legPrice.style.display   = _hasCandlesNow ? 'none' : '';
   if (_legCandles) _legCandles.style.display = _hasCandlesNow ? ''     : 'none';
+  const _le = document.getElementById('legendEntry'); if (_le) _le.style.display = d.entry     ? '' : 'none';
+  const _ls = document.getElementById('legendSL');    if (_ls) _ls.style.display = d.stop_loss ? '' : 'none';
+  const _lt = document.getElementById('legendTP');    if (_lt) _lt.style.display = d.tp1       ? '' : 'none';
 
-  // Show/hide legend level indicators
-  var _le = document.getElementById('legendEntry'); if (_le) _le.style.display = d.entry     ? '' : 'none';
-  var _ls = document.getElementById('legendSL');    if (_ls) _ls.style.display = d.stop_loss ? '' : 'none';
-  var _lt = document.getElementById('legendTP');    if (_lt) _lt.style.display = d.tp1       ? '' : 'none';
-
-  // ── RSI Divergence badges: update button label + RSI chart badge ──
+  // ── RSI divergence badges ──
   const _divData   = d.rsi_divergence || {};
   const _divType   = _divData.type;
-  const _divLabel  = _divData.label || '';
   const _hasDivNow = _divType && _divType !== 'none';
   const _divIsBull = _divType === 'bullish' || _divType === 'hidden_bullish';
-  const _divColor  = _divIsBull ? '#00c98d' : '#ff524a';
+  const _divColor  = _divIsBull ? '#00c98d' : '#ff4459';
   const _divBg     = _divIsBull ? 'rgba(0,201,141,.14)' : 'rgba(255,82,74,.14)';
   const _divBorder = _divIsBull ? 'rgba(0,201,141,.3)'  : 'rgba(255,82,74,.3)';
-
-  // Button inline tag (e.g. "Regular Bearish")
+  const _divLabel  = _divData.label || '';
   const _divTypeEl = document.getElementById('indDivType');
   if (_divTypeEl) {
     if (_hasDivNow) {
-      _divTypeEl.textContent = _divLabel;
-      _divTypeEl.style.display     = '';
-      _divTypeEl.style.color       = _divColor;
-      _divTypeEl.style.background  = _divBg;
-      _divTypeEl.style.border      = `1px solid ${_divBorder}`;
-    } else {
-      _divTypeEl.style.display = 'none';
-    }
+      _divTypeEl.textContent = _divLabel; _divTypeEl.style.display = '';
+      _divTypeEl.style.color = _divColor; _divTypeEl.style.background = _divBg;
+      _divTypeEl.style.border = `1px solid ${_divBorder}`;
+    } else { _divTypeEl.style.display = 'none'; }
   }
-
-  // RSI chart corner badge
   const _rsiDivBadge = document.getElementById('rsiDivBadge');
   if (_rsiDivBadge) {
     if (_hasDivNow) {
-      _rsiDivBadge.textContent        = (_divIsBull ? '▲ ' : '▼ ') + _divLabel;
-      _rsiDivBadge.style.display      = '';
-      _rsiDivBadge.style.color        = _divColor;
-      _rsiDivBadge.style.background   = _divBg;
-      _rsiDivBadge.style.border       = `1px solid ${_divBorder}`;
-    } else {
-      _rsiDivBadge.style.display = 'none';
-    }
+      _rsiDivBadge.textContent = (_divIsBull ? '▲ ' : '▼ ') + _divLabel;
+      _rsiDivBadge.style.display = ''; _rsiDivBadge.style.color = _divColor;
+      _rsiDivBadge.style.background = _divBg; _rsiDivBadge.style.border = `1px solid ${_divBorder}`;
+    } else { _rsiDivBadge.style.display = 'none'; }
   }
 
-  const labels  = d.chart_dates    || [], prices = d.chart_prices || [];
-  const ema20   = d.chart_ema20    || [], ema50  = d.chart_ema50  || [];
+  const labels  = d.chart_dates    || [];
+  const prices  = d.chart_prices   || [];
+  const ema20   = d.chart_ema20    || [];
+  const ema50   = d.chart_ema50    || [];
   const vols    = d.chart_volumes  || [];
-  const bbUpper = d.chart_bb_upper || [], bbLower = d.chart_bb_lower || [];
+  const bbUpper = d.chart_bb_upper || [];
+  const bbLower = d.chart_bb_lower || [];
   const rsiData = d.chart_rsi      || [];
 
-  const tvEmbed   = document.getElementById('tvChartEmbed');
-  const canvasPC  = document.getElementById('priceChart');
-  const canvasVC  = document.getElementById('volChart');
-  const ovrRow    = document.getElementById('chartOvrRow');
-  const rsiWrap   = document.getElementById('rsiChartWrap');
+  const tvEmbed = document.getElementById('tvChartEmbed');
+  const ovrRow  = document.getElementById('chartOvrRow');
+  const rsiWrap = document.getElementById('rsiChartWrap');
+  const volWrap = document.getElementById('lwcVolWrap');
 
-  // ── When no OHLC history: show "data unavailable" message (no TradingView) ──
+  // ── No data ──
   if (prices.length === 0) {
     chartOHLC = null;
-    if (priceChartInst) { priceChartInst.destroy(); priceChartInst = null; }
-    if (volChartInst)   { volChartInst.destroy();   volChartInst   = null; }
-    if (rsiChartInst)   { rsiChartInst.destroy();   rsiChartInst   = null; }
-    canvasPC.parentElement.style.display = 'none';
-    canvasVC.parentElement.style.display = 'none';
-    if (rsiWrap) rsiWrap.style.display = 'none';
-    if (tvEmbed) tvEmbed.style.display = 'none';
-    if (ovrRow) ovrRow.style.display = 'none';
-
-    // Show a styled "no data" message in the chart area
-    var noDataDiv = document.getElementById('chartNoData');
-    if (!noDataDiv) {
-      noDataDiv = document.createElement('div');
-      noDataDiv.id = 'chartNoData';
-      noDataDiv.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:300px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);';
-      noDataDiv.innerHTML = '<div style="font-family:var(--mono);font-size:13px;color:var(--muted2);letter-spacing:1px;">Chart data temporarily unavailable</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:8px;">Try a different timeframe or ticker</div>';
-      canvasPC.parentElement.parentElement.appendChild(noDataDiv);
-    }
-    noDataDiv.style.display = 'flex';
-    document.getElementById('chartTitle').textContent = d.ticker + ' \u00b7 ' + d.timeframe.toUpperCase() + ' \u00b7 ' + (d.ema_trend || '');
+    _destroyLwcCharts();
+    priceChartInst = null; rsiChartInst = null; volChartInst = null;
+    if (tvEmbed)  tvEmbed.style.display  = 'none';
+    const pc = document.getElementById('priceChart'); if (pc) pc.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-family:var(--mono);font-size:12px;">No chart data available</div>';
+    if (ovrRow)  ovrRow.style.display = 'flex';
+    _syncIndButtons('SIG', chartOverlays.SIG);
+    _syncIndButtons('RSI', chartOverlays.RSI);
     return;
   }
 
-  // Hide no-data message if it was shown previously
-  var noDataDiv = document.getElementById('chartNoData');
-  if (noDataDiv) noDataDiv.style.display = 'none';
-
-  // ── OHLC data available — use Chart.js ──
+  // ── Hide TV embed, show LWC containers ──
   tvMode = false;
-  tvEmbed.style.display = 'none';
-  canvasPC.parentElement.style.display = '';
-  canvasVC.parentElement.style.display = '';
-  // Restore Chart.js overlay button labels
+  if (tvEmbed)  tvEmbed.style.display  = 'none';
+  const priceWrap = document.getElementById('lwcPriceWrap');
+  if (priceWrap) priceWrap.style.display = '';
+  if (volWrap)   volWrap.style.display   = chartOverlays.VOL  ? '' : 'none';
+  if (rsiWrap)   rsiWrap.style.display   = chartOverlays.RSI  ? '' : 'none';
+  if (ovrRow)    ovrRow.style.display    = 'flex';
+
+  // Restore overlay button labels
   const _bbBtn  = document.getElementById('ovrBB');
   const _rsiBtn = document.getElementById('ovrRSI');
   const _sigBtn = document.getElementById('ovrSIG');
   const _volBtn = document.getElementById('ovrVOL');
-  if (_bbBtn)  _bbBtn.textContent  = 'BB Bands';
-  if (_rsiBtn) _rsiBtn.textContent = 'RSI';
-  if (_sigBtn) _sigBtn.textContent = 'Signals';
-  if (_volBtn) { _volBtn.textContent = 'Volume'; _volBtn.style.display = ''; _volBtn.classList.toggle('active', chartOverlays.VOL); }
-  if (ovrRow) ovrRow.style.display = 'flex';
-  // Show bottom indicator buttons, hide TV hint
+  if (_bbBtn)  { _bbBtn.innerHTML  = '≡ BB Bands <span class="ovr-state" id="ovrBBState">'  + (chartOverlays.BB  ? 'ON' : 'OFF') + '</span>'; }
+  if (_rsiBtn) { _rsiBtn.innerHTML = '〰 RSI <span class="ovr-state" id="ovrRSIState">'      + (chartOverlays.RSI ? 'ON' : 'OFF') + '</span>'; }
+  if (_sigBtn) { _sigBtn.innerHTML = '↑↓ Signals <span class="ovr-state" id="ovrSIGState">' + (chartOverlays.SIG ? 'ON' : 'OFF') + '</span>'; }
+  if (_volBtn) { _volBtn.innerHTML = '▮ Volume <span class="ovr-state" id="ovrVOLState">'   + (chartOverlays.VOL ? 'ON' : 'OFF') + '</span>'; _volBtn.style.display = ''; _volBtn.classList.toggle('active', chartOverlays.VOL); }
   const _indRow = document.getElementById('chartIndicatorRow');
   if (_indRow) _indRow.style.display = 'flex';
   const _tvHint = document.getElementById('chartTVHint');
@@ -4181,336 +4031,243 @@ function renderChart(d) {
   _syncIndButtons('SIG', chartOverlays.SIG);
   _syncIndButtons('RSI', chartOverlays.RSI);
 
-  const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
-  const gridColor  = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
-  const labelColor = isDark ? '#484848' : '#7a9ab5';
+  // ── Destroy previous LWC chart instances ──
+  _destroyLwcCharts();
 
-  const pCtx = document.getElementById('priceChart').getContext('2d');
-  if (priceChartInst) priceChartInst.destroy();
-
-  // Candlestick mode: hide price line; otherwise show a blue line as fallback
   const hasCandleData = !!(chartOHLC && chartOHLC.closes && chartOHLC.closes.length);
-  const priceLineColor = hasCandleData ? 'transparent' : '#4d9fff';
-  const priceLineBg    = hasCandleData ? 'transparent' : (() => {
-    const g = pCtx.createLinearGradient(0, 0, 0, 240);
-    g.addColorStop(0, 'rgba(77,159,255,0.18)'); g.addColorStop(1, 'rgba(77,159,255,0.00)');
-    return g;
-  })();
-  const priceLineFill  = !hasCandleData;
+  const priceContEl   = document.getElementById('priceChart');
+  const volContEl     = document.getElementById('volChart');
+  const rsiContEl     = document.getElementById('rsiChart');
 
-  // BB band fill
-  const bbGrad = pCtx.createLinearGradient(0, 0, 0, 240);
-  bbGrad.addColorStop(0, 'rgba(255,255,255,0.035)');
-  bbGrad.addColorStop(1, 'rgba(255,255,255,0.035)');
+  // ── Time-indexed data helpers ──
+  // LWC requires data sorted by time with no duplicates
+  const toSeriesData = (arr, valueKey) =>
+    labels.map((t, i) => ({ time: t, value: arr[i] })).filter(p => p.value != null);
 
-  // y-axis anchors so high/low wicks don't clip when candles are drawn
-  const yMinData = hasCandleData ? chartOHLC.lows  : prices;
-  const yMaxData = hasCandleData ? chartOHLC.highs : prices;
+  // ── Build price data ──
+  let candleData = [];
+  if (hasCandleData) {
+    candleData = labels.map((t, i) => ({
+      time: t,
+      open:  chartOHLC.opens[i],
+      high:  chartOHLC.highs[i],
+      low:   chartOHLC.lows[i],
+      close: chartOHLC.closes[i],
+    })).filter(c => c.open != null && c.high != null && c.low != null && c.close != null);
+  }
+  const priceLineData = toSeriesData(prices, 'value');
+  const ema20Data     = toSeriesData(ema20,  'value');
+  const ema50Data     = toSeriesData(ema50,  'value');
+  const bbUpperData   = toSeriesData(bbUpper,'value');
+  const bbLowerData   = toSeriesData(bbLower,'value');
+  _lwcRsiData         = toSeriesData(rsiData, 'value');
+  _lwcVolData         = labels.map((t, i) => ({
+    time:  t,
+    value: vols[i] || 0,
+    color: (chartOHLC && chartOHLC.closes[i] >= chartOHLC.opens[i]) ? 'rgba(0,210,130,0.6)' : 'rgba(255,60,70,0.6)',
+  })).filter(v => v.value != null);
 
-  priceChartInst = new Chart(pCtx, {
-    type: 'line',
-    plugins: [candlestickPlugin, levelLinesPlugin, crosshairPlugin],
-    data: { labels, datasets: [
-      // 0 — Price close line (visible as fallback when no OHLC; hidden when candles draw)
-      { label:'Price', data:prices,
-        borderColor: priceLineColor, backgroundColor: priceLineBg,
-        borderWidth: hasCandleData ? 0 : 2,
-        pointRadius:0, fill: priceLineFill, tension:0.1, order:10 },
-      // 1 — Y-axis low anchor (always invisible — just widens y-scale for wick room)
-      { label:'_low',  data: yMinData,
-        borderColor:'transparent', backgroundColor:'transparent',
-        borderWidth:0, pointRadius:0, fill:false, tension:0, order:11 },
-      // 2 — Y-axis high anchor
-      { label:'_high', data: yMaxData,
-        borderColor:'transparent', backgroundColor:'transparent',
-        borderWidth:0, pointRadius:0, fill:false, tension:0, order:12 },
-      // 3 — EMA20
-      { label:'EMA20', data:ema20, borderColor:'rgba(255,195,70,0.88)',
-        borderWidth:1.4, pointRadius:0, fill:false, tension:0.1, order:2 },
-      // 4 — EMA50
-      { label:'EMA50', data:ema50, borderColor:'rgba(167,139,250,0.88)',
-        borderWidth:1.4, pointRadius:0, fill:false, tension:0.1, order:3 },
-      // 5 — BB Upper
-      { label:'BB Upper', data:bbUpper, borderColor:'rgba(255,255,255,0.15)',
-        borderWidth:1, borderDash:[3,3], pointRadius:0, fill:'+1',
-        backgroundColor: bbGrad, tension:0.1, order:4, hidden:!chartOverlays.BB },
-      // 6 — BB Lower
-      { label:'BB Lower', data:bbLower, borderColor:'rgba(255,255,255,0.15)',
-        borderWidth:1, borderDash:[3,3], pointRadius:0, fill:false,
-        tension:0.1, order:5, hidden:!chartOverlays.BB },
-    ]},
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      interaction:{ mode:'index', intersect:false },
-      plugins:{ legend:{ display:false }, tooltip:{
-        enabled: false,
-        external: function(context) {
-          var tip = document.getElementById('chartTooltipCustom');
-          if (!tip) {
-            tip = document.createElement('div');
-            tip.id = 'chartTooltipCustom';
-            tip.style.cssText = 'position:absolute;pointer-events:none;background:rgba(20,20,20,.96);border:1px solid rgba(245,166,35,.2);border-radius:4px;padding:10px 14px;font-family:var(--mono);font-size:12px;z-index:9999;transition:opacity .15s;white-space:nowrap;';
-            document.body.appendChild(tip);
-          }
-          var model = context.tooltip;
-          if (model.opacity === 0) { tip.style.opacity = '0'; return; }
-          // Suppress OHLC/EMA tooltip while signal tooltip is visible — prevents overlap
-          var sigTip = document.getElementById('chartTooltip');
-          if (sigTip && sigTip.classList.contains('visible')) { tip.style.opacity = '0'; return; }
-          var items = (model.dataPoints || []).filter(function(dp) {
-            return ['Price','EMA20','EMA50'].includes(dp.dataset.label);
-          });
-          if (!items.length) { tip.style.opacity = '0'; return; }
-          var titleText = labels[items[0].dataIndex] || '';
-          var html = '<div style="color:#888;margin-bottom:6px;">' + titleText + '</div>';
-          items.forEach(function(dp) {
-            if (dp.dataset.label === 'Price' && hasCandleData) {
-              var idx = dp.dataIndex;
-              var o = chartOHLC.opens[idx], h = chartOHLC.highs[idx],
-                  l = chartOHLC.lows[idx],  c = chartOHLC.closes[idx];
-              var bull = c >= o;
-              var oColor = bull ? '#00c98d' : '#ff4459';
-              var cColor = bull ? '#00c98d' : '#ff4459';
-              html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
-                '<span style="display:inline-block;width:10px;height:10px;background:' + (bull ? '#00c98d' : '#ff4459') + ';border-radius:2px;"></span>' +
-                '<span style="color:#999;">O:</span> <span style="color:' + oColor + ';">' + fmt(o) + '</span>' +
-                '&nbsp;&nbsp;<span style="color:#999;">H:</span> <span style="color:#00c98d;">' + fmt(h) + '</span></div>';
-              html += '<div style="margin-left:16px;">' +
-                '<span style="color:#999;">L:</span> <span style="color:#ff4459;">' + fmt(l) + '</span>' +
-                '&nbsp;&nbsp;<span style="color:#999;">C:</span> <span style="color:' + cColor + ';">' + fmt(c) + '</span>' +
-                (bull ? '<span style="color:#00c98d;margin-left:4px;">&#9650;</span>' : '<span style="color:#ff4459;margin-left:4px;">&#9660;</span>') +
-                '</div>';
-            } else if (dp.dataset.label === 'EMA20') {
-              html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
-                '<span style="display:inline-block;width:10px;height:10px;background:#f5a623;border-radius:2px;"></span>' +
-                '<span style="color:#f5a623;">EMA20: ' + fmt(dp.raw) + '</span></div>';
-            } else if (dp.dataset.label === 'EMA50') {
-              html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
-                '<span style="display:inline-block;width:10px;height:10px;background:#a78bfa;border-radius:2px;"></span>' +
-                '<span style="color:#a78bfa;">EMA50: ' + fmt(dp.raw) + '</span></div>';
-            }
-          });
-          tip.innerHTML = html;
-          tip.style.opacity = '1';
-          var pos = context.chart.canvas.getBoundingClientRect();
-          tip.style.left = pos.left + window.scrollX + model.caretX + 12 + 'px';
-          tip.style.top = pos.top + window.scrollY + model.caretY - 20 + 'px';
-        }
-      }},
-      scales:{
-        x:{ grid:{color:gridColor}, ticks:{color:labelColor, maxTicksLimit:8, font:{size:10}} },
-        y:{ grid:{color:gridColor}, ticks:{color:labelColor, font:{size:10}, callback:v=>fmt(v)}, position:'right' }
-      }
+  // ── Create PRICE chart ──
+  if (priceContEl) {
+    priceContEl.innerHTML = '';
+    lwcPrice = LightweightCharts.createChart(priceContEl, {
+      ..._lwcCommonOpts(300),
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)', scaleMargins: { top: 0.1, bottom: 0.1 } },
+    });
+
+    if (hasCandleData) {
+      lwcCandleSeries = lwcPrice.addCandlestickSeries({
+        upColor:          'rgba(0,210,130,0.9)',
+        downColor:        'rgba(255,60,70,0.9)',
+        borderUpColor:    'rgba(0,210,130,0.9)',
+        borderDownColor:  'rgba(255,60,70,0.9)',
+        wickUpColor:      'rgba(0,210,130,0.7)',
+        wickDownColor:    'rgba(255,60,70,0.7)',
+      });
+      lwcCandleSeries.setData(candleData);
+    } else {
+      lwcLineSeries = lwcPrice.addLineSeries({ color: '#4d9fff', lineWidth: 2, priceLineVisible: false });
+      lwcLineSeries.setData(priceLineData);
     }
-  });
 
-  // ── RSI sub-chart ──
-  if (rsiWrap) rsiWrap.style.display = chartOverlays.RSI && rsiData.length ? '' : 'none';
-  if (rsiData.length) {
-    const rCtx = document.getElementById('rsiChart').getContext('2d');
-    if (rsiChartInst) rsiChartInst.destroy();
+    // EMA lines
+    lwcEma20Series = lwcPrice.addLineSeries({ color: 'rgba(255,195,70,0.88)', lineWidth: 1.4, priceLineVisible: false, lastValueVisible: false });
+    lwcEma20Series.setData(ema20Data);
+    lwcEma50Series = lwcPrice.addLineSeries({ color: 'rgba(167,139,250,0.88)', lineWidth: 1.4, priceLineVisible: false, lastValueVisible: false });
+    lwcEma50Series.setData(ema50Data);
 
-    // Colour RSI line: green when < 40, red when > 60, else muted
-    const rsiColors = rsiData.map(v => v == null ? '#888' : v < 40 ? '#00c98d' : v > 60 ? '#ff524a' : '#aaa');
-    const rsiGrad   = rCtx.createLinearGradient(0, 0, 0, 72);
-    rsiGrad.addColorStop(0, 'rgba(255,82,74,0.12)');
-    rsiGrad.addColorStop(0.5, 'rgba(255,255,255,0.0)');
-    rsiGrad.addColorStop(1, 'rgba(0,201,141,0.12)');
+    // BB Bands
+    lwcBbUpperSeries = lwcPrice.addLineSeries({ color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: chartOverlays.BB });
+    lwcBbUpperSeries.setData(bbUpperData);
+    lwcBbLowerSeries = lwcPrice.addLineSeries({ color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: chartOverlays.BB });
+    lwcBbLowerSeries.setData(bbLowerData);
 
-    // RSI divergence overlay plugin
-    const rsiDivPlugin = {
-      id: 'rsiDiv',
-      afterDraw(chart) {
-        // Clear in-place (NOT reassign) so the event-listener closure keeps its reference
-        _rsiHits.length = 0;
-        if (!chartOverlays.RSI) return;
-        const { ctx, scales: { x: xAx, y: yAx } } = chart;
-        if (!xAx || !yAx) return;
+    // Level price lines (Entry, SL, TP)
+    const mainSeries = lwcCandleSeries || lwcLineSeries;
+    if (mainSeries && chartLevels) {
+      const lvlDefs = [
+        { val: chartLevels.entry,     color: '#f5a623', title: 'Entry',  style: 1 },
+        { val: chartLevels.stop_loss, color: '#ff4459', title: 'SL',     style: 2 },
+        { val: chartLevels.tp1,       color: '#00c98d', title: 'TP1',    style: 2 },
+        { val: chartLevels.tp2,       color: '#009d6f', title: 'TP2',    style: 2 },
+        { val: chartLevels.tp3,       color: '#006e4e', title: 'TP3',    style: 2 },
+      ];
+      lvlDefs.forEach(({ val, color, title, style }) => {
+        if (val == null) return;
+        mainSeries.createPriceLine({ price: val, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title });
+      });
+    }
 
-        // Collect the divergences to draw:
-        //   History mode → all historical divergences (both bull+bear co-exist)
-        //   Classic mode → only the most recent divergence (clean)
-        // Fallback: if history mode is on but the backend didn't return a full
-        // history list, still fall back to the classic single divergence so the
-        // toggle never leaves the chart blank when data exists.
-        let toDraw;
-        if (divHistoryMode) {
-          toDraw = (chartDivergenceAll && chartDivergenceAll.length)
-            ? chartDivergenceAll.slice()
-            : (chartDivergence ? [chartDivergence] : []);
-          if (chartDivergence && toDraw.length) {
-            const _last = toDraw[toDraw.length - 1];
-            const _same = _last && _last.rsiBars && chartDivergence.rsiBars &&
-                          _last.rsiBars[0] === chartDivergence.rsiBars[0] &&
-                          _last.rsiBars[1] === chartDivergence.rsiBars[1];
-            if (!_same) toDraw.push(chartDivergence);
-          }
-        } else {
-          toDraw = chartDivergence ? [chartDivergence] : [];
-        }
-        if (!toDraw.length) return;
+    // Buy/Sell signal markers
+    if (mainSeries && chartSignals && chartOverlays.SIG) {
+      const markers = [];
+      const dataMap = hasCandleData ? candleData : priceLineData;
+      (chartSignals.buys  || []).forEach(i => { if (labels[i]) markers.push({ time: labels[i], position: 'belowBar', color: '#f5a623', shape: 'arrowUp',   text: 'B' }); });
+      (chartSignals.sells || []).forEach(i => { if (labels[i]) markers.push({ time: labels[i], position: 'aboveBar', color: '#ff524a', shape: 'arrowDown', text: 'S' }); });
+      markers.sort((a, b) => a.time < b.time ? -1 : 1);
+      mainSeries.setMarkers(markers);
+    }
+  }
 
-        ctx.save();
-        const total = toDraw.length;
-        toDraw.forEach((div, idx) => {
-          if (!div || !div.rsiBars || div.rsiBars.length < 2) return;
-          const rb = div.rsiBars, rv = div.rsiVals;
-          const b0 = Math.max(0, rb[0]), b1 = Math.max(0, rb[1]);
-          const x0 = xAx.getPixelForValue(b0), x1 = xAx.getPixelForValue(b1);
-          const y0 = yAx.getPixelForValue(rv[0] || 50), y1 = yAx.getPixelForValue(rv[1] || 50);
-          if (!x0 || !x1) return;
-          const color = div.isBull ? '#00c98d' : '#ff524a';
-
-          // Opacity ramp (oldest dim → newest bright) when in history mode
-          let lineAlpha, dotAlpha, showLabel, showDotLabel;
-          const isNewest = (idx === total - 1);
-          if (divHistoryMode && total > 1) {
-            const t = idx / (total - 1);
-            lineAlpha    = 0.25 + t * 0.60;
-            dotAlpha     = 0.35 + t * 0.55;
-            showLabel    = isNewest;
-            showDotLabel = isNewest;
-          } else {
-            lineAlpha    = 0.85;
-            dotAlpha     = 1;
-            showLabel    = true;
-            showDotLabel = true;
-          }
-
-          // Dashed line between the two RSI pivots
-          ctx.beginPath();
-          ctx.setLineDash([4, 3]);
-          ctx.strokeStyle = color;
-          ctx.lineWidth   = isNewest ? 1.8 : 1.4;
-          ctx.globalAlpha = lineAlpha;
-          ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Filled circles at pivots + register hit targets
-          [{ x:x0, y:y0, v:rv[0] }, { x:x1, y:y1, v:rv[1] }].forEach(pt => {
-            ctx.beginPath();
-            ctx.arc(pt.x, pt.y, isNewest ? 3.5 : 2.8, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.globalAlpha = dotAlpha;
-            ctx.fill();
-            if (showDotLabel) {
-              // RSI value label (only for the newest in history mode)
-              ctx.globalAlpha = 1;
-              ctx.font = 'bold 7px JetBrains Mono,monospace';
-              ctx.fillStyle = color;
-              ctx.textAlign = 'center';
-              ctx.fillText(pt.v != null ? pt.v.toFixed(1) : '', pt.x, pt.y - 6);
-            }
-            // Register hit target so tooltips still work for older ones too
-            _rsiHits.push({ x: pt.x, y: pt.y, type: 'div', div });
-          });
-
-          // Badge label in centre (newest only in history mode to avoid clutter)
-          if (showLabel) {
-            const mx = (x0 + x1) / 2, my = (y0 + y1) / 2 - 10;
-            ctx.globalAlpha = 1;
-            ctx.font = 'bold 8px JetBrains Mono,monospace';
-            const lbl = div.label || (div.isBull ? 'Bull Div' : 'Bear Div');
-            const tw  = ctx.measureText(lbl).width;
-            ctx.fillStyle = 'rgba(8,8,12,0.82)';
-            ctx.fillRect(mx - tw/2 - 3, my - 9, tw + 6, 12);
-            ctx.fillStyle = color;
-            ctx.textAlign = 'center';
-            ctx.fillText(lbl, mx, my);
-            _rsiHits.push({ x: mx, y: my, type: 'div', div });
-          }
-        });
-        ctx.restore();
-      }
-    };
-
-    rsiChartInst = new Chart(rCtx, {
-      type: 'line',
-      plugins: [crosshairPlugin, rsiDivPlugin, {
-        id: 'rsiZones',
-        beforeDraw(chart) {
-          const { ctx, chartArea: {left,right,top,bottom}, scales:{y} } = chart;
-          if (!y) return;
-          ctx.save();
-          // Overbought zone (60–100) — red tint
-          const y60 = y.getPixelForValue(60), y100 = y.getPixelForValue(100);
-          ctx.fillStyle = 'rgba(255,82,74,0.06)';
-          ctx.fillRect(left, Math.min(y60,y100), right-left, Math.abs(y100-y60));
-          // Oversold zone (0–40) — green tint
-          const y0  = y.getPixelForValue(0),  y40  = y.getPixelForValue(40);
-          ctx.fillStyle = 'rgba(0,201,141,0.06)';
-          ctx.fillRect(left, Math.min(y0,y40), right-left, Math.abs(y40-y0));
-          // Reference lines at 30, 40, 60, 70
-          [[70,'rgba(255,82,74,0.3)'],[60,'rgba(255,82,74,0.5)'],
-           [40,'rgba(0,201,141,0.5)'],[30,'rgba(0,201,141,0.3)']].forEach(([v,c]) => {
-            const yp = y.getPixelForValue(v);
-            ctx.beginPath();
-            ctx.setLineDash([3,3]);
-            ctx.strokeStyle = c;
-            ctx.lineWidth = 0.8;
-            ctx.moveTo(left, yp); ctx.lineTo(right, yp);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.font = '7px monospace';
-            ctx.fillStyle = c;
-            ctx.textAlign = 'right';
-            ctx.fillText(v, right - 2, yp - 2);
-          });
-          ctx.restore();
-        }
-      }],
-      data:{
-        labels,
-        datasets:[{
-          label:'RSI', data:rsiData,
-          borderColor: '#aaaaaa',
-          segment:{ borderColor: ctx => {
-            const v = ctx.p1.parsed.y;
-            return v < 40 ? '#00c98d' : v > 60 ? '#ff524a' : 'rgba(255,255,255,0.35)';
-          }},
-          borderWidth:1.5, pointRadius:0, fill:false, tension:0.2,
-        }]
+  // ── Create VOLUME chart ──
+  if (volContEl) {
+    volContEl.innerHTML = '';
+    lwcVol = LightweightCharts.createChart(volContEl, {
+      ..._lwcCommonOpts(60),
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)', scaleMargins: { top: 0.1, bottom: 0 } },
+      timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: false, visible: false },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: 'rgba(245,166,35,0.4)', labelBackgroundColor: 'rgba(20,16,10,0.95)', style: 0, width: 1 },
+        horzLine: { visible: false, labelVisible: false },
       },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        animation:{duration:0},
-        interaction:{mode:'index',intersect:false},
-        plugins:{legend:{display:false}, tooltip:{
-          backgroundColor:'rgba(20,20,20,.96)', borderColor:'rgba(245,166,35,.2)', borderWidth:1,
-          titleColor:'#888', bodyColor:'#f2f2f2', padding:8,
-          callbacks:{label:ctx=>`RSI: ${ctx.raw != null ? ctx.raw.toFixed(1) : '—'}`}
-        }},
-        scales:{
-          x:{display:false},
-          y:{min:0, max:100, position:'right',
-             grid:{color:gridColor},
-             ticks:{color:labelColor, font:{size:8}, maxTicksLimit:3,
-                    callback:v => v===50?'50':''}}
-        }
+    });
+    lwcVolSeries = lwcVol.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'right' });
+    lwcVolSeries.setData(_lwcVolData);
+  }
+
+  // ── Create RSI chart ──
+  if (rsiContEl) {
+    rsiContEl.innerHTML = '';
+    lwcRsi = LightweightCharts.createChart(rsiContEl, {
+      ..._lwcCommonOpts(90),
+      rightPriceScale: {
+        borderColor: 'rgba(255,255,255,0.06)',
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+        autoScale: false,
+        mode: 0,
+      },
+      timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: false, visible: false },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: 'rgba(245,166,35,0.4)', labelBackgroundColor: 'rgba(20,16,10,0.95)', style: 0, width: 1 },
+        horzLine: { color: 'rgba(245,166,35,0.25)', labelBackgroundColor: 'rgba(20,16,10,0.95)', style: 2, width: 1 },
+      },
+    });
+
+    lwcRsiSeries = lwcRsi.addLineSeries({ color: 'rgba(168,120,255,0.85)', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    lwcRsiSeries.setData(_lwcRsiData);
+    // Set fixed RSI scale 0-100
+    lwcRsi.priceScale('right').applyOptions({ autoScale: false });
+    lwcRsiSeries.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 }, margins: { above: 0.1, below: 0.1 } }) });
+
+    // Overbought/oversold reference lines
+    lwcRsiSeries.createPriceLine({ price: 70, color: 'rgba(255,82,74,0.35)',  lineWidth: 1, lineStyle: 1, axisLabelVisible: true,  title: 'OB' });
+    lwcRsiSeries.createPriceLine({ price: 60, color: 'rgba(255,82,74,0.18)',  lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+    lwcRsiSeries.createPriceLine({ price: 50, color: 'rgba(255,255,255,0.1)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+    lwcRsiSeries.createPriceLine({ price: 40, color: 'rgba(0,201,141,0.18)',  lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+    lwcRsiSeries.createPriceLine({ price: 30, color: 'rgba(0,201,141,0.35)',  lineWidth: 1, lineStyle: 1, axisLabelVisible: true,  title: 'OS' });
+  }
+
+  // ── Sync timeScale: scroll/zoom on price chart syncs RSI + vol ──
+  if (lwcPrice && (lwcRsi || lwcVol)) {
+    lwcPrice.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (_lwcSyncing || !range) return;
+      _lwcSyncing = true;
+      try {
+        if (lwcRsi) lwcRsi.timeScale().setVisibleLogicalRange(range);
+        if (lwcVol) lwcVol.timeScale().setVisibleLogicalRange(range);
+      } finally { setTimeout(() => { _lwcSyncing = false; }, 0); }
+    });
+    // Redraw divergence overlays whenever view changes
+    lwcPrice.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(_drawDivOverlays));
+    if (lwcRsi) lwcRsi.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(_drawDivOverlays));
+  }
+
+  // ── Crosshair sync: move crosshair on RSI/vol when price chart crosshair moves ──
+  if (lwcPrice) {
+    lwcPrice.subscribeCrosshairMove(param => {
+      if (!param || !param.time) {
+        if (lwcRsi) lwcRsi.clearCrosshairPosition();
+        if (lwcVol) lwcVol.clearCrosshairPosition();
+        return;
       }
+      const rsiPt = _lwcRsiData.find(p => p.time === param.time);
+      const volPt = _lwcVolData.find(p => p.time === param.time);
+      if (lwcRsi && lwcRsiSeries && rsiPt) lwcRsi.setCrosshairPosition(rsiPt.value, param.time, lwcRsiSeries);
+      if (lwcVol && lwcVolSeries && volPt) lwcVol.setCrosshairPosition(volPt.value, param.time, lwcVolSeries);
+      // Update custom tooltip
+      _lwcUpdateTooltip(param, labels, prices, rsiPt, volPt, hasCandleData);
     });
   }
 
-  const vCtx = document.getElementById('volChart').getContext('2d');
-  if (volChartInst) volChartInst.destroy();
-  const maxVol = Math.max(...vols.filter(v=>v>0)) || 1;
-  const volColors = prices.map((p,i)=> i===0 ? 'rgba(245,166,35,.35)' : p>=(prices[i-1]||p) ? 'rgba(0,201,141,.5)' : 'rgba(255,68,89,.5)');
+  // ── Fit content and draw overlays ──
+  if (lwcPrice) lwcPrice.timeScale().fitContent();
+  setTimeout(_drawDivOverlays, 50);
 
-  volChartInst = new Chart(vCtx, {
-    type:'bar',
-    data:{labels,datasets:[{label:'Volume',data:vols,backgroundColor:volColors,borderWidth:0,borderRadius:1}]},
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{
-        backgroundColor:'rgba(20,20,20,.96)',borderColor:'rgba(245,166,35,.2)',borderWidth:1,
-        callbacks:{label:ctx=>` Vol: ${fmtBig(ctx.raw)}`}
-      }},
-      scales:{x:{display:false},y:{display:false,max:maxVol*2}}
+  // ── Shim for legacy code that checks priceChartInst ──
+  priceChartInst = lwcPrice ? { _isLWC: true } : null;
+  rsiChartInst   = lwcRsi   ? { _isLWC: true } : null;
+  volChartInst   = lwcVol   ? { _isLWC: true } : null;
+}
+
+/* Lightweight Charts tooltip handler */
+function _lwcUpdateTooltip(param, labels, prices, rsiPt, volPt, hasCandleData) {
+  var tip = document.getElementById('chartTooltipCustom');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'chartTooltipCustom';
+    tip.style.cssText = 'position:fixed;pointer-events:none;background:rgba(20,20,20,.96);border:1px solid rgba(245,166,35,.2);border-radius:4px;padding:10px 14px;font-family:var(--mono);font-size:12px;z-index:9999;transition:opacity .15s;white-space:nowrap;';
+    document.body.appendChild(tip);
+  }
+  if (!param || !param.time) { tip.style.opacity = '0'; return; }
+
+  // Position near cursor
+  var el = document.getElementById('priceChart');
+  if (!el) return;
+  var rect = el.getBoundingClientRect();
+  var px = (param.point ? param.point.x : 0) + rect.left + 20;
+  var py = (param.point ? param.point.y : 0) + rect.top  - 20;
+  // Flip if near right edge
+  if (px + 200 > window.innerWidth) px -= 230;
+  tip.style.left = px + 'px'; tip.style.top = py + 'px';
+
+  var timeLabel = param.time || '';
+  var html = '<div style="color:#888;margin-bottom:6px;">' + timeLabel + '</div>';
+
+  if (hasCandleData && lwcCandleSeries) {
+    var bar = param.seriesData.get(lwcCandleSeries);
+    if (bar) {
+      var bull = bar.close >= bar.open;
+      var clr  = bull ? '#00c98d' : '#ff4459';
+      html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px;">' +
+        '<span style="display:inline-block;width:10px;height:10px;background:' + clr + ';border-radius:2px;"></span>' +
+        '<span style="color:#999;">O:</span><span style="color:' + clr + ';">' + fmt(bar.open) + '</span>&nbsp;' +
+        '<span style="color:#999;">H:</span><span style="color:#00c98d;">' + fmt(bar.high) + '</span></div>';
+      html += '<div style="margin-left:16px;"><span style="color:#999;">L:</span><span style="color:#ff4459;">' +
+        fmt(bar.low) + '</span>&nbsp;<span style="color:#999;">C:</span><span style="color:' + clr + ';">' + fmt(bar.close) + '</span></div>';
     }
-  });
+  } else if (lwcLineSeries) {
+    var lv = param.seriesData.get(lwcLineSeries);
+    if (lv) html += '<div>Price: <span style="color:#4d9fff;">' + fmt(lv.value) + '</span></div>';
+  }
+  if (lwcEma20Series) { var e2 = param.seriesData.get(lwcEma20Series); if (e2) html += '<div><span style="color:#ffc346;">EMA20 ' + fmt(e2.value) + '</span></div>'; }
+  if (lwcEma50Series) { var e5 = param.seriesData.get(lwcEma50Series); if (e5) html += '<div><span style="color:#a78bfa;">EMA50 ' + fmt(e5.value) + '</span></div>'; }
+  if (rsiPt) html += '<div><span style="color:#a878ff;">RSI ' + rsiPt.value.toFixed(1) + '</span></div>';
+  if (volPt) html += '<div style="color:#666;font-size:10px;">Vol ' + (volPt.value >= 1e6 ? (volPt.value/1e6).toFixed(1)+'M' : volPt.value >= 1e3 ? (volPt.value/1e3).toFixed(0)+'K' : volPt.value.toFixed(0)) + '</div>';
 
-  document.getElementById('chartTitle').textContent = `${d.ticker} · ${d.timeframe.toUpperCase()} · ${d.ema_trend}`;
+  tip.innerHTML = html;
+  tip.style.opacity = '1';
 }
 
 /* ════════════════════════════════════════════
@@ -6099,6 +5856,11 @@ function closeMobileDrawers() {
 // On resize: close drawers if going to desktop
 window.addEventListener('resize', () => {
   if (!isMobile()) closeMobileDrawers();
+  // Handle LWC chart resize
+  if (lwcPrice) lwcPrice.applyOptions({ width: document.getElementById('priceChart')?.offsetWidth || 0 });
+  if (lwcRsi)   lwcRsi.applyOptions({ width: document.getElementById('rsiChart')?.offsetWidth || 0 });
+  if (lwcVol)   lwcVol.applyOptions({ width: document.getElementById('volChart')?.offsetWidth || 0 });
+  requestAnimationFrame(_drawDivOverlays);
 });
 
 /* ════════════════════════════════════════════
@@ -9382,33 +9144,37 @@ function toggleOverlay(type, btn) {
   if (stateEl) stateEl.textContent = on ? 'ON' : 'OFF';
 
   if (type === 'SIG') {
-    // Toggle buy/sell signal points on Chart.js price chart
-    if (priceChartInst) {
-      priceChartInst.data.datasets.forEach(function(ds) {
-        if (ds.label === 'Buy Signals' || ds.label === 'Sell Signals') ds.hidden = !on;
-      });
-      priceChartInst.update('none');
+    // Toggle buy/sell signal markers on LWC price chart
+    var mainSeries = lwcCandleSeries || lwcLineSeries;
+    if (mainSeries && chartSignals) {
+      if (on) {
+        var _sigLabels = (currentData && currentData.chart_dates) || [];
+        var _markers = [];
+        (chartSignals.buys  || []).forEach(function(i) { if (_sigLabels[i]) _markers.push({ time: _sigLabels[i], position: 'belowBar', color: '#f5a623', shape: 'arrowUp',   text: 'B' }); });
+        (chartSignals.sells || []).forEach(function(i) { if (_sigLabels[i]) _markers.push({ time: _sigLabels[i], position: 'aboveBar', color: '#ff524a', shape: 'arrowDown', text: 'S' }); });
+        _markers.sort(function(a,b){ return a.time < b.time ? -1 : 1; });
+        mainSeries.setMarkers(_markers);
+      } else {
+        mainSeries.setMarkers([]);
+      }
     }
   }
   if (type === 'RSI') {
     var rw = document.getElementById('rsiChartWrap');
     if (rw) rw.style.display = on ? '' : 'none';
+    requestAnimationFrame(_drawDivOverlays);
   }
   if (type === 'BB') {
-    // Toggle BB bands on Chart.js price chart
-    if (priceChartInst) {
-      priceChartInst.data.datasets.forEach(function(ds) {
-        if (ds.label === 'BB Upper' || ds.label === 'BB Lower') ds.hidden = !on;
-      });
-      priceChartInst.update('none');
-    }
+    // Toggle BB bands on LWC price chart
+    if (lwcBbUpperSeries) lwcBbUpperSeries.applyOptions({ visible: on });
+    if (lwcBbLowerSeries) lwcBbLowerSeries.applyOptions({ visible: on });
   }
   if (type === 'VOL') {
-    var vw = document.getElementById('volChart');
-    if (vw) vw.parentElement.style.display = on ? '' : 'none';
+    var vwrap = document.getElementById('lwcVolWrap');
+    if (vwrap) vwrap.style.display = on ? '' : 'none';
   }
   if (type === 'DELTA') {
-    // Delta not yet wired to Chart.js — placeholder
+    // Delta not yet wired — placeholder
   }
 
   // TradingView mode toggles
@@ -9426,9 +9192,8 @@ function toggleDivHistory(btn) {
   btn.classList.toggle('active', divHistoryMode);
   var stateEl = document.getElementById('ovrDIVHISTState');
   if (stateEl) stateEl.textContent = divHistoryMode ? 'ON' : 'OFF';
-  // Redraw both the price chart (divergence lines on candles) and the RSI sub-chart
-  try { if (typeof priceChartInst !== 'undefined' && priceChartInst) priceChartInst.update('none'); } catch(_) {}
-  try { if (typeof rsiChartInst   !== 'undefined' && rsiChartInst)   rsiChartInst.update('none');   } catch(_) {}
+  // Redraw divergence overlays on both price and RSI charts
+  requestAnimationFrame(_drawDivOverlays);
 }
 
 // ─── TF PILLS ───
