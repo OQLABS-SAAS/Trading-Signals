@@ -3672,6 +3672,41 @@ let _lwcRsiData      = [];     // cached RSI data for crosshair sync
 let _lwcVolData      = [];     // cached vol data for crosshair sync
 let _lwcSyncing      = false;  // prevents recursive timeScale sync
 
+/* Global time-value converter — used by both renderChart() and _drawDivOverlays().
+   Converts a raw backend date string to the value LWC expects:
+   - "YYYY-MM-DD"            → returned as-is (LWC handles natively)
+   - "YYYY-MM-DD HH:MM"      → Unix timestamp (seconds)
+   - Any other parseable str  → Unix timestamp (seconds)
+   Must stay in sync with the toTimeVal logic inside renderChart(). */
+function toTimeVal(dateStr) {
+  if (!dateStr) return null;
+  if (typeof dateStr === 'number') return dateStr;
+  const s = String(dateStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const isoSpace = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/);
+  if (isoSpace) {
+    const d = new Date(`${isoSpace[1]}T${isoSpace[2]}:00`);
+    if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  }
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  }
+  const mondd = s.match(/^([A-Za-z]{3})(\d{2})\s+(\d{2}:\d{2})$/);
+  if (mondd) {
+    const d = new Date(`${mondd[1]} ${mondd[2]} ${new Date().getFullYear()} ${mondd[3]}:00`);
+    if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  }
+  const monD = s.match(/^([A-Za-z]{3})\s+(\d{1,2})$/);
+  if (monD) {
+    const d = new Date(`${monD[1]} ${monD[2]} ${new Date().getFullYear()}`);
+    if (!isNaN(d.getTime())) return s;
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  return null;
+}
+
 let chartLevels      = null; // set by renderChart(), read by plugin
 let chartSignals     = null; // { buys:[], sells:[], prices:[] } for arrow markers
 let chartDivergence  = null; // most recent divergence pivot data (for current-mode overlay)
@@ -3848,7 +3883,7 @@ function _drawDivOverlays() {
       const bars  = getX === 'price' ? div.priceBars : div.rsiBars;
       const vals  = getX === 'price' ? div.priceVals : div.rsiVals;
       if (!bars || bars.length < 2) return;
-      const t0 = labels[bars[0]], t1 = labels[bars[1]];
+      const t0 = toTimeVal(labels[bars[0]]), t1 = toTimeVal(labels[bars[1]]);
       if (!t0 || !t1) return;
       const x0 = chart.timeScale().timeToCoordinate(t0);
       const x1 = chart.timeScale().timeToCoordinate(t1);
@@ -4045,46 +4080,8 @@ function renderChart(d) {
   const volContEl     = document.getElementById('volChart');
   const rsiContEl     = document.getElementById('rsiChart');
 
-  // ── Time conversion: LWC needs Unix timestamps (seconds) for intraday data ──
-  // Daily "YYYY-MM-DD" strings are passed as-is (LWC handles those natively).
-  // Anything with a time component must be converted to a Unix timestamp,
-  // otherwise LWC silently drops the data point.
-  function toTimeVal(dateStr) {
-    if (!dateStr) return null;
-    // Already a Unix timestamp (number)
-    if (typeof dateStr === 'number') return dateStr;
-    const s = String(dateStr).trim();
-    // Pure ISO date "YYYY-MM-DD" — LWC handles natively as a string
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    // ISO datetime with space "YYYY-MM-DD HH:MM" (backend intraday format)
-    // Normalize space → T so Safari can parse it correctly
-    const isoSpace = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/);
-    if (isoSpace) {
-      const d = new Date(`${isoSpace[1]}T${isoSpace[2]}:00`);
-      if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
-    }
-    // ISO datetime with T separator "YYYY-MM-DDTHH:MM..."
-    if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
-      const d = new Date(s);
-      if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
-    }
-    // Legacy backend format "AprDD HH:MM" (no space between month+day)
-    const mondd = s.match(/^([A-Za-z]{3})(\d{2})\s+(\d{2}:\d{2})$/);
-    if (mondd) {
-      const d = new Date(`${mondd[1]} ${mondd[2]} ${new Date().getFullYear()} ${mondd[3]}:00`);
-      if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
-    }
-    // Legacy daily "Apr 08" or "Apr  8"
-    const monD = s.match(/^([A-Za-z]{3})\s+(\d{1,2})$/);
-    if (monD) {
-      const d = new Date(`${monD[1]} ${monD[2]} ${new Date().getFullYear()}`);
-      if (!isNaN(d.getTime())) return s; // Return string so LWC treats as daily
-    }
-    // Generic fallback
-    const d = new Date(s);
-    if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
-    return null;
-  }
+  // toTimeVal() is now a global function (defined above renderChart) so that
+  // _drawDivOverlays() can also use it for timeToCoordinate() lookups.
 
   // ── Time-indexed data helpers ──
   const toSeriesData = (arr) =>
