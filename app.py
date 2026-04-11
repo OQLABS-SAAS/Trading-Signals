@@ -1815,21 +1815,48 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         confidence = "LOW"
 
     # ══════════════════════════════════════════════════════════════
+    # TRADINGVIEW PRIMARY SIGNAL OVERRIDE
+    # When TV data is available, use TradingView's 26-indicator
+    # Recommend.All score as the authoritative signal.  Our custom
+    # analysis still drives the narrative, trade levels, and context
+    # but the headline BUY / HOLD / SELL matches what traders see
+    # on TradingView exactly.
+    # ══════════════════════════════════════════════════════════════
+    tv_signal_used = False
+    if tv:
+        tv_rec_label = tv.get("tv_rec_label", "")
+        tv_rec_all   = tv.get("tv_rec_all")
+        if tv_rec_label in ("STRONG BUY", "BUY", "NEUTRAL", "SELL", "STRONG SELL"):
+            if tv_rec_label == "STRONG BUY":
+                signal, confidence = "BUY",  "HIGH"
+            elif tv_rec_label == "BUY":
+                signal, confidence = "BUY",  "MEDIUM"
+            elif tv_rec_label == "NEUTRAL":
+                signal, confidence = "HOLD", "LOW"
+            elif tv_rec_label == "SELL":
+                signal, confidence = "SELL", "MEDIUM"
+            else:  # STRONG SELL
+                signal, confidence = "SELL", "HIGH"
+            tv_signal_used = True
+            print(f"[TV-signal] {ticker} → {tv_rec_label} (score={tv_rec_all}) → {signal}/{confidence}")
+
+    # ══════════════════════════════════════════════════════════════
     # GATE 1: Higher-timeframe trend filter
-    # Block any signal that fights the HTF trend.
+    # Skip when TV signal is used — TV already aggregates HTF context.
     # ══════════════════════════════════════════════════════════════
     htf_bias = _htf_trend_bias(mtf, timeframe)
     gate_note = ""
-    if signal == "SELL" and htf_bias == "BULLISH":
-        print(f"[gate] HTF trend BULLISH — blocking SELL on {ticker} {timeframe}")
-        signal = "HOLD"
-        confidence = "LOW"
-        gate_note = "HTF trend is bullish — counter-trend SELL suppressed."
-    elif signal == "BUY" and htf_bias == "BEARISH":
-        print(f"[gate] HTF trend BEARISH — blocking BUY on {ticker} {timeframe}")
-        signal = "HOLD"
-        confidence = "LOW"
-        gate_note = "HTF trend is bearish — counter-trend BUY suppressed."
+    if not tv_signal_used:
+        if signal == "SELL" and htf_bias == "BULLISH":
+            print(f"[gate] HTF trend BULLISH — blocking SELL on {ticker} {timeframe}")
+            signal = "HOLD"
+            confidence = "LOW"
+            gate_note = "HTF trend is bullish — counter-trend SELL suppressed."
+        elif signal == "BUY" and htf_bias == "BEARISH":
+            print(f"[gate] HTF trend BEARISH — blocking BUY on {ticker} {timeframe}")
+            signal = "HOLD"
+            confidence = "LOW"
+            gate_note = "HTF trend is bearish — counter-trend BUY suppressed."
 
     # ══════════════════════════════════════════════════════════════
     # GATE 2: Candle footprint sanity check
@@ -1853,8 +1880,9 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
     # GATE 3: Confidence floor
     # Any signal that survives the gates but still scores LOW is
     # not actionable — downgrade to HOLD so we don't mislead users.
+    # Skip when using TV signal — TV's label is always actionable.
     # ══════════════════════════════════════════════════════════════
-    if signal != "HOLD" and confidence == "LOW":
+    if not tv_signal_used and signal != "HOLD" and confidence == "LOW":
         print(f"[gate] confidence floor — downgrading {signal} to HOLD on {ticker}")
         signal = "HOLD"
         gate_note = gate_note or "Indicator conviction is too weak for an actionable signal."
@@ -1991,6 +2019,9 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         "bullish_count": bullish_count,
         "bearish_count": bearish_count,
         "net_score": net,
+        "tv_signal_used": tv_signal_used,
+        "tv_rec_label": tv.get("tv_rec_label") if tv else None,
+        "tv_rec_all": tv.get("tv_rec_all") if tv else None,
     }
 
     # Call OpenAI to narrate data if API key is configured
