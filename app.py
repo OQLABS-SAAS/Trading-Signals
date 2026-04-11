@@ -1154,7 +1154,7 @@ def calculate_win_rate(df, signal):
         return {"win_rate": None, "sample_size": 0}
 
 # ─── FREE PRE-SCREEN (no API call) ───────────────────────────
-def pre_screen(ind):
+def pre_screen(ind, tv=None):
     rsi       = ind.get("rsi", 50)
     bb_pos    = ind.get("bb_pos", 0.5)
     macd_hist = ind.get("macd_hist", 0)
@@ -1194,20 +1194,39 @@ def pre_screen(ind):
         and bb_pos < 0.18
     )
 
-    if net_bull >= 4:
-        hint, reason = "BUY", f"RSI={rsi}, BB={bb_pos:.0%}, vol={vol_ratio}x — strong oversold setup"
-    elif net_bear >= 4:
-        hint, reason = "SELL", f"RSI={rsi}, BB={bb_pos:.0%}, vol={vol_ratio}x — strong overbought setup"
-    elif counter_bounce:
-        hint, reason = "COUNTER_BUY", f"RSI={rsi} oversold in {ema_trend} trend near lower BB — bounce candidate"
-    elif net_bull >= 2:
-        hint, reason = "POSSIBLE_BUY", f"RSI={rsi}, BB={bb_pos:.0%} — moderate bullish setup forming"
-    elif net_bear >= 2:
-        hint, reason = "POSSIBLE_SELL", f"RSI={rsi}, BB={bb_pos:.0%} — moderate bearish setup forming"
+    # ── TV primary signal — same source as get_analysis() ──────
+    # When TV data is available use Recommend.All so scanner matches
+    # the signals tab exactly.
+    if tv:
+        tv_rec_label = tv.get("tv_rec_label", "")
+        tv_score     = tv.get("tv_rec_all")
+        score_str    = f"{tv_score:+.2f}" if tv_score is not None else "?"
+        if tv_rec_label == "STRONG BUY":
+            hint, reason = "BUY",  f"TV: STRONG BUY ({score_str}) — {bull_score}B/{bear_score}S indicators"
+        elif tv_rec_label == "BUY":
+            hint, reason = "BUY",  f"TV: BUY ({score_str}) — {bull_score}B/{bear_score}S indicators"
+        elif tv_rec_label == "STRONG SELL":
+            hint, reason = "SELL", f"TV: STRONG SELL ({score_str}) — {bear_score}S/{bull_score}B indicators"
+        elif tv_rec_label == "SELL":
+            hint, reason = "SELL", f"TV: SELL ({score_str}) — {bear_score}S/{bull_score}B indicators"
+        else:  # NEUTRAL or missing
+            hint, reason = None,   f"TV: NEUTRAL ({score_str}) — no directional setup"
+        call_claude = hint in ("BUY", "SELL")
     else:
-        hint, reason = None, "No clear setup — market neutral"
-
-    call_claude = hint in ("BUY", "SELL", "COUNTER_BUY")
+        # Fallback: custom scoring when TV unavailable
+        if net_bull >= 4:
+            hint, reason = "BUY", f"RSI={rsi}, BB={bb_pos:.0%}, vol={vol_ratio}x — strong oversold setup"
+        elif net_bear >= 4:
+            hint, reason = "SELL", f"RSI={rsi}, BB={bb_pos:.0%}, vol={vol_ratio}x — strong overbought setup"
+        elif counter_bounce:
+            hint, reason = "COUNTER_BUY", f"RSI={rsi} oversold in {ema_trend} trend near lower BB — bounce candidate"
+        elif net_bull >= 2:
+            hint, reason = "POSSIBLE_BUY", f"RSI={rsi}, BB={bb_pos:.0%} — moderate bullish setup forming"
+        elif net_bear >= 2:
+            hint, reason = "POSSIBLE_SELL", f"RSI={rsi}, BB={bb_pos:.0%} — moderate bearish setup forming"
+        else:
+            hint, reason = None, "No clear setup — market neutral"
+        call_claude = hint in ("BUY", "SELL", "COUNTER_BUY")
 
     return {
         "opportunity": hint is not None,
@@ -3182,7 +3201,7 @@ def scan_list():
                 tv = fetch_tv_data(raw, asset_type, timeframe)
                 if tv and tv.get("tv_price"):
                     ind = build_ind_from_tv(tv)
-                    screen = pre_screen(ind)
+                    screen = pre_screen(ind, tv=tv)
                     ct     = detect_counter_trade(ind)
                     # Get volume from TV for display
                     volume = tv.get("tv_volume") or 0
