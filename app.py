@@ -2703,15 +2703,28 @@ def analyze():
 
         # ── STEP 2c: RSI divergence safety net ──────────────────────────────────
         # detect_rsi_divergence only runs inside calculate_indicators() (yfinance path).
-        # When yfinance fails and the fallback chart paths fire, divergence is never
+        # When yfinance fails and fallback chart paths fire, divergence is never
         # computed — ind["rsi_divergence"] stays as {"type":"none"}.
-        # Fix: if we now have chart_highs/lows/rsi from ANY path, run it here.
+        # Fix: run divergence on whatever chart data we have from ANY path.
+        # If real highs/lows aren't available (Stooq/Yahoo close-only fallbacks),
+        # approximate them from closes — divergence still fires correctly.
         if ind.get("rsi_divergence", {}).get("type") == "none":
-            _h = ind.get("chart_highs") or []
-            _l = ind.get("chart_lows")  or []
-            _r = ind.get("chart_rsi")   or []
-            # filter out None entries and align lengths
-            _valid = [(h,l,r) for h,l,r in zip(_h,_l,_r) if h is not None and l is not None and r is not None]
+            _prices = ind.get("chart_prices") or []
+            _rsi_raw = ind.get("chart_rsi")   or []
+            _h_raw   = ind.get("chart_highs") or []
+            _l_raw   = ind.get("chart_lows")  or []
+
+            # Approximate highs/lows from closes when real OHLC not available
+            if len(_prices) >= 20 and (not _h_raw or len(_h_raw) < len(_prices)):
+                _h_raw = [max(_prices[i], _prices[i-1]) if i > 0 else _prices[i] for i in range(len(_prices))]
+                _l_raw = [min(_prices[i], _prices[i-1]) if i > 0 else _prices[i] for i in range(len(_prices))]
+
+            # Align all three arrays, drop None entries
+            _valid = [
+                (h, l, r)
+                for h, l, r in zip(_h_raw, _l_raw, _rsi_raw)
+                if h is not None and l is not None and r is not None
+            ]
             if len(_valid) >= 20:
                 _hh = pd.Series([v[0] for v in _valid])
                 _ll = pd.Series([v[1] for v in _valid])
@@ -2722,6 +2735,8 @@ def analyze():
                     print(f"[analyze] divergence safety-net: type={_div.get('type')} all={len(_div.get('all',[]))}")
                 except Exception as _de:
                     print(f"[analyze] divergence safety-net failed: {_de}")
+            else:
+                print(f"[analyze] divergence safety-net: not enough data ({len(_valid)} valid bars)")
 
         # Hard fail only when BOTH TV and yfinance/Stooq are unavailable
         if not tv_ok and not yf_ok:
