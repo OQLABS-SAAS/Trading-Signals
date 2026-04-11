@@ -601,13 +601,24 @@ def calculate_indicators(df, timeframe="1d"):
         elif prev_r <= 60 and curr_r > 60:
             chart_sell_signals.append(chart_i)
 
-    # Convert divergence pivot bar indices → chart-window coordinates
-    # (only include if the pivot falls within the visible chart window)
+    # Convert divergence pivot bar indices → chart-window coordinates.
+    # Require ALL four bars (both price pivots + both RSI pivots) to be inside
+    # the chart window.  If any bar is off-screen the translated index would be
+    # negative → labels[negative] = undefined in JS → canvas draw silently skips.
+    # It is cleaner to emit empty lists (no divergence drawn) than partial ones
+    # that draw on price but not on RSI (or vice-versa).
     if rsi_div.get("price_pivot_bars"):
         pb = rsi_div["price_pivot_bars"]
         rb = rsi_div["rsi_pivot_bars"]
-        rsi_div["chart_price_pivot_bars"] = [b - chart_start_idx for b in pb if b >= chart_start_idx]
-        rsi_div["chart_rsi_pivot_bars"]   = [b - chart_start_idx for b in rb if b >= chart_start_idx]
+        all_in_window = (len(pb) >= 2 and len(rb) >= 2 and
+                         all(b >= chart_start_idx for b in pb) and
+                         all(b >= chart_start_idx for b in rb))
+        if all_in_window:
+            rsi_div["chart_price_pivot_bars"] = [b - chart_start_idx for b in pb]
+            rsi_div["chart_rsi_pivot_bars"]   = [b - chart_start_idx for b in rb]
+        else:
+            rsi_div["chart_price_pivot_bars"] = []
+            rsi_div["chart_rsi_pivot_bars"]   = []
     else:
         rsi_div["chart_price_pivot_bars"] = []
         rsi_div["chart_rsi_pivot_bars"]   = []
@@ -621,8 +632,11 @@ def calculate_indicators(df, timeframe="1d"):
         rb2 = _dv.get("rsi_pivot_bars", []) or []
         if len(pb2) < 2 or len(rb2) < 2:
             continue
-        # Keep only divergences where BOTH price pivots fall inside the chart window.
-        if pb2[0] < chart_start_idx or pb2[1] < chart_start_idx:
+        # Keep only divergences where ALL four pivot bars fall inside the chart window.
+        # If any bar (price or RSI) is before chart_start_idx the translated index
+        # becomes negative → labels[negative] = undefined in JS → canvas draw skips.
+        if (pb2[0] < chart_start_idx or pb2[1] < chart_start_idx or
+                rb2[0] < chart_start_idx or rb2[1] < chart_start_idx):
             continue
         _dv_copy = dict(_dv)
         _dv_copy["chart_price_pivot_bars"] = [b - chart_start_idx for b in pb2]

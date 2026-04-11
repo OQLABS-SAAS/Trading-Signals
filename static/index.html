@@ -4922,7 +4922,7 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
       var sig = res ? (res.signal_hint || 'HOLD') : '—';
       var rsi = res ? (res.rsi != null ? res.rsi.toFixed(1) : '—') : '—';
       var sigClass = sig === 'BUY' || sig.includes('BUY') ? 'buy' : sig === 'SELL' || sig.includes('SELL') ? 'sell' : 'hold';
-      html += '<td onclick="event.stopPropagation();quickLoad(\'' + ticker + '\',\'' + assetType + '\',\'' + tf + '\')" style="cursor:pointer;">';
+      html += '<td onclick="event.stopPropagation();scannerLoadTicker(\'' + ticker + '\',\'' + assetType + '\',\'' + tf + '\')" style="cursor:pointer;">';
       html += '<div class="scan-mtf-cell">';
       html += '<div class="scan-mtf-pill ' + sigClass + '">' + (sig === 'COUNTER_BUY' ? 'CTR' : sig === 'POSSIBLE_BUY' ? 'PBY' : sig === 'POSSIBLE_SELL' ? 'PSL' : sig) + '</div>';
       html += '<div class="scan-mtf-rsi">' + rsi + '</div>';
@@ -4935,14 +4935,17 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
   document.getElementById('scanResults').innerHTML = html;
 }
 
-// Helper: load ticker from scanner using signals-tab timeframe, then switch to signals tab
-function scannerLoadTicker(ticker, assetType) {
-  // Use the signals-tab timeframe selector (not the scanner's scanTF)
-  var sigTF = (document.getElementById('timeframe')||{}).value || '4h';
-  // Switch to signals tab first so the chart renders in the visible panel
+// Helper: load ticker from scanner, switch to signals tab, then analyze.
+// overrideTF — when provided (multi-TF cell click) use that specific timeframe;
+//              otherwise fall back to whatever the signals-tab TF dropdown says.
+function scannerLoadTicker(ticker, assetType, overrideTF) {
+  var sigTF = overrideTF || (document.getElementById('timeframe')||{}).value || '4h';
+  // Switch to signals tab FIRST — charts must be visible before LWC creates them
   var firstNavTab = document.querySelector('.nav-tab');
   switchMainTab('signals', firstNavTab);
-  // Load the ticker with the signals timeframe
+  // Sync the TF dropdown to match what we're about to load
+  var tfEl = document.getElementById('timeframe');
+  if (tfEl && sigTF) tfEl.value = sigTF;
   quickLoad(ticker, assetType, sigTF);
 }
 
