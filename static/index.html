@@ -4858,15 +4858,19 @@ function renderScanResults(results, assetType) {
   document.querySelectorAll('#tab-scanner > .scanner-layout > .scan-table').forEach(function(t) { t.style.display = 'none'; });
   var mf = document.getElementById('scanFilterRow') || document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
   var fmt = function(v) { return v != null ? parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:4}) : '—'; };
-  document.getElementById('scanResults').innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + results.length + ' results</div>' +
+  document.getElementById('scanResults').innerHTML =
+    '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:10px;">' +
+      '<span>' + results.length + ' results</span>' +
+      '<span style="color:var(--amber);font-size:9px;letter-spacing:.3px;">⚡ PRE-SCREEN — click any row to run full gated analysis</span>' +
+    '</div>' +
     '<table class="scan-table"><thead><tr>' +
-    '<th>Symbol</th><th>Signal</th><th>Confidence</th><th>Price</th><th>RSI</th><th>EMA Trend</th><th>Volume</th><th>Change 1D</th><th>TF</th>' +
+    '<th>Symbol</th><th title="Quick pre-screen — HTF gates not applied. Click row for confirmed signal.">Screen ⚡</th><th>Score</th><th>Price</th><th>RSI</th><th>EMA Trend</th><th>Volume</th><th>Change 1D</th><th>TF</th>' +
     '</tr></thead><tbody>' + results.map(r => {
     if (r.error) return '<tr><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm hold">ERR</span></td><td colspan="7" style="color:var(--muted);">' + (r.error||'Failed') + '</td></tr>';
     const hint = r.signal_hint || 'HOLD';
     const chg  = r.chg_1d != null ? (r.chg_1d >= 0 ? '+' + r.chg_1d + '%' : r.chg_1d + '%') : '—';
     const chgCls = r.chg_1d >= 0 ? 'style="color:var(--green)"' : 'style="color:var(--red)"';
-    const pillLbl = hint==='COUNTER_BUY'?'CTR':hint==='POSSIBLE_BUY'?'PBY':hint==='POSSIBLE_SELL'?'PSL':hint;
+    const pillLbl = hint==='BUY'?'↑ SETUP':hint==='SELL'?'↓ SETUP':hint==='COUNTER_BUY'?'↑ CTR':hint==='POSSIBLE_BUY'?'↑ WATCH':hint==='POSSIBLE_SELL'?'↓ WATCH':'—';
     var sigCls = (hint==='BUY'||hint==='POSSIBLE_BUY'||hint==='COUNTER_BUY')?'buy':(hint==='SELL'||hint==='POSSIBLE_SELL')?'sell':'hold';
     var confColor = (r.confidence && parseInt(r.confidence) > 65) ? 'var(--amber)' : 'var(--muted2)';
     var trend = r.ema_trend || '—';
@@ -4875,8 +4879,8 @@ function renderScanResults(results, assetType) {
     var tf = (document.getElementById('scanTF')||{}).value || '4h';
     return '<tr style="cursor:pointer;" onclick="quickLoad(\'' + r.ticker + '\',\'' + assetType + '\',\'' + tf + '\')">' +
       '<td class="st-sym">' + r.ticker + '</td>' +
-      '<td><span class="sig-badge-sm ' + sigCls + '">' + pillLbl + '</span></td>' +
-      '<td style="color:' + confColor + ';">' + (r.confidence || '—') + '</td>' +
+      '<td><span class="sig-badge-sm ' + sigCls + '" title="Pre-screen only — HTF gates not applied">' + pillLbl + '</span></td>' +
+      '<td style="font-family:var(--mono);font-size:11px;color:var(--muted2);" title="Bull score / Bear score">' + (r.bull_score||0) + 'B / ' + (r.bear_score||0) + 'S</td>' +
       '<td>' + fmt(r.price) + '</td>' +
       '<td>' + (r.rsi||'—') + '</td>' +
       '<td style="color:' + trendColor + ';">' + trend + '</td>' +
