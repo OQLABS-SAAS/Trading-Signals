@@ -2484,21 +2484,6 @@ def index():
     resp.headers["Expires"] = "0"
     return resp
 
-@app.route("/quantverse")
-def quantverse_app():
-    """Serve the Quantverse PWA from the same origin as DotVerse so the
-    session cookie is sent automatically on /api/analyze calls."""
-    resp = send_from_directory("quantverse-pwa", "index.html")
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    return resp
-
-@app.route("/quantverse-pwa/<path:filename>")
-def quantverse_static(filename):
-    """Serve Quantverse static assets (manifest, icons, sw.js)."""
-    return send_from_directory("quantverse-pwa", filename)
-
 # ─── AUTH ROUTES (no login_required) ─────────────────────────
 @app.route("/api/login", methods=["POST"])
 def login():

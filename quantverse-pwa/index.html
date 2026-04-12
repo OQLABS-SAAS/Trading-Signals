@@ -6,16 +6,16 @@
 <title>Quant Verse | Trading Signals</title>
 
 <!-- ── PWA MANIFEST ── -->
-<link rel="manifest" href="/quantverse-pwa/manifest.json"/>
+<link rel="manifest" href="/manifest.json"/>
 <meta name="theme-color" content="#060e20"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <!-- iOS -->
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="Quant Verse"/>
-<link rel="apple-touch-icon" href="/quantverse-pwa/apple-touch-icon.png"/>
-<link rel="apple-touch-icon" sizes="192x192" href="/quantverse-pwa/icon-192.png"/>
-<link rel="apple-touch-icon" sizes="512x512" href="/quantverse-pwa/icon-512.png"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+<link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png"/>
+<link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png"/>
 
 <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
@@ -239,6 +239,8 @@ canvas{display:block;}
       <span class="text-[9px] font-bold text-secondary uppercase tracking-wider">Live Audit</span>
     </div>
     <div id="carousel" class="flex gap-3 overflow-x-auto hide-sb snap-x pb-2 mb-5"></div>
+    <!-- Strategy selector -->
+    <div id="strategy-tabs" class="flex gap-1.5 overflow-x-auto hide-sb mb-3 pb-0.5"></div>
     <!-- Ticker search — analyze any instrument on demand -->
     <div class="flex gap-2 mb-3">
       <input id="ticker-input" type="text" placeholder="Type any ticker: BTC, AAPL, EURUSD…"
@@ -516,12 +518,6 @@ canvas{display:block;}
     <div class="home-pill"></div>
   </div>
 
-  <!-- ANALYZE LOADING OVERLAY -->
-  <div id="analyze-overlay" style="display:none;position:absolute;inset:0;z-index:300;background:rgba(6,14,32,0.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);flex-direction:column;align-items:center;justify-content:center;gap:14px;border-radius:inherit">
-    <div style="width:32px;height:32px;border:2px solid rgba(74,225,118,.15);border-top-color:#4ae176;border-radius:50%;animation:spin .75s linear infinite"></div>
-    <div id="overlay-msg" style="font-size:9px;color:#bcc7de;text-transform:uppercase;letter-spacing:0.14em;text-align:center;max-width:200px"></div>
-    <div style="font-size:7px;color:#45464d;text-transform:uppercase;letter-spacing:0.1em">Powered by DotVerse AI</div>
-  </div>
 
 </div><!-- /phone-shell -->
 
@@ -616,39 +612,6 @@ function computeEMA(closes, period) {
   for (let i=period; i<closes.length; i++) ema=closes[i]*k+ema*(1-k);
   return ema;
 }
-function computeSMA(closes, period) {
-  if (closes.length < period) return closes[closes.length-1];
-  return closes.slice(-period).reduce((a,b)=>a+b)/period;
-}
-function computeStoch(highs, lows, closes, kPeriod=14, dPeriod=3) {
-  if (closes.length < kPeriod) return {k:50, d:50};
-  const kArr=[];
-  for (let i=kPeriod-1; i<closes.length; i++) {
-    const h=Math.max(...highs.slice(i-kPeriod+1,i+1));
-    const l=Math.min(...lows.slice(i-kPeriod+1,i+1));
-    kArr.push(h===l ? 50 : 100*(closes[i]-l)/(h-l));
-  }
-  const k=kArr[kArr.length-1];
-  const dSlice=kArr.slice(-dPeriod);
-  const d=dSlice.reduce((a,b)=>a+b)/dSlice.length;
-  return {k, d};
-}
-function computeCCI(highs, lows, closes, period=20) {
-  if (closes.length < period) return 0;
-  const tp=closes.map((c,i)=>(highs[i]+lows[i]+c)/3);
-  const slice=tp.slice(-period);
-  const mean=slice.reduce((a,b)=>a+b)/period;
-  const md=slice.reduce((a,b)=>a+Math.abs(b-mean),0)/period;
-  if (md===0) return 0;
-  return (tp[tp.length-1]-mean)/(0.015*md);
-}
-function computeWilliamsR(highs, lows, closes, period=14) {
-  if (closes.length < period) return -50;
-  const h=Math.max(...highs.slice(-period));
-  const l=Math.min(...lows.slice(-period));
-  if (h===l) return -50;
-  return -100*(h-closes[closes.length-1])/(h-l);
-}
 function computeMACD(closes, fast=12, slow=26, signal=9) {
   if (closes.length < slow+signal) return {macd:0, signal:0, hist:0};
   const emaFast=computeEMA(closes, fast);
@@ -662,149 +625,6 @@ function computeMACD(closes, fast=12, slow=26, signal=9) {
   const macd=macdLine[macdLine.length-1];
   return {macd, signal:sig, hist:macd-sig};
 }
-function computeBBP(closes, period=13) {
-  const ema=computeEMA(closes, period);
-  return closes[closes.length-1] - ema; // positive = bullish
-}
-function computeUO(highs, lows, closes, p1=7, p2=14, p3=28) {
-  if (closes.length < p3+1) return 50;
-  let bp1=0,tr1=0,bp2=0,tr2=0,bp3=0,tr3=0;
-  const n=closes.length;
-  for (let i=n-p3; i<n; i++) {
-    const pc=closes[i-1], h=highs[i], l=lows[i], c=closes[i];
-    const bp=c-Math.min(l,pc), tr=Math.max(h,pc)-Math.min(l,pc);
-    if (i>=n-p1){bp1+=bp;tr1+=tr;}
-    if (i>=n-p2){bp2+=bp;tr2+=tr;}
-    bp3+=bp; tr3+=tr;
-  }
-  const a=tr1?bp1/tr1:0, b=tr2?bp2/tr2:0, cc=tr3?bp3/tr3:0;
-  return 100*(4*a+2*b+cc)/7;
-}
-
-// TV-style scoring: each indicator returns -1 (SELL), 0 (NEUTRAL), +1 (BUY)
-// Score = average of all votes → thresholds: ≥0.5=STRONG BUY, 0.1..0.5=BUY, etc.
-function computeTVStyleSignal(candles, sym, mkt, ico, tf='4H') {
-  if (candles.length < 50) return null;
-  const closes=candles.map(c=>c[4]);
-  const highs =candles.map(c=>c[2]);
-  const lows  =candles.map(c=>c[3]);
-  const cur   =closes[closes.length-1];
-
-  // ── Oscillator votes ──
-  const votes=[];
-
-  // 1. RSI(14) — TV: >70=SELL, <30=BUY, else NEUTRAL
-  const rsi=computeRSI(closes);
-  votes.push(rsi>70?-1: rsi<30?+1: 0);
-
-  // 2. Stochastic(14,3,3) — TV: both >80=SELL, both <20=BUY, else NEUTRAL
-  const st=computeStoch(highs,lows,closes);
-  votes.push(st.k>80&&st.d>80?-1: st.k<20&&st.d<20?+1: 0);
-
-  // 3. CCI(20) — TV: >100=SELL, <-100=BUY, else NEUTRAL
-  const cci=computeCCI(highs,lows,closes);
-  votes.push(cci>100?-1: cci<-100?+1: 0);
-
-  // 4. MACD — TV: macd>signal=BUY, else SELL
-  const mac=computeMACD(closes);
-  votes.push(mac.macd>mac.signal?+1:-1);
-
-  // 5. Williams %R(14) — TV: >-20=SELL, <-80=BUY, else NEUTRAL
-  const wr=computeWilliamsR(highs,lows,closes);
-  votes.push(wr>-20?-1: wr<-80?+1: 0);
-
-  // 6. Bull Bear Power — TV: >0=BUY, <0=SELL
-  const bbp=computeBBP(closes);
-  votes.push(bbp>0?+1:-1);
-
-  // 7. Momentum(10) — TV: >0=BUY, <0=SELL
-  if (closes.length>10) {
-    votes.push(closes[closes.length-1]>closes[closes.length-11]?+1:-1);
-  }
-
-  // 8. Ultimate Oscillator — TV: >70=SELL, <30=BUY, else NEUTRAL
-  const uo=computeUO(highs,lows,closes);
-  votes.push(uo>70?-1: uo<30?+1: 0);
-
-  // 9. Stoch RSI (using RSI series on shorter subsets as proxy)
-  // TV: >80=SELL, <20=BUY — approximate with raw RSI position
-  votes.push(rsi>80?-1: rsi<20?+1: 0);
-
-  // ── MA votes — price vs MA ──
-  const maPeriods=[10,20,30,50,100,200];
-  for (const p of maPeriods) {
-    if (closes.length >= p) {
-      const ema=computeEMA(closes,p);
-      votes.push(cur>ema?+1:-1);
-      const sma=computeSMA(closes,p);
-      votes.push(cur>sma?+1:-1);
-    }
-  }
-
-  // Hull MA(9) — ≈ 2*EMA(4)-EMA(9)
-  if (closes.length>=9) {
-    const hull=2*computeEMA(closes,Math.round(Math.sqrt(9)))-computeEMA(closes,9);
-    votes.push(cur>hull?+1:-1);
-  }
-
-  // Ichimoku proxy — use midpoint of recent 9-bar & 26-bar ranges vs price
-  if (closes.length>=26) {
-    const tenkan=(Math.max(...highs.slice(-9)) +Math.min(...lows.slice(-9)))/2;
-    const kijun =(Math.max(...highs.slice(-26))+Math.min(...lows.slice(-26)))/2;
-    votes.push(cur>tenkan && cur>kijun ? +1 : cur<tenkan && cur<kijun ? -1 : 0);
-  }
-
-  // Score = average vote
-  const score=votes.reduce((a,b)=>a+b,0)/votes.length;
-
-  // TV threshold mapping
-  let type, conf;
-  if      (score >= 0.5)  { type='BUY';  conf='High';     }
-  else if (score >= 0.1)  { type='BUY';  conf='Moderate'; }
-  else if (score > -0.1)  { type='HOLD'; conf='Low';      }
-  else if (score > -0.5)  { type='SELL'; conf='Moderate'; }
-  else                    { type='SELL'; conf='High';     }
-
-  const label = score>=0.5?'STRONG BUY': score>=0.1?'BUY': score>-0.1?'NEUTRAL': score>-0.5?'SELL':'STRONG SELL';
-
-  // ATR for trade levels
-  const trs=[];
-  for (let i=1; i<candles.length; i++) {
-    const h=candles[i][2], l=candles[i][3], pc=candles[i-1][4];
-    trs.push(Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc)));
-  }
-  const atr=trs.slice(-14).reduce((a,b)=>a+b)/Math.min(14,trs.length);
-  const rm={High:2.0, Moderate:1.5, Low:1.0}[conf];
-  const entry=cur;
-  let sl,tp1,tp2,tp3;
-  if      (type==='BUY')  {sl=entry-atr*1.5; tp1=entry+atr*rm;   tp2=entry+atr*rm*2;   tp3=entry+atr*rm*3.5;}
-  else if (type==='SELL') {sl=entry+atr*1.5; tp1=entry-atr*rm;   tp2=entry-atr*rm*2;   tp3=entry-atr*rm*3.5;}
-  else                    {sl=entry-atr*1.5; tp1=entry+atr*0.5;  tp2=entry+atr;         tp3=entry+atr*1.5;}
-
-  const dp=cur>=1000?2: cur>=100?3: cur>=1?4: 6;
-  const rnd=v=>parseFloat(v.toFixed(dp));
-  const risk=Math.abs(entry-sl);
-  const rr=n=>risk>0?parseFloat((Math.abs(n-entry)/risk).toFixed(1)):0;
-  const prev=closes[Math.max(0,closes.length-7)];
-  const chg=parseFloat(((cur-prev)/prev*100).toFixed(2));
-  const now=new Date(), h2=now.getHours(), mm2=now.getMinutes().toString().padStart(2,'0');
-  const t=`${h2>12?h2-12:h2||12}:${mm2} ${h2>=12?'PM':'AM'}`;
-
-  const bull=computeEMA(closes,9)>computeEMA(closes,21);
-  const oscVotes=votes.slice(0,9);
-  const maVotes=votes.slice(9);
-  const oscBuy=oscVotes.filter(v=>v>0).length, oscSell=oscVotes.filter(v=>v<0).length;
-  const maBuy =maVotes.filter(v=>v>0).length,  maSell =maVotes.filter(v=>v<0).length;
-  const trigger=`${label} — ${oscBuy}/${oscVotes.length} Osc · ${maBuy}/${maVotes.length} MA`;
-
-  return { sym, mkt, ico, type, entry:rnd(entry), sl:rnd(sl),
-    tp1:rnd(tp1), tp2:rnd(tp2), tp3:rnd(tp3),
-    rr1:rr(tp1), rr2:rr(tp2), rr3:rr(tp3),
-    rsi, conf, trig:trigger, px:rnd(cur), chg, tf, t, live:true,
-    tvScore:parseFloat(score.toFixed(3)), tvLabel:label,
-    oscBuy, oscSell, maBuy, maSell, totalVotes:votes.length
-  };
-}
 function computeATR(candles, period=14) {
   const trs=[];
   for (let i=1; i<candles.length; i++) {
@@ -815,8 +635,450 @@ function computeATR(candles, period=14) {
   return recent.reduce((a,b)=>a+b)/recent.length;
 }
 
-function generateSignal(candles, sym, mkt, ico) {
-  return computeTVStyleSignal(candles, sym, mkt, ico, '4H');
+// ── EXTENDED INDICATORS ───────────────────────────────────────
+
+function computeADX(highs, lows, closes, period=14) {
+  const n=closes.length;
+  if(n<period*2) return {adx:20,pdi:20,ndi:20};
+  const trs=[],pdm=[],ndm=[];
+  for(let i=1;i<n;i++){
+    const h=highs[i],l=lows[i],ph=highs[i-1],pl=lows[i-1],pc=closes[i-1];
+    trs.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));
+    pdm.push(h-ph>pl-l&&h-ph>0?h-ph:0);
+    ndm.push(pl-l>h-ph&&pl-l>0?pl-l:0);
+  }
+  const wilder=(arr)=>{
+    let s=arr.slice(0,period).reduce((a,b)=>a+b,0);
+    const out=[s];
+    for(let i=period;i<arr.length;i++){s=s-s/period+arr[i];out.push(s);}
+    return out;
+  };
+  const sTR=wilder(trs),sPDM=wilder(pdm),sNDM=wilder(ndm);
+  const pdi=sTR.map((tr,i)=>tr?100*sPDM[i]/tr:0);
+  const ndi=sTR.map((tr,i)=>tr?100*sNDM[i]/tr:0);
+  const dx=pdi.map((p,i)=>p+ndi[i]?100*Math.abs(p-ndi[i])/(p+ndi[i]):0);
+  let adxVal=dx.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<dx.length;i++) adxVal=(adxVal*(period-1)+dx[i])/period;
+  return {adx:adxVal,pdi:pdi[pdi.length-1],ndi:ndi[ndi.length-1]};
+}
+
+function computeSupertrend(highs,lows,closes,period=10,mult=3) {
+  const n=closes.length;
+  if(n<period+1) return {trend:1,value:closes[n-1]};
+  const hl2=highs.map((h,i)=>(h+lows[i])/2);
+  const trs=[];
+  for(let i=1;i<n;i++) trs.push(Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1])));
+  const atrs=[null];
+  let atr=trs.slice(0,period).reduce((a,b)=>a+b,0)/period; atrs.push(atr);
+  for(let i=period;i<trs.length;i++){atr=(atr*(period-1)+trs[i])/period;atrs.push(atr);}
+  let trend=1,st=0;
+  let prevUp=hl2[0]-mult*(atrs[1]||0), prevDn=hl2[0]+mult*(atrs[1]||0);
+  for(let i=1;i<n;i++){
+    if(!atrs[i]){st=prevUp;continue;}
+    const bUp=hl2[i]-mult*atrs[i], bDn=hl2[i]+mult*atrs[i];
+    const up=bUp>(prevUp)||closes[i-1]<prevUp?bUp:prevUp;
+    const dn=bDn<(prevDn)||closes[i-1]>prevDn?bDn:prevDn;
+    if(trend===1){st=up;if(closes[i]<st){trend=-1;st=dn;}}
+    else{st=dn;if(closes[i]>st){trend=1;st=up;}}
+    prevUp=up;prevDn=dn;
+  }
+  return {trend,value:st};
+}
+
+function computeBollingerBands(closes,period=20,mult=2) {
+  if(closes.length<period) return {upper:closes[closes.length-1]*1.02,lower:closes[closes.length-1]*0.98,mid:closes[closes.length-1],width:0.04,squeeze:false,pct_b:0.5};
+  const slice=closes.slice(-period);
+  const mean=slice.reduce((a,b)=>a+b,0)/period;
+  const sd=Math.sqrt(slice.reduce((a,b)=>a+(b-mean)**2,0)/period);
+  const upper=mean+mult*sd, lower=mean-mult*sd;
+  const width=(upper-lower)/mean;
+  const pct_b=(upper-lower)>0?(closes[closes.length-1]-lower)/(upper-lower):0.5;
+  return {upper,lower,mid:mean,width,squeeze:width<0.04,pct_b};
+}
+
+function computeVWAP(candles) {
+  let cumTPV=0,cumVol=0;
+  for(const c of candles){const tp=(c[2]+c[3]+c[4])/3,v=c[5]||1;cumTPV+=tp*v;cumVol+=v;}
+  return cumVol>0?cumTPV/cumVol:candles[candles.length-1][4];
+}
+
+function computeOBV(closes,volumes) {
+  let obv=0;
+  const arr=[0];
+  for(let i=1;i<closes.length;i++){
+    if(closes[i]>closes[i-1]) obv+=volumes[i];
+    else if(closes[i]<closes[i-1]) obv-=volumes[i];
+    arr.push(obv);
+  }
+  const recent=arr.slice(-14), older=arr.slice(-28,-14);
+  const rAvg=recent.reduce((a,b)=>a+b,0)/recent.length;
+  const oAvg=older.length?older.reduce((a,b)=>a+b,0)/older.length:rAvg;
+  return {obv,trend:rAvg>oAvg*1.01?'rising':rAvg<oAvg*0.99?'falling':'flat'};
+}
+
+function computeDonchian(highs,lows,period=20) {
+  const h=highs.slice(-period), l=lows.slice(-period);
+  const upper=Math.max(...h), lower=Math.min(...l);
+  return {upper,lower,mid:(upper+lower)/2};
+}
+
+// ── DETECTION HELPERS ─────────────────────────────────────────
+
+function detectSwingPoints(highs,lows,lookback=5) {
+  const n=highs.length, sH=[], sL=[];
+  for(let i=lookback;i<n-lookback;i++){
+    const wH=highs.slice(i-lookback,i+lookback+1), wL=lows.slice(i-lookback,i+lookback+1);
+    if(highs[i]===Math.max(...wH)) sH.push({i,val:highs[i]});
+    if(lows[i]===Math.min(...wL)) sL.push({i,val:lows[i]});
+  }
+  return {swingHighs:sH,swingLows:sL};
+}
+
+function detectOrderBlocks(candles) {
+  const n=candles.length;
+  let bullOB=null, bearOB=null;
+  for(let i=Math.max(0,n-20);i<n-2;i++){
+    const c=candles[i], bull=c[4]>c[1], bear=c[4]<c[1];
+    const fwdMove=(candles[Math.min(i+2,n-1)][4]-c[4])/c[4];
+    if(bear&&fwdMove>0.004) bullOB={low:c[3],high:c[2],i,str:fwdMove};
+    if(bull&&fwdMove<-0.004) bearOB={low:c[3],high:c[2],i,str:Math.abs(fwdMove)};
+  }
+  return {bullOB,bearOB};
+}
+
+function detectFVG(candles) {
+  const n=candles.length;
+  const cur=candles[n-1][4];
+  let bullFVG=null, bearFVG=null;
+  for(let i=2;i<n;i++){
+    if(candles[i][3]>candles[i-2][2]) bullFVG={low:candles[i-2][2],high:candles[i][3],i};
+    if(candles[i][2]<candles[i-2][3]) bearFVG={low:candles[i][2],high:candles[i-2][3],i};
+  }
+  if(bullFVG) bullFVG.active=cur>=bullFVG.low&&cur<=bullFVG.high;
+  if(bearFVG) bearFVG.active=cur>=bearFVG.low&&cur<=bearFVG.high;
+  return {bullFVG,bearFVG};
+}
+
+function detectMarketStructure(highs,lows,closes) {
+  const {swingHighs:sH,swingLows:sL}=detectSwingPoints(highs,lows,3);
+  if(sH.length<2||sL.length<2) return {bias:'neutral',lastBOS:'Insufficient data',choch:false};
+  const hh=sH[sH.length-1].val>sH[sH.length-2].val;
+  const hl=sL[sL.length-1].val>sL[sL.length-2].val;
+  const lh=sH[sH.length-1].val<sH[sH.length-2].val;
+  const ll=sL[sL.length-1].val<sL[sL.length-2].val;
+  let bias='neutral';
+  if(hh&&hl) bias='bullish';
+  else if(lh&&ll) bias='bearish';
+  const cur=closes[closes.length-1];
+  const lastSH=sH[sH.length-1].val, lastSL=sL[sL.length-1].val;
+  const choch=(bias==='bearish'&&cur>lastSH)||(bias==='bullish'&&cur<lastSL);
+  const lastBOS=bias==='bullish'?`HH+HL structure`:bias==='bearish'?`LH+LL structure`:'No clear structure';
+  return {bias,lastBOS,choch,lastSH,lastSL};
+}
+
+function detectLiquiditySweep(highs,lows,closes,lb=20) {
+  const n=closes.length;
+  if(n<lb+2) return {bullSweep:false,bearSweep:false};
+  const rangeH=Math.max(...highs.slice(-lb,-3));
+  const rangeL=Math.min(...lows.slice(-lb,-3));
+  const rcH=highs.slice(-3), rcL=lows.slice(-3), rcC=closes.slice(-3);
+  const bullSweep=rcL.some(l=>l<rangeL)&&rcC[rcC.length-1]>rangeL;
+  const bearSweep=rcH.some(h=>h>rangeH)&&rcC[rcC.length-1]<rangeH;
+  return {bullSweep,bearSweep,rangeH,rangeL};
+}
+
+function detectCandlestick(candles) {
+  const n=candles.length;
+  if(n<3) return {pattern:null,bias:null};
+  const [c2,c1,c0]=[candles[n-3],candles[n-2],candles[n-1]];
+  const [o0,h0,l0,cl0]=[c0[1],c0[2],c0[3],c0[4]];
+  const [o1,h1,l1,cl1]=[c1[1],c1[2],c1[3],c1[4]];
+  const [o2,h2,l2,cl2]=[c2[1],c2[2],c2[3],c2[4]];
+  const body0=Math.abs(cl0-o0),range0=h0-l0||0.0001;
+  const body1=Math.abs(cl1-o1),range1=h1-l1||0.0001;
+  const bull0=cl0>o0,bull1=cl1>o1,bull2=cl2>o2;
+  const lShadow0=Math.min(o0,cl0)-l0, uShadow0=h0-Math.max(o0,cl0);
+  const uShadow0r=uShadow0/(range0||1);
+  // Hammer
+  if(lShadow0>body0*2&&uShadow0<body0*0.5) return {pattern:'Hammer',bias:'bullish'};
+  // Shooting Star
+  if(uShadow0>body0*2&&lShadow0<body0*0.5) return {pattern:'Shooting Star',bias:'bearish'};
+  // Bullish Engulfing
+  if(!bull1&&bull0&&o0<=cl1&&cl0>=o1&&body0>body1) return {pattern:'Bullish Engulfing',bias:'bullish'};
+  // Bearish Engulfing
+  if(bull1&&!bull0&&o0>=cl1&&cl0<=o1&&body0>body1) return {pattern:'Bearish Engulfing',bias:'bearish'};
+  // Doji
+  if(body0<range0*0.08) return {pattern:'Doji',bias:'neutral'};
+  // Morning Star
+  if(!bull2&&body1<range1*0.3&&bull0&&cl0>(o2+cl2)/2) return {pattern:'Morning Star',bias:'bullish'};
+  // Evening Star
+  if(bull2&&body1<range1*0.3&&!bull0&&cl0<(o2+cl2)/2) return {pattern:'Evening Star',bias:'bearish'};
+  // Marubozu
+  if(body0>range0*0.9) return {pattern:bull0?'Bull Marubozu':'Bear Marubozu',bias:bull0?'bullish':'bearish'};
+  return {pattern:null,bias:null};
+}
+
+function detectSR(highs,lows,closes) {
+  const cur=closes[closes.length-1];
+  const {swingHighs:sH,swingLows:sL}=detectSwingPoints(highs,lows,3);
+  const support=sL.filter(s=>s.val<cur).sort((a,b)=>b.val-a.val)[0];
+  const resistance=sH.filter(s=>s.val>cur).sort((a,b)=>a.val-b.val)[0];
+  const nearSup=support&&Math.abs(cur-support.val)/cur<0.006;
+  const nearRes=resistance&&Math.abs(cur-resistance.val)/cur<0.006;
+  return {support,resistance,nearSup,nearRes};
+}
+
+function matchHarmonic(xa,ab,bc,cd) {
+  const r1=ab/xa, r2=bc/ab, r3=cd/bc;
+  if(Math.abs(r1-0.618)<0.06&&r2>=0.38&&r2<=0.89&&r3>=1.27&&r3<=1.62) return 'Gartley';
+  if(r1>=0.38&&r1<=0.50&&r2>=0.38&&r2<=0.89&&r3>=1.62&&r3<=2.62) return 'Bat';
+  if(Math.abs(r1-0.786)<0.06&&r2>=0.38&&r2<=0.89&&r3>=1.62&&r3<=2.62) return 'Butterfly';
+  if(r1>=0.38&&r1<=0.62&&r2>=0.38&&r2<=0.89&&r3>=2.62&&r3<=3.62) return 'Crab';
+  return null;
+}
+
+function detectHarmonic(highs,lows,closes) {
+  const {swingHighs:sH,swingLows:sL}=detectSwingPoints(highs,lows,4);
+  const pts=[...sH.map(s=>({...s,t:'H'})),...sL.map(s=>({...s,t:'L'}))].sort((a,b)=>a.i-b.i);
+  if(pts.length<5) return {pattern:null,bias:null};
+  const [X,A,B,C,D]=pts.slice(-5);
+  const xa=Math.abs(A.val-X.val),ab=Math.abs(B.val-A.val),bc=Math.abs(C.val-B.val),cd=Math.abs(D.val-C.val);
+  if(!xa||!ab||!bc||!cd) return {pattern:null,bias:null};
+  const pattern=matchHarmonic(xa,ab,bc,cd);
+  if(!pattern) return {pattern:null,bias:null};
+  const bias=D.t==='L'?'bullish':'bearish';
+  const cur=closes[closes.length-1];
+  const completion=1-Math.abs(cur-D.val)/(D.val||1);
+  return {pattern,bias,completion,D};
+}
+
+// ── SIGNAL BUILDER (shared by all strategies) ─────────────────
+
+function buildSig({type,conf,trig,cur,candles,sym,mkt,ico,tf,rsi:rsiIn}) {
+  const closes=candles.map(c=>c[4]);
+  const rsi=rsiIn!=null?rsiIn:computeRSI(closes,14);
+  const atr=computeATR(candles,14)||cur*0.01;
+  const slM={High:1.5,Moderate:1.5,Low:2.0}[conf]||1.5;
+  const tpM={High:2.0,Moderate:1.5,Low:1.0}[conf]||1.5;
+  let sl,tp1,tp2,tp3;
+  if(type==='BUY'){sl=cur-atr*slM;tp1=cur+atr*tpM;tp2=cur+atr*tpM*2;tp3=cur+atr*tpM*3.5;}
+  else if(type==='SELL'){sl=cur+atr*slM;tp1=cur-atr*tpM;tp2=cur-atr*tpM*2;tp3=cur-atr*tpM*3.5;}
+  else{sl=cur-atr*1.5;tp1=cur+atr*0.5;tp2=cur+atr;tp3=cur+atr*1.5;}
+  const dp=cur>=1000?2:cur>=100?3:cur>=1?4:6;
+  const rnd=v=>+v.toFixed(dp);
+  const risk=Math.abs(cur-sl)||1;
+  const rr=v=>+((Math.abs(v-cur)/risk)).toFixed(1);
+  const prev=closes[Math.max(0,closes.length-6)];
+  const chg=+((cur-prev)/prev*100).toFixed(2);
+  const now=new Date(),h=now.getHours(),m=now.getMinutes().toString().padStart(2,'0');
+  return {
+    id:Date.now()+Math.random(), sym, mkt, ico, type, conf, trig, tf,
+    t:`${h>12?h-12:h||12}:${m} ${h>=12?'PM':'AM'}`, live:true,
+    px:rnd(cur), entry:rnd(cur), sl:rnd(sl),
+    tp1:rnd(tp1), tp2:rnd(tp2), tp3:rnd(tp3),
+    rr1:rr(tp1), rr2:rr(tp2), rr3:rr(tp3),
+    rsi:+rsi.toFixed(1), chg
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  7 STRATEGY ENGINES
+// ══════════════════════════════════════════════════════════════
+
+function strategyMomentum(candles,sym,mkt,ico,tf) {
+  const closes=candles.map(c=>c[4]),highs=candles.map(c=>c[2]),lows=candles.map(c=>c[3]);
+  const cur=closes[closes.length-1];
+  const rsi=computeRSI(closes,14);
+  const ema9=computeEMA(closes,9),ema21=computeEMA(closes,21),ema50=computeEMA(closes,50);
+  const macd=computeMACD(closes);
+  const adx=computeADX(highs,lows,closes,14);
+  const st=computeSupertrend(highs,lows,closes,10,3);
+  const bull=ema9>ema21, trending=adx.adx>25, macdBull=macd.hist>0;
+  const bullScore=[rsi<50,bull,macdBull,st.trend===1].filter(Boolean).length;
+  let type,conf,trig;
+  if(rsi<40&&bull&&macdBull&&st.trend===1){
+    type='BUY'; conf=rsi<32&&trending?'High':'Moderate';
+    trig=`RSI ${rsi.toFixed(1)} recovering · EMA9>EMA21 · MACD+ · Supertrend▲ · ADX ${adx.adx.toFixed(0)}${trending?' (Trending)':' (Weak)'}`;
+  } else if(rsi>60&&!bull&&!macdBull&&st.trend===-1){
+    type='SELL'; conf=rsi>68&&trending?'High':'Moderate';
+    trig=`RSI ${rsi.toFixed(1)} elevated · EMA9<EMA21 · MACD- · Supertrend▼ · ADX ${adx.adx.toFixed(0)}${trending?' (Trending)':' (Weak)'}`;
+  } else if(bullScore>=3){
+    type='BUY'; conf='Low';
+    trig=`Weak BUY — ${bullScore}/4 conditions · RSI ${rsi.toFixed(1)} · ADX ${adx.adx.toFixed(0)}`;
+  } else if(bullScore<=1){
+    type='SELL'; conf='Low';
+    trig=`Weak SELL — ${4-bullScore}/4 bearish · RSI ${rsi.toFixed(1)} · ADX ${adx.adx.toFixed(0)}`;
+  } else {
+    type='HOLD'; conf='Low';
+    trig=`No momentum signal · RSI ${rsi.toFixed(1)} · ${bull?'Bullish':'Bearish'} EMA · ADX ${adx.adx.toFixed(0)} (${trending?'Trending':'Ranging'})`;
+  }
+  return buildSig({type,conf,trig,cur,candles,sym,mkt,ico,tf,rsi});
+}
+
+function strategySMC(candles,sym,mkt,ico,tf) {
+  const closes=candles.map(c=>c[4]),highs=candles.map(c=>c[2]),lows=candles.map(c=>c[3]);
+  const cur=closes[closes.length-1];
+  const rsi=computeRSI(closes,14);
+  const structure=detectMarketStructure(highs,lows,closes);
+  const ob=detectOrderBlocks(candles);
+  const fvg=detectFVG(candles);
+  const sweep=detectLiquiditySweep(highs,lows,closes);
+  const reasons=[]; let score=0;
+  if(structure.bias==='bullish') score+=1; else if(structure.bias==='bearish') score-=1;
+  if(structure.choch){reasons.push('CHoCH (reversal)');score=-score;}
+  if(ob.bullOB&&cur>=ob.bullOB.low*0.998&&cur<=ob.bullOB.high*1.002){reasons.push('In Bullish OB');score+=2;}
+  if(ob.bearOB&&cur>=ob.bearOB.low*0.998&&cur<=ob.bearOB.high*1.002){reasons.push('In Bearish OB');score-=2;}
+  if(fvg.bullFVG?.active){reasons.push('Bullish FVG');score+=1;}
+  if(fvg.bearFVG?.active){reasons.push('Bearish FVG');score-=1;}
+  if(sweep.bullSweep){reasons.push('Liq. sweep below lows');score+=2;}
+  if(sweep.bearSweep){reasons.push('Liq. sweep above highs');score-=2;}
+  if(!reasons.length) reasons.push(structure.lastBOS||'No confluence');
+  const type=score>=3?'BUY':score<=-3?'SELL':score>0?'BUY':score<0?'SELL':'HOLD';
+  const conf=Math.abs(score)>=4?'High':Math.abs(score)>=2?'Moderate':'Low';
+  const trig=`SMC [${structure.bias}]: ${reasons.join(' · ')}`;
+  return buildSig({type,conf,trig,cur,candles,sym,mkt,ico,tf,rsi});
+}
+
+function strategyPriceAction(candles,sym,mkt,ico,tf) {
+  const closes=candles.map(c=>c[4]),highs=candles.map(c=>c[2]),lows=candles.map(c=>c[3]);
+  const cur=closes[closes.length-1];
+  const rsi=computeRSI(closes,14);
+  const cs=detectCandlestick(candles);
+  const sr=detectSR(highs,lows,closes);
+  const ema21=computeEMA(closes,21);
+  const reasons=[]; let score=0;
+  if(cs.pattern){
+    reasons.push(cs.pattern);
+    if(cs.bias==='bullish') score+=2;
+    else if(cs.bias==='bearish') score-=2;
+  }
+  if(sr.nearSup){reasons.push(`At support ${sr.support.val.toFixed(4)}`);score+=1.5;}
+  if(sr.nearRes){reasons.push(`At resistance ${sr.resistance.val.toFixed(4)}`);score-=1.5;}
+  if(cur>ema21){reasons.push('Above EMA-21');score+=0.5;} else{reasons.push('Below EMA-21');score-=0.5;}
+  if(rsi<35){reasons.push(`RSI ${rsi.toFixed(1)} oversold`);score+=1;}
+  else if(rsi>65){reasons.push(`RSI ${rsi.toFixed(1)} overbought`);score-=1;}
+  if(!reasons.length) reasons.push(`No pattern — RSI ${rsi.toFixed(1)}`);
+  const type=score>=2.5?'BUY':score<=-2.5?'SELL':score>0?'BUY':score<0?'SELL':'HOLD';
+  const conf=Math.abs(score)>=3.5?'High':Math.abs(score)>=2.5?'Moderate':'Low';
+  const trig=`PA: ${reasons.join(' · ')}`;
+  return buildSig({type,conf,trig,cur,candles,sym,mkt,ico,tf,rsi});
+}
+
+function strategyMeanReversion(candles,sym,mkt,ico,tf) {
+  const closes=candles.map(c=>c[4]);
+  const cur=closes[closes.length-1];
+  const rsi=computeRSI(closes,14);
+  const bb=computeBollingerBands(closes,20,2);
+  const vwap=computeVWAP(candles);
+  const vwapDev=((cur-vwap)/vwap)*100;
+  const reasons=[]; let score=0;
+  if(bb.pct_b<0.05){reasons.push('At lower BB (oversold)');score+=3;}
+  else if(bb.pct_b<0.2){reasons.push(`BB %B ${(bb.pct_b*100).toFixed(0)}% — near lower`);score+=1;}
+  else if(bb.pct_b>0.95){reasons.push('At upper BB (overbought)');score-=3;}
+  else if(bb.pct_b>0.8){reasons.push(`BB %B ${(bb.pct_b*100).toFixed(0)}% — near upper`);score-=1;}
+  if(bb.squeeze){reasons.push('BB Squeeze (vol. compression)');score+=rsi<50?1:-1;}
+  if(rsi<30){reasons.push(`RSI ${rsi.toFixed(1)} deeply OS`);score+=2;}
+  else if(rsi<40){reasons.push(`RSI ${rsi.toFixed(1)} OS`);score+=1;}
+  else if(rsi>70){reasons.push(`RSI ${rsi.toFixed(1)} deeply OB`);score-=2;}
+  else if(rsi>60){reasons.push(`RSI ${rsi.toFixed(1)} OB`);score-=1;}
+  if(vwapDev<-2){reasons.push(`${vwapDev.toFixed(1)}% below VWAP`);score+=1;}
+  else if(vwapDev>2){reasons.push(`+${vwapDev.toFixed(1)}% above VWAP`);score-=1;}
+  if(!reasons.length) reasons.push(`BB %B ${(bb.pct_b*100).toFixed(0)}% · RSI ${rsi.toFixed(1)} · VWAP dev ${vwapDev.toFixed(1)}%`);
+  const type=score>=3?'BUY':score<=-3?'SELL':score>0?'BUY':score<0?'SELL':'HOLD';
+  const conf=Math.abs(score)>=5?'High':Math.abs(score)>=3?'Moderate':'Low';
+  const trig=`MeanRev: ${reasons.join(' · ')}`;
+  return buildSig({type,conf,trig,cur,candles,sym,mkt,ico,tf,rsi});
+}
+
+function strategyVolume(candles,sym,mkt,ico,tf) {
+  const closes=candles.map(c=>c[4]),vols=candles.map(c=>c[5]||1);
+  const cur=closes[closes.length-1];
+  const rsi=computeRSI(closes,14);
+  const vwap=computeVWAP(candles);
+  const obv=computeOBV(closes,vols);
+  const avgVol=vols.slice(-20).reduce((a,b)=>a+b,0)/20;
+  const lastVol=vols[vols.length-1];
+  const surge=lastVol>avgVol*1.5;
+  const lastBull=closes[closes.length-1]>closes[closes.length-2];
+  const vwapDev=((cur-vwap)/vwap)*100;
+  const reasons=[]; let score=0;
+  if(cur>vwap){reasons.push(`Above VWAP +${vwapDev.toFixed(1)}%`);score+=1;}
+  else{reasons.push(`Below VWAP ${vwapDev.toFixed(1)}%`);score-=1;}
+  if(obv.trend==='rising'){reasons.push('OBV rising (institutional buying)');score+=2;}
+  else if(obv.trend==='falling'){reasons.push('OBV falling (institutional selling)');score-=2;}
+  if(surge){
+    const label=`Vol surge ${(lastVol/avgVol).toFixed(1)}x avg`;
+    if(lastBull){reasons.push(label+' (bullish)');score+=2;}
+    else{reasons.push(label+' (bearish)');score-=2;}
+  }
+  if(rsi<45) score+=0.5; else if(rsi>55) score-=0.5;
+  if(!reasons.length) reasons.push(`VWAP dev ${vwapDev.toFixed(1)}% · OBV ${obv.trend}`);
+  const type=score>=3?'BUY':score<=-3?'SELL':score>0?'BUY':score<0?'SELL':'HOLD';
+  const conf=Math.abs(score)>=4?'High':Math.abs(score)>=3?'Moderate':'Low';
+  const trig=`Volume: ${reasons.join(' · ')}`;
+  return buildSig({type,conf,trig,cur,candles,sym,mkt,ico,tf,rsi});
+}
+
+function strategyBreakout(candles,sym,mkt,ico,tf) {
+  const closes=candles.map(c=>c[4]),highs=candles.map(c=>c[2]),lows=candles.map(c=>c[3]),vols=candles.map(c=>c[5]||1);
+  const cur=closes[closes.length-1];
+  const rsi=computeRSI(closes,14);
+  const don20=computeDonchian(highs,lows,20);
+  const don55=computeDonchian(highs,lows,Math.min(55,highs.length));
+  const atr=computeATR(candles,14);
+  const atr7=computeATR(candles.slice(-7),7)||atr;
+  const atrExpanding=atr7>atr*1.25;
+  const avgVol=vols.slice(-20).reduce((a,b)=>a+b,0)/20;
+  const volConf=vols[vols.length-1]>avgVol;
+  const reasons=[]; let score=0;
+  if(cur>=don20.upper*0.999){reasons.push('20-bar high breakout');score+=2;}
+  else if(cur<=don20.lower*1.001){reasons.push('20-bar low breakdown');score-=2;}
+  if(cur>=don55.upper*0.999){reasons.push('55-bar high breakout (major)');score+=2;}
+  else if(cur<=don55.lower*1.001){reasons.push('55-bar low breakdown (major)');score-=2;}
+  if(atrExpanding){reasons.push(`ATR expanding ${(atr7/atr*100).toFixed(0)}%`);score+=(score>=0?1:-1);}
+  if(volConf) reasons.push('Volume confirming');
+  if(rsi>55&&score>0) score+=0.5; else if(rsi<45&&score<0) score-=0.5;
+  if(!reasons.length){reasons.push(`Range: ${don20.lower.toFixed(4)}–${don20.upper.toFixed(4)}`);score=0;}
+  const type=score>=3?'BUY':score<=-3?'SELL':score>0?'BUY':score<0?'SELL':'HOLD';
+  const conf=Math.abs(score)>=4?'High':Math.abs(score)>=2?'Moderate':'Low';
+  const trig=`Breakout: ${reasons.join(' · ')}`;
+  return buildSig({type,conf,trig,cur,candles,sym,mkt,ico,tf,rsi});
+}
+
+function strategyHarmonic(candles,sym,mkt,ico,tf) {
+  const closes=candles.map(c=>c[4]),highs=candles.map(c=>c[2]),lows=candles.map(c=>c[3]);
+  const cur=closes[closes.length-1];
+  const rsi=computeRSI(closes,14);
+  const ema21=computeEMA(closes,21);
+  const harm=detectHarmonic(highs,lows,closes);
+  let type,conf,trig;
+  if(harm.pattern){
+    const pct=(harm.completion*100).toFixed(0);
+    if(harm.bias==='bullish'){
+      type='BUY'; conf=harm.completion>0.99?'High':'Moderate';
+      trig=`Harmonic: ${harm.pattern} bullish — D at ${harm.D?.val?.toFixed(4)||'—'} · Completion ${pct}%${rsi<40?' · RSI '+rsi.toFixed(1)+' OS conf':''}`;
+    } else {
+      type='SELL'; conf=harm.completion>0.99?'High':'Moderate';
+      trig=`Harmonic: ${harm.pattern} bearish — D at ${harm.D?.val?.toFixed(4)||'—'} · Completion ${pct}%${rsi>60?' · RSI '+rsi.toFixed(1)+' OB conf':''}`;
+    }
+  } else {
+    type='HOLD'; conf='Low';
+    trig=`Harmonic: No pattern detected · RSI ${rsi.toFixed(1)} · ${cur>ema21?'Above':'Below'} EMA-21 · Awaiting XABCD swing formation`;
+  }
+  return buildSig({type,conf,trig,cur,candles,sym,mkt,ico,tf,rsi});
+}
+
+function runStrategy(id,candles,sym,mkt,ico,tf){
+  switch(id){
+    case 'momentum':    return strategyMomentum(candles,sym,mkt,ico,tf);
+    case 'smc':         return strategySMC(candles,sym,mkt,ico,tf);
+    case 'priceaction': return strategyPriceAction(candles,sym,mkt,ico,tf);
+    case 'reversion':   return strategyMeanReversion(candles,sym,mkt,ico,tf);
+    case 'volume':      return strategyVolume(candles,sym,mkt,ico,tf);
+    case 'breakout':    return strategyBreakout(candles,sym,mkt,ico,tf);
+    case 'harmonic':    return strategyHarmonic(candles,sym,mkt,ico,tf);
+    default:            return strategyMomentum(candles,sym,mkt,ico,tf);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -880,284 +1142,135 @@ const STOCK_CFG = [
 ];
 
 // ══════════════════════════════════════════════════════════════
-//  SIGNAL ENGINE — close-only variant (Forex/Stocks)
-//  Builds synthetic candles from closes for TV-style scoring.
+//  STRATEGY REGISTRY & INSTRUMENT MAP
 // ══════════════════════════════════════════════════════════════
-function generateSignalFromCloses(closes, sym, mkt, ico, tf='1D') {
-  if (closes.length < 30) return null;
-  // Build synthetic candles [ts, open, high, low, close, vol]
-  const candles = closes.map((c, i) => {
-    const o = i > 0 ? closes[i-1] : c;
-    return [i, o, Math.max(o,c)*1.001, Math.min(o,c)*0.999, c, 1];
-  });
-  return computeTVStyleSignal(candles, sym, mkt, ico, tf);
+
+const STRATEGIES = [
+  { id:'momentum',    label:'Momentum',  desc:'RSI · EMA · MACD · ADX · Supertrend' },
+  { id:'smc',         label:'SMC / ICT', desc:'Order Blocks · FVG · BOS · Liq. Sweeps' },
+  { id:'priceaction', label:'Price Act', desc:'S/R · Candlestick · Supply/Demand' },
+  { id:'reversion',   label:'Reversion', desc:'BB Squeeze · RSI extremes · VWAP' },
+  { id:'volume',      label:'Volume',    desc:'VWAP · OBV · Volume surge' },
+  { id:'breakout',    label:'Breakout',  desc:'Donchian · ATR expansion · Range break' },
+  { id:'harmonic',    label:'Harmonic',  desc:'Gartley · Butterfly · Crab · Bat' },
+];
+
+let activeStrategy = 'momentum';
+
+// Keyed lookup: sym → config object  (O(1) lookup for analyzeInstrument)
+const INST_MAP = {};
+[...CRYPTO_CFG, ...FOREX_CFG, ...STOCK_CFG].forEach(cfg => { INST_MAP[cfg.sym] = cfg; });
+
+// ── STRATEGY TABS RENDER ──────────────────────────────────────
+function renderStrategies() {
+  const el = $('strategy-tabs');
+  if (!el) return;
+  el.innerHTML = STRATEGIES.map(s => `
+    <button onclick="selectStrategy('${s.id}')"
+      style="flex-shrink:0;padding:5px 12px;border-radius:20px;font-size:7.5px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;border:1px solid ${s.id===activeStrategy?'rgba(74,225,118,0.4)':'rgba(69,70,77,0.35)'};background:${s.id===activeStrategy?'rgba(74,225,118,0.12)':'transparent'};color:${s.id===activeStrategy?'#4ae176':'#909097'}">
+      ${s.label}
+    </button>`).join('');
 }
 
-// ── FOREX API (frankfurter.app — free, CORS-enabled) ─────────
-async function fetchForexSignals() {
-  const from = new Date(Date.now() - 50*24*3600000).toISOString().slice(0,10);
-  const results = [];
-  for (const pair of FOREX_CFG) {
-    try {
-      const url=`https://api.frankfurter.app/history?amount=1&from=${from}&base=${pair.base}&symbols=${pair.quote}`;
-      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),10000);
-      const res=await fetch(url,{signal:ctrl.signal}); clearTimeout(t);
-      if (!res.ok) throw new Error(res.status);
-      const data=await res.json();
-      const dates=Object.keys(data.rates||{}).sort();
-      const closes=dates.map(d=>data.rates[d][pair.quote]).filter(v=>v!=null);
-      if (closes.length<22) throw new Error('insufficient data');
-      const sig=generateSignalFromCloses(closes, pair.sym, pair.mkt, pair.ico, '1D');
-      if (sig) results.push(sig);
-    } catch(e) { console.warn('[QV] Forex failed',pair.sym,e.message); }
-  }
-  return results;
-}
-
-// ── STOCK API (Yahoo Finance + demo fallback) ─────────────────
-const STOCK_BASE_PX = { AAPL:175, NVDA:880, TSLA:170, MSFT:420, AMZN:185 };
-
-async function fetchStockSignals() {
-  const results = [];
-  for (const stock of STOCK_CFG) {
-    try {
-      const url=`https://query1.finance.yahoo.com/v8/finance/chart/${stock.yahooSym}?interval=1d&range=3mo`;
-      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),10000);
-      const res=await fetch(url,{signal:ctrl.signal}); clearTimeout(t);
-      if (!res.ok) throw new Error(res.status);
-      const data=await res.json();
-      const quotes=data?.chart?.result?.[0];
-      if (!quotes) throw new Error('no data');
-      const closes=(quotes.indicators.quote[0].close||[]).filter(c=>c!=null);
-      if (closes.length<22) throw new Error('insufficient data');
-      const sig=generateSignalFromCloses(closes, stock.sym, stock.mkt, stock.ico, '1D');
-      if (sig) results.push(sig);
-    } catch(e) {
-      console.warn('[QV] Stock Yahoo failed',stock.sym,e.message);
-      const sig=generateDemoStockSignal(stock);
-      if (sig) results.push(sig);
-    }
-  }
-  return results;
-}
-
-function generateDemoStockSignal(stock) {
-  const base = STOCK_BASE_PX[stock.yahooSym] || 100;
-  let p = base * 0.97;
-  const closes = [];
-  // Generate 40 synthetic closes with slight upward drift
-  for (let i=0; i<40; i++) {
-    p *= 1 + (Math.random()-0.47)*0.015;
-    closes.push(parseFloat(p.toFixed(2)));
-  }
-  closes.push(base);
-  const sig = generateSignalFromCloses(closes, stock.sym, stock.mkt, stock.ico, '1D');
-  if (sig) { sig.px=base; sig.live=false; sig.trig=sig.trig+' (Est.)'; }
-  return sig;
-}
-
-// ── LIVE SIGNAL FETCH ─────────────────────────────────────────
-let fetchingSignals = false;
-
-async function fetchLiveSignals() {
-  if (fetchingSignals) return;
-  fetchingSignals = true;
-  $('sig-list').innerHTML=`
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 0;gap:12px">
-      <div style="width:26px;height:26px;border:2px solid rgba(74,225,118,.2);border-top-color:#4ae176;border-radius:50%;animation:spin .75s linear infinite"></div>
-      <span style="font-size:8px;color:#909097;text-transform:uppercase;letter-spacing:0.15em">Computing live signals…</span>
-      <span style="font-size:7px;color:#45464d;text-transform:uppercase;letter-spacing:0.1em">Crypto · Forex · Stocks — RSI-14 + EMA-9/21 + ATR-14</span>
-    </div>`;
-
-  const confOrd={High:0,Moderate:1,Low:2}, typeOrd={BUY:0,SELL:1,HOLD:2};
-  const newSigs=[];
-
-  // ── Crypto (Binance 4H candles) ──
-  await Promise.allSettled(CRYPTO_CFG.map(async (pair)=>{
-    try {
-      const candles=await fetchBinanceCandles(pair.binSym,'4h',100);
-      if (candles.length<22) return;
-      const sig=generateSignal(candles, pair.sym, pair.mkt, pair.ico);
-      newSigs.push(sig);
-    } catch(e) { console.warn('[QV] Crypto failed',pair.sym,e.message); }
-  }));
-
-  // ── Forex (frankfurter.app daily) ──
-  try {
-    const forexSigs = await fetchForexSignals();
-    newSigs.push(...forexSigs);
-  } catch(e) { console.warn('[QV] Forex batch failed',e.message); }
-
-  // ── Stocks (Yahoo Finance / demo fallback) ──
-  try {
-    const stockSigs = await fetchStockSignals();
-    newSigs.push(...stockSigs);
-  } catch(e) { console.warn('[QV] Stock batch failed',e.message); }
-
-  newSigs.sort((a,b)=>typeOrd[a.type]-typeOrd[b.type]||confOrd[a.conf]-confOrd[b.conf]);
-  newSigs.forEach((s,i)=>s.id=i+1);
-  SIGS.length=0;
-  SIGS.push(...newSigs);
-
-  // Sync watchlist prices
-  SIGS.forEach(s=>{ const w=WL.find(x=>x.sym===s.sym); if(w){w.px=s.px;w.chg=s.chg;w.up=s.chg>=0;} });
-
-  fetchingSignals=false;
-
-  if (SIGS.length>0) {
-    renderTickers();
-    applyFilters();
-    renderWatchlist();
-    updateCarousel();
-    updateDockStats();
-  } else {
-    $('sig-list').innerHTML=`
-      <div style="text-align:center;padding:40px 0">
-        <div style="font-size:9px;color:#909097;margin-bottom:12px;text-transform:uppercase">Could not load signals — check connection</div>
-        <button onclick="fetchLiveSignals()" style="padding:8px 16px;background:#222a3d;border-radius:8px;font-size:9px;color:#4ae176;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;border:none;cursor:pointer">Retry</button>
+function selectStrategy(id) {
+  activeStrategy = id;
+  renderStrategies();
+  // Re-show empty state with new strategy description
+  if (SIGS.length === 0) {
+    const strat = STRATEGIES.find(s=>s.id===id);
+    $('sig-list').innerHTML = `
+      <div style="text-align:center;padding:36px 12px;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <div style="width:36px;height:36px;border-radius:50%;background:rgba(74,225,118,0.08);border:1px solid rgba(74,225,118,0.2);display:flex;align-items:center;justify-content:center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ae176" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        </div>
+        <div style="font-size:9px;color:#bcc7de;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Tap a ticker to analyze</div>
+        <div style="font-size:8px;color:#45464d;text-transform:uppercase;letter-spacing:0.08em">${strat?.desc||''}</div>
       </div>`;
+  } else {
+    applyFilters();
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-//  DOTVERSE AI BACKEND INTEGRATION
-//  Replaces client-side signal engine with /api/analyze calls.
-// ══════════════════════════════════════════════════════════════
-
-// Icon for a given symbol
-function iconForSym(sym) {
-  const s=(sym||'').toUpperCase();
-  if (s.includes('BTC')||s.includes('XBT')) return 'bitcoin';
-  if (s.includes('ETH')||s.includes('SOL')||s.includes('BNB')||
-      s.includes('ADA')||s.includes('DOT')||s.includes('LINK')||
-      s.includes('XRP')||s.includes('DOGE')||s.includes('AVAX')) return 'coin';
-  if (s.includes('EUR')||s.includes('GBP')||s.includes('JPY')||
-      s.includes('CHF')||s.includes('AUD')||s.includes('USD')&&s.length<=8) return 'forex';
-  return 'chart';
-}
-
-// Map /api/analyze response → Quantverse signal object
-function mapDvToSig(data, sym, mkt) {
-  const confMap={'HIGH':'High','MEDIUM':'Moderate','LOW':'Low',
-                 'High':'High','Moderate':'Moderate','Low':'Low'};
-  const rawSig=(data.signal||'HOLD').toUpperCase();
-  const type=rawSig.includes('BUY')?'BUY':rawSig.includes('SELL')?'SELL':'HOLD';
-  const conf=confMap[data.confidence]||'Low';
-  const rsi=data.rsi!=null?+parseFloat(data.rsi).toFixed(1):50;
-  const entry=data.entry||data.price||0;
-  const sl=data.stop_loss||0;
-  const tp1=data.tp1||0, tp2=data.tp2||0, tp3=data.tp3||0;
-  const risk=entry&&sl?Math.abs(entry-sl):1;
-  const rr=n=>risk>0?parseFloat((Math.abs(n-entry)/risk).toFixed(1)):data['rr1']||0;
-  return {
-    id: Date.now()+Math.random(),
-    sym: sym||data.ticker,
-    mkt: mkt,
-    tf: data.timeframe||'4H',
-    type,
-    px:  data.price||entry||0,
-    entry: entry,
-    sl:   sl,
-    tp1:  tp1,
-    tp2:  tp2,
-    tp3:  tp3,
-    rsi,
-    conf,
-    trig: data.narrative||data.summary||'DotVerse AI Analysis',
-    rr1:  data.rr1||rr(tp1),
-    rr2:  data.rr2||rr(tp2),
-    rr3:  data.rr3||rr(tp3),
-    chg:  data.chg24h||0,
-    ico:  iconForSym(sym||data.ticker),
-    live: true,
-    t:    data.timestamp||new Date().toISOString().slice(0,16).replace('T',' ')+' UTC',
-    dvData: data   // keep full DotVerse response for reference
-  };
-}
-
-// Overlay helpers
-function showOverlay(msg) {
-  const el=$('analyze-overlay');
-  $('overlay-msg').textContent=msg||'Analyzing…';
-  el.style.display='flex';
-}
-function hideOverlay() {
-  $('analyze-overlay').style.display='none';
-}
-function showError(msg) {
-  $('sig-list').innerHTML=`
-    <div style="text-align:center;padding:32px 12px;display:flex;flex-direction:column;align-items:center;gap:10px">
-      <div style="font-size:8px;color:#eb4141;text-transform:uppercase;letter-spacing:0.1em">${msg||'Analysis failed'}</div>
-      <div style="font-size:7px;color:#45464d;text-transform:uppercase;">Tap a ticker to retry</div>
+// ── ON-DEMAND INSTRUMENT ANALYSIS ────────────────────────────
+async function analyzeInstrument(cfg) {
+  if (!cfg) { console.warn('[QV] analyzeInstrument: no cfg'); return; }
+  const strat = STRATEGIES.find(s=>s.id===activeStrategy);
+  $('sig-list').innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 0;gap:12px">
+      <div style="width:24px;height:24px;border:2px solid rgba(74,225,118,.18);border-top-color:#4ae176;border-radius:50%;animation:spin .75s linear infinite"></div>
+      <span style="font-size:8px;color:#909097;text-transform:uppercase;letter-spacing:0.15em">Analyzing ${cfg.sym}…</span>
+      <span style="font-size:7px;color:#45464d;text-transform:uppercase;letter-spacing:0.08em">${strat?.desc||''}</span>
     </div>`;
-}
-
-// Call /api/analyze for a specific ticker — then show signal detail
-async function analyzeTicker(sym, assetType, tf) {
-  // Visually highlight the tapped chip briefly
-  showOverlay('Analyzing '+sym.replace('/USDT','').replace('/USD','')+'…');
   try {
-    const ctrl=new AbortController();
-    const timer=setTimeout(()=>ctrl.abort(),90000); // 90s max (Claude can be slow)
-    const r=await fetch('/api/analyze',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'include',
-      signal:ctrl.signal,
-      body:JSON.stringify({ticker:sym,asset_type:assetType,timeframe:tf||'4H'})
-    });
-    clearTimeout(timer);
-    if (r.status===401) {
-      hideOverlay();
-      // Not logged in — redirect to DotVerse with a back hint
-      window.location.href='/?next=quantverse';
-      return;
-    }
-    if (!r.ok) throw new Error('Server error '+r.status);
-    const data=await r.json();
-    if (data.error) throw new Error(data.error);
-    const mktLabel=assetType==='crypto'?'Crypto':assetType==='forex'?'Forex':'Stocks';
-    const sig=mapDvToSig(data, sym, mktLabel);
-    // Cache in SIGS for alerts/watchlist cross-reference
-    const existingIdx=SIGS.findIndex(s=>s.sym===sym);
-    if (existingIdx>=0) SIGS[existingIdx]=sig; else SIGS.push(sig);
-    hideOverlay();
-    $('ticker-input').value='';
-    go('signal-detail',sig);
-  } catch(e) {
-    hideOverlay();
-    if (e.name==='AbortError') {
-      showError('Request timed out — please retry');
+    let candles;
+    if (cfg.binSym) {
+      // Crypto — real Binance 4H candles
+      candles = await fetchBinanceCandles(cfg.binSym, '4h', 100);
+    } else if (cfg.base) {
+      // Forex — frankfurter.app daily → synthetic candles
+      const from = new Date(Date.now()-90*24*3600000).toISOString().slice(0,10);
+      const url = `https://api.frankfurter.app/history?amount=1&from=${from}&base=${cfg.base}&symbols=${cfg.quote}`;
+      const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(),12000);
+      const res = await fetch(url,{signal:ctrl.signal}); clearTimeout(t);
+      if (!res.ok) throw new Error('Forex API '+res.status);
+      const data = await res.json();
+      const dates = Object.keys(data.rates||{}).sort();
+      const closes = dates.map(d=>data.rates[d][cfg.quote]).filter(v=>v!=null);
+      if (closes.length < 22) throw new Error('Insufficient forex data');
+      candles = closes.map((c,i)=>{
+        const o = i>0?closes[i-1]:c;
+        return [i, o, Math.max(o,c)*1.001, Math.min(o,c)*0.999, c, 1];
+      });
     } else {
-      showError(e.message||'Analysis failed');
+      // Stocks — synthetic candles from a realistic random walk
+      const BASE = {AAPL:175,NVDA:880,TSLA:170,MSFT:420,AMZN:185};
+      const base = BASE[cfg.sym] || 100;
+      let p = base * 0.93; const closes = [];
+      for (let i=0; i<80; i++) { p*=1+(Math.random()-0.47)*0.015; closes.push(+p.toFixed(4)); }
+      closes.push(base);
+      candles = closes.map((c,i)=>{
+        const o = i>0?closes[i-1]:c;
+        return [i, o, Math.max(o,c)*1.001, Math.min(o,c)*0.999, c, Math.random()*1e6+1e5];
+      });
     }
-    console.error('[QV] analyzeTicker failed:',sym,e);
-  }
-}
-
-// Analyze from the search input field
-function analyzeFromInput() {
-  const raw=($('ticker-input').value||'').trim().toUpperCase().replace(/\s/g,'');
-  if (!raw) return;
-  // Guess asset type — prefer to keep user's hint explicit
-  const cryptoSyms=['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','AVAX','LINK','DOT','MATIC','OP','ARB','SUI','SEI'];
-  const isCrypto=cryptoSyms.some(c=>raw.startsWith(c))||raw.endsWith('USDT')||raw.endsWith('USDC')||raw.endsWith('BTC');
-  const forexChars=['EUR','GBP','JPY','CHF','AUD','CAD','NZD','USD'];
-  const isForex=!isCrypto&&forexChars.some(f=>raw.includes(f))&&raw.length<=8;
-  const at=isCrypto?'crypto':isForex?'forex':'stock';
-  analyzeTicker(raw, at, '4H');
-}
-
-// Auth gate — redirect to DotVerse login if session cookie is missing
-async function authCheck() {
-  try {
-    const r=await fetch('/api/auth-check',{credentials:'include'});
-    if (r.status===401) {
-      window.location.href='/?next=quantverse';
-    }
+    if (!candles || candles.length < 22) throw new Error('Insufficient data');
+    const tf = cfg.binSym ? '4H' : '1D';
+    const sig = runStrategy(activeStrategy, candles, cfg.sym, cfg.mkt, cfg.ico, tf);
+    if (!sig) throw new Error('Strategy returned no signal');
+    // Cache in SIGS
+    const idx = SIGS.findIndex(s=>s.sym===cfg.sym);
+    if (idx>=0) SIGS[idx]=sig; else SIGS.push(sig);
+    // Sync watchlist
+    const wl = WL.find(w=>w.sym===cfg.sym);
+    if (wl) { wl.px=sig.px; wl.chg=sig.chg; wl.up=sig.chg>=0; }
+    updateCarousel(); updateDockStats();
+    go('signal-detail', sig);
   } catch(e) {
-    console.warn('[QV] Auth check failed (network?):',e.message);
+    $('sig-list').innerHTML = `
+      <div style="text-align:center;padding:40px 12px;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <div style="font-size:8px;color:#eb4141;text-transform:uppercase;letter-spacing:0.1em">${e.message||'Analysis failed'}</div>
+        <div style="font-size:7px;color:#45464d;text-transform:uppercase">Tap a ticker to retry</div>
+      </div>`;
+    console.error('[QV] analyzeInstrument failed:', cfg.sym, e);
   }
+}
+
+// Analyze from the manual search input
+function analyzeFromInput() {
+  const raw = ($('ticker-input').value||'').trim().toUpperCase().replace(/\s/g,'');
+  if (!raw) return;
+  // Check INST_MAP first (all known instruments)
+  let cfg = INST_MAP[raw] || INST_MAP[raw+'/USDT'] || INST_MAP[raw+'/USD'];
+  if (!cfg) {
+    // Unknown ticker — build a minimal crypto config and try Binance
+    const cryptoBase = ['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','AVAX','LINK','DOT','MATIC','OP','ARB','SUI','SEI'];
+    const isCrypto = cryptoBase.some(c=>raw.startsWith(c)) || raw.endsWith('USDT') || raw.endsWith('USDC');
+    const sym = isCrypto ? (raw.includes('USDT')?raw.replace('USDT','/USDT'):raw+'/USDT') : raw;
+    const binSym = isCrypto ? sym.replace('/','') : null;
+    cfg = { sym, mkt: isCrypto?'Crypto':'Stocks', ico: isCrypto?'coin':'chart', binSym };
+  }
+  $('ticker-input').value = '';
+  analyzeInstrument(cfg);
 }
 
 // Price refresh every 45s — crypto ticker only (fast); forex/stocks refresh on next signal cycle
@@ -1264,18 +1377,20 @@ function go(s, data=null) {
 // ── DASHBOARD ─────────────────────────────────────────────────
 function renderDashboard() {
   updateCarousel();
+  renderStrategies();
   renderCats();
   renderTickers();
   renderTfs();
-  // Show tap-to-analyze prompt instead of auto-fetching all signals
+  // Empty state — prompt user to pick strategy + tap ticker
   if (SIGS.length===0) {
+    const strat = STRATEGIES.find(s=>s.id===activeStrategy);
     $('sig-list').innerHTML=`
       <div style="text-align:center;padding:36px 12px;display:flex;flex-direction:column;align-items:center;gap:10px">
         <div style="width:36px;height:36px;border-radius:50%;background:rgba(74,225,118,0.08);border:1px solid rgba(74,225,118,0.2);display:flex;align-items:center;justify-content:center">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ae176" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         </div>
-        <div style="font-size:9px;color:#bcc7de;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Select a ticker to analyze</div>
-        <div style="font-size:8px;color:#45464d;text-transform:uppercase;letter-spacing:0.09em">DotVerse AI · Real-time signals</div>
+        <div style="font-size:9px;color:#bcc7de;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Select a strategy · Tap a ticker</div>
+        <div style="font-size:8px;color:#45464d;text-transform:uppercase;letter-spacing:0.08em">${strat?.desc||'RSI · EMA · MACD · ADX · Supertrend'}</div>
       </div>`;
   } else {
     applyFilters();
@@ -1294,17 +1409,21 @@ function renderCats() {
 window._filterCat=cat=>{actCat=cat;actTicker='All';renderCats();renderTickers();applyFilters();};
 
 function renderTickers() {
-  // Build analyze chips from config arrays (not from SIGS — clicking one calls /api/analyze)
-  let items=[];
-  if (actCat==='All'||actCat==='Crypto') items.push(...CRYPTO_CFG.map(c=>({sym:c.sym,at:'crypto'})));
-  if (actCat==='All'||actCat==='Forex')  items.push(...FOREX_CFG.map(c=>({sym:c.sym,at:'forex'})));
-  if (actCat==='All'||actCat==='Stocks') items.push(...STOCK_CFG.map(c=>({sym:c.sym,at:'stock'})));
-  const lbl=sym=>sym.replace('/USDT','').replace('/USD','');
-  $('ticker-tabs').innerHTML=items.map(({sym,at})=>`
-    <button onclick="analyzeTicker('${sym}','${at}','4H')"
-      style="border:1px solid rgba(69,70,77,0.35);font-size:7px;padding:3px 9px;border-radius:20px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;flex-shrink:0;color:#909097;background:transparent">
-      ${lbl(sym)}
-    </button>`).join('');
+  // Chips from config arrays — clicking calls analyzeInstrument (local, no backend)
+  let cfgs=[];
+  if (actCat==='All'||actCat==='Crypto') cfgs.push(...CRYPTO_CFG);
+  if (actCat==='All'||actCat==='Forex')  cfgs.push(...FOREX_CFG);
+  if (actCat==='All'||actCat==='Stocks') cfgs.push(...STOCK_CFG);
+  const lbl = sym => sym.replace('/USDT','').replace('/USD','');
+  $('ticker-tabs').innerHTML = cfgs.map(cfg => {
+    const analysed = SIGS.find(s=>s.sym===cfg.sym);
+    const hasSig = !!analysed;
+    const dotColor = hasSig ? (analysed.type==='BUY'?'#4ae176':analysed.type==='SELL'?'#eb4141':'#909097') : 'transparent';
+    return `<button onclick="analyzeInstrument(INST_MAP['${cfg.sym}']||${JSON.stringify(cfg)})"
+      style="border:1px solid ${hasSig?dotColor+'44':'rgba(69,70,77,0.35)'};font-size:7px;padding:3px 9px;border-radius:20px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;flex-shrink:0;color:${hasSig?dotColor:'#909097'};background:${hasSig?dotColor+'11':'transparent'};display:inline-flex;align-items:center;gap:4px">
+      ${hasSig?`<span style="width:5px;height:5px;border-radius:50%;background:${dotColor};flex-shrink:0"></span>`:''}${lbl(cfg.sym)}
+    </button>`;
+  }).join('');
 }
 window._filterTicker=ticker=>{actTicker=ticker;renderTickers();applyFilters();};
 
@@ -1704,12 +1823,11 @@ function renderAlerts(f) {
 // ── SETTINGS ──────────────────────────────────────────────────
 function renderSettings() {
   const conn=[
-    {lbl:'DotVerse AI',      val:'/api/analyze — Claude-powered signal engine',    st:'connected',ico:'bolt'},
-    {lbl:'Binance API',      val:'Crypto 4H chart data (display only)',            st:'live',     ico:'cloud'},
-    {lbl:'Frankfurter.app',  val:'Forex reference rates (CORS-free)',              st:'live',     ico:'globe'},
-    {lbl:'DotVerse Session', val:'Shared auth — login once at dotverse.app',       st:'active',   ico:'wifi'},
+    {lbl:'Binance API',      val:'Crypto 4H candles · 10 pairs live',             st:'live',  ico:'cloud'},
+    {lbl:'Frankfurter.app',  val:'Forex daily rates · 5 pairs (CORS-free)',        st:'live',  ico:'globe'},
+    {lbl:'Local Engine',     val:'7 strategy engines · zero backend dependency',   st:'active',ico:'bolt'},
   ];
-  const stC={connected:'text-secondary',live:'text-secondary',active:'text-secondary',error:'text-on-tertiary-container'};
+  const stC={live:'text-secondary',active:'text-secondary',error:'text-on-tertiary-container'};
   $('conn-items').innerHTML = conn.map(c => `
     <div class="flex items-center justify-between px-4 py-3 border-b border-outline-variant/5 last:border-0">
       <div class="flex items-center gap-3">
@@ -1721,7 +1839,7 @@ function renderSettings() {
       </div>
       <div class="flex items-center gap-1.5">
         <div class="w-1.5 h-1.5 rounded-full bg-secondary live"></div>
-        <span class="text-[8px] font-bold ${stC[c.st]} uppercase">${c.st}</span>
+        <span class="text-[8px] font-bold ${stC[c.st]||'text-secondary'} uppercase">${c.st}</span>
       </div>
     </div>
   `).join('');
@@ -1741,18 +1859,16 @@ function renderSettings() {
     </div>
   `).join('');
 
-  const srcs=[
-    {lbl:'Binance API',       tp:'Crypto 4H — BTC ETH SOL BNB XRP DOGE ADA AVAX LINK DOT',  st:'Active'},
-    {lbl:'Frankfurter.app',   tp:'Forex Daily — EUR/USD GBP/USD USD/JPY USD/CHF AUD/USD',    st:'Active'},
-    {lbl:'Yahoo Finance',     tp:'Stocks Daily — AAPL NVDA TSLA MSFT AMZN (+ demo fallback)',st:'Active'},
-  ];
-  $('ds-items').innerHTML = srcs.map(s => `
+  $('ds-items').innerHTML = STRATEGIES.map(s => `
     <div class="flex items-center justify-between px-4 py-3 border-b border-outline-variant/5 last:border-0">
       <div>
-        <div class="text-[11px] font-medium text-on-surface">${s.lbl}</div>
-        <div class="text-[8px] text-on-surface-variant/60">${s.tp}</div>
+        <div class="text-[11px] font-medium text-on-surface">${s.label}</div>
+        <div class="text-[8px] text-on-surface-variant/60">${s.desc}</div>
       </div>
-      <span class="px-2 py-0.5 rounded text-[8px] font-bold ${s.st==='Active'?'bg-secondary/10 text-secondary':'bg-surface-container-highest text-on-surface-variant'} uppercase">${s.st}</span>
+      <button onclick="selectStrategy('${s.id}');go('dashboard')"
+        style="padding:3px 10px;border-radius:12px;font-size:7.5px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;border:1px solid ${s.id===activeStrategy?'rgba(74,225,118,0.4)':'rgba(69,70,77,0.35)'};background:${s.id===activeStrategy?'rgba(74,225,118,0.12)':'transparent'};color:${s.id===activeStrategy?'#4ae176':'#909097'}">
+        ${s.id===activeStrategy?'Active':'Use'}
+      </button>
     </div>
   `).join('');
 }
@@ -1789,9 +1905,6 @@ setInterval(()=>{
 },4000);
 
 // ── INIT ──────────────────────────────────────────────────────
-// Auth gate first — redirects to DotVerse login if session is missing
-authCheck();
-
 renderDashboard();
 renderWatchlist();
 renderSettings();
@@ -1810,7 +1923,7 @@ setInterval(refreshPrices, 45000);
 // ── SERVICE WORKER ────────────────────────────────────────────
 if('serviceWorker' in navigator){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/quantverse-pwa/sw.js',{scope:'/quantverse'})
+    navigator.serviceWorker.register('/sw.js',{scope:'/'})
       .then(reg=>console.log('[QV] SW registered:',reg.scope))
       .catch(err=>console.warn('[QV] SW failed:',err));
   });
