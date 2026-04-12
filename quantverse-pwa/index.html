@@ -1408,8 +1408,17 @@ function renderCats() {
 }
 window._filterCat=cat=>{actCat=cat;actTicker='All';renderCats();renderTickers();applyFilters();};
 
+// Safe wrapper — ticker chips call this with just a symbol string (no JSON in onclick)
+function analyzeSym(sym) {
+  const cfg = INST_MAP[sym];
+  if (cfg) { analyzeInstrument(cfg); return; }
+  // Unknown symbol — try Binance as crypto
+  const binSym = sym.replace('/','');
+  analyzeInstrument({ sym, mkt:'Crypto', ico:'coin', binSym });
+}
+
 function renderTickers() {
-  // Chips from config arrays — clicking calls analyzeInstrument (local, no backend)
+  // Chips from config arrays — clicking calls analyzeSym(sym) — no JSON in HTML
   let cfgs=[];
   if (actCat==='All'||actCat==='Crypto') cfgs.push(...CRYPTO_CFG);
   if (actCat==='All'||actCat==='Forex')  cfgs.push(...FOREX_CFG);
@@ -1419,7 +1428,7 @@ function renderTickers() {
     const analysed = SIGS.find(s=>s.sym===cfg.sym);
     const hasSig = !!analysed;
     const dotColor = hasSig ? (analysed.type==='BUY'?'#4ae176':analysed.type==='SELL'?'#eb4141':'#909097') : 'transparent';
-    return `<button onclick="analyzeInstrument(INST_MAP['${cfg.sym}']||${JSON.stringify(cfg)})"
+    return `<button onclick="analyzeSym('${cfg.sym}')"
       style="border:1px solid ${hasSig?dotColor+'44':'rgba(69,70,77,0.35)'};font-size:7px;padding:3px 9px;border-radius:20px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;flex-shrink:0;color:${hasSig?dotColor:'#909097'};background:${hasSig?dotColor+'11':'transparent'};display:inline-flex;align-items:center;gap:4px">
       ${hasSig?`<span style="width:5px;height:5px;border-radius:50%;background:${dotColor};flex-shrink:0"></span>`:''}${lbl(cfg.sym)}
     </button>`;
