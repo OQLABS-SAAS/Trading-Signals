@@ -482,8 +482,70 @@ def detect_rsi_divergence(high, low, rsi_series, pivot_len=3, lookback=100):
     result["all"] = all_divs
     return result
 
+# ─── 2e: FORWARD-FILL DATE GRID ──────────────────────────────
+_TF_FREQ = {
+    "1m": "1min", "3m": "3min", "5m": "5min", "15m": "15min", "30m": "30min",
+    "1h": "1h",   "2h": "2h",   "4h": "4h",
+    "1d": "1D",   "1w": "1W",
+}
+_STOCK_TYPES = {"stock", "index", "commodity"}
+
+def _fill_date_grid(df, timeframe, asset_type):
+    """Build expected timestamp grid for the given timeframe, reindex the
+    DataFrame with forward-fill (max 3 consecutive fills) so indicators
+    receive a continuous series with no accidental gaps.
+
+    Weekends are excluded from the grid for stocks/indices/commodities.
+    Crypto runs 24/7 — no exclusion.
+    """
+    freq = _TF_FREQ.get(timeframe)
+    if not freq or df.empty:
+        return df
+    try:
+        start = df.index[0]
+        end   = df.index[-1]
+        grid  = pd.date_range(start=start, end=end, freq=freq, tz=df.index.tz)
+        # Exclude weekends for non-crypto assets
+        if asset_type in _STOCK_TYPES:
+            grid = grid[grid.dayofweek < 5]
+        # Reindex and forward-fill, capping at 3 consecutive fills
+        df = df.reindex(grid).ffill(limit=3)
+    except Exception as _e:
+        print(f"[fill_date_grid] skipped ({_e})")
+    return df
+
 # ─── INDICATOR CALCULATION ────────────────────────────────────
-def calculate_indicators(df, timeframe="1d"):
+def calculate_indicators(df, timeframe="1d", asset_type="stock"):
+    # ── 2a: Per-asset NaN / bad-tick strategy ────────────────────────────────
+    df = df.copy()
+    if asset_type == "crypto":
+        for col in ("Open", "High", "Low", "Close"):
+            s = df[col]
+            # Zero prices → NaN
+            df[col] = s.where(s > 0)
+            # Bars more than 10× the 20-bar rolling median → replace with median
+            roll_med = df[col].rolling(20, min_periods=5).median()
+            mask = df[col] > (roll_med * 10)
+            df.loc[mask, col] = roll_med[mask]
+    # Drop rows with any NaN in OHLCV (covers genuine gaps for all asset types)
+    df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+
+    # ── 2b: Spike filter (all asset types) ───────────────────────────────────
+    # Any bar where close deviates > 20% from its 20-bar rolling median is a
+    # data spike. Replace with the median rather than dropping so index stays
+    # continuous. Log how many were clipped.
+    roll_med_close = df["Close"].rolling(20, min_periods=5).median()
+    spike_mask = (
+        (df["Close"] - roll_med_close).abs() / roll_med_close.clip(lower=1e-9) > 0.20
+    )
+    n_spikes = int(spike_mask.sum())
+    if n_spikes:
+        df.loc[spike_mask, "Close"] = roll_med_close[spike_mask]
+        # Clip High/Low to match so TR calc stays sane
+        df.loc[spike_mask, "High"] = df.loc[spike_mask, ["High", "Close"]].min(axis=1)
+        df.loc[spike_mask, "Low"]  = df.loc[spike_mask, ["Low",  "Close"]].max(axis=1)
+        print(f"[calc_ind] spike filter: clipped {n_spikes} bar(s) for {asset_type}")
+
     close = df["Close"].squeeze()
     high  = df["High"].squeeze()
     low   = df["Low"].squeeze()
@@ -512,7 +574,12 @@ def calculate_indicators(df, timeframe="1d"):
     tr  = pd.concat([high - low,
                      (high - close.shift()).abs(),
                      (low  - close.shift()).abs()], axis=1).max(axis=1)
-    atr = float(rma(tr, 14).iloc[-1])
+    # ── 2c: Smoothed ATR — Wilder ATR14 smoothed over 100-bar rolling mean ──
+    # Raw ATR14 is too noisy for stop sizing. Rolling mean of ATR14 gives a
+    # stable baseline that doesn't overreact to individual volatile bars.
+    atr_raw    = rma(tr, 14)
+    atr_smooth = atr_raw.rolling(100, min_periods=14).mean()
+    atr        = float(atr_smooth.iloc[-1])
 
     vol_avg   = float(vol.rolling(20).mean().iloc[-1])
     # Use previous bar if the last bar has no volume (incomplete candle edge case)
@@ -1294,7 +1361,7 @@ def detect_counter_trade(ind):
     if not price or not atr:
         return {"counter_trade": False}
     entry  = price
-    sl     = round(min(sup - atr * 0.3, price - atr * 1.5), 4)
+    sl     = round(min(sup - atr * 0.3, price - atr * 4.0), 4)
     risk   = entry - sl
     if risk <= 0:
         return {"counter_trade": False}
@@ -1302,6 +1369,11 @@ def detect_counter_trade(ind):
     tp1 = round(entry + risk * 1.5, 4)
     tp2 = round(entry + risk * 2.5, 4)
     tp3 = round(entry + risk * 4.0, 4)
+    # ── 2d: Net RR after fees — 0.2% round-trip ──────────────────────────
+    fee_adj = entry * 0.002
+    tp1 = round(tp1 - fee_adj, 4)
+    tp2 = round(tp2 - fee_adj, 4)
+    tp3 = round(tp3 - fee_adj, 4)
     rr1 = round((tp1 - entry) / risk, 1)
     rr2 = round((tp2 - entry) / risk, 1)
     rr3 = round((tp3 - entry) / risk, 1)
@@ -1949,17 +2021,28 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         entry = round(price, 4) if price > 100 else round(price, 2)
 
         if signal == "BUY":
-            stop_loss = round(price - (1.5 * atr), 4) if price > 100 else round(price - (1.5 * atr), 2)
+            stop_loss = round(price - (4.0 * atr), 4) if price > 100 else round(price - (4.0 * atr), 2)
             tp1 = round(price + (2 * atr), 4) if price > 100 else round(price + (2 * atr), 2)
             tp2 = round(price + (3.5 * atr), 4) if price > 100 else round(price + (3.5 * atr), 2)
             tp3 = round(price + (5.5 * atr), 4) if price > 100 else round(price + (5.5 * atr), 2)
         else:  # SELL
-            stop_loss = round(price + (1.5 * atr), 4) if price > 100 else round(price + (1.5 * atr), 2)
+            stop_loss = round(price + (4.0 * atr), 4) if price > 100 else round(price + (4.0 * atr), 2)
             tp1 = round(price - (2 * atr), 4) if price > 100 else round(price - (2 * atr), 2)
             tp2 = round(price - (3.5 * atr), 4) if price > 100 else round(price - (3.5 * atr), 2)
             tp3 = round(price - (5.5 * atr), 4) if price > 100 else round(price - (5.5 * atr), 2)
 
-        # Calculate R:R ratios
+        # ── 2d: Net RR after fees — 0.2% round-trip (0.1% entry + 0.1% exit) ──
+        fee_adj = entry * 0.002
+        if signal == "BUY":
+            tp1 = round(tp1 - fee_adj, 4) if price > 100 else round(tp1 - fee_adj, 2)
+            tp2 = round(tp2 - fee_adj, 4) if price > 100 else round(tp2 - fee_adj, 2)
+            tp3 = round(tp3 - fee_adj, 4) if price > 100 else round(tp3 - fee_adj, 2)
+        else:  # SELL — fees add to cost, reducing net gain
+            tp1 = round(tp1 + fee_adj, 4) if price > 100 else round(tp1 + fee_adj, 2)
+            tp2 = round(tp2 + fee_adj, 4) if price > 100 else round(tp2 + fee_adj, 2)
+            tp3 = round(tp3 + fee_adj, 4) if price > 100 else round(tp3 + fee_adj, 2)
+
+        # Calculate R:R ratios (after fee adjustment)
         risk = abs(entry - stop_loss)
         if risk > 0:
             rr1 = round((abs(tp1 - entry) / risk), 1)
@@ -2263,15 +2346,26 @@ def get_watch_signal(ticker, asset_type, ind, timeframe):
     if signal != "HOLD" and atr > 0:
         entry = round(price, 4) if price > 100 else round(price, 2)
         if signal == "BUY":
-            stop_loss = round(price - (1.5 * atr), 4) if price > 100 else round(price - (1.5 * atr), 2)
+            stop_loss = round(price - (4.0 * atr), 4) if price > 100 else round(price - (4.0 * atr), 2)
             tp1 = round(price + (2 * atr), 4) if price > 100 else round(price + (2 * atr), 2)
             tp2 = round(price + (3.5 * atr), 4) if price > 100 else round(price + (3.5 * atr), 2)
             tp3 = round(price + (5.5 * atr), 4) if price > 100 else round(price + (5.5 * atr), 2)
         else:  # SELL
-            stop_loss = round(price + (1.5 * atr), 4) if price > 100 else round(price + (1.5 * atr), 2)
+            stop_loss = round(price + (4.0 * atr), 4) if price > 100 else round(price + (4.0 * atr), 2)
             tp1 = round(price - (2 * atr), 4) if price > 100 else round(price - (2 * atr), 2)
             tp2 = round(price - (3.5 * atr), 4) if price > 100 else round(price - (3.5 * atr), 2)
             tp3 = round(price - (5.5 * atr), 4) if price > 100 else round(price - (5.5 * atr), 2)
+
+        # ── 2d: Net RR after fees — 0.2% round-trip ──────────────────────────
+        fee_adj = entry * 0.002
+        if signal == "BUY":
+            tp1 = round(tp1 - fee_adj, 4) if price > 100 else round(tp1 - fee_adj, 2)
+            tp2 = round(tp2 - fee_adj, 4) if price > 100 else round(tp2 - fee_adj, 2)
+            tp3 = round(tp3 - fee_adj, 4) if price > 100 else round(tp3 - fee_adj, 2)
+        else:
+            tp1 = round(tp1 + fee_adj, 4) if price > 100 else round(tp1 + fee_adj, 2)
+            tp2 = round(tp2 + fee_adj, 4) if price > 100 else round(tp2 + fee_adj, 2)
+            tp3 = round(tp3 + fee_adj, 4) if price > 100 else round(tp3 + fee_adj, 2)
 
         risk = abs(entry - stop_loss)
         if risk > 0:
@@ -2361,11 +2455,14 @@ def run_watch_job():
                 df = df.resample(cfg["resample"]).agg(
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
                 ).dropna()
+            # ── 2e: Forward-fill date grid ────────────────────────────────────
+            if not df.empty:
+                df = _fill_date_grid(df, timeframe, asset_type)
 
             if df.empty or len(df) < 30:
                 continue
 
-            ind    = calculate_indicators(df, timeframe)
+            ind    = calculate_indicators(df, timeframe, asset_type)
             screen = pre_screen(ind)
 
             with watch_lock:
@@ -2619,8 +2716,11 @@ def analyze():
                 df = df.resample(cfg["resample"]).agg(
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
                 ).dropna()
+            # ── 2e: Forward-fill date grid before indicator calc ──────────────
+            if not df.empty:
+                df = _fill_date_grid(df, timeframe, asset_type)
             if not df.empty and len(df) >= 51:  # EMA50 needs 51 bars minimum to be valid
-                ind_full = calculate_indicators(df, timeframe)
+                ind_full = calculate_indicators(df, timeframe, asset_type)
                 if tv_ok:
                     # TV is primary — only take chart arrays + win rate from yfinance
                     # rsi_divergence MUST be included: build_ind_from_tv hardcodes it
@@ -2744,7 +2844,7 @@ def analyze():
                             "Close":  prices_c,
                             "Volume": vols_c,
                         }, index=_fb_idx)
-                        _ind_fb = calculate_indicators(_df_fb, timeframe)
+                        _ind_fb = calculate_indicators(_df_fb, timeframe, asset_type)
                         # Overwrite chart_rsi and rsi_divergence — these need the full
                         # indicator pipeline.  Leave chart_prices/dates alone (already set).
                         for _k in ("chart_rsi", "chart_buy_signals", "chart_sell_signals",
@@ -2996,7 +3096,7 @@ def screen():
         if df.empty or len(df) < 30:
             return jsonify({"opportunity": False, "reason": "Not enough data"}), 200
 
-        ind    = calculate_indicators(df, timeframe)
+        ind    = calculate_indicators(df, timeframe, asset_type)
         result = pre_screen(ind)
         return jsonify({
             "ticker":    ticker,
@@ -3305,7 +3405,7 @@ def scan_list():
                 if df.empty or len(df) < 20:
                     results.append({"ticker": ticker, "error": "no data"})
                     continue
-                ind    = calculate_indicators(df, timeframe)
+                ind    = calculate_indicators(df, timeframe, asset_type)
                 screen = pre_screen(ind)
                 ct     = detect_counter_trade(ind)
                 results.append({

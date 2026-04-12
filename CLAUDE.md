@@ -154,16 +154,13 @@ These are unresolved bugs confirmed by the user. Do not mark any as fixed until 
 
 ---
 
-### BUG 3 — `doAnalyze` Called Directly on 3 Code Paths (UNRESOLVED)
-**Status:** UNRESOLVED as of 2026-04-11
-**Symptom:** Lines 3252, 3263, 3317 in `index.html` call `doAnalyze` directly without going through `scannerLoadTicker`. If triggered while the signals tab is hidden, the chart renders into a zero-width container — same class of bug as BUG 2.
-**Where to look:** History chip handler, instrument chip handler, sidebar ticker handler.
+### BUG 3 — `doAnalyze` Called Directly on 3 Code Paths (RESOLVED)
+**Status:** RESOLVED — Phase 1b. `instChipLoad`, `instSwitchGo`, `runAnalyze` in `static/index.html` now route through `scannerLoadTicker`. Committed `a8adf2a`, deployed 2026-04-13.
 
 ---
 
-### BUG 4 — `/api/backtest` Missing `@login_required` (UNRESOLVED)
-**Status:** UNRESOLVED as of 2026-04-11
-**Symptom:** `app.py` line 3532 — `backtest_route` has no `@login_required` decorator. Unauthenticated users can call `/api/backtest` directly.
+### BUG 4 — `/api/backtest` Missing `@login_required` (RESOLVED)
+**Status:** RESOLVED — Phase 1a. `@login_required` added to `backtest_route` in `app.py`. Committed `a8adf2a`, deployed 2026-04-13.
 
 ---
 
@@ -259,19 +256,37 @@ Flask (Railway) ──→ PostgreSQL   (positions, optimisation results)
 **Session sequencing rule:**
 Each phase must be runtime-verified in a live Railway deploy before the next phase starts. User confirms in browser. Claude does not mark a phase complete until user confirms.
 
-**Phase 1 status — IMPLEMENTED (Level 4 verified, awaiting runtime confirmation):**
-- 1a: DONE — `@login_required` added to `/api/backtest` at `app.py` line 3533.
-- 1b: DONE — `instChipLoad`, `instSwitchGo`, `runAnalyze` in `static/index.html` now route through `scannerLoadTicker`. Two other `doAnalyze` calls (lines 5813, 9467) confirmed safe — not the same class of bug.
-- 1c: DONE — `_build_chart_output` rewritten to accept `pd.DataFrame` with `DatetimeIndex`. All 5 callers updated (`_fetch_binance`, `_fetch_stooq`, `_fetch_yahoo_v8`, `_fetch_fmp`, exception-handler Binance fallback at line 2665). Timestamps preserved until display formatting — no more position-based merge.
-- 1d: DONE — `len(df) >= 30` → `len(df) >= 51` at `app.py` line 2622.
+**Phase 1 status — RUNTIME VERIFIED by user on 2026-04-13:**
+- 1a: DONE + VERIFIED — `@login_required` on `/api/backtest`. Commit `a8adf2a`.
+- 1b: DONE + VERIFIED — BUG 3 routed through `scannerLoadTicker`. Commit `a8adf2a`.
+- 1c: DONE + VERIFIED — `_build_chart_output` accepts `pd.DataFrame` + `DatetimeIndex`. All 5 callers updated. Commit `a8adf2a`.
+- 1d: DONE + VERIFIED — Bar floor `>= 30` → `>= 51`. Commit `a8adf2a`.
+- Bonus fix: Fallback `calculate_indicators` on Stooq chart data → RSI divergence trendlines now render for stocks on Railway. Commit `545e090`. Runtime verified by user screenshot 2026-04-13.
+- Bonus fix: `renderIndicators` null guard on `macd_hist`, `expandId` wired into card template. Commit `a8adf2a`.
 
-**Runtime verification required before Phase 2 starts:**
-Deploy to Railway (`git push origin main`). In browser:
-1. Call `/api/backtest` without session cookie → should get 401/redirect, not execute.
-2. From scanner tab, click an instrument chip → signals tab should switch into view, chart renders at full width.
-3. Load BTC on 1h timeframe → Railway logs should show `[binance] OK` with bar count, chart dates should be correct UTC timestamps.
-4. Load a stock (e.g. AAPL) → logs should show `[stooq] OK` or `[yahoo_v8] OK`, chart dates should be correct.
-5. Confirm no "5-tuple" unpack errors in logs (all callers now return 8-tuple).
+---
+
+### SESSION HANDOFF NOTES — 2026-04-13 (Phase 2 start)
+
+**Phase 1: COMPLETE — runtime verified. All known bugs resolved.**
+
+**Phase 2 — Signal Quality (app.py only, no new infrastructure):**
+All five items to be implemented sequentially. Each must be committed and runtime verified before moving to the next.
+
+- 2a: Per-asset NaN strategy — `dropna()` for stocks/indices/forex. Crypto: bad-tick filter (price = 0, or close > 10× rolling median of last 20 bars → replace with median). Applied in `calculate_indicators` after DataFrame is received.
+- 2b: Spike filter — bar-to-bar % change > 3× ATR20 flagged, replaced with 20-bar rolling median. Applied before indicators run. Exemption: stocks on earnings dates (if identifiable — skip for now, add note).
+- 2c: Smoothed ATR + 4× stop — ATR14 smoothed over 100-bar rolling mean. Replace 1.5× stop multiplier with 4×. Applied in stop/TP calculation section.
+- 2d: Net RR after fees — 0.2% round-trip deducted from every TP1/TP2/TP3 calculation. Applied after ATR stop is computed.
+- 2e: Forward-fill date grid — build expected timestamp grid per timeframe before accepting source data, reindex with ffill, cap at 3 consecutive fills max. Stocks: exclude weekends from grid. Applied in `_build_chart_output` or at top of `calculate_indicators`.
+
+**Risks stated before implementation:**
+- 2a: Threshold for crypto bad-tick too aggressive → real flash moves removed. Mitigation: use 10× rolling median, not absolute value.
+- 2b: Spike filter clips genuine gap-ups (earnings). Mitigation: flag only, log, do not silently discard without trace.
+- 2c: 4× stop widens SL — reduces signal frequency on short timeframes. Expected and acceptable.
+- 2d: All three TP levels must get fee deduction — not just TP1.
+- 2e: Weekend exclusion for stocks requires asset_type detection before grid construction.
+
+**Verification level for Phase 2:** Level 4 (code reading) until Railway deploy + user confirms in browser.
 
 **Next session — start here:**
-Say "Protocol active." Re-read this file. Confirm Phase 1 runtime verification with user. If verified, begin Phase 2, item 2a (per-asset NaN strategy).
+Say "Protocol active." Re-read this file. Begin Phase 2, item 2a. Read `calculate_indicators` in `app.py` first. State exact insertion point. Get confirmation. Then implement.
