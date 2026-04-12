@@ -6,16 +6,16 @@
 <title>Quant Verse | Trading Signals</title>
 
 <!-- ── PWA MANIFEST ── -->
-<link rel="manifest" href="/manifest.json"/>
+<link rel="manifest" href="/quantverse-pwa/manifest.json"/>
 <meta name="theme-color" content="#060e20"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <!-- iOS -->
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="Quant Verse"/>
-<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
-<link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png"/>
-<link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png"/>
+<link rel="apple-touch-icon" href="/quantverse-pwa/apple-touch-icon.png"/>
+<link rel="apple-touch-icon" sizes="192x192" href="/quantverse-pwa/icon-192.png"/>
+<link rel="apple-touch-icon" sizes="512x512" href="/quantverse-pwa/icon-512.png"/>
 
 <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
@@ -239,6 +239,18 @@ canvas{display:block;}
       <span class="text-[9px] font-bold text-secondary uppercase tracking-wider">Live Audit</span>
     </div>
     <div id="carousel" class="flex gap-3 overflow-x-auto hide-sb snap-x pb-2 mb-5"></div>
+    <!-- Ticker search — analyze any instrument on demand -->
+    <div class="flex gap-2 mb-3">
+      <input id="ticker-input" type="text" placeholder="Type any ticker: BTC, AAPL, EURUSD…"
+        autocomplete="off" autocorrect="off" spellcheck="false"
+        style="flex:1;background:#131b2e;color:#dae2fd;font-size:9px;font-family:'Inter',sans-serif;font-weight:600;padding:8px 12px;border-radius:8px;border:1px solid rgba(69,70,77,0.4);outline:none;text-transform:uppercase;letter-spacing:0.06em;caret-color:#4ae176"
+        oninput="this.value=this.value.toUpperCase()"
+        onkeydown="if(event.key==='Enter')analyzeFromInput()"/>
+      <button onclick="analyzeFromInput()"
+        style="background:linear-gradient(180deg,#bcc7de 0%,#768197 100%);color:#111c2d;font-size:8px;font-weight:800;letter-spacing:0.1em;padding:8px 12px;border-radius:8px;border:none;cursor:pointer;text-transform:uppercase;flex-shrink:0;active:transform:scale(.95)">
+        Analyze
+      </button>
+    </div>
     <div id="cat-tabs" class="flex gap-2 overflow-x-auto hide-sb mb-2 pb-0.5"></div>
     <div id="ticker-tabs" class="flex gap-1.5 overflow-x-auto hide-sb mb-2 pb-0.5"></div>
     <div id="tf-tabs" class="flex gap-2 overflow-x-auto hide-sb mb-5 pb-2 border-b border-outline-variant/10"></div>
@@ -502,6 +514,13 @@ canvas{display:block;}
   <!-- HOME INDICATOR -->
   <div id="home-area">
     <div class="home-pill"></div>
+  </div>
+
+  <!-- ANALYZE LOADING OVERLAY -->
+  <div id="analyze-overlay" style="display:none;position:absolute;inset:0;z-index:300;background:rgba(6,14,32,0.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);flex-direction:column;align-items:center;justify-content:center;gap:14px;border-radius:inherit">
+    <div style="width:32px;height:32px;border:2px solid rgba(74,225,118,.15);border-top-color:#4ae176;border-radius:50%;animation:spin .75s linear infinite"></div>
+    <div id="overlay-msg" style="font-size:9px;color:#bcc7de;text-transform:uppercase;letter-spacing:0.14em;text-align:center;max-width:200px"></div>
+    <div style="font-size:7px;color:#45464d;text-transform:uppercase;letter-spacing:0.1em">Powered by DotVerse AI</div>
   </div>
 
 </div><!-- /phone-shell -->
@@ -1000,6 +1019,147 @@ async function fetchLiveSignals() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════
+//  DOTVERSE AI BACKEND INTEGRATION
+//  Replaces client-side signal engine with /api/analyze calls.
+// ══════════════════════════════════════════════════════════════
+
+// Icon for a given symbol
+function iconForSym(sym) {
+  const s=(sym||'').toUpperCase();
+  if (s.includes('BTC')||s.includes('XBT')) return 'bitcoin';
+  if (s.includes('ETH')||s.includes('SOL')||s.includes('BNB')||
+      s.includes('ADA')||s.includes('DOT')||s.includes('LINK')||
+      s.includes('XRP')||s.includes('DOGE')||s.includes('AVAX')) return 'coin';
+  if (s.includes('EUR')||s.includes('GBP')||s.includes('JPY')||
+      s.includes('CHF')||s.includes('AUD')||s.includes('USD')&&s.length<=8) return 'forex';
+  return 'chart';
+}
+
+// Map /api/analyze response → Quantverse signal object
+function mapDvToSig(data, sym, mkt) {
+  const confMap={'HIGH':'High','MEDIUM':'Moderate','LOW':'Low',
+                 'High':'High','Moderate':'Moderate','Low':'Low'};
+  const rawSig=(data.signal||'HOLD').toUpperCase();
+  const type=rawSig.includes('BUY')?'BUY':rawSig.includes('SELL')?'SELL':'HOLD';
+  const conf=confMap[data.confidence]||'Low';
+  const rsi=data.rsi!=null?+parseFloat(data.rsi).toFixed(1):50;
+  const entry=data.entry||data.price||0;
+  const sl=data.stop_loss||0;
+  const tp1=data.tp1||0, tp2=data.tp2||0, tp3=data.tp3||0;
+  const risk=entry&&sl?Math.abs(entry-sl):1;
+  const rr=n=>risk>0?parseFloat((Math.abs(n-entry)/risk).toFixed(1)):data['rr1']||0;
+  return {
+    id: Date.now()+Math.random(),
+    sym: sym||data.ticker,
+    mkt: mkt,
+    tf: data.timeframe||'4H',
+    type,
+    px:  data.price||entry||0,
+    entry: entry,
+    sl:   sl,
+    tp1:  tp1,
+    tp2:  tp2,
+    tp3:  tp3,
+    rsi,
+    conf,
+    trig: data.narrative||data.summary||'DotVerse AI Analysis',
+    rr1:  data.rr1||rr(tp1),
+    rr2:  data.rr2||rr(tp2),
+    rr3:  data.rr3||rr(tp3),
+    chg:  data.chg24h||0,
+    ico:  iconForSym(sym||data.ticker),
+    live: true,
+    t:    data.timestamp||new Date().toISOString().slice(0,16).replace('T',' ')+' UTC',
+    dvData: data   // keep full DotVerse response for reference
+  };
+}
+
+// Overlay helpers
+function showOverlay(msg) {
+  const el=$('analyze-overlay');
+  $('overlay-msg').textContent=msg||'Analyzing…';
+  el.style.display='flex';
+}
+function hideOverlay() {
+  $('analyze-overlay').style.display='none';
+}
+function showError(msg) {
+  $('sig-list').innerHTML=`
+    <div style="text-align:center;padding:32px 12px;display:flex;flex-direction:column;align-items:center;gap:10px">
+      <div style="font-size:8px;color:#eb4141;text-transform:uppercase;letter-spacing:0.1em">${msg||'Analysis failed'}</div>
+      <div style="font-size:7px;color:#45464d;text-transform:uppercase;">Tap a ticker to retry</div>
+    </div>`;
+}
+
+// Call /api/analyze for a specific ticker — then show signal detail
+async function analyzeTicker(sym, assetType, tf) {
+  // Visually highlight the tapped chip briefly
+  showOverlay('Analyzing '+sym.replace('/USDT','').replace('/USD','')+'…');
+  try {
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),90000); // 90s max (Claude can be slow)
+    const r=await fetch('/api/analyze',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      signal:ctrl.signal,
+      body:JSON.stringify({ticker:sym,asset_type:assetType,timeframe:tf||'4H'})
+    });
+    clearTimeout(timer);
+    if (r.status===401) {
+      hideOverlay();
+      // Not logged in — redirect to DotVerse with a back hint
+      window.location.href='/?next=quantverse';
+      return;
+    }
+    if (!r.ok) throw new Error('Server error '+r.status);
+    const data=await r.json();
+    if (data.error) throw new Error(data.error);
+    const mktLabel=assetType==='crypto'?'Crypto':assetType==='forex'?'Forex':'Stocks';
+    const sig=mapDvToSig(data, sym, mktLabel);
+    // Cache in SIGS for alerts/watchlist cross-reference
+    const existingIdx=SIGS.findIndex(s=>s.sym===sym);
+    if (existingIdx>=0) SIGS[existingIdx]=sig; else SIGS.push(sig);
+    hideOverlay();
+    $('ticker-input').value='';
+    go('signal-detail',sig);
+  } catch(e) {
+    hideOverlay();
+    if (e.name==='AbortError') {
+      showError('Request timed out — please retry');
+    } else {
+      showError(e.message||'Analysis failed');
+    }
+    console.error('[QV] analyzeTicker failed:',sym,e);
+  }
+}
+
+// Analyze from the search input field
+function analyzeFromInput() {
+  const raw=($('ticker-input').value||'').trim().toUpperCase().replace(/\s/g,'');
+  if (!raw) return;
+  // Guess asset type — prefer to keep user's hint explicit
+  const cryptoSyms=['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','AVAX','LINK','DOT','MATIC','OP','ARB','SUI','SEI'];
+  const isCrypto=cryptoSyms.some(c=>raw.startsWith(c))||raw.endsWith('USDT')||raw.endsWith('USDC')||raw.endsWith('BTC');
+  const forexChars=['EUR','GBP','JPY','CHF','AUD','CAD','NZD','USD'];
+  const isForex=!isCrypto&&forexChars.some(f=>raw.includes(f))&&raw.length<=8;
+  const at=isCrypto?'crypto':isForex?'forex':'stock';
+  analyzeTicker(raw, at, '4H');
+}
+
+// Auth gate — redirect to DotVerse login if session cookie is missing
+async function authCheck() {
+  try {
+    const r=await fetch('/api/auth-check',{credentials:'include'});
+    if (r.status===401) {
+      window.location.href='/?next=quantverse';
+    }
+  } catch(e) {
+    console.warn('[QV] Auth check failed (network?):',e.message);
+  }
+}
+
 // Price refresh every 45s — crypto ticker only (fast); forex/stocks refresh on next signal cycle
 async function refreshPrices() {
   const cryptoSigs = SIGS.filter(s=>s.mkt==='Crypto');
@@ -1107,8 +1267,19 @@ function renderDashboard() {
   renderCats();
   renderTickers();
   renderTfs();
-  if (SIGS.length>0) applyFilters();
-  else fetchLiveSignals();
+  // Show tap-to-analyze prompt instead of auto-fetching all signals
+  if (SIGS.length===0) {
+    $('sig-list').innerHTML=`
+      <div style="text-align:center;padding:36px 12px;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <div style="width:36px;height:36px;border-radius:50%;background:rgba(74,225,118,0.08);border:1px solid rgba(74,225,118,0.2);display:flex;align-items:center;justify-content:center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ae176" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        </div>
+        <div style="font-size:9px;color:#bcc7de;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Select a ticker to analyze</div>
+        <div style="font-size:8px;color:#45464d;text-transform:uppercase;letter-spacing:0.09em">DotVerse AI · Real-time signals</div>
+      </div>`;
+  } else {
+    applyFilters();
+  }
 }
 
 function renderCats() {
@@ -1123,26 +1294,17 @@ function renderCats() {
 window._filterCat=cat=>{actCat=cat;actTicker='All';renderCats();renderTickers();applyFilters();};
 
 function renderTickers() {
-  // Show tickers visible under current category filter, from loaded SIGS
-  const base=actCat==='All'?SIGS:SIGS.filter(s=>s.mkt===actCat);
-  const syms=['All',...base.map(s=>s.sym)];
-  // Short label for display (remove /USDT suffix for crypto)
-  const lbl=sym=>sym==='All'?'All':sym.replace('/USDT','').replace('/USD','');
-  const typeColor=sym=>{
-    const s=SIGS.find(x=>x.sym===sym);
-    if(!s||sym==='All') return null;
-    return s.type==='BUY'?'#4ae176':s.type==='SELL'?'#eb4141':'#bcc7de';
-  };
-  $('ticker-tabs').innerHTML=syms.map(sym=>{
-    const active=sym===actTicker;
-    const col=typeColor(sym);
-    const activeBorder=col?`border-color:${col};color:${col};background:${col}18`:'';
-    return `<button onclick="window._filterTicker('${sym}')"
-      style="border:1px solid ${active?(col||'#4ae176'):'rgba(69,70,77,0.3)'};${active?activeBorder:''};font-size:7px;padding:3px 9px;border-radius:20px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;flex-shrink:0;
-      color:${active?(col||'#4ae176'):'#909097'};background:${active?((col||'#4ae176')+'18'):'transparent'}">
-      ${lbl(sym)}${col&&!active?`<span style="display:inline-block;width:4px;height:4px;border-radius:50%;background:${col};margin-left:3px;vertical-align:middle"></span>`:''}
-    </button>`;
-  }).join('');
+  // Build analyze chips from config arrays (not from SIGS — clicking one calls /api/analyze)
+  let items=[];
+  if (actCat==='All'||actCat==='Crypto') items.push(...CRYPTO_CFG.map(c=>({sym:c.sym,at:'crypto'})));
+  if (actCat==='All'||actCat==='Forex')  items.push(...FOREX_CFG.map(c=>({sym:c.sym,at:'forex'})));
+  if (actCat==='All'||actCat==='Stocks') items.push(...STOCK_CFG.map(c=>({sym:c.sym,at:'stock'})));
+  const lbl=sym=>sym.replace('/USDT','').replace('/USD','');
+  $('ticker-tabs').innerHTML=items.map(({sym,at})=>`
+    <button onclick="analyzeTicker('${sym}','${at}','4H')"
+      style="border:1px solid rgba(69,70,77,0.35);font-size:7px;padding:3px 9px;border-radius:20px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;flex-shrink:0;color:#909097;background:transparent">
+      ${lbl(sym)}
+    </button>`).join('');
 }
 window._filterTicker=ticker=>{actTicker=ticker;renderTickers();applyFilters();};
 
@@ -1542,10 +1704,10 @@ function renderAlerts(f) {
 // ── SETTINGS ──────────────────────────────────────────────────
 function renderSettings() {
   const conn=[
-    {lbl:'Binance API',      val:'Crypto 4H klines + 24h ticker',   st:'connected',ico:'cloud'},
-    {lbl:'Frankfurter.app',  val:'Forex daily rates (CORS-free)',    st:'live',     ico:'globe'},
-    {lbl:'Yahoo Finance',    val:'Stock OHLCV daily + demo fallback',st:'live',     ico:'wifi'},
-    {lbl:'Signal Engine',    val:'RSI-14 · EMA-9/21 · ATR-14 · HOLD zone',st:'active',ico:'bolt'},
+    {lbl:'DotVerse AI',      val:'/api/analyze — Claude-powered signal engine',    st:'connected',ico:'bolt'},
+    {lbl:'Binance API',      val:'Crypto 4H chart data (display only)',            st:'live',     ico:'cloud'},
+    {lbl:'Frankfurter.app',  val:'Forex reference rates (CORS-free)',              st:'live',     ico:'globe'},
+    {lbl:'DotVerse Session', val:'Shared auth — login once at dotverse.app',       st:'active',   ico:'wifi'},
   ];
   const stC={connected:'text-secondary',live:'text-secondary',active:'text-secondary',error:'text-on-tertiary-container'};
   $('conn-items').innerHTML = conn.map(c => `
@@ -1627,6 +1789,9 @@ setInterval(()=>{
 },4000);
 
 // ── INIT ──────────────────────────────────────────────────────
+// Auth gate first — redirects to DotVerse login if session is missing
+authCheck();
+
 renderDashboard();
 renderWatchlist();
 renderSettings();
@@ -1639,17 +1804,13 @@ if(dashNav){
   if(l){l.style.color='#4ae176';l.style.opacity='1';}
 }
 
-// Kick off live signal fetch
-fetchLiveSignals();
-// Refresh prices every 45 seconds
+// Refresh watchlist prices every 45 seconds (lightweight Binance ticker only)
 setInterval(refreshPrices, 45000);
-// Re-compute signals every 4 hours
-setInterval(fetchLiveSignals, 4*60*60*1000);
 
 // ── SERVICE WORKER ────────────────────────────────────────────
 if('serviceWorker' in navigator){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('/quantverse-pwa/sw.js',{scope:'/quantverse'})
       .then(reg=>console.log('[QV] SW registered:',reg.scope))
       .catch(err=>console.warn('[QV] SW failed:',err));
   });

@@ -133,3 +133,42 @@ Do not silently investigate then present conclusions and fixes together as if th
 After writing any fix, re-read the original user requirement and ask:
 **"Have I verified this works at runtime, or only that the code looks correct?"**
 Static code analysis is not verification.
+
+---
+
+## KNOWN BUGS — READ THIS FIRST EVERY SESSION
+
+These are unresolved bugs confirmed by the user. Do not mark any as fixed until runtime verified in a live browser.
+
+---
+
+### BUG 1 — RSI Divergence Trendlines Not Rendering
+**Status:** RESOLVED — runtime verified by user on 2026-04-12. Deployed to Railway.
+**Fix summary:** RSI panel height increased 90px → 160px. Flat-line guard added (if y-spread < 5px, draw at midpoint y). Pivot dot radius increased 3.5px → 5.5px. Root cause was sub-pixel line height due to small RSI value differences on tiny canvas.
+
+---
+
+### BUG 2 — Scanner → Signals Chart Zero-Width (RESOLVED)
+**Status:** RESOLVED — runtime verified by user on 2026-04-12. Deployed to Railway.
+**Fix summary:** `autoSize: true` in `_lwcCommonOpts`, `requestAnimationFrame` in `scannerLoadTicker`, all scanner entry points now use `scannerLoadTicker`.
+
+---
+
+### BUG 3 — `doAnalyze` Called Directly on 3 Code Paths (UNRESOLVED)
+**Status:** UNRESOLVED as of 2026-04-11
+**Symptom:** Lines 3252, 3263, 3317 in `index.html` call `doAnalyze` directly without going through `scannerLoadTicker`. If triggered while the signals tab is hidden, the chart renders into a zero-width container — same class of bug as BUG 2.
+**Where to look:** History chip handler, instrument chip handler, sidebar ticker handler.
+
+---
+
+### BUG 4 — `/api/backtest` Missing `@login_required` (UNRESOLVED)
+**Status:** UNRESOLVED as of 2026-04-11
+**Symptom:** `app.py` line 3532 — `backtest_route` has no `@login_required` decorator. Unauthenticated users can call `/api/backtest` directly.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-11
+- User has been working 20+ hours. RSI divergence trendlines have been reported and "fixed" multiple times with no runtime verification. This is the primary unresolved issue.
+- Git push failed due to HTTPS credentials — user must run `git push origin main` manually.
+- `renderResults()` (old legacy function, ~lines 3413–3630) is dead code never called from `quickLoad`. Safe to remove eventually but not urgent.
+- When user returns: ask them to say "Protocol active", then go straight to BUG 1 investigation — do NOT act before tracing the full render path.
