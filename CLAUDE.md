@@ -278,11 +278,20 @@ Each phase must be runtime-verified in a live Railway deploy before the next pha
 - 2d: Net RR after fees — `fee_adj = entry * 0.002`. BUY: `tp -= fee_adj`. SELL: `tp += fee_adj`. Applied before RR calculation in all three TP blocks.
 - 2e: Forward-fill date grid — `_fill_date_grid(df, timeframe, asset_type)` helper. Builds expected timestamp grid, reindexes with `ffill(limit=3)`. Weekends excluded for stocks/indices/commodities. Called in `analyze()` and `run_watch_job()` before `calculate_indicators`.
 
-**Phase 3 — Signal Intelligence (app.py + static/index.html, no new infrastructure):**
-- 3a: Confluence gate — signal fires only at ≥65% sub-indicator agreement. Below threshold → NEUTRAL.
-- 3b: Asset-specific indicator settings — hardcoded per class: Crypto (RSI 10, EMA 7/14), Forex (RSI 14, EMA 9/21), Stocks (RSI 14, EMA 9/21), Indices (RSI 21, EMA 20/50), Commodities (RSI 14, EMA 9/21).
-- 3c: Position size output — `positionPct` on every signal for 1% account risk.
-- 3d: Signal confidence label — CONFIRMED / LIKELY / HYPOTHESIS surfaced on signal card.
+**Phase 3: COMPLETE — runtime verified by user on 2026-04-13. Commit `ef6774f`.**
+
+**Phase 3 items — all DONE + VERIFIED:**
+- 3a: Confluence gate — `bull_pct = bullish_count / total_votes`. Signal fires only at ≥65%. Below threshold → HOLD. Existing HTF/footprint/confidence-floor gates remain downstream.
+- 3b: Asset-specific settings — `ASSET_CONFIG` dict. `get_rsi()` gains `period` param. `calculate_indicators()` uses per-asset RSI period and EMA fast/slow. Frontend EMA card label updates dynamically from `d.ema_fast_period` / `d.ema_slow_period`.
+- 3c: Position size — `position_pct = round(min(entry / risk, 100.0), 1)`. Added to `get_analysis` result dict. Displayed as amber banner above Trade Management Plan.
+- 3d: Confidence label — `confidence_label` field in result dict. CONFIRMED (TV used or net≥5) / LIKELY (net≥3) / HYPOTHESIS (weak). Displayed below confidence ring with colour coding and tooltip.
+
+**Phase 4 — Infrastructure (user provisions on Railway before Phase 5 code starts):**
+- 4a: PostgreSQL Railway add-on. Schema: `positions` and `optimisation_results` tables.
+- 4b: Redis Railway add-on. OHLCV cache, task queue, task results.
+- 4c: RQ Worker — second Railway service, same codebase, start command `rq worker`.
+
+**Phase 4 is user-side provisioning — no code written until all three add-ons are live.**
 
 **Next session — start here:**
-Say "Protocol active." Re-read this file. Run Six Stop Gates for Phase 3. State investigation plan. Get confirmation. Then implement.
+Say "Protocol active." Re-read this file. Run Six Stop Gates for Phase 4. Present provisioning checklist to user. Once user confirms all three are live, begin Phase 5 code.
