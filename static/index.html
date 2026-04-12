@@ -3248,8 +3248,9 @@ function instChipLoad(ticker, assetType, timeframe) {
   const tf = document.getElementById('timeframe').value || timeframe;
   document.getElementById('tickerInput').value = ticker;
   document.getElementById('assetType').value   = assetType;
-  document.getElementById('timeframe').value   = tf;
-  doAnalyze(ticker, assetType, tf);
+  // Route through scannerLoadTicker to guarantee signals tab is visible before
+  // chart renders — prevents zero-width container bug (same fix as BUG 2).
+  scannerLoadTicker(ticker, assetType, tf);
 }
 
 function instSwitchGo() {
@@ -3260,7 +3261,8 @@ function instSwitchGo() {
   const timeframe = document.getElementById('timeframe').value;
   document.getElementById('instSwitchInput').value = '';
   document.getElementById('tickerInput').value = val;
-  doAnalyze(val, assetType, timeframe);
+  // Route through scannerLoadTicker — guarantees signals tab visible before chart renders.
+  scannerLoadTicker(val, assetType, timeframe);
 }
 
 /* ── Glass pill selector helper ── */
@@ -3314,7 +3316,8 @@ function syncPillsFromSelect(id) {
 function runAnalyze() {
   const t = document.getElementById('tickerInput').value.trim().toUpperCase();
   if (!t) { showToast('Enter a ticker symbol'); return; }
-  doAnalyze(t, document.getElementById('assetType').value, document.getElementById('timeframe').value);
+  // Route through scannerLoadTicker — guarantees signals tab visible before chart renders.
+  scannerLoadTicker(t, document.getElementById('assetType').value, document.getElementById('timeframe').value);
 }
 function quickLoad(ticker, assetType, timeframe) {
   document.getElementById('tickerInput').value = ticker;
@@ -4604,6 +4607,7 @@ function renderIndicators(d) {
 
   const cards = [
     {
+      expandId: 'indExpandRsi',
       plain: 'Momentum Gauge', tech: 'RSI (14)',
       badge: rsiBadge, bl: rsiLabel,
       desc: d.rsi_assessment || 'Momentum indicator showing buying/selling pressure.',
@@ -4611,6 +4615,7 @@ function renderIndicators(d) {
       bar: bar(rsi, rsiColor)
     },
     {
+      expandId: null,
       plain: 'Divergence Signal', tech: 'RSI Divergence',
       badge: divBadge, bl: divBl,
       desc: div.desc || 'No divergence between price pivots and RSI in the current window.',
@@ -4620,6 +4625,7 @@ function renderIndicators(d) {
       bar: bar(divType === 'none' ? 0 : divStr, divColor)
     },
     {
+      expandId: 'indExpandEma',
       plain: 'Trend Direction', tech: 'EMA (20/50)',
       badge: etBull ? 'bull' : etBear ? 'bear' : 'neut',
       bl: etBull ? 'Uptrend' : etBear ? 'Downtrend' : 'Mixed',
@@ -4630,14 +4636,16 @@ function renderIndicators(d) {
       bar: bar(etBull ? 71 : etBear ? 29 : 50, etBull ? '#00c98d' : etBear ? '#ff4459' : '#4d9fff')
     },
     {
+      expandId: 'indExpandMacd',
       plain: 'Trend Momentum', tech: 'MACD (12,26,9)',
       badge: macdBull ? 'bull' : 'bear',
       bl: macdBull ? 'Bullish Cross' : 'Bearish Cross',
       desc: d.macd_assessment || 'Momentum shift — short-term vs long-term moving average crossover.',
-      raw: `${lbl('Histogram:')} <span style="color:${macdBull?'#00c98d':'#ff6b7a'};font-weight:700;">${(d.macd_hist>=0?'+':'')+d.macd_hist.toFixed(3)}</span>`,
+      raw: `${lbl('Histogram:')} <span style="color:${macdBull?'#00c98d':'#ff6b7a'};font-weight:700;">${d.macd_hist != null ? (d.macd_hist>=0?'+':'') + d.macd_hist.toFixed(3) : '—'}</span>`,
       bar: bar(Math.min(Math.abs(d.macd_hist||0)*10000+50,100), macdBull ? '#00c98d' : '#ff4459')
     },
     {
+      expandId: 'indExpandBb',
       plain: 'Volatility Range', tech: 'Bollinger Bands (20,2)',
       badge: bbBadge, bl: bbLabel,
       desc: d.bb_pos < 0.2 ? 'Price touched the lower edge of its normal range — historically bounces from here.' :
@@ -4647,6 +4655,7 @@ function renderIndicators(d) {
       bar: bar(bbPct, bbBadge === 'bull' ? '#00c98d' : bbBadge === 'bear' ? '#ff4459' : '#f5c842')
     },
     {
+      expandId: 'indExpandSupertrend',
       plain: 'Trend Confirmation', tech: 'Supertrend (10,3)',
       badge: stBull ? 'bull' : 'bear',
       bl: stBull ? 'Uptrend' : 'Downtrend',
@@ -4655,6 +4664,7 @@ function renderIndicators(d) {
       bar: bar(stBull ? 75 : 25, stBull ? '#00c98d' : '#ff4459')
     },
     {
+      expandId: 'indExpandVolume',
       plain: 'Trading Activity', tech: 'Volume (20-bar avg)',
       badge: volBull ? 'bull' : (d.vol_ratio||0) < 0.7 ? 'warn' : 'neut',
       bl: volBull ? 'High Volume' : (d.vol_ratio||0) < 0.7 ? 'Low Volume' : 'Average',
@@ -4684,7 +4694,7 @@ function renderIndicators(d) {
       </div>
       <div class="ind-desc">${colorizeNumbers(c.desc)}</div>
       <div class="ind-raw">${c.raw}</div>
-      <div class="ind-expand"></div>
+      <div class="ind-expand"${c.expandId ? ` id="${c.expandId}"` : ''}></div>
     </div>`;
   }).join('');
 }

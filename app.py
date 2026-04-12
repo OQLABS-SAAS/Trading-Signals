@@ -802,14 +802,26 @@ def _enrich_chart_indicators(prices_c):
 # ─── MULTI-SOURCE CHART DATA ──────────────────────────────────
 # Tries sources in order until one works. Yahoo Finance is blocked on Railway IPs,
 # so we try Binance (crypto) and Stooq (stocks/forex) first.
-def _build_chart_output(dates_raw, prices_raw, vols_raw, timeframe, max_bars=200,
-                        opens_raw=None, highs_raw=None, lows_raw=None):
-    """Helper: trim, compute EMAs, return tuple.
-    Returns (dates, prices, vols, ema20, ema50) when no OHLC provided,
-    or (dates, prices, vols, ema20, ema50, opens, highs, lows) when OHLC is available."""
-    dates_raw  = dates_raw[-max_bars:]
-    prices_raw = prices_raw[-max_bars:]
-    vols_raw   = vols_raw[-max_bars:]
+def _build_chart_output(df: pd.DataFrame, timeframe: str, max_bars: int = 200):
+    """Accept a DataFrame with DatetimeIndex (columns: Open High Low Close Volume).
+    Sorts by timestamp, trims to max_bars, computes EMAs.
+    Always returns 8-tuple: (dates, prices, vols, ema20, ema50, opens, highs, lows).
+    Timestamps are formatted for display AFTER alignment — never before."""
+    if df is None or df.empty:
+        return None
+
+    # Sort by timestamp — never trust source order (backtesting.py pattern)
+    df = df.sort_index()
+    df = df.iloc[-max_bars:]
+
+    # Format dates for display only after alignment is complete
+    dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
+    dates  = [idx.strftime(dt_fmt) for idx in df.index]
+    prices = df['Close'].round(6).tolist()
+    vols   = df['Volume'].fillna(0).astype(int).tolist()
+    opens  = df['Open'].round(6).tolist()
+    highs  = df['High'].round(6).tolist()
+    lows   = df['Low'].round(6).tolist()
 
     def _ema(px, n):
         if len(px) < n:
@@ -822,10 +834,10 @@ def _build_chart_output(dates_raw, prices_raw, vols_raw, timeframe, max_bars=200
             out.append(round(ema, 6))
         return out
 
-    base = (dates_raw, prices_raw, vols_raw, _ema(prices_raw, 20), _ema(prices_raw, min(50, len(prices_raw)-1)))
-    if opens_raw and highs_raw and lows_raw:
-        return base + (opens_raw[-max_bars:], highs_raw[-max_bars:], lows_raw[-max_bars:])
-    return base
+    ema20 = _ema(prices, 20)
+    ema50 = _ema(prices, min(50, len(prices) - 1))
+
+    return (dates, prices, vols, ema20, ema50, opens, highs, lows)
 
 
 def _fetch_binance(ticker, timeframe):
@@ -849,22 +861,20 @@ def _fetch_binance(ticker, timeframe):
         if not klines or isinstance(klines, dict):  # error dict
             return None
 
-        dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
-        dates, opens, highs, lows, prices, vols = [], [], [], [], [], []
-        for k in klines:
-            ts = int(k[0]) // 1000
-            dates.append(datetime.utcfromtimestamp(ts).strftime(dt_fmt))
-            opens.append(round(float(k[1]), 6))
-            highs.append(round(float(k[2]), 6))
-            lows.append(round(float(k[3]), 6))
-            prices.append(round(float(k[4]), 6))
-            vols.append(int(float(k[5])))
+        # Build DataFrame with UTC DatetimeIndex — preserves timestamps for alignment
+        # Never convert to display strings here; _build_chart_output handles formatting
+        df = pd.DataFrame({
+            'Open':   [round(float(k[1]), 6) for k in klines],
+            'High':   [round(float(k[2]), 6) for k in klines],
+            'Low':    [round(float(k[3]), 6) for k in klines],
+            'Close':  [round(float(k[4]), 6) for k in klines],
+            'Volume': [int(float(k[5]))       for k in klines],
+        }, index=pd.to_datetime([int(k[0]) for k in klines], unit='ms', utc=True).tz_convert(None))
 
-        if len(prices) < 10:
+        if len(df) < 10:
             return None
-        print(f"[binance] OK — {sym} {interval}: {len(prices)} bars")
-        return _build_chart_output(dates, prices, vols, timeframe,
-                                   opens_raw=opens, highs_raw=highs, lows_raw=lows)
+        print(f"[binance] OK — {sym} {interval}: {len(df)} bars")
+        return _build_chart_output(df, timeframe)
     except Exception as e:
         print(f"[binance] error {sym}: {e}")
         return None
@@ -924,9 +934,13 @@ def _fetch_stooq(ticker, asset_type, timeframe):
 
         if len(prices) < 10:
             return None
-        print(f"[stooq] OK — {sym} {iv}: {len(prices)} bars")
-        return _build_chart_output(dates, prices, vols, timeframe,
-                                   opens_raw=opens, highs_raw=highs, lows_raw=lows)
+        # Build DataFrame with DatetimeIndex before passing to _build_chart_output
+        df = pd.DataFrame({
+            'Open': opens, 'High': highs, 'Low': lows,
+            'Close': prices, 'Volume': vols,
+        }, index=pd.to_datetime(dates))
+        print(f"[stooq] OK — {sym} {iv}: {len(df)} bars")
+        return _build_chart_output(df, timeframe)
     except Exception as e:
         print(f"[stooq] error {sym}: {e}")
         return None
@@ -1005,9 +1019,13 @@ def _fetch_yahoo_v8(ticker, asset_type, timeframe):
 
         if len(prices) < 5:
             return None
-        print(f"[yahoo_v8] OK — {yf_ticker} {timeframe}: {len(prices)} bars")
-        return _build_chart_output(dates, prices, volumes, timeframe,
-                                   opens_raw=o_out, highs_raw=h_out, lows_raw=l_out)
+        # Build DataFrame with DatetimeIndex before passing to _build_chart_output
+        df = pd.DataFrame({
+            'Open': o_out, 'High': h_out, 'Low': l_out,
+            'Close': prices, 'Volume': volumes,
+        }, index=pd.to_datetime(dates))
+        print(f"[yahoo_v8] OK — {yf_ticker} {timeframe}: {len(df)} bars")
+        return _build_chart_output(df, timeframe)
     except Exception as e:
         print(f"[yahoo_v8] error {yf_ticker}: {e}")
         return None
@@ -1069,9 +1087,13 @@ def _fetch_fmp(ticker, asset_type, timeframe):
 
         if len(prices) < 10:
             return None
-        print(f"[fmp] OK — {sym} {fmp_iv}: {len(prices)} bars")
-        return _build_chart_output(dates, prices, vols, timeframe,
-                                   opens_raw=opens, highs_raw=highs, lows_raw=lows)
+        # Build DataFrame with DatetimeIndex before passing to _build_chart_output
+        df = pd.DataFrame({
+            'Open': opens, 'High': highs, 'Low': lows,
+            'Close': prices, 'Volume': vols,
+        }, index=pd.to_datetime(dates))
+        print(f"[fmp] OK — {sym} {fmp_iv}: {len(df)} bars")
+        return _build_chart_output(df, timeframe)
     except Exception as e:
         print(f"[fmp] error {sym}: {e}")
         return None
@@ -2597,7 +2619,7 @@ def analyze():
                 df = df.resample(cfg["resample"]).agg(
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
                 ).dropna()
-            if not df.empty and len(df) >= 30:
+            if not df.empty and len(df) >= 51:  # EMA50 needs 51 bars minimum to be valid
                 ind_full = calculate_indicators(df, timeframe)
                 if tv_ok:
                     # TV is primary — only take chart arrays + win rate from yfinance
@@ -2639,17 +2661,8 @@ def analyze():
                 df_binance = fetch_binance_ohlcv(ticker, interval=cfg["interval"], period=cfg["period"])
                 if not df_binance.empty:
                     print(f"[analyze] Exception handler Binance fallback — got {len(df_binance)} bars")
-                    # Convert DataFrame back to chart format — include OHLC for footprint
-                    _exc_dt_fmt = "%Y-%m-%d %H:%M" if cfg.get("interval","1d") in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
-                    chart_result = _build_chart_output(
-                        df_binance.index.strftime(_exc_dt_fmt).tolist(),
-                        df_binance["Close"].tolist(),
-                        df_binance["Volume"].astype(int).tolist(),
-                        timeframe,
-                        opens_raw=df_binance["Open"].tolist() if "Open" in df_binance else None,
-                        highs_raw=df_binance["High"].tolist() if "High" in df_binance else None,
-                        lows_raw=df_binance["Low"].tolist() if "Low" in df_binance else None,
-                    )
+                    # Pass DataFrame directly — DatetimeIndex preserved, no list conversion
+                    chart_result = _build_chart_output(df_binance, timeframe)
             # Fallback to multi-source chart fetch (Binance → Stooq → Yahoo)
             if not chart_result:
                 chart_result = fetch_chart_direct(ticker, asset_type, timeframe)
@@ -2818,6 +2831,7 @@ def analyze():
               f"price={response_data.get('price')} rsi={response_data.get('rsi')} "
               f"entry={response_data.get('entry')} sl={response_data.get('stop_loss')} "
               f"tp1={response_data.get('tp1')} chart_bars={len(response_data.get('chart_prices', []))} "
+              f"chart_rsi_bars={len([v for v in (response_data.get('chart_rsi') or []) if v is not None])} "
               f"ema_trend={response_data.get('ema_trend')} atr={response_data.get('atr')}")
 
         # Validate JSON serialisability before sending — if this raises we get a
@@ -3530,6 +3544,7 @@ def send_sms_on_demand():
 
 # ─── STRATEGY BACKTEST ───────────────────────────────────────
 @app.route("/api/backtest", methods=["POST"])
+@login_required
 def backtest_route():
     """Simulate the current signal's TP/SL strategy on historical price data.
     Uses the same RSI-based entry condition as the main analysis.
