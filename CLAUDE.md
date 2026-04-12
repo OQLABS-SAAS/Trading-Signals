@@ -172,3 +172,25 @@ These are unresolved bugs confirmed by the user. Do not mark any as fixed until 
 - Git push failed due to HTTPS credentials — user must run `git push origin main` manually.
 - `renderResults()` (old legacy function, ~lines 3413–3630) is dead code never called from `quickLoad`. Safe to remove eventually but not urgent.
 - When user returns: ask them to say "Protocol active", then go straight to BUG 1 investigation — do NOT act before tracing the full render path.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-12
+**DotVerse (Railway — git push origin main):**
+- BUG 1 (RSI divergence trendlines) — RESOLVED, runtime verified by user, deployed.
+- BUG 2 (Scanner → Signals zero-width chart) — RESOLVED, runtime verified by user, deployed.
+- BUG 3 and BUG 4 still UNRESOLVED — not touched this session.
+
+**Quantverse PWA (Netlify — drag quantverse-pwa/ folder into Netlify deploy section):**
+- Replaced 15-indicator TV-style vote engine with 7 strategy engines: Momentum, SMC/ICT, Price Action, Mean Reversion, Volume, Breakout, Harmonic Patterns.
+- All signals computed locally from Binance/Frankfurter candles — no backend dependency.
+- Strategy tab row added above ticker chips. Ticker chips now trigger on-demand analysis via `analyzeSym(sym)` → `analyzeInstrument(cfg)` → `runStrategy()`.
+- Removed all DotVerse backend integration (authCheck, analyzeTicker, mapDvToSig, showOverlay).
+- manifest.json and SW registration fixed for Netlify (start_url /, icons /icon-*.png, sw.js at /).
+- Bug fixed this session: JSON.stringify in onclick HTML attribute caused SyntaxError on every ticker tap. Fixed by adding `analyzeSym(sym)` wrapper — no JSON in HTML attributes.
+- Committed: 0f16861 (full rewrite), 9ee9ad4 (onclick fix).
+- Verified at Level 4 (code reading) + user confirmed console errors were resolved after redeploying.
+
+**Deploy reminder:**
+- DotVerse: `git push origin main` → Railway auto-deploys.
+- Quantverse: drag `quantverse-pwa/` folder into Netlify site's deploy section (NOT git push).
