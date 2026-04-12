@@ -2725,6 +2725,42 @@ def analyze():
                 ind["chart_buy_signals"]  = _bsigs2
                 ind["chart_sell_signals"] = _ssigs2
                 print(f"[analyze] chart fallback OK — {len(prices_c)} bars, BB:{sum(1 for b in _bbu2 if b)} RSI:{sum(1 for r in _rsi_c2 if r)} signals:{len(_bsigs2)}B/{len(_ssigs2)}S")
+                # ── Run full calculate_indicators on fallback chart data ──────────────
+                # Gives RSI divergence detection, Supertrend, real vol_ratio, BB width,
+                # etc. — all the things that only compute when yfinance is available.
+                # On Railway, Yahoo Finance is often blocked for stocks; Stooq fills the
+                # gap here.  We reconstruct a DatetimeIndex DataFrame from the chart
+                # arrays and run the full pipeline on it.
+                if len(prices_c) >= 51:
+                    try:
+                        _fb_idx = pd.to_datetime(dates_c)
+                        _opens  = opens_c  if opens_c  and len(opens_c)  == len(prices_c) else prices_c
+                        _highs  = highs_c  if highs_c  and len(highs_c)  == len(prices_c) else prices_c
+                        _lows   = lows_c   if lows_c   and len(lows_c)   == len(prices_c) else prices_c
+                        _df_fb  = pd.DataFrame({
+                            "Open":   _opens,
+                            "High":   _highs,
+                            "Low":    _lows,
+                            "Close":  prices_c,
+                            "Volume": vols_c,
+                        }, index=_fb_idx)
+                        _ind_fb = calculate_indicators(_df_fb, timeframe)
+                        # Overwrite chart_rsi and rsi_divergence — these need the full
+                        # indicator pipeline.  Leave chart_prices/dates alone (already set).
+                        for _k in ("chart_rsi", "chart_buy_signals", "chart_sell_signals",
+                                   "chart_bb_upper", "chart_bb_lower", "rsi_divergence"):
+                            ind[_k] = _ind_fb.get(_k, ind.get(_k, []))
+                        # If TV is not available, pull scalar indicators from the full calc too
+                        if not tv_ok:
+                            for _k in ("rsi", "ema_trend", "ema20", "ema50", "macd_hist",
+                                       "bb_pos", "bb_width", "atr", "vol_ratio", "supertrend",
+                                       "resistance", "support"):
+                                ind[_k] = _ind_fb.get(_k, ind.get(_k))
+                        _div_type = _ind_fb.get("rsi_divergence", {}).get("type", "none")
+                        _rsi_fb   = _ind_fb.get("rsi", "?")
+                        print(f"[analyze] fallback calc_ind OK — rsi={_rsi_fb} divergence={_div_type} bars={len(prices_c)}")
+                    except Exception as _fb_err:
+                        print(f"[analyze] fallback calc_ind failed (non-critical): {_fb_err}")
                 # Mark as OK so we don't 404 — Stooq/direct chart data is enough
                 yf_ok = True
                 if not tv_ok and prices_c:

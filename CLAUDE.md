@@ -194,3 +194,84 @@ These are unresolved bugs confirmed by the user. Do not mark any as fixed until 
 **Deploy reminder:**
 - DotVerse: `git push origin main` → Railway auto-deploys.
 - Quantverse: drag `quantverse-pwa/` folder into Netlify site's deploy section (NOT git push).
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-13
+
+**Status of known bugs — unchanged:**
+- BUG 3: UNRESOLVED. Lines 3252, 3263, 3317 in `static/index.html` call `doAnalyze` directly.
+- BUG 4: UNRESOLVED. `app.py` line 3532 — `backtest_route` missing `@login_required`.
+
+**Research audit completed this session (Level 4 — code reading):**
+- Read actual source files in `research/gs-quant`, `research/backtesting.py`.
+- Key gs-quant files confirmed: `gs_quant/timeseries/analysis.py` (`smooth_spikes`, `repeat`), `gs_quant/timeseries/datetime.py` (`align`, `union`, `interpolate`), `gs_quant/timeseries/statistics.py` (`zscores`, `winsorize`), `gs_quant/timeseries/helper.py` (`Window`, `apply_ramp`, `get_df_with_retries`).
+- Key backtesting.py files confirmed: `backtesting/backtesting.py` (hard NaN gate, DatetimeIndex enforcement, monotonic sort), `backtesting/lib.py` (`resample_apply` — the multi-timeframe alignment pattern using `.reindex(..., method='ffill')`).
+- Root cause of DotVerse data corruption CONFIRMED: `_fetch_binance` converts Unix timestamps to formatted strings immediately. `_build_chart_output` operates on position-indexed Python lists. All sources collapse to list position before any indicator runs. One bar offset between TradingView and Binance corrupts every indicator value silently.
+- `safe_download` (Yahoo) already returns proper `DatetimeIndex` DataFrame — the fix is to standardise all fetch functions to this shape and rewrite `_build_chart_output` to accept DataFrame not lists.
+
+**Five-phase enhancement plan approved by user — NOT YET IMPLEMENTED:**
+
+PHASE 1 — Stop the Bleeding (app.py + static/index.html, no new infrastructure):
+- 1a: BUG 4 — add `@login_required` to `/api/backtest` line 3532. One line.
+- 1b: BUG 3 — route lines 3252, 3263, 3317 through `scannerLoadTicker`.
+- 1c: Timestamp merge — rewrite `_build_chart_output` to accept DataFrame + DatetimeIndex. Standardise `_fetch_binance` and `_fetch_stooq` to return same shape as `safe_download`. Replace position merge with `combine_first` on timestamps.
+- 1d: Minimum bar floor — `len(df) >= 30` → `len(df) >= 51`.
+
+PHASE 2 — Signal Quality (app.py only, no new infrastructure):
+- 2a: Per-asset NaN strategy — `dropna()` for stocks/indices/forex, bad-tick removal for crypto.
+- 2b: Spike filter — `smooth_spikes` logic from `research/gs-quant/gs_quant/timeseries/analysis.py`. No GS API needed. Self-contained.
+- 2c: Smoothed ATR + 4x stop — Wilder ATR14 smoothed over 100-bar rolling mean. Replace 1.5x stop with 4x.
+- 2d: Net RR after fees — 0.2% round-trip deducted from every TP calculation.
+- 2e: Forward-fill on complete date grid — build expected timestamp grid per timeframe before accepting source data, reindex with ffill.
+
+PHASE 3 — Signal Intelligence (app.py + static/index.html, no new infrastructure):
+- 3a: Confluence gate — signal fires only at ≥65% sub-indicator agreement. Below threshold → NEUTRAL.
+- 3b: Asset-specific indicator settings — hardcoded per class: Crypto (RSI 10, ATR 5x, EMA 7/14), Forex (RSI 14, ATR 4x, EMA 9/21), Stocks (RSI 14, ATR 4x, EMA 9/21), Indices (RSI 21, ATR 3x, EMA 20/50), Commodities (RSI 14, ATR 5x, EMA 9/21).
+- 3c: Position size output — `positionPct` on every signal for 1% account risk.
+- 3d: Signal confidence label — CONFIRMED / LIKELY / HYPOTHESIS surfaced on signal card.
+
+PHASE 4 — Infrastructure (Railway add-ons, user provisions before Phase 5 code starts):
+- 4a: PostgreSQL Railway add-on. Schema: `positions (id, user_id, ticker, asset_type, size, entry_price, opened_at)` and `optimisation_results (id, asset_class, timeframe, rsi_period, atr_mult, sharpe, computed_at)`.
+- 4b: Redis Railway add-on. Used for: OHLCV cache 5-min TTL, cross-asset shared data, task result storage.
+- 4c: RQ Worker — second Railway service, same codebase, start command `rq worker` instead of `gunicorn`.
+
+PHASE 5 — Features Unlocked by Infrastructure:
+- 5a: Portfolio position tracking — traders log open positions stored in PostgreSQL.
+- 5b: Parametric VaR — `VaR = portfolio_value × z_score × portfolio_std` from 252 days returns. No GS API needed.
+- 5c: Stress testing — configurable % shock per asset class applied to stored positions, P&L impact computed.
+- 5d: Cross-asset correlation dashboard — OHLCV from Redis cache, timestamp-aligned (Phase 1c prerequisite), numpy correlation matrix.
+- 5e: Offline parameter optimisation — RQ worker runs backtesting.py grid search per asset class, results written to PostgreSQL, frontend reads recommended settings from there.
+
+**Architecture target:**
+```
+Flask (Railway) ──→ PostgreSQL   (positions, optimisation results)
+                ──→ Redis        (OHLCV cache, task queue, task results)
+                ──→ RQ Worker    (backtesting, VaR, stress test jobs)
+                ──→ Data sources (Binance, Stooq, Yahoo — cached via Redis)
+```
+
+**What is permanently excluded and why:**
+- VaR via gs-quant: requires GS API key — open-source layer is interface only, confirmed from source files.
+- Arbitrage detection: requires sub-millisecond WebSocket feeds and execution infrastructure. Different product.
+- Stress testing without portfolio DB: requires Phase 4a (PostgreSQL) first.
+
+**Session sequencing rule:**
+Each phase must be runtime-verified in a live Railway deploy before the next phase starts. User confirms in browser. Claude does not mark a phase complete until user confirms.
+
+**Phase 1 status — IMPLEMENTED (Level 4 verified, awaiting runtime confirmation):**
+- 1a: DONE — `@login_required` added to `/api/backtest` at `app.py` line 3533.
+- 1b: DONE — `instChipLoad`, `instSwitchGo`, `runAnalyze` in `static/index.html` now route through `scannerLoadTicker`. Two other `doAnalyze` calls (lines 5813, 9467) confirmed safe — not the same class of bug.
+- 1c: DONE — `_build_chart_output` rewritten to accept `pd.DataFrame` with `DatetimeIndex`. All 5 callers updated (`_fetch_binance`, `_fetch_stooq`, `_fetch_yahoo_v8`, `_fetch_fmp`, exception-handler Binance fallback at line 2665). Timestamps preserved until display formatting — no more position-based merge.
+- 1d: DONE — `len(df) >= 30` → `len(df) >= 51` at `app.py` line 2622.
+
+**Runtime verification required before Phase 2 starts:**
+Deploy to Railway (`git push origin main`). In browser:
+1. Call `/api/backtest` without session cookie → should get 401/redirect, not execute.
+2. From scanner tab, click an instrument chip → signals tab should switch into view, chart renders at full width.
+3. Load BTC on 1h timeframe → Railway logs should show `[binance] OK` with bar count, chart dates should be correct UTC timestamps.
+4. Load a stock (e.g. AAPL) → logs should show `[stooq] OK` or `[yahoo_v8] OK`, chart dates should be correct.
+5. Confirm no "5-tuple" unpack errors in logs (all callers now return 8-tuple).
+
+**Next session — start here:**
+Say "Protocol active." Re-read this file. Confirm Phase 1 runtime verification with user. If verified, begin Phase 2, item 2a (per-asset NaN strategy).
