@@ -266,27 +266,23 @@ Each phase must be runtime-verified in a live Railway deploy before the next pha
 
 ---
 
-### SESSION HANDOFF NOTES — 2026-04-13 (Phase 2 start)
+### SESSION HANDOFF NOTES — 2026-04-13 (Phase 2 complete, Phase 3 next)
 
-**Phase 1: COMPLETE — runtime verified. All known bugs resolved.**
+**Phase 1: COMPLETE — runtime verified.**
+**Phase 2: COMPLETE — runtime verified by user on 2026-04-13. Commit `5e21bd7`.**
 
-**Phase 2 — Signal Quality (app.py only, no new infrastructure):**
-All five items to be implemented sequentially. Each must be committed and runtime verified before moving to the next.
+**Phase 2 items — all DONE + VERIFIED:**
+- 2a: Per-asset NaN strategy — `calculate_indicators` gains `asset_type` param. Crypto: zeros → NaN, bars > 10× 20-bar rolling median → median. All types: `dropna()`. All 5 callers updated.
+- 2b: Spike filter — bars where |close - 20-bar rolling median| / median > 20% replaced with median. High/Low clipped to match. Spike count logged.
+- 2c: Smoothed ATR + 4× stop — `atr_raw = rma(tr, 14)`, `atr = atr_raw.rolling(100, min_periods=14).mean()`. Stop multiplier 1.5× → 4.0× at all three sites: `detect_counter_trade`, `get_analysis`, `get_watch_signal`.
+- 2d: Net RR after fees — `fee_adj = entry * 0.002`. BUY: `tp -= fee_adj`. SELL: `tp += fee_adj`. Applied before RR calculation in all three TP blocks.
+- 2e: Forward-fill date grid — `_fill_date_grid(df, timeframe, asset_type)` helper. Builds expected timestamp grid, reindexes with `ffill(limit=3)`. Weekends excluded for stocks/indices/commodities. Called in `analyze()` and `run_watch_job()` before `calculate_indicators`.
 
-- 2a: Per-asset NaN strategy — `dropna()` for stocks/indices/forex. Crypto: bad-tick filter (price = 0, or close > 10× rolling median of last 20 bars → replace with median). Applied in `calculate_indicators` after DataFrame is received.
-- 2b: Spike filter — bar-to-bar % change > 3× ATR20 flagged, replaced with 20-bar rolling median. Applied before indicators run. Exemption: stocks on earnings dates (if identifiable — skip for now, add note).
-- 2c: Smoothed ATR + 4× stop — ATR14 smoothed over 100-bar rolling mean. Replace 1.5× stop multiplier with 4×. Applied in stop/TP calculation section.
-- 2d: Net RR after fees — 0.2% round-trip deducted from every TP1/TP2/TP3 calculation. Applied after ATR stop is computed.
-- 2e: Forward-fill date grid — build expected timestamp grid per timeframe before accepting source data, reindex with ffill, cap at 3 consecutive fills max. Stocks: exclude weekends from grid. Applied in `_build_chart_output` or at top of `calculate_indicators`.
-
-**Risks stated before implementation:**
-- 2a: Threshold for crypto bad-tick too aggressive → real flash moves removed. Mitigation: use 10× rolling median, not absolute value.
-- 2b: Spike filter clips genuine gap-ups (earnings). Mitigation: flag only, log, do not silently discard without trace.
-- 2c: 4× stop widens SL — reduces signal frequency on short timeframes. Expected and acceptable.
-- 2d: All three TP levels must get fee deduction — not just TP1.
-- 2e: Weekend exclusion for stocks requires asset_type detection before grid construction.
-
-**Verification level for Phase 2:** Level 4 (code reading) until Railway deploy + user confirms in browser.
+**Phase 3 — Signal Intelligence (app.py + static/index.html, no new infrastructure):**
+- 3a: Confluence gate — signal fires only at ≥65% sub-indicator agreement. Below threshold → NEUTRAL.
+- 3b: Asset-specific indicator settings — hardcoded per class: Crypto (RSI 10, EMA 7/14), Forex (RSI 14, EMA 9/21), Stocks (RSI 14, EMA 9/21), Indices (RSI 21, EMA 20/50), Commodities (RSI 14, EMA 9/21).
+- 3c: Position size output — `positionPct` on every signal for 1% account risk.
+- 3d: Signal confidence label — CONFIRMED / LIKELY / HYPOTHESIS surfaced on signal card.
 
 **Next session — start here:**
-Say "Protocol active." Re-read this file. Begin Phase 2, item 2a. Read `calculate_indicators` in `app.py` first. State exact insertion point. Get confirmation. Then implement.
+Say "Protocol active." Re-read this file. Run Six Stop Gates for Phase 3. State investigation plan. Get confirmation. Then implement.
