@@ -109,6 +109,19 @@ TIMEFRAME_CONFIG = {
     "1d":  {"interval": "1d",  "period": "1y",  "chart_bars": 90,  "date_fmt": "%Y-%m-%d"},
 }
 
+# ── 3b: Asset-specific indicator settings ────────────────────────────────────
+# RSI period and EMA fast/slow per asset class.
+# Crypto is more volatile → faster RSI and EMAs to stay responsive.
+# Indices are mean-reverting and slow → longer RSI and EMAs for stability.
+ASSET_CONFIG = {
+    "crypto":    {"rsi_period": 10, "ema_fast": 7,  "ema_slow": 14},
+    "forex":     {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21},
+    "stock":     {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21},
+    "index":     {"rsi_period": 21, "ema_fast": 20, "ema_slow": 50},
+    "commodity": {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21},
+}
+_DEFAULT_ASSET_CFG = {"rsi_period": 14, "ema_fast": 9, "ema_slow": 21}
+
 # How often to re-run the screen per timeframe (seconds)
 ALERT_INTERVALS = {
     "5m": 300, "15m": 600, "30m": 900,
@@ -343,11 +356,11 @@ def safe_download(ticker, period="1y", interval="1d", **kwargs):
 
     return df
 
-def get_rsi(close):
+def get_rsi(close, period=14):
     delta = close.diff()
     gain  = delta.clip(lower=0).fillna(0)
     loss  = (-delta).clip(lower=0).fillna(0)
-    return 100 - 100 / (1 + rma(gain, 14) / rma(loss, 14))
+    return 100 - 100 / (1 + rma(gain, period) / rma(loss, period))
 
 
 def detect_rsi_divergence(high, low, rsi_series, pivot_len=3, lookback=100):
@@ -551,13 +564,22 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
     low   = df["Low"].squeeze()
     vol   = df["Volume"].squeeze()
 
-    rsi_series = get_rsi(close)
+    # ── 3b: Asset-specific indicator periods ─────────────────────────────────
+    _acfg      = ASSET_CONFIG.get(asset_type, _DEFAULT_ASSET_CFG)
+    rsi_period = _acfg["rsi_period"]
+    ema_fast   = _acfg["ema_fast"]
+    ema_slow   = _acfg["ema_slow"]
+
+    rsi_series = get_rsi(close, period=rsi_period)
     rsi        = rsi_series.iloc[-1]
     rsi_div    = detect_rsi_divergence(high, low, rsi_series)
 
-    e20  = ema_tv(close, 20).iloc[-1]
-    e50  = ema_tv(close, 50).iloc[-1] if len(close) >= 50 else ema_tv(close, 20).iloc[-1]
-    e200 = ema_tv(close, 200).iloc[-1] if len(close) >= 200 else ema_tv(close, 50).iloc[-1]
+    e_fast = ema_tv(close, ema_fast).iloc[-1]
+    e_slow = ema_tv(close, ema_slow).iloc[-1] if len(close) >= ema_slow else e_fast
+    e200   = ema_tv(close, 200).iloc[-1] if len(close) >= 200 else e_slow
+    # Keep e20/e50 aliases so downstream code that references them still works
+    e20 = e_fast
+    e50 = e_slow
 
     macd_line = ema_tv(close, 12) - ema_tv(close, 26)
     macd_sig  = ema_tv(macd_line.dropna().reindex(macd_line.index), 9)
@@ -630,8 +652,9 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
     chart_high   = df["High"].squeeze().iloc[-n_bars:]
     chart_low    = df["Low"].squeeze().iloc[-n_bars:]
     chart_vol    = vol.iloc[-n_bars:]
-    ema20_series = ema_tv(close, 20).iloc[-n_bars:]
-    ema50_series = ema_tv(close, 50).iloc[-n_bars:] if len(close) >= 50 else ema_tv(close, 20).iloc[-n_bars:]
+    # Use asset-specific EMA periods for chart lines
+    ema20_series = ema_tv(close, ema_fast).iloc[-n_bars:]
+    ema50_series = ema_tv(close, ema_slow).iloc[-n_bars:] if len(close) >= ema_slow else ema20_series
     chart_dates  = [d.strftime(date_fmt) for d in chart_close.index]
     chart_prices = [round(float(v), 4) for v in chart_close]
     chart_opens  = [None if np.isnan(v) else round(float(v), 4) for v in chart_open]
@@ -718,12 +741,15 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
         "chg_1m":       round((p / pm - 1) * 100, 2),
         "high_52w":     round(high52, 4),
         "low_52w":      round(low52, 4),
-        "rsi":          round(float(rsi), 1),
-        "rsi_divergence": rsi_div,
-        "ema20":        round(float(e20), 4),
-        "ema50":        round(float(e50), 4),
-        "ema200":       round(float(e200), 4),
-        "ema_trend":    ema_trend,
+        "rsi":              round(float(rsi), 1),
+        "rsi_period":       rsi_period,
+        "rsi_divergence":   rsi_div,
+        "ema20":            round(float(e20), 4),
+        "ema50":            round(float(e50), 4),
+        "ema200":           round(float(e200), 4),
+        "ema_fast_period":  ema_fast,
+        "ema_slow_period":  ema_slow,
+        "ema_trend":        ema_trend,
         "macd_hist":    round(float(macd_hist), 6),
         "bb_pos":       round(bb_pos, 3),
         "bb_width":     round(bb_width, 3),
@@ -1926,11 +1952,23 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
     elif bb_pos < 0.15:
         bullish_count += 1  # Near lower band = oversold, bounce potential
 
-    # ── Net score → raw signal ──
+    # ── Net score (kept for confidence calculation) ──
     net = bullish_count - bearish_count
-    if net >= 3:
+
+    # ── 3a: Confluence gate — signal requires ≥65% sub-indicator agreement ──
+    # Only indicators that actually voted (bullish OR bearish) count toward the
+    # denominator. Neutral indicators (RSI in 45-55, flat MACD) are excluded.
+    # Below 65% agreement → HOLD regardless of net score.
+    total_votes = bullish_count + bearish_count
+    if total_votes > 0:
+        bull_pct = bullish_count / total_votes
+        bear_pct = bearish_count / total_votes
+    else:
+        bull_pct = bear_pct = 0.0
+
+    if bull_pct >= 0.65:
         signal = "BUY"
-    elif net <= -3:
+    elif bear_pct >= 0.65:
         signal = "SELL"
     else:
         signal = "HOLD"
@@ -2048,11 +2086,17 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
             rr1 = round((abs(tp1 - entry) / risk), 1)
             rr2 = round((abs(tp2 - entry) / risk), 1)
             rr3 = round((abs(tp3 - entry) / risk), 1)
+            # ── 3c: Position size for 1% account risk ──────────────────────
+            # positionPct = 1% / (SL_distance / entry) = entry / SL_distance
+            # Capped at 100% — very tight stops on cheap assets could exceed it.
+            position_pct = round(min(entry / risk, 100.0), 1)
         else:
             rr1 = rr2 = rr3 = None
+            position_pct = None
     else:
         entry = stop_loss = tp1 = tp2 = tp3 = None
         rr1 = rr2 = rr3 = None
+        position_pct = None
 
     # Generate timing call
     if signal == "HOLD":
@@ -2147,6 +2191,7 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         "rr1": rr1,
         "rr2": rr2,
         "rr3": rr3,
+        "position_pct": position_pct,
         "rsi_assessment": rsi_assessment,
         "trend_assessment": trend_assessment,
         "macd_assessment": macd_assessment,
@@ -2162,6 +2207,15 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         "tv_signal_used": tv_signal_used,
         "tv_rec_label": tv.get("tv_rec_label") if tv else None,
         "tv_rec_all": tv.get("tv_rec_all") if tv else None,
+        # ── 3d: Confidence label (protocol vocabulary) ────────────────────
+        # CONFIRMED — TV scanner data used (26 indicators) OR very strong net score
+        # LIKELY    — Medium/high conviction from our indicator stack, no TV override
+        # HYPOTHESIS — Weak agreement; signal exists but conviction is marginal
+        "confidence_label": (
+            "CONFIRMED"  if (tv_signal_used or abs(net) >= 5) else
+            "LIKELY"     if abs(net) >= 3 else
+            "HYPOTHESIS"
+        ),
     }
 
     # Call OpenAI to narrate data if API key is configured

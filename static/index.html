@@ -1517,6 +1517,7 @@ body::before{
           <div class="conf-ring">
             <svg viewBox="0 0 76 76"><circle class="cr-track" cx="38" cy="38" r="32"/><circle class="cr-fill" cx="38" cy="38" r="32"/></svg>
             <div class="conf-inner"><span class="conf-pct" id="confPct">—</span><span class="conf-lbl">CONF</span></div>
+            <div id="confLabel" style="text-align:center;margin-top:3px;height:14px;"></div>
           </div>
           <div class="win-badge"><div class="wb-val">—</div><div class="wb-lbl">Win Rate</div></div>
           <div class="sig-btns">
@@ -3457,6 +3458,17 @@ function renderResults(d) {
   arc.style.stroke = ringClr;
   document.getElementById('confPct').textContent = pct + '%';
 
+  // ── 3d: Confidence label (CONFIRMED / LIKELY / HYPOTHESIS) ──
+  var confLabelEl = document.getElementById('confLabel');
+  if (confLabelEl && d.confidence_label) {
+    var clr = d.confidence_label === 'CONFIRMED'  ? '#00c98d' :
+              d.confidence_label === 'LIKELY'      ? '#f5c842' : 'var(--muted2)';
+    confLabelEl.innerHTML = `<span style="color:${clr};font-size:10px;font-weight:700;letter-spacing:.06em;">${d.confidence_label}</span>`;
+    confLabelEl.title = d.confidence_label === 'CONFIRMED'  ? 'TV scanner (26 indicators) or strong multi-source agreement' :
+                        d.confidence_label === 'LIKELY'     ? 'Good indicator alignment, no external source confirmation' :
+                                                              'Weak agreement — treat as hypothesis, reduce position size';
+  }
+
   // ── FEATURE C: Timing Accuracy Meter ──
   const timingMeter  = document.getElementById('timingMeter');
   const timingSignal = document.getElementById('timingSignal');
@@ -4507,6 +4519,9 @@ function renderMgmtPlan(d) {
 
   wrap.innerHTML = `
     <div class="mgmt-title">Trade Management Plan</div>
+    ${d.position_pct != null ? `<div style="font-size:11px;color:var(--muted2);margin-bottom:10px;padding:6px 10px;background:rgba(255,255,255,.04);border-radius:6px;border-left:2px solid var(--amber);">
+      <span style="color:var(--amber);font-weight:700;">Position Size</span> — Allocate <span style="color:var(--text);font-weight:700;">${d.position_pct}%</span> of account to risk 1% on this trade.
+    </div>` : ''}
     <div class="mgmt-steps">
       <div class="mgmt-step" style="cursor:pointer;" onclick="var p=this.querySelector('.wwh-panel');if(p)p.classList.toggle('open');">
         <div class="mgmt-num" style="background:var(--amber);color:var(--bg);">E</div>
@@ -4626,12 +4641,13 @@ function renderIndicators(d) {
     },
     {
       expandId: 'indExpandEma',
-      plain: 'Trend Direction', tech: 'EMA (20/50)',
+      plain: 'Trend Direction',
+      tech: `EMA (${d.ema_fast_period||20}/${d.ema_slow_period||50})`,
       badge: etBull ? 'bull' : etBear ? 'bear' : 'neut',
       bl: etBull ? 'Uptrend' : etBear ? 'Downtrend' : 'Mixed',
       desc: d.trend_assessment || 'Moving average alignment showing overall trend direction.',
       raw: d.ema20
-        ? `${lbl('EMA20:')} <span style="color:#00c98d;font-weight:700;">${fmt(d.ema20)}</span>${dot}${lbl('EMA50:')} <span style="color:var(--text);">${fmt(d.ema50)}</span>`
+        ? `${lbl('EMA'+( d.ema_fast_period||20)+':')} <span style="color:#00c98d;font-weight:700;">${fmt(d.ema20)}</span>${dot}${lbl('EMA'+(d.ema_slow_period||50)+':')} <span style="color:var(--text);">${fmt(d.ema50)}</span>`
         : `${lbl('Trend:')} <span style="color:var(--text);">${d.ema_trend||'—'}</span>`,
       bar: bar(etBull ? 71 : etBear ? 29 : 50, etBull ? '#00c98d' : etBear ? '#ff4459' : '#4d9fff')
     },
