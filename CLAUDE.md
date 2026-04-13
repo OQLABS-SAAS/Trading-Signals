@@ -325,9 +325,61 @@ Each phase must be runtime-verified in a live Railway deploy before the next pha
 - `pfAddPosition()` now reads inputs as strings before parsing (Safari type=number bug). Committed `f89eecf`.
 - Ticker field was showing placeholder "AAPL" — user must actually type the ticker.
 
-**Next session — start here:**
-1. Say "Protocol active." Re-read this file.
-2. Fix DATABASE_URL cross-project issue (see above).
-3. Once positions save successfully, verify all 5 Phase 5 features in browser.
-4. Update CLAUDE.md marking Phase 5 complete.
-5. Generate the full implementation report (user requested this at start of Phase 3 session).
+---
+
+### SESSION HANDOFF NOTES — 2026-04-13 (ALL PHASES COMPLETE)
+
+**Phase 1: COMPLETE — runtime verified.**
+**Phase 2: COMPLETE — runtime verified.**
+**Phase 3: COMPLETE — runtime verified.**
+**Phase 4: COMPLETE — runtime verified.**
+**Phase 5: COMPLETE — runtime verified by user on 2026-04-13.**
+
+**Phase 5 items — all DONE + VERIFIED:**
+- 5a: Portfolio position tracking — AAPL BUY saved, appeared in table. `/api/positions` GET/POST/DELETE working.
+- 5b: Parametric VaR — $246.51 (2.465%) at 95% confidence, Portfolio STD 1.4987%. `/api/var` working.
+- 5c: Stress test — AAPL -20% shock → new price $160 → P&L $-100. `/api/stress` working.
+- 5d: Cross-asset correlation — heatmap for BTC-USD, AAPL, GC=F, ^GSPC, EURUSD=X. `/api/correlation` working.
+- 5e: Parameter optimisation — RQ job enqueued, completed: RSI 10, ATR 2×, EMA 20/50, Sharpe 4.948. `/api/optimise` + `/api/optimise/result` working.
+
+**Infrastructure fixes required this session (cross-project Railway):**
+- DATABASE_URL: Postgres and web service in different Railway projects. `${{Postgres.DATABASE_URL}}` resolves to empty string. Fix: use DATABASE_PUBLIC_URL from Postgres service (metro.proxy.rlwy.net:46116) with literal password. `sslmode=disable` required (metro proxy handles TLS at TCP level). The server at port 54321 was MySQL (user had wrong URL). The real Postgres port is 46116.
+- REDIS_URL: Same cross-project issue. Fix: use public URL redis://default:PASSWORD@metro.proxy.rlwy.net:20577.
+- SSL probe: Added auto-probe loop in app.py (commits `545e4d0`, `3db09f8`) that tests sslmode=disable then sslmode=require with SELECT 1 before committing to connection pool. Logs `[db] Connected with sslmode=X`.
+
+**Key commits this session:**
+- `545e4d0` — sslmode=disable fix
+- `3db09f8` — SSL auto-probe loop (disable → require fallback)
+
+**ALL FIVE PHASES COMPLETE. Full implementation report generated.**
+
+**Next session — no pending items. System is fully deployed and verified.**
+- If new features are needed, run Six Stop Gates before starting.
+- PostgreSQL: metro.proxy.rlwy.net:46116 (sslmode=disable)
+- Redis: metro.proxy.rlwy.net:20577
+- Deploy: git push origin main → Railway auto-deploys web service.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-13 (Calculator overhaul + UI fixes)
+
+**Calculator rebuild — commit `f9e9c2d` — NOT YET runtime verified (needs git push):**
+
+Root causes fixed:
+- `winRateBadge`/`winRateVal`/`winRateSample` IDs were missing from HTML — `getElementById` returned null silently. Fixed by adding IDs to existing `.win-badge` div.
+- `recalc()` showed dollar distances for all asset types. Rewrote to show pips for forex (0.0001, JPY 0.01), points/$ for crypto/stocks.
+- `autoFillCalc(d)` — new function. Auto-populates `cEntry`, `cSL`, `cTP1/2/3`, `cAsset` from signal data on every analyze. HOLD-safe (no entry = no overwrite).
+- `cVolume` (redundant with `cPosSize`) replaced with `cMarginReq` showing margin = posVal / leverage.
+- Net profit after fees added to every TP row: 0.1% round-trip crypto, 0.05% stocks/forex.
+- Win rate from `window._lastBt` shown in calculator output (updates after backtest completes).
+
+**Strategy buttons — confirmed cosmetic only:**
+- They do NOT change the signal. They show a text commentary panel interpreting the existing BUY/SELL result through a strategy lens. No backend recalculation. User was informed. Left as-is.
+
+**Beginner mode — dropped:**
+- Three design versions created (V1 Operator, V2 Meridian, V3 Command) but user rejected all. Feature abandoned.
+
+**UI bug fix — indicator grid empty cell (next commit):**
+- Screenshot shows "Trading Activity" card in 3-column grid leaving 2 empty brown cells to its right. Root cause: 4 indicator cards in a 3-column grid — last card wraps to new row alone, leaving 2 empty grid cells visible. Fix: make last card span remaining columns OR switch to auto-fit grid.
+
+**Deploy:** `git push origin main` → Railway auto-deploys.
