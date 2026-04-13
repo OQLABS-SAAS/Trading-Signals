@@ -388,22 +388,24 @@ Root causes fixed:
 
 Problem: `recalc()` had `if (!acct || !risk || !entry || !sl) return` — SL=0 is falsy, so clicking "Calculate Position" with SL field empty did nothing. User saw all dashes, no feedback.
 
-Root cause: Silent return with no user-visible message.
+Root cause: Silent return with no user-visible message. Secondary root cause: `window.currentData` undefined — `currentData` is `let` not `var`, so it never attaches to `window`.
 
-Fix:
+Fix (commits `5eab9e7`, `6b244d3`, `dcc553e`):
 - Added `<div id="calcGuidance">` panel between "Calculate Position" button and results area.
-- Replaced silent return with a `showGuidance(lines)` / `hideGuidance()` helper.
-- Validation now shows inline coloured messages for each failure case:
-  - HOLD signal → amber warning, no calculation possible
-  - Missing account size → red error
-  - Missing risk % → red error with professional range hint
-  - Missing entry (but signal has one) → amber pointing to signal entry price
-  - Entry >15% from market price → amber sanity check
-  - Missing SL (but signal has one) → red pointing to signal SL price
-  - SL on wrong side of entry → red direction mismatch
-- Signal context line always shown: TICKER · signal direction · entry price · SL price
-- Account context always shown: "$X at Y% risk = $Z per trade"
-- `cRiskDollar` now shows `—` when acct/risk missing (not `$0`)
-- Direction check fixed: reads `calcDir` variable, not `.active` CSS class (buttons use `buy-on`/`sell-on`)
+- Fixed `window.currentData` → `currentData` throughout `recalc()` and `seMode()`.
+- Rebuilt entire guidance section as a plain-English step-by-step trading coach for absolute beginners.
+
+**Coaching states — runtime verified by user:**
+- No signal: "Run an analysis first — I'll walk you through it step by step"
+- HOLD: signal card + "no trade right now" in plain English + what to do next
+- Missing account (Step 1): explains what account size means and why
+- Missing risk % (Step 2): real dollar examples (1% of $10k = $100, 2% = $200) + beginner 1–2% rule
+- Missing entry (Step 3): shows signal entry, explains auto-fill
+- Missing SL (Step 4): plain English explanation of stop loss, exact $ loss at SL, amber "Use Signal Stop Loss $X" button that auto-fills and recalculates
+- SL wrong side: direction mismatch in plain English
+- All valid: coach hides, results show
+
+**Signal card always shown** when signal is loaded: ticker, BUY/SELL/HOLD, entry, SL, TP1/2/3.
+**Account footer always shown** when acct + risk filled: "$X at Y% risk = $Z max loss per trade".
 
 **Deploy:** `git push origin main` → Railway auto-deploys.
