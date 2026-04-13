@@ -2773,6 +2773,19 @@ body::before{
       </div>
     </div>
 
+    <!-- ── PORTFOLIO HEALTH BANNER ── -->
+    <div id="pfHealthBanner" style="border-radius:8px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:20px;background:var(--bg1);border:2px solid var(--border2);">
+      <div id="pfHealthDot" style="width:52px;height:52px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-size:18px;font-weight:900;background:rgba(100,100,100,.2);color:var(--muted2);border:3px solid var(--border2);">?</div>
+      <div style="flex:1;">
+        <div id="pfHealthTitle" style="font-family:var(--disp);font-size:18px;font-weight:900;letter-spacing:-.3px;margin-bottom:5px;color:var(--muted2);">Log your trades to get a safety check</div>
+        <div id="pfHealthSub" style="font-size:12px;color:var(--muted2);line-height:1.6;">Once you've added your open positions below, this banner will tell you whether it's safe to enter another trade.</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <button onclick="pfRunFullCheck()" style="font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 16px;background:rgba(245,158,11,.12);color:var(--amber);border:1px solid rgba(245,158,11,.4);border-radius:4px;cursor:pointer;white-space:nowrap;">Run Safety Check</button>
+        <div style="font-size:10px;color:var(--muted2);font-family:var(--mono);margin-top:5px;">Runs VaR + Stress Test</div>
+      </div>
+    </div>
+
     <!-- ── 5a: Position Log ── -->
     <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;padding:20px;margin-bottom:20px;">
       <div id="pfGrid1" style="display:grid;grid-template-columns:1fr;gap:24px;align-items:start;">
@@ -11411,6 +11424,105 @@ function _pfFmt(n, dec) {
 }
 function _pfClr(v) { return v >= 0 ? 'var(--green)' : 'var(--red)'; }
 
+// ── Portfolio: Health Banner ──────────────────────────────────
+var _pfLastVarPct    = null;   // set after VaR run
+var _pfLastStressPct = null;   // set after stress test run
+
+function pfUpdateHealth() {
+  var dot   = document.getElementById('pfHealthDot');
+  var title = document.getElementById('pfHealthTitle');
+  var sub   = document.getElementById('pfHealthSub');
+  var banner= document.getElementById('pfHealthBanner');
+  if (!dot || !title || !sub || !banner) return;
+
+  // Sum total SIZE% from logged positions
+  var body = document.getElementById('pfTableBody');
+  var rows = body ? body.querySelectorAll('tr[data-id]') : [];
+  if (!rows.length) {
+    dot.textContent   = '?';
+    dot.style.background = 'rgba(100,100,100,.2)';
+    dot.style.color      = 'var(--muted2)';
+    dot.style.borderColor= 'var(--border2)';
+    banner.style.border  = '2px solid var(--border2)';
+    title.style.color    = 'var(--muted2)';
+    title.textContent = 'Log your trades to get a safety check';
+    sub.textContent   = 'Once you\'ve added your open positions below, this banner will tell you whether it\'s safe to enter another trade.';
+    return;
+  }
+  var totalSize = Array.from(rows).reduce(function(acc, r) {
+    var cells = r.querySelectorAll('td');
+    return acc + (parseFloat((cells[6] || {}).textContent) || 0);
+  }, 0);
+
+  var varPct    = _pfLastVarPct;
+  var stressPct = _pfLastStressPct;
+
+  // Determine severity
+  var level = 'green';
+  var reasons = [];
+  if (totalSize > 30)            { level = 'red';    reasons.push('total position size is ' + totalSize.toFixed(0) + '% of your account — dangerously high'); }
+  else if (totalSize > 20)       { level = 'yellow'; reasons.push('total position size is ' + totalSize.toFixed(0) + '% of your account — getting high'); }
+  if (varPct !== null) {
+    if (varPct > 4)              { level = 'red';    reasons.push('daily risk is ' + varPct.toFixed(2) + '% — too high'); }
+    else if (varPct > 2 && level !== 'red') { level = 'yellow'; reasons.push('daily risk is ' + varPct.toFixed(2) + '% — elevated'); }
+  }
+  if (stressPct !== null) {
+    if (stressPct < -30)         { level = 'red';    reasons.push('a crash would cost you ' + Math.abs(stressPct).toFixed(1) + '% of your account'); }
+    else if (stressPct < -15 && level !== 'red') { level = 'yellow'; reasons.push('a crash would cost ' + Math.abs(stressPct).toFixed(1) + '% — worth reducing'); }
+  }
+
+  var colours = {
+    green:  {bg:'rgba(34,197,94,.15)',  border:'rgba(34,197,94,.5)',  dot:'rgba(34,197,94,.9)',  text:'#22c55e'},
+    yellow: {bg:'rgba(234,179,8,.1)',   border:'rgba(234,179,8,.5)',  dot:'rgba(234,179,8,.9)',  text:'#eab308'},
+    red:    {bg:'rgba(239,68,68,.12)',  border:'rgba(239,68,68,.5)',  dot:'rgba(239,68,68,.9)',  text:'#ef4444'}
+  };
+  var c = colours[level];
+  var labels = {
+    green:  {symbol:'OK', headline:'Safe to add another trade', detail: reasons.length ? 'Your ' + reasons.join(' and ') + '.' : 'Your risk levels look healthy. If DotVerse gives you a signal, you can take the trade.'},
+    yellow: {symbol:'!',  headline:'Be cautious — check before trading', detail: 'Your ' + reasons.join(', and ') + '. Only take trades with strong signals.'},
+    red:    {symbol:'X',  headline:'Do not add new positions', detail: 'Warning: your ' + reasons.join(', and ') + '. Reduce your position sizes before entering anything new.'}
+  };
+  var lbl = labels[level];
+
+  banner.style.border      = '2px solid ' + c.border;
+  banner.style.background  = c.bg;
+  dot.textContent          = lbl.symbol;
+  dot.style.background     = c.dot;
+  dot.style.borderColor    = c.border;
+  dot.style.color          = '#0C0A08';
+  title.style.color        = c.text;
+  title.textContent        = lbl.headline;
+  sub.textContent          = lbl.detail;
+}
+
+function pfRunFullCheck() {
+  var pv = parseFloat((document.getElementById('varPortValue') || {}).value) || 10000;
+  var sp = parseFloat((document.getElementById('stressPortValue') || {}).value) || 10000;
+  // Run VaR then stress in sequence
+  fetch('/api/var', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({portfolio_value: pv, confidence: 0.95})
+  }).then(r=>r.json()).then(d=>{
+    if (d.var_pct) {
+      _pfLastVarPct = Math.abs(d.var_pct);
+      // Also update the VaR result panel
+      var ve = document.getElementById('varResult');
+      if (ve && d.var_amount) {
+        ve.innerHTML = '<span style="color:var(--text);">Portfolio STD: <strong>' + (d.portfolio_std || 0).toFixed(4) + '%</strong> &nbsp;|&nbsp; Max 1-day loss: <strong style="color:var(--red);">$' + Math.abs(d.var_amount).toFixed(2) + ' (' + _pfLastVarPct.toFixed(2) + '%)</strong></span>';
+      }
+    }
+    return fetch('/api/stress', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({portfolio_value: sp})
+    });
+  }).then(r=>r.json()).then(d=>{
+    if (d.total_pnl_pct !== undefined) {
+      _pfLastStressPct = d.total_pnl_pct;
+    }
+    pfUpdateHealth();
+  }).catch(function(){pfUpdateHealth();});
+}
+
 // ── Portfolio: Guide toggle ───────────────────────────────────
 function pfToggleGuide(gridId, sideId, btn) {
   var side = document.getElementById(sideId);
@@ -11449,9 +11561,11 @@ function pfLoadPositions() {
         </td>
       </tr>`;
     }).join('');
+    pfUpdateHealth();
   }).catch(e => {
     var tbody = document.getElementById('pfTableBody');
     if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--red);padding:20px;">Failed to load positions.</td></tr>';
+    pfUpdateHealth();
   });
 }
 
@@ -11520,10 +11634,11 @@ function pfRunVar() {
     if (!el) return;
     if (d.error) { el.innerHTML = `<span style="color:var(--red);">${d.error}</span>`; return; }
     var varPct = d.var_1d_pct || 0;
-    var varVerdict = varPct < 1 ? '🟢 Low risk day. Your portfolio is relatively stable.' :
-                     varPct < 2 ? '🟡 Moderate risk. Normal for a diversified portfolio.' :
-                     varPct < 4 ? '🟠 Elevated risk. Consider reducing your largest position.' :
-                                  '🔴 High risk. You are heavily exposed — one bad day could hurt significantly.';
+    _pfLastVarPct = varPct; pfUpdateHealth();
+    var varVerdict = varPct < 1 ? 'Low risk. Your portfolio is relatively stable.' :
+                     varPct < 2 ? 'Moderate risk. Normal for a diversified portfolio.' :
+                     varPct < 4 ? 'Elevated risk. Consider reducing your largest position.' :
+                                  'High risk. You are heavily exposed — one bad day could hurt significantly.';
     el.innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:8px;">
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
@@ -11592,10 +11707,11 @@ function pfRunStress() {
         <div style="font-family:var(--mono);font-size:13px;margin-bottom:8px;">Total stressed P&L: <span style="color:${totalClr};font-weight:700;">$${_pfFmt(d.total_pnl_usd, 2)} (${_pfFmt(d.total_pnl_pct, 2)}%)</span></div>
         ${(function(){
           var pct = d.total_pnl_pct || 0;
-          var verdict = pct > -5  ? '🟢 <strong>You can handle this.</strong> A market crash of these magnitudes would cause manageable losses.' :
-                        pct > -15 ? '🟡 <strong>Painful but survivable.</strong> You\'d feel this, but it wouldn\'t wipe you out. Consider trimming your most volatile positions.' :
-                        pct > -30 ? '🟠 <strong>Serious damage.</strong> A crash scenario like this would hurt badly. You may be over-exposed — look at your largest losing position and consider reducing it.' :
-                                    '🔴 <strong>Portfolio-destroying.</strong> If this scenario happens, you could lose most of your capital. Reduce position sizes urgently.';
+          _pfLastStressPct = pct; pfUpdateHealth();
+          var verdict = pct > -5  ? '<strong>You can handle this.</strong> A market crash of these magnitudes would cause manageable losses.' :
+                        pct > -15 ? '<strong>Painful but survivable.</strong> You\'d feel this, but it wouldn\'t wipe you out. Consider trimming your most volatile positions.' :
+                        pct > -30 ? '<strong>Serious damage.</strong> A crash scenario like this would hurt badly. You may be over-exposed — look at your largest losing position and consider reducing it.' :
+                                    '<strong>Portfolio-destroying.</strong> If this scenario happens, you could lose most of your capital. Reduce position sizes urgently.';
           return '<div style="font-size:13px;color:var(--text);line-height:1.6;">' + verdict + '</div>';
         })()}
       </div>`;
