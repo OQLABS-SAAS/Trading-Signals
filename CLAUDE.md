@@ -363,7 +363,7 @@ Each phase must be runtime-verified in a live Railway deploy before the next pha
 
 ### SESSION HANDOFF NOTES — 2026-04-13 (Calculator overhaul + UI fixes)
 
-**Calculator rebuild — commit `f9e9c2d` — NOT YET runtime verified (needs git push):**
+**Calculator rebuild — commits `f9e9c2d`, `34c7e55` — runtime verified by user:**
 
 Root causes fixed:
 - `winRateBadge`/`winRateVal`/`winRateSample` IDs were missing from HTML — `getElementById` returned null silently. Fixed by adding IDs to existing `.win-badge` div.
@@ -372,14 +372,38 @@ Root causes fixed:
 - `cVolume` (redundant with `cPosSize`) replaced with `cMarginReq` showing margin = posVal / leverage.
 - Net profit after fees added to every TP row: 0.1% round-trip crypto, 0.05% stocks/forex.
 - Win rate from `window._lastBt` shown in calculator output (updates after backtest completes).
+- Indicator grid orphan card: CSS `:last-child:nth-child(3n+1)` selector — "Trading Activity" now spans full row.
 
 **Strategy buttons — confirmed cosmetic only:**
 - They do NOT change the signal. They show a text commentary panel interpreting the existing BUY/SELL result through a strategy lens. No backend recalculation. User was informed. Left as-is.
 
 **Beginner mode — dropped:**
-- Three design versions created (V1 Operator, V2 Meridian, V3 Command) but user rejected all. Feature abandoned.
+- Three design versions created (V1 Operator, V2 Meridian, V3 Command) but user rejected all. Feature permanently abandoned.
 
-**UI bug fix — indicator grid empty cell (next commit):**
-- Screenshot shows "Trading Activity" card in 3-column grid leaving 2 empty brown cells to its right. Root cause: 4 indicator cards in a 3-column grid — last card wraps to new row alone, leaving 2 empty grid cells visible. Fix: make last card span remaining columns OR switch to auto-fit grid.
+---
+
+### SESSION HANDOFF NOTES — 2026-04-13 (Calculator guidance fix)
+
+**Calculator guidance — commit `5eab9e7` — NOT YET runtime verified (needs git push):**
+
+Problem: `recalc()` had `if (!acct || !risk || !entry || !sl) return` — SL=0 is falsy, so clicking "Calculate Position" with SL field empty did nothing. User saw all dashes, no feedback.
+
+Root cause: Silent return with no user-visible message.
+
+Fix:
+- Added `<div id="calcGuidance">` panel between "Calculate Position" button and results area.
+- Replaced silent return with a `showGuidance(lines)` / `hideGuidance()` helper.
+- Validation now shows inline coloured messages for each failure case:
+  - HOLD signal → amber warning, no calculation possible
+  - Missing account size → red error
+  - Missing risk % → red error with professional range hint
+  - Missing entry (but signal has one) → amber pointing to signal entry price
+  - Entry >15% from market price → amber sanity check
+  - Missing SL (but signal has one) → red pointing to signal SL price
+  - SL on wrong side of entry → red direction mismatch
+- Signal context line always shown: TICKER · signal direction · entry price · SL price
+- Account context always shown: "$X at Y% risk = $Z per trade"
+- `cRiskDollar` now shows `—` when acct/risk missing (not `$0`)
+- Direction check fixed: reads `calcDir` variable, not `.active` CSS class (buttons use `buy-on`/`sell-on`)
 
 **Deploy:** `git push origin main` → Railway auto-deploys.
