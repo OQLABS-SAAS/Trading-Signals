@@ -107,6 +107,8 @@ TIMEFRAME_CONFIG = {
     "1h":  {"interval": "1h",  "period": "30d", "chart_bars": 100, "date_fmt": "%Y-%m-%d %H:%M"},
     "4h":  {"interval": "1h",  "period": "60d", "chart_bars": 90,  "date_fmt": "%Y-%m-%d %H:%M", "resample": "4h"},
     "1d":  {"interval": "1d",  "period": "1y",  "chart_bars": 90,  "date_fmt": "%Y-%m-%d"},
+    "1w":  {"interval": "1wk", "period": "5y",  "chart_bars": 80,  "date_fmt": "%Y-%m-%d"},
+    "1mo": {"interval": "1mo", "period": "10y", "chart_bars": 60,  "date_fmt": "%Y-%m"},
 }
 
 # ── 3b: Asset-specific indicator settings ────────────────────────────────────
@@ -1230,8 +1232,12 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
 def get_mtf_trend(ticker):
     result = {}
     configs = {
-        "4H": {"interval": "1h",  "period": "60d", "resample": "4h"},
-        "1D": {"interval": "1d",  "period": "1y"},
+        "15m": {"interval": "15m", "period": "5d"},
+        "1H":  {"interval": "1h",  "period": "30d"},
+        "4H":  {"interval": "1h",  "period": "60d", "resample": "4h"},
+        "1D":  {"interval": "1d",  "period": "1y"},
+        "1W":  {"interval": "1wk", "period": "5y"},
+        "1M":  {"interval": "1mo", "period": "10y"},
     }
     for label, cfg in configs.items():
         try:
@@ -2998,6 +3004,17 @@ def analyze():
         _t3 = time.time()
         print(f"[analyze] Claude done [{_t3-_t2:.1f}s] — returning response")
         counter  = detect_counter_trade(ind)
+
+        # ── Override MTF entry for the current timeframe with the actual signal ──
+        # get_mtf_trend uses simple EMA stacking which can disagree with the full
+        # confluence gate. The analyzed TF must always show the real signal result.
+        _tf_key_map = {"15m":"15m","1h":"1H","4h":"4H","1d":"1D","1w":"1W","1mo":"1M"}
+        _tf_key = _tf_key_map.get(timeframe.lower(), timeframe.upper())
+        _sig_to_trend = {"BUY":"BULLISH","SELL":"BEARISH","HOLD":"NEUTRAL"}
+        mtf[_tf_key] = {
+            "trend": _sig_to_trend.get(analysis.get("signal","HOLD"), "NEUTRAL"),
+            "rsi":   round(ind.get("rsi", 50) or 50, 1)
+        }
 
         # Win rate: already calculated above if yfinance succeeded (no extra call needed)
         # Skipping a redundant Yahoo Finance fetch here — if Yahoo failed above it will

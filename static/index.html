@@ -1486,10 +1486,12 @@ body::before{
 <option value="index">index</option>
 </select>
 <select id="timeframe" style="display:none;">
+<option value="15m">15m</option>
 <option value="1h">1h</option>
 <option value="4h">4h</option>
 <option value="1d">1d</option>
 <option value="1w">1w</option>
+<option value="1mo">1mo</option>
 </select>
 
 
@@ -1635,11 +1637,12 @@ body::before{
         <div class="chart-topbar">
           <span class="ct-title" id="chartTitle">— / —</span>
           <div class="tf-pills">
-            <button class="tf-pill" onclick="setTF(this)">15m</button>
-            <button class="tf-pill" onclick="setTF(this)">1H</button>
-            <button class="tf-pill active" onclick="setTF(this)">4H</button>
-            <button class="tf-pill" onclick="setTF(this)">1D</button>
-            <button class="tf-pill" onclick="setTF(this)">1W</button>
+            <button class="tf-pill" onclick="setTF(this,'15m')">15m</button>
+            <button class="tf-pill" onclick="setTF(this,'1h')">1H</button>
+            <button class="tf-pill active" onclick="setTF(this,'4h')">4H</button>
+            <button class="tf-pill" onclick="setTF(this,'1d')">1D</button>
+            <button class="tf-pill" onclick="setTF(this,'1w')">1W</button>
+            <button class="tf-pill" onclick="setTF(this,'1mo')">1M</button>
           </div>
           <div class="chart-inds-row" style="margin-left:auto;">
             <span class="ci-tag">EMA20 <span class="v a" id="ciEma20">—</span></span>
@@ -9944,9 +9947,20 @@ function toggleDivHistory(btn) {
 }
 
 // ─── TF PILLS ───
-function setTF(btn) {
+function setTF(btn, tfVal) {
   btn.closest('.tf-pills').querySelectorAll('.tf-pill').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
+  // Update the timeframe select so runAnalyze picks it up
+  var sel = document.getElementById('timeframe');
+  if (sel && tfVal) {
+    sel.value = tfVal;
+    // If a ticker is already loaded, re-run analysis on the new timeframe
+    var ticker = (document.getElementById('tickerInput') || {}).value;
+    var at     = (document.getElementById('assetType')   || {}).value;
+    if (ticker && ticker.trim()) {
+      scannerLoadTicker(ticker.trim().toUpperCase(), at, tfVal);
+    }
+  }
 }
 
 // ─── AUTO-REFRESH ───
