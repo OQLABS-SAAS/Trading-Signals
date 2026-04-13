@@ -929,19 +929,21 @@ body::before{
 
 .se-scan-btn{
   width:100%;padding:10px;
-  background:linear-gradient(135deg,#8B5CF6,#6d28d9);
-  color:#fff;border:none;border-radius:3px;
-  font-family:var(--mono);font-size:12px;font-weight:800;
+  background:rgba(245,166,35,.12);
+  color:var(--amber);border:1px solid rgba(245,166,35,.4);border-radius:3px;
+  font-family:var(--mono);font-size:12px;font-weight:700;
   cursor:pointer;letter-spacing:.5px;transition:all .15s;margin-top:5px;
 }
+.se-scan-btn:hover{background:rgba(245,166,35,.22);border-color:rgba(245,166,35,.7);}
 
 .se-matrix-btn{
   width:100%;padding:10px;
-  background:linear-gradient(135deg,#06b6d4,#0891b2);
-  color:#fff;border:none;border-radius:3px;
-  font-family:var(--mono);font-size:12px;font-weight:800;
+  background:rgba(255,255,255,.04);
+  color:var(--muted2);border:1px solid rgba(255,255,255,.1);border-radius:3px;
+  font-family:var(--mono);font-size:12px;font-weight:700;
   cursor:pointer;letter-spacing:.5px;transition:all .15s;margin-top:5px;
 }
+.se-matrix-btn:hover{background:rgba(255,255,255,.08);color:var(--white2);}
 
 /* Strategy main area */
 .strat-main{padding:24px;overflow-y:auto;}
@@ -8444,8 +8446,13 @@ function renderResultsV2(d) {
     if (acSym) acSym.textContent = d.ticker;
     if (acPrice) acPrice.textContent = '$' + (d.price ? d.price.toLocaleString(undefined,{maximumFractionDigits:2}) : '—');
     if (acChg) {
-      acChg.textContent = (d.chg_1d >= 0 ? '+' : '') + d.chg_1d + '%';
-      acChg.style.color = d.chg_1d >= 0 ? 'var(--green)' : 'var(--red)';
+      if (d.chg_1d != null && !isNaN(d.chg_1d)) {
+        acChg.textContent = (d.chg_1d >= 0 ? '+' : '') + d.chg_1d + '%';
+        acChg.style.color = d.chg_1d >= 0 ? 'var(--green)' : 'var(--red)';
+      } else {
+        acChg.textContent = '—';
+        acChg.style.color = 'var(--muted2)';
+      }
     }
   }
 
@@ -11562,6 +11569,9 @@ function pfUpdateHealth() {
 function pfRunFullCheck() {
   var pv = parseFloat((document.getElementById('varPortValue') || {}).value) || 10000;
   var sp = parseFloat((document.getElementById('stressPortValue') || {}).value) || 10000;
+  var safeBtn = document.querySelector('button[onclick="pfRunFullCheck()"]');
+  if (safeBtn) { safeBtn.textContent = 'Running...'; safeBtn.disabled = true; }
+  showToast('Running safety check...');
   // Run VaR then stress in sequence
   fetch('/api/var', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -11584,7 +11594,12 @@ function pfRunFullCheck() {
       _pfLastStressPct = d.total_pnl_pct;
     }
     pfUpdateHealth();
-  }).catch(function(){pfUpdateHealth();});
+    if (safeBtn) { safeBtn.textContent = 'Run Safety Check'; safeBtn.disabled = false; }
+    showToast('Safety check complete');
+  }).catch(function(){
+    pfUpdateHealth();
+    if (safeBtn) { safeBtn.textContent = 'Run Safety Check'; safeBtn.disabled = false; }
+  });
 }
 
 // ── Strategy Lens ─────────────────────────────────────────────
@@ -11826,7 +11841,7 @@ function pfLoadPositions() {
     tbody.innerHTML = rows.map(p => {
       var sigClr = p.signal === 'BUY' ? 'var(--green)' : 'var(--red)';
       var dt = p.opened_at ? p.opened_at.substring(0,10) : '—';
-      return `<tr style="border-bottom:1px solid var(--border);">
+      return `<tr data-id="${p.id}" style="border-bottom:1px solid var(--border);">
         <td style="padding:6px 8px;color:var(--amber);font-weight:700;">${p.ticker}</td>
         <td style="padding:6px 8px;color:var(--muted2);">${p.asset_type}</td>
         <td style="padding:6px 8px;color:${sigClr};font-weight:700;">${p.signal}</td>
