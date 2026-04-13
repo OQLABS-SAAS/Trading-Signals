@@ -1523,7 +1523,7 @@ body::before{
             <div class="conf-inner"><span class="conf-pct" id="confPct">—</span><span class="conf-lbl">CONF</span></div>
             <div id="confLabel" style="text-align:center;margin-top:3px;height:14px;"></div>
           </div>
-          <div class="win-badge"><div class="wb-val">—</div><div class="wb-lbl">Win Rate</div></div>
+          <div class="win-badge" id="winRateBadge"><div class="wb-val" id="winRateVal">—</div><div class="wb-lbl">Win Rate</div><div id="winRateSample" style="font-size:9px;color:var(--muted2);text-align:center;margin-top:1px;"></div></div>
           <div class="sig-btns">
             <button class="btn-primary" onclick="switchMainTab('simulation',document.querySelector('.nav-tab:nth-child(5)'));if(currentData)runSimulation();">Simulate Trade</button>
             <button class="btn-ghost" onclick="togglePineCode()">Pine Script</button>
@@ -1927,8 +1927,14 @@ body::before{
               <div class="crm-item"><div class="crm-label">Position Size</div><div class="crm-val a" id="cPosSize">—</div></div>
               <div class="crm-item"><div class="crm-label">Position Value</div><div class="crm-val" id="cPosVal">—</div></div>
               <div class="crm-item"><div class="crm-label">Stop Distance</div><div class="crm-val r" id="cStopDist">—</div></div>
-              <div class="crm-item"><div class="crm-label">Volume (units)</div><div class="crm-val" id="cVolume">—</div></div>
+              <div class="crm-item"><div class="crm-label">Margin Required</div><div class="crm-val" id="cMarginReq">—</div></div>
             </div>
+            <!-- Win rate from last backtest + fees note -->
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-top:6px;font-size:11px;">
+              <span style="color:var(--muted2);">Backtest Win Rate</span>
+              <span id="cWinRate" style="color:var(--green);font-weight:700;font-family:var(--mono);">—</span>
+            </div>
+            <div style="font-size:10px;color:var(--muted2);margin-top:2px;padding-bottom:4px;">TP profits shown net of fees · Distances in pips/pts</div>
 
             <!-- TP rows -->
             <div class="calc-tp-title">Take Profit Levels</div>
@@ -4082,6 +4088,8 @@ function renderResults(d) {
 
   // Update AUTO values in position size calc whenever a new signal loads
   updateRiskAutoValues(d);
+  // Auto-fill live calculator from signal levels
+  try { autoFillCalc(d); } catch(e) { console.warn('autoFillCalc:', e); }
 
   // Apply number colour coding (positive=green, negative=red, neutral=amber)
   setTimeout(colorNumbers, 80);
@@ -10002,15 +10010,42 @@ function toggleCalc() {
   icon.textContent = body.classList.contains('open') ? '▲ Collapse' : '▼ Expand';
 }
 
+// ── Auto-fill live calculator from signal ──
+function autoFillCalc(d) {
+  if (!d || !d.entry) return; // HOLD or no entry — do not overwrite manual values
+  const fmt = function(v) {
+    if (v == null || isNaN(v)) return '';
+    return v >= 100 ? Math.round(v * 100) / 100 : parseFloat(v.toFixed(6));
+  };
+  var eEl = document.getElementById('cEntry');
+  var sEl = document.getElementById('cSL');
+  var t1  = document.getElementById('cTP1');
+  var t2  = document.getElementById('cTP2');
+  var t3  = document.getElementById('cTP3');
+  var aEl = document.getElementById('cAsset');
+  if (eEl) eEl.value = fmt(d.entry);
+  if (sEl && d.stop_loss) sEl.value = fmt(d.stop_loss);
+  if (t1  && d.tp1)       t1.value  = fmt(d.tp1);
+  if (t2  && d.tp2)       t2.value  = fmt(d.tp2);
+  if (t3  && d.tp3)       t3.value  = fmt(d.tp3);
+  if (aEl && d.price)     aEl.value = fmt(d.price);
+  if (d.signal === 'BUY' || d.signal === 'SELL') {
+    try { setDir(d.signal); } catch(e) {}
+  }
+  // Run immediately only if account size is already populated
+  var acct = parseFloat((document.getElementById('cAcct') || {}).value) || 0;
+  if (acct > 0) try { recalc(); } catch(e) {}
+}
+
 function recalc() {
-  const acct = parseFloat(document.getElementById('cAcct').value) || 0;
-  const risk = parseFloat(document.getElementById('cRisk').value) || 0;
-  const lev = parseFloat(document.getElementById('cLev').value) || 1;
+  const acct  = parseFloat(document.getElementById('cAcct').value)  || 0;
+  const risk  = parseFloat(document.getElementById('cRisk').value)  || 0;
+  const lev   = parseFloat(document.getElementById('cLev').value)   || 1;
   const entry = parseFloat(document.getElementById('cEntry').value) || 0;
-  const sl = parseFloat(document.getElementById('cSL').value) || 0;
-  const tp1 = parseFloat(document.getElementById('cTP1').value) || 0;
-  const tp2 = parseFloat(document.getElementById('cTP2').value) || 0;
-  const tp3 = parseFloat(document.getElementById('cTP3').value) || 0;
+  const sl    = parseFloat(document.getElementById('cSL').value)    || 0;
+  const tp1   = parseFloat(document.getElementById('cTP1').value)   || 0;
+  const tp2   = parseFloat(document.getElementById('cTP2').value)   || 0;
+  const tp3   = parseFloat(document.getElementById('cTP3').value)   || 0;
   const assetPrice = parseFloat(document.getElementById('cAsset').value) || entry;
 
   const riskAmt = acct * (risk / 100);
@@ -10018,63 +10053,82 @@ function recalc() {
 
   if (!acct || !risk || !entry || !sl) return;
 
-  const slDist = Math.abs(entry - sl);
-  const posSize = (riskAmt / slDist) * lev;
-  const posVal = posSize * assetPrice;
+  // ── Asset type + pip size ──
+  const cd = window.currentData || {};
+  const assetType = cd.asset_type || 'crypto';
+  const ticker    = (cd.ticker || '').toUpperCase();
+  let pipSize = 1, pipLabel = 'pts';
+  if (assetType === 'forex') {
+    pipSize  = ticker.includes('JPY') ? 0.01 : 0.0001;
+    pipLabel = 'pips';
+  }
 
-  document.getElementById('cPosSize').textContent = posSize.toFixed(4) + ' units';
-  document.getElementById('cPosVal').textContent = '$' + posVal.toFixed(0);
-  document.getElementById('cStopDist').textContent = '$' + slDist.toFixed(2);
-  document.getElementById('cVolume').textContent = posSize.toFixed(4);
+  // ── Round-trip fee rate ──
+  const feeRate = assetType === 'crypto' ? 0.001 : 0.0005; // 0.1% crypto · 0.05% stocks/forex
+
+  // ── Core sizing ──
+  const slDist  = Math.abs(entry - sl);
+  const posSize = (riskAmt / slDist) * lev;
+  const posVal  = posSize * assetPrice;
+  const margin  = posVal / lev;
+  const slPips  = slDist / pipSize;
+  const decimals = assetType === 'forex' ? 1 : 0;
+
+  // ── Unit label ──
+  const unitLabel = assetType === 'crypto'
+    ? (posSize >= 1 ? posSize.toFixed(4) + ' coins' : posSize.toFixed(6) + ' coins')
+    : assetType === 'forex'
+      ? (posSize / 100000).toFixed(2) + ' lots'
+      : posSize.toFixed(2) + ' shares';
+
+  document.getElementById('cPosSize').textContent   = unitLabel;
+  document.getElementById('cPosVal').textContent    = '$' + posVal.toLocaleString(undefined, {maximumFractionDigits: 0});
+  document.getElementById('cStopDist').textContent  = slPips.toFixed(decimals) + ' ' + pipLabel + ' ($' + slDist.toFixed(assetType === 'forex' ? 5 : 2) + ')';
+  document.getElementById('cMarginReq').textContent = lev > 1 ? '$' + margin.toLocaleString(undefined, {maximumFractionDigits: 0}) : '— (spot)';
+
+  // ── Win rate from last backtest ──
+  const wr   = window._lastBt ? (window._lastBt.win_rate != null ? window._lastBt.win_rate : null) : null;
+  const wrEl = document.getElementById('cWinRate');
+  if (wrEl) {
+    wrEl.textContent = wr != null ? wr + '%' : '—';
+    wrEl.style.color = wr != null ? (wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--amber)' : 'var(--red)') : 'var(--muted2)';
+  }
+
+  // ── TP calculator ──
+  const tpList = [[tp1,'TP1'],[tp2,'TP2'],[tp3,'TP3']];
+  const maxDistAbs = Math.abs((tp3 || tp2 || tp1 || entry) - entry) || 1;
 
   function calcTP(tp) {
-    const dist = Math.abs(tp - entry);
-    const profit = dist * posSize;
-    const rr = (dist / slDist).toFixed(1);
-    const pct = ((tp - entry) / entry * 100).toFixed(1);
-    const acctPct = (profit / acct * 100).toFixed(1);
-    return { dist, profit, rr, pct, acctPct };
+    const dist        = Math.abs(tp - entry);
+    const grossProfit = dist * posSize;
+    const fees        = posVal * feeRate;  // entry fee + exit fee on position value
+    const netProfit   = grossProfit - fees;
+    const rr          = (dist / slDist).toFixed(1);
+    const pct         = ((tp - entry) / entry * 100).toFixed(2);
+    const acctGross   = (grossProfit / acct * 100).toFixed(2);
+    const acctNet     = (netProfit   / acct * 100).toFixed(2);
+    const tpPips      = dist / pipSize;
+    const priceStr    = tp >= 100 ? '$' + tp.toLocaleString(undefined,{maximumFractionDigits:2}) : tp.toFixed(5);
+    return { dist, grossProfit, netProfit, fees, rr, pct, acctGross, acctNet, tpPips, priceStr };
   }
 
-  if (tp1) {
-    const t = calcTP(tp1);
-    document.getElementById('cTP1Price').textContent = '$' + tp1.toLocaleString();
-    document.getElementById('cTP1RR').textContent = 'R:R 1 : ' + t.rr;
-    document.getElementById('cTP1Profit').textContent = '+$' + t.profit.toFixed(0);
-    document.getElementById('cTP1Dist').textContent = '$' + t.dist.toFixed(2);
-    document.getElementById('cTP1Pct').textContent = '+' + t.pct + '%';
-    document.getElementById('cTP1TotalProfit').textContent = '+$' + t.profit.toFixed(0);
-    document.getElementById('cTP1AcctPct').textContent = '+' + t.acctPct + '%';
-    const maxDist = tp3 ? Math.abs(tp3 - entry) : t.dist;
-    document.getElementById('cpTP1Bar').style.width = Math.min(100, (t.dist / maxDist) * 100) + '%';
-    document.getElementById('cpTP1Val').textContent = '$' + t.dist.toFixed(0);
-  }
-  if (tp2) {
-    const t = calcTP(tp2);
-    document.getElementById('cTP2Price').textContent = '$' + tp2.toLocaleString();
-    document.getElementById('cTP2RR').textContent = 'R:R 1 : ' + t.rr;
-    document.getElementById('cTP2Profit').textContent = '+$' + t.profit.toFixed(0);
-    document.getElementById('cTP2Dist').textContent = '$' + t.dist.toFixed(2);
-    document.getElementById('cTP2Pct').textContent = '+' + t.pct + '%';
-    document.getElementById('cTP2TotalProfit').textContent = '+$' + t.profit.toFixed(0);
-    document.getElementById('cTP2AcctPct').textContent = '+' + t.acctPct + '%';
-    const maxDist = tp3 ? Math.abs(tp3 - entry) : t.dist;
-    document.getElementById('cpTP2Bar').style.width = Math.min(100, (t.dist / maxDist) * 100) + '%';
-    document.getElementById('cpTP2Val').textContent = '$' + t.dist.toFixed(0);
-  }
-  if (tp3) {
-    const t = calcTP(tp3);
-    document.getElementById('cTP3Price').textContent = '$' + tp3.toLocaleString();
-    document.getElementById('cTP3RR').textContent = 'R:R 1 : ' + t.rr;
-    document.getElementById('cTP3Profit').textContent = '+$' + t.profit.toFixed(0);
-    document.getElementById('cTP3Dist').textContent = '$' + t.dist.toFixed(2);
-    document.getElementById('cTP3Pct').textContent = '+' + t.pct + '%';
-    document.getElementById('cTP3TotalProfit').textContent = '+$' + t.profit.toFixed(0);
-    document.getElementById('cTP3AcctPct').textContent = '+' + t.acctPct + '%';
-    document.getElementById('cpTP3Bar').style.width = '100%';
-    document.getElementById('cpTP3Val').textContent = '$' + t.dist.toFixed(0);
-  }
-  document.getElementById('cpSLVal').textContent = '$' + slDist.toFixed(0);
+  tpList.forEach(([tp, lbl]) => {
+    if (!tp) return;
+    const t    = calcTP(tp);
+    const barEl = document.getElementById('cp' + lbl + 'Bar');
+    const valEl = document.getElementById('cp' + lbl + 'Val');
+    document.getElementById('c' + lbl + 'Price').textContent      = t.priceStr;
+    document.getElementById('c' + lbl + 'RR').textContent         = 'R:R 1 : ' + t.rr;
+    document.getElementById('c' + lbl + 'Profit').textContent     = '+$' + t.netProfit.toFixed(0) + ' net';
+    document.getElementById('c' + lbl + 'Dist').textContent       = t.tpPips.toFixed(decimals) + ' ' + pipLabel;
+    document.getElementById('c' + lbl + 'Pct').textContent        = '+' + t.pct + '%';
+    document.getElementById('c' + lbl + 'TotalProfit').textContent = '+$' + t.grossProfit.toFixed(0) + ' gross  (fees −$' + t.fees.toFixed(0) + ')';
+    document.getElementById('c' + lbl + 'AcctPct').textContent    = '+' + t.acctNet + '% net  /  +' + t.acctGross + '% gross';
+    if (barEl) barEl.style.width = Math.min(100, (t.dist / maxDistAbs) * 100) + '%';
+    if (valEl) valEl.textContent = t.tpPips.toFixed(decimals) + ' ' + pipLabel;
+  });
+
+  document.getElementById('cpSLVal').textContent = slPips.toFixed(decimals) + ' ' + pipLabel;
 }
 
 // ─── STRATEGY ENGINE ───
