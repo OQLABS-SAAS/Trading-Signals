@@ -1452,6 +1452,7 @@ body::before{
     <button class="nav-tab" onclick="switchMainTab('backtest',this)">Backtest</button>
     <button class="nav-tab" onclick="switchMainTab('simulation',this)">Simulation</button>
     <button class="nav-tab" onclick="switchMainTab('news',this)">News</button>
+    <button class="nav-tab" onclick="switchMainTab('portfolio',this)">Portfolio</button>
   </nav>
 
   <div class="hdr-right"><div id="hdrTicker" style="font-family:var(--mono); font-size:13px; font-weight:600; color:var(--amber); margin-right:12px; min-width:50px;">—</div>
@@ -2733,6 +2734,142 @@ body::before{
 </div><!-- /app -->
 
 <!-- DotVerse AI chat removed -->
+
+<!-- ════════════ PORTFOLIO TAB ════════════ -->
+<div id="tab-portfolio" class="tab-panel">
+  <div style="max-width:960px;margin:0 auto;padding:24px 16px;">
+    <h2 style="font-family:var(--disp);font-size:24px;font-weight:900;letter-spacing:-.5px;margin-bottom:4px;">Portfolio Risk Manager</h2>
+    <p style="color:var(--muted2);font-size:12px;font-family:var(--mono);margin-bottom:24px;">Log positions · Compute VaR · Run stress tests · Correlation heatmap · Optimise parameters</p>
+
+    <!-- ── 5a: Position Log ── -->
+    <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;padding:20px;margin-bottom:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div style="font-family:var(--disp);font-size:16px;font-weight:700;color:var(--amber);">Open Positions</div>
+        <button onclick="pfShowAddForm()" style="font-family:var(--mono);font-size:11px;padding:6px 14px;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;cursor:pointer;font-weight:700;">+ Log Position</button>
+      </div>
+
+      <!-- Add Position Form (hidden by default) -->
+      <div id="pfAddForm" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:16px;margin-bottom:16px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:12px;">
+          <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">TICKER</label>
+            <input id="pfTicker" placeholder="AAPL" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;"></div>
+          <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">ASSET TYPE</label>
+            <select id="pfAssetType" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;">
+              <option value="stock">Stock</option><option value="crypto">Crypto</option>
+              <option value="forex">Forex</option><option value="index">Index</option>
+              <option value="commodity">Commodity</option>
+            </select></div>
+          <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">SIGNAL</label>
+            <select id="pfSignal" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;">
+              <option value="BUY">BUY</option><option value="SELL">SELL</option>
+            </select></div>
+          <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">ENTRY PRICE</label>
+            <input id="pfEntry" type="number" step="any" placeholder="150.00" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;"></div>
+          <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">STOP PRICE</label>
+            <input id="pfStop" type="number" step="any" placeholder="142.00" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;"></div>
+          <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">TP1 PRICE</label>
+            <input id="pfTp1" type="number" step="any" placeholder="162.00" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;"></div>
+          <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">SIZE (% ACCOUNT)</label>
+            <input id="pfSize" type="number" step="any" placeholder="5" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;"></div>
+          <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">TIMEFRAME</label>
+            <select id="pfTimeframe" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;">
+              <option value="1d">1D</option><option value="4h">4H</option>
+              <option value="1h">1H</option><option value="15m">15M</option><option value="1w">1W</option>
+            </select></div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="pfAddPosition()" style="font-family:var(--mono);font-size:11px;padding:7px 18px;background:var(--green);color:#0C0A08;border:none;border-radius:3px;cursor:pointer;font-weight:700;">Save Position</button>
+          <button onclick="document.getElementById('pfAddForm').style.display='none'" style="font-family:var(--mono);font-size:11px;padding:7px 14px;background:var(--bg3);color:var(--muted2);border:1px solid var(--border);border-radius:3px;cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Position Table -->
+      <div id="pfTableWrap" style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;">
+          <thead><tr style="border-bottom:1px solid var(--border2);">
+            <th style="text-align:left;padding:6px 8px;color:var(--muted2);">TICKER</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--muted2);">TYPE</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--muted2);">SIGNAL</th>
+            <th style="text-align:right;padding:6px 8px;color:var(--muted2);">ENTRY</th>
+            <th style="text-align:right;padding:6px 8px;color:var(--muted2);">STOP</th>
+            <th style="text-align:right;padding:6px 8px;color:var(--muted2);">TP1</th>
+            <th style="text-align:right;padding:6px 8px;color:var(--muted2);">SIZE%</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--muted2);">TF</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--muted2);">OPENED</th>
+            <th style="padding:6px 8px;"></th>
+          </tr></thead>
+          <tbody id="pfTableBody"><tr><td colspan="10" style="text-align:center;color:var(--muted2);padding:20px;">No positions logged yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── 5b: Parametric VaR ── -->
+    <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;padding:20px;margin-bottom:20px;">
+      <div style="font-family:var(--disp);font-size:16px;font-weight:700;color:var(--amber);margin-bottom:14px;">Parametric Value-at-Risk (VaR)</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
+        <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">PORTFOLIO VALUE ($)</label>
+          <input id="varPortValue" type="number" value="10000" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:3px;width:140px;"></div>
+        <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">CONFIDENCE</label>
+          <select id="varConfidence" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:3px;">
+            <option value="0.95">95%</option><option value="0.99">99%</option>
+          </select></div>
+        <button onclick="pfRunVar()" style="font-family:var(--mono);font-size:11px;padding:7px 18px;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;cursor:pointer;font-weight:700;">Compute VaR</button>
+      </div>
+      <div id="varResult" style="font-family:var(--mono);font-size:12px;color:var(--muted2);">Add positions above, then compute VaR.</div>
+    </div>
+
+    <!-- ── 5c: Stress Test ── -->
+    <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;padding:20px;margin-bottom:20px;">
+      <div style="font-family:var(--disp);font-size:16px;font-weight:700;color:var(--amber);margin-bottom:4px;">Stress Test</div>
+      <p style="color:var(--muted2);font-size:11px;font-family:var(--mono);margin-bottom:14px;">Applies a % shock per asset class to all open positions. Defaults: Crypto −30%, Stocks −20%, Forex −10%, Index −15%, Commodity −20%.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
+        <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">PORTFOLIO VALUE ($)</label>
+          <input id="stressPortValue" type="number" value="10000" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:3px;width:140px;"></div>
+        <button onclick="pfRunStress()" style="font-family:var(--mono);font-size:11px;padding:7px 18px;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;cursor:pointer;font-weight:700;">Run Stress Test</button>
+      </div>
+      <div id="stressResult" style="font-family:var(--mono);font-size:12px;color:var(--muted2);">No results yet.</div>
+    </div>
+
+    <!-- ── 5d: Correlation Heatmap ── -->
+    <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;padding:20px;margin-bottom:20px;">
+      <div style="font-family:var(--disp);font-size:16px;font-weight:700;color:var(--amber);margin-bottom:4px;">Cross-Asset Correlation</div>
+      <p style="color:var(--muted2);font-size:11px;font-family:var(--mono);margin-bottom:14px;">Enter 2–15 tickers (comma-separated). Uses 252-day daily returns. OHLCV cached 5 min.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
+        <div style="flex:1;min-width:200px;"><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">TICKERS</label>
+          <input id="corrTickers" value="BTC-USD,AAPL,GC=F,^GSPC,EURUSD=X" style="width:100%;box-sizing:border-box;background:var(--bg2);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:3px;"></div>
+        <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">PERIOD</label>
+          <select id="corrPeriod" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:3px;">
+            <option value="3mo">3M</option><option value="6mo" selected>6M</option>
+            <option value="1y">1Y</option><option value="2y">2Y</option>
+          </select></div>
+        <button onclick="pfRunCorr()" style="font-family:var(--mono);font-size:11px;padding:7px 18px;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;cursor:pointer;font-weight:700;">Compute</button>
+      </div>
+      <div id="corrResult" style="overflow-x:auto;"></div>
+    </div>
+
+    <!-- ── 5e: Parameter Optimisation ── -->
+    <div style="background:var(--bg1);border:1px solid var(--border2);border-radius:6px;padding:20px;margin-bottom:20px;">
+      <div style="font-family:var(--disp);font-size:16px;font-weight:700;color:var(--amber);margin-bottom:4px;">Parameter Optimisation</div>
+      <p style="color:var(--muted2);font-size:11px;font-family:var(--mono);margin-bottom:14px;">Enqueues a background grid search on the RQ worker. Tests RSI [10,14,21] × ATR mult [2,3,4] × EMA pairs [7/14, 9/21, 20/50] on 2 years of benchmark data. Best Sharpe wins. Results stored in PostgreSQL.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
+        <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">ASSET CLASS</label>
+          <select id="optAssetClass" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:3px;">
+            <option value="stock">Stock</option><option value="crypto">Crypto</option>
+            <option value="forex">Forex</option><option value="index">Index</option>
+            <option value="commodity">Commodity</option>
+          </select></div>
+        <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">TIMEFRAME</label>
+          <select id="optTimeframe" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:3px;">
+            <option value="1d" selected>1D</option><option value="4h">4H</option><option value="1h">1H</option>
+          </select></div>
+        <button onclick="pfRunOptimise()" style="font-family:var(--mono);font-size:11px;padding:7px 18px;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;cursor:pointer;font-weight:700;">Enqueue Job</button>
+        <button onclick="pfPollOptimise()" style="font-family:var(--mono);font-size:11px;padding:7px 18px;background:var(--bg2);color:var(--amber);border:1px solid var(--amber);border-radius:3px;cursor:pointer;">Check Result</button>
+      </div>
+      <div id="optResult" style="font-family:var(--mono);font-size:12px;color:var(--muted2);">No job running.</div>
+    </div>
+
+  </div>
+</div><!-- end tab-portfolio -->
 
 <!-- ══════════════════════════════════
    JAVASCRIPT
@@ -10994,6 +11131,291 @@ function closeSimulate() {
     </div>
   </div>
 </div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   PHASE 5 — PORTFOLIO RISK MANAGER JAVASCRIPT
+   5a: Position tracking  5b: VaR  5c: Stress  5d: Corr  5e: Optimise
+═══════════════════════════════════════════════════════════════ */
+
+var _pfJobId       = null;   // last enqueued optimise job id
+var _pfOptClass    = null;
+var _pfOptTf       = null;
+
+// ── Helpers ──────────────────────────────────────────────────
+function _pfFmt(n, dec) {
+  if (n == null || isNaN(n)) return '—';
+  return parseFloat(n).toFixed(dec != null ? dec : 2);
+}
+function _pfClr(v) { return v >= 0 ? 'var(--green)' : 'var(--red)'; }
+
+// ── 5a: Load + render positions table ────────────────────────
+function pfLoadPositions() {
+  fetch('/api/positions').then(r => r.json()).then(rows => {
+    var tbody = document.getElementById('pfTableBody');
+    if (!tbody) return;
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--muted2);padding:20px;">No positions logged yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(p => {
+      var sigClr = p.signal === 'BUY' ? 'var(--green)' : 'var(--red)';
+      var dt = p.opened_at ? p.opened_at.substring(0,10) : '—';
+      return `<tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:6px 8px;color:var(--amber);font-weight:700;">${p.ticker}</td>
+        <td style="padding:6px 8px;color:var(--muted2);">${p.asset_type}</td>
+        <td style="padding:6px 8px;color:${sigClr};font-weight:700;">${p.signal}</td>
+        <td style="padding:6px 8px;text-align:right;">${_pfFmt(p.entry_price, 4)}</td>
+        <td style="padding:6px 8px;text-align:right;color:var(--red);">${p.stop_price ? _pfFmt(p.stop_price, 4) : '—'}</td>
+        <td style="padding:6px 8px;text-align:right;color:var(--green);">${p.tp1_price ? _pfFmt(p.tp1_price, 4) : '—'}</td>
+        <td style="padding:6px 8px;text-align:right;">${_pfFmt(p.size, 1)}%</td>
+        <td style="padding:6px 8px;color:var(--muted2);">${p.timeframe || '—'}</td>
+        <td style="padding:6px 8px;color:var(--muted2);">${dt}</td>
+        <td style="padding:6px 8px;">
+          <button onclick="pfDeletePosition(${p.id})" style="font-family:var(--mono);font-size:10px;padding:3px 8px;background:rgba(220,38,38,.15);color:var(--red);border:1px solid rgba(220,38,38,.3);border-radius:3px;cursor:pointer;">✕</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }).catch(e => {
+    var tbody = document.getElementById('pfTableBody');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--red);padding:20px;">Failed to load positions.</td></tr>';
+  });
+}
+
+function pfShowAddForm() {
+  var f = document.getElementById('pfAddForm');
+  if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+function pfAddPosition() {
+  var ticker  = (document.getElementById('pfTicker')    || {}).value || '';
+  var atype   = (document.getElementById('pfAssetType') || {}).value || 'stock';
+  var signal  = (document.getElementById('pfSignal')    || {}).value || 'BUY';
+  var entry   = parseFloat((document.getElementById('pfEntry')    || {}).value);
+  var stop    = parseFloat((document.getElementById('pfStop')     || {}).value);
+  var tp1     = parseFloat((document.getElementById('pfTp1')      || {}).value);
+  var size    = parseFloat((document.getElementById('pfSize')     || {}).value);
+  var tf      = (document.getElementById('pfTimeframe') || {}).value || '1d';
+
+  if (!ticker || isNaN(entry) || isNaN(size)) {
+    alert('Ticker, Entry Price and Size are required.'); return;
+  }
+  fetch('/api/positions', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ticker, asset_type: atype, signal, entry_price: entry,
+                          stop_price: isNaN(stop) ? null : stop,
+                          tp1_price:  isNaN(tp1)  ? null : tp1,
+                          size, timeframe: tf})
+  }).then(r => r.json()).then(d => {
+    if (d.error) { alert('Error: ' + d.error); return; }
+    document.getElementById('pfAddForm').style.display = 'none';
+    // Clear form
+    ['pfTicker','pfEntry','pfStop','pfTp1','pfSize'].forEach(id => {
+      var el = document.getElementById(id); if (el) el.value = '';
+    });
+    pfLoadPositions();
+  }).catch(e => alert('Network error'));
+}
+
+function pfDeletePosition(id) {
+  if (!confirm('Remove this position?')) return;
+  fetch('/api/positions/' + id, {method: 'DELETE'})
+    .then(r => r.json())
+    .then(() => pfLoadPositions())
+    .catch(e => alert('Delete failed'));
+}
+
+// ── 5b: Parametric VaR ───────────────────────────────────────
+function pfRunVar() {
+  var pv  = parseFloat((document.getElementById('varPortValue')  || {}).value) || 10000;
+  var conf = parseFloat((document.getElementById('varConfidence') || {}).value) || 0.95;
+  var el  = document.getElementById('varResult');
+  if (el) el.innerHTML = '<span style="color:var(--muted2);">Computing VaR… fetching 1-year returns…</span>';
+  fetch('/api/var', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({portfolio_value: pv, confidence: conf})
+  }).then(r => r.json()).then(d => {
+    if (!el) return;
+    if (d.error) { el.innerHTML = `<span style="color:var(--red);">${d.error}</span>`; return; }
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:8px;">
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">1-DAY VaR (USD)</div>
+          <div style="color:var(--red);font-size:20px;font-weight:700;">$${_pfFmt(d.var_1d_usd, 2)}</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">1-DAY VaR (%)</div>
+          <div style="color:var(--red);font-size:20px;font-weight:700;">${_pfFmt(d.var_1d_pct, 3)}%</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">PORTFOLIO STD</div>
+          <div style="color:var(--amber);font-size:20px;font-weight:700;">${_pfFmt(d.portfolio_std, 4)}%</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">POSITIONS USED</div>
+          <div style="color:var(--text);font-size:20px;font-weight:700;">${d.positions_used}</div>
+        </div>
+      </div>
+      <div style="margin-top:10px;padding:10px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.2);border-radius:4px;color:var(--muted2);font-size:11px;">${d.interpretation}</div>`;
+  }).catch(e => { if (el) el.innerHTML = '<span style="color:var(--red);">Network error</span>'; });
+}
+
+// ── 5c: Stress Test ──────────────────────────────────────────
+function pfRunStress() {
+  var pv  = parseFloat((document.getElementById('stressPortValue') || {}).value) || 10000;
+  var el  = document.getElementById('stressResult');
+  if (el) el.innerHTML = '<span style="color:var(--muted2);">Running stress test…</span>';
+  fetch('/api/stress', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({portfolio_value: pv})
+  }).then(r => r.json()).then(d => {
+    if (!el) return;
+    if (d.error) { el.innerHTML = `<span style="color:var(--red);">${d.error}</span>`; return; }
+    var rows = (d.rows || []).map(r =>
+      `<tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:6px 8px;color:var(--amber);font-weight:700;">${r.ticker}</td>
+        <td style="padding:6px 8px;color:var(--muted2);">${r.asset_type}</td>
+        <td style="padding:6px 8px;text-align:right;">${_pfFmt(r.entry_price, 4)}</td>
+        <td style="padding:6px 8px;text-align:right;color:var(--red);">${r.shock_pct}%</td>
+        <td style="padding:6px 8px;text-align:right;">${_pfFmt(r.new_price, 4)}</td>
+        <td style="padding:6px 8px;text-align:right;">$${_pfFmt(r.alloc_usd, 0)}</td>
+        <td style="padding:6px 8px;text-align:right;color:${_pfClr(r.pnl_usd)};font-weight:700;">$${_pfFmt(r.pnl_usd, 2)}</td>
+      </tr>`
+    ).join('');
+    var totalClr = _pfClr(d.total_pnl_usd);
+    el.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;margin-bottom:12px;">
+        <thead><tr style="border-bottom:1px solid var(--border2);">
+          <th style="text-align:left;padding:6px 8px;color:var(--muted2);">TICKER</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--muted2);">TYPE</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--muted2);">ENTRY</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--muted2);">SHOCK</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--muted2);">NEW PRICE</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--muted2);">ALLOC</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--muted2);">P&L</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="font-family:var(--mono);font-size:13px;padding:10px 14px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.2);border-radius:4px;">
+        Total stressed P&L: <span style="color:${totalClr};font-weight:700;">$${_pfFmt(d.total_pnl_usd, 2)} (${_pfFmt(d.total_pnl_pct, 2)}%)</span>
+      </div>`;
+  }).catch(e => { if (el) el.innerHTML = '<span style="color:var(--red);">Network error</span>'; });
+}
+
+// ── 5d: Correlation Heatmap ───────────────────────────────────
+function pfRunCorr() {
+  var raw     = (document.getElementById('corrTickers') || {}).value || '';
+  var tickers = raw.split(',').map(t => t.trim()).filter(Boolean);
+  var period  = (document.getElementById('corrPeriod')  || {}).value || '6mo';
+  var el      = document.getElementById('corrResult');
+  if (el) el.innerHTML = '<span style="color:var(--muted2);font-family:var(--mono);font-size:12px;">Fetching data and computing correlation matrix…</span>';
+  fetch('/api/correlation', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({tickers, period})
+  }).then(r => r.json()).then(d => {
+    if (!el) return;
+    if (d.error) { el.innerHTML = `<span style="color:var(--red);font-family:var(--mono);font-size:12px;">${d.error}</span>`; return; }
+    var labels = d.labels, matrix = d.matrix;
+    var header = '<th style="padding:6px 8px;color:var(--muted2);font-family:var(--mono);font-size:10px;"></th>' +
+      labels.map(l => `<th style="padding:6px 8px;color:var(--amber);font-family:var(--mono);font-size:10px;">${l}</th>`).join('');
+    var bodyRows = matrix.map((row, i) =>
+      '<tr>' +
+      `<td style="padding:6px 8px;color:var(--amber);font-family:var(--mono);font-size:10px;font-weight:700;">${labels[i]}</td>` +
+      row.map((v, j) => {
+        var absV  = Math.abs(v);
+        var isOne = i === j;
+        var bg    = isOne ? 'rgba(245,158,11,.25)' :
+                    v > 0  ? `rgba(0,201,141,${absV * 0.5})` :
+                              `rgba(220,38,38,${absV * 0.5})`;
+        var clr   = isOne ? 'var(--amber)' : v > 0 ? 'var(--green)' : 'var(--red)';
+        return `<td style="padding:6px 8px;text-align:center;background:${bg};color:${clr};font-family:var(--mono);font-size:11px;font-weight:${absV > 0.7 ? '700' : '400'};">${_pfFmt(v, 2)}</td>`;
+      }).join('') +
+      '</tr>'
+    ).join('');
+    el.innerHTML = `
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:8px;">${d.min_date} → ${d.max_date} · ${period}</div>
+      <table style="border-collapse:collapse;min-width:100%;">
+        <thead><tr>${header}</tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:8px;">Green = positive correlation · Red = negative · Intensity = magnitude</div>`;
+  }).catch(e => { if (el) el.innerHTML = '<span style="color:var(--red);font-family:var(--mono);font-size:12px;">Network error</span>'; });
+}
+
+// ── 5e: Parameter Optimisation ───────────────────────────────
+function pfRunOptimise() {
+  var ac = (document.getElementById('optAssetClass') || {}).value || 'stock';
+  var tf = (document.getElementById('optTimeframe')  || {}).value || '1d';
+  var el = document.getElementById('optResult');
+  if (el) el.innerHTML = '<span style="color:var(--amber);">Enqueuing job… this runs on the background worker and may take 1–3 minutes.</span>';
+  fetch('/api/optimise', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({asset_class: ac, timeframe: tf})
+  }).then(r => r.json()).then(d => {
+    if (!el) return;
+    if (d.error) { el.innerHTML = `<span style="color:var(--red);">${d.error}</span>`; return; }
+    _pfJobId    = d.job_id;
+    _pfOptClass = ac;
+    _pfOptTf    = tf;
+    el.innerHTML = `<span style="color:var(--green);">Job enqueued (${d.job_id.substring(0,8)}…) for ${ac} / ${tf}. Click "Check Result" in ~2 minutes.</span>`;
+  }).catch(e => { if (el) el.innerHTML = '<span style="color:var(--red);">Network error</span>'; });
+}
+
+function pfPollOptimise() {
+  var el  = document.getElementById('optResult');
+  var ac  = _pfOptClass || (document.getElementById('optAssetClass') || {}).value || 'stock';
+  var tf  = _pfOptTf    || (document.getElementById('optTimeframe')  || {}).value || '1d';
+  var url = '/api/optimise/result?asset_class=' + ac + '&timeframe=' + tf;
+  if (_pfJobId) url += '&job_id=' + _pfJobId;
+  if (el) el.innerHTML = '<span style="color:var(--muted2);">Checking…</span>';
+  fetch(url).then(r => r.json()).then(d => {
+    if (!el) return;
+    if (d.status === 'running') { el.innerHTML = '<span style="color:var(--amber);">Job still running… check again in a moment.</span>'; return; }
+    if (d.status === 'failed')  { el.innerHTML = `<span style="color:var(--red);">Job failed: ${d.error || 'unknown'}</span>`; return; }
+    if (d.status === 'not_found') { el.innerHTML = '<span style="color:var(--muted2);">No result yet. Enqueue a job first.</span>'; return; }
+    var r = d.result || {};
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px;">
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">RSI PERIOD</div>
+          <div style="color:var(--amber);font-size:22px;font-weight:700;">${r.rsi_period || '—'}</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">ATR MULT</div>
+          <div style="color:var(--amber);font-size:22px;font-weight:700;">${_pfFmt(r.atr_mult, 1)}×</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">EMA PAIR</div>
+          <div style="color:var(--amber);font-size:22px;font-weight:700;">${r.ema_fast || '—'}/${r.ema_slow || '—'}</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">SHARPE</div>
+          <div style="color:var(--green);font-size:22px;font-weight:700;">${_pfFmt(r.sharpe, 3)}</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
+          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">WIN RATE</div>
+          <div style="color:var(--green);font-size:22px;font-weight:700;">${r.win_rate != null ? _pfFmt(r.win_rate * 100, 1) + '%' : '—'}</div>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:10px;color:var(--muted2);">Computed: ${r.computed_at ? r.computed_at.substring(0,19).replace('T',' ') : '—'} UTC · ${ac} / ${tf}</div>`;
+  }).catch(e => { if (el) el.innerHTML = '<span style="color:var(--red);">Network error</span>'; });
+}
+
+// Load positions when Portfolio tab is opened
+var _pfLoaded = false;
+var _origSwitch = typeof switchMainTab === 'function' ? switchMainTab : null;
+// Hook into tab switch to load positions on first visit
+document.addEventListener('click', function(e) {
+  if (e.target && e.target.textContent === 'Portfolio' && e.target.classList.contains('nav-tab')) {
+    if (!_pfLoaded) { pfLoadPositions(); _pfLoaded = true; }
+  }
+});
+</script>
 
 </body>
 </html>

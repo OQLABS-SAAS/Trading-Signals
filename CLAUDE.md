@@ -286,12 +286,30 @@ Each phase must be runtime-verified in a live Railway deploy before the next pha
 - 3c: Position size — `position_pct = round(min(entry / risk, 100.0), 1)`. Added to `get_analysis` result dict. Displayed as amber banner above Trade Management Plan.
 - 3d: Confidence label — `confidence_label` field in result dict. CONFIRMED (TV used or net≥5) / LIKELY (net≥3) / HYPOTHESIS (weak). Displayed below confidence ring with colour coding and tooltip.
 
-**Phase 4 — Infrastructure (user provisions on Railway before Phase 5 code starts):**
-- 4a: PostgreSQL Railway add-on. Schema: `positions` and `optimisation_results` tables.
-- 4b: Redis Railway add-on. OHLCV cache, task queue, task results.
-- 4c: RQ Worker — second Railway service, same codebase, start command `rq worker`.
+**Phase 4: COMPLETE — runtime verified by user on 2026-04-13. Commit `2417bb1`.**
 
-**Phase 4 is user-side provisioning — no code written until all three add-ons are live.**
+**Phase 4 items — all DONE + VERIFIED:**
+- 4a: PostgreSQL Railway add-on — Online, "Deployment successful". DATABASE_URL injected into web service.
+- 4b: Redis Railway add-on — Online. REDIS_URL injected into web service.
+- 4c: RQ Worker (Trading-Signals service) — Active, logs confirmed "*** Listening on default..." Commit `2417bb1` added `rq worker` to Procfile and added `redis>=5.0.0`, `rq>=1.16.0`, `psycopg2-binary>=2.9.0`, `sqlalchemy>=2.0.0` to requirements.txt.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-13 (Phase 4 complete, Phase 5 next)
+
+**Phase 1: COMPLETE — runtime verified.**
+**Phase 2: COMPLETE — runtime verified.**
+**Phase 3: COMPLETE — runtime verified.**
+**Phase 4: COMPLETE — runtime verified by user on 2026-04-13. Commit `2417bb1`.**
+
+**Phase 5 — next to implement:**
+- 5a: Portfolio position tracking — `/api/positions` (GET/POST/DELETE). SQLAlchemy model `Position`. Frontend: position log panel below signal card.
+- 5b: Parametric VaR — `VaR = portfolio_value × z_score × portfolio_std` from 252-day returns. `/api/var` endpoint. Cached in Redis 5-min TTL.
+- 5c: Stress testing — configurable % shock per asset class applied to stored positions, P&L impact table. `/api/stress` endpoint.
+- 5d: Cross-asset correlation dashboard — OHLCV from Redis cache, numpy correlation matrix. `/api/correlation` endpoint. Frontend heatmap.
+- 5e: Offline parameter optimisation — RQ job runs grid search per asset class, writes to `optimisation_results` table, frontend reads recommended settings. `/api/optimise` (enqueue) + `/api/optimise/result` (poll).
+
+**Session sequencing rule:** Each phase must be runtime-verified in a live Railway deploy before the next phase starts.
 
 **Next session — start here:**
-Say "Protocol active." Re-read this file. Run Six Stop Gates for Phase 4. Present provisioning checklist to user. Once user confirms all three are live, begin Phase 5 code.
+Say "Protocol active." Re-read this file. Run Six Stop Gates for Phase 5. Get explicit user go-ahead before writing any code.

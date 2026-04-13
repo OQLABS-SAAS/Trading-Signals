@@ -4090,6 +4090,625 @@ def backtest_route():
     })
 
 
+# ═══════════════════════════════════════════════════════════════
+# PHASE 5 — INFRASTRUCTURE FEATURES
+# Requires: DATABASE_URL (PostgreSQL), REDIS_URL (Redis), RQ Worker
+# ═══════════════════════════════════════════════════════════════
+
+import redis as _redis_module
+from rq import Queue as RQQueue
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, text
+from sqlalchemy.orm import declarative_base, sessionmaker
+from scipy.stats import norm as _scipy_norm
+
+# ─── DATABASE SETUP ───────────────────────────────────────────
+_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+_REDIS_URL    = os.environ.get("REDIS_URL", "")
+
+# SQLAlchemy engine + session (graceful no-op if DATABASE_URL absent)
+_db_engine  = None
+_DBSession  = None
+_Base       = declarative_base()
+
+if _DATABASE_URL:
+    try:
+        # Railway Postgres URLs start with postgres:// — SQLAlchemy needs postgresql://
+        _db_url    = _DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        _db_engine = create_engine(_db_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
+        _DBSession = sessionmaker(bind=_db_engine)
+        print("[db] SQLAlchemy engine created")
+    except Exception as _e:
+        print(f"[db] Engine creation failed: {_e}")
+
+# Redis client (graceful no-op if REDIS_URL absent)
+_redis_client = None
+if _REDIS_URL:
+    try:
+        _redis_client = _redis_module.from_url(_REDIS_URL, decode_responses=True)
+        _redis_client.ping()
+        print("[redis] Connected")
+    except Exception as _e:
+        print(f"[redis] Connection failed: {_e}")
+
+# RQ queue (only usable if Redis is available)
+_rq_queue = None
+if _redis_client:
+    try:
+        _rq_conn  = _redis_module.from_url(_REDIS_URL)   # bytes connection for RQ
+        _rq_queue = RQQueue(connection=_rq_conn)
+        print("[rq] Queue initialised")
+    except Exception as _e:
+        print(f"[rq] Queue init failed: {_e}")
+
+# ─── SQLALCHEMY MODELS ────────────────────────────────────────
+
+class Position(_Base):
+    """Open trade positions logged by the user."""
+    __tablename__ = "positions"
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    user_id      = Column(String(64), nullable=False, default="default")
+    ticker       = Column(String(32), nullable=False)
+    asset_type   = Column(String(16), nullable=False, default="stock")
+    signal       = Column(String(8),  nullable=False, default="BUY")
+    size         = Column(Float,      nullable=False)   # % of account
+    entry_price  = Column(Float,      nullable=False)
+    stop_price   = Column(Float,      nullable=True)
+    tp1_price    = Column(Float,      nullable=True)
+    timeframe    = Column(String(8),  nullable=True)
+    opened_at    = Column(DateTime,   nullable=False, default=datetime.utcnow)
+
+class OptimisationResult(_Base):
+    """Best indicator parameters per asset class found by RQ grid search."""
+    __tablename__ = "optimisation_results"
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    asset_class  = Column(String(16), nullable=False)
+    timeframe    = Column(String(8),  nullable=False)
+    rsi_period   = Column(Integer,    nullable=False)
+    atr_mult     = Column(Float,      nullable=False)
+    ema_fast     = Column(Integer,    nullable=False)
+    ema_slow     = Column(Integer,    nullable=False)
+    sharpe       = Column(Float,      nullable=False)
+    win_rate     = Column(Float,      nullable=True)
+    computed_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
+
+# Create tables on startup (idempotent — skips existing tables)
+def _init_db():
+    if _db_engine:
+        try:
+            _Base.metadata.create_all(_db_engine)
+            print("[db] Tables created / verified")
+        except Exception as _e:
+            print(f"[db] create_all failed: {_e}")
+
+with app.app_context():
+    _init_db()
+
+# ─── HELPER: Redis OHLCV cache ────────────────────────────────
+_OHLCV_TTL = 300   # 5 minutes
+
+def _redis_get_ohlcv(key):
+    if not _redis_client:
+        return None
+    try:
+        raw = _redis_client.get(key)
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+def _redis_set_ohlcv(key, data):
+    if not _redis_client:
+        return
+    try:
+        _redis_client.setex(key, _OHLCV_TTL, json.dumps(data))
+    except Exception:
+        pass
+
+# ─── 5a: PORTFOLIO POSITION TRACKING ─────────────────────────
+
+@app.route("/api/positions", methods=["GET"])
+@login_required
+def positions_get():
+    if not _DBSession:
+        return jsonify({"error": "Database not configured"}), 503
+    db = _DBSession()
+    try:
+        rows = db.query(Position).order_by(Position.opened_at.desc()).all()
+        return jsonify([{
+            "id":          p.id,
+            "ticker":      p.ticker,
+            "asset_type":  p.asset_type,
+            "signal":      p.signal,
+            "size":        p.size,
+            "entry_price": p.entry_price,
+            "stop_price":  p.stop_price,
+            "tp1_price":   p.tp1_price,
+            "timeframe":   p.timeframe,
+            "opened_at":   p.opened_at.isoformat() if p.opened_at else None,
+        } for p in rows])
+    finally:
+        db.close()
+
+@app.route("/api/positions", methods=["POST"])
+@login_required
+def positions_add():
+    if not _DBSession:
+        return jsonify({"error": "Database not configured"}), 503
+    data = request.get_json(force=True)
+    required = ("ticker", "entry_price", "size")
+    if not all(data.get(k) for k in required):
+        return jsonify({"error": f"Missing required fields: {required}"}), 400
+    db = _DBSession()
+    try:
+        pos = Position(
+            ticker      = str(data["ticker"]).upper().strip(),
+            asset_type  = data.get("asset_type", "stock"),
+            signal      = data.get("signal", "BUY").upper(),
+            size        = float(data["size"]),
+            entry_price = float(data["entry_price"]),
+            stop_price  = float(data["stop_price"])  if data.get("stop_price")  else None,
+            tp1_price   = float(data["tp1_price"])   if data.get("tp1_price")   else None,
+            timeframe   = data.get("timeframe", "1d"),
+            opened_at   = datetime.utcnow(),
+        )
+        db.add(pos)
+        db.commit()
+        return jsonify({"id": pos.id, "status": "added"}), 201
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/positions/<int:pos_id>", methods=["DELETE"])
+@login_required
+def positions_delete(pos_id):
+    if not _DBSession:
+        return jsonify({"error": "Database not configured"}), 503
+    db = _DBSession()
+    try:
+        pos = db.query(Position).filter(Position.id == pos_id).first()
+        if not pos:
+            return jsonify({"error": "Position not found"}), 404
+        db.delete(pos)
+        db.commit()
+        return jsonify({"status": "deleted"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+# ─── 5b: PARAMETRIC VaR ──────────────────────────────────────
+
+@app.route("/api/var", methods=["POST"])
+@login_required
+def portfolio_var():
+    """
+    Parametric VaR for the user's open positions.
+    Body: { portfolio_value: float, confidence: float (0.95|0.99) }
+    Returns: { var_1d_usd, var_1d_pct, positions_used, method }
+    """
+    if not _DBSession:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data             = request.get_json(force=True) or {}
+    portfolio_value  = float(data.get("portfolio_value", 10000))
+    confidence       = float(data.get("confidence", 0.95))
+    z_score          = float(_scipy_norm.ppf(confidence))
+
+    # Check Redis cache
+    cache_key = f"var:{confidence}:{portfolio_value}"
+    cached    = _redis_get_ohlcv(cache_key)
+    if cached:
+        return jsonify(cached)
+
+    db   = _DBSession()
+    rows = []
+    try:
+        rows = db.query(Position).all()
+    finally:
+        db.close()
+
+    if not rows:
+        return jsonify({"error": "No open positions found. Add positions first."}), 400
+
+    # Fetch 252-day returns for each unique ticker
+    returns_map = {}
+    for pos in rows:
+        ticker = pos.ticker
+        if ticker in returns_map:
+            continue
+        try:
+            df = yf.download(ticker, period="1y", interval="1d", progress=False, auto_adjust=True)
+            if df.empty or len(df) < 30:
+                continue
+            closes = df["Close"].squeeze()
+            returns_map[ticker] = closes.pct_change().dropna()
+        except Exception:
+            pass
+
+    if not returns_map:
+        return jsonify({"error": "Could not fetch price history for any position"}), 502
+
+    # Build weighted portfolio returns
+    total_size  = sum(p.size for p in rows if p.ticker in returns_map) or 1.0
+    port_returns = None
+    for pos in rows:
+        if pos.ticker not in returns_map:
+            continue
+        weight = pos.size / total_size
+        ret    = returns_map[pos.ticker] * weight
+        if port_returns is None:
+            port_returns = ret
+        else:
+            port_returns = port_returns.add(ret, fill_value=0)
+
+    if port_returns is None or len(port_returns) < 10:
+        return jsonify({"error": "Insufficient return data to compute VaR"}), 400
+
+    port_std   = float(port_returns.std())
+    var_1d_pct = round(z_score * port_std * 100, 3)
+    var_1d_usd = round(portfolio_value * z_score * port_std, 2)
+
+    result = {
+        "var_1d_usd":      var_1d_usd,
+        "var_1d_pct":      var_1d_pct,
+        "confidence":      confidence,
+        "z_score":         round(z_score, 4),
+        "portfolio_std":   round(port_std * 100, 4),
+        "positions_used":  len([p for p in rows if p.ticker in returns_map]),
+        "portfolio_value": portfolio_value,
+        "method":          "parametric",
+        "interpretation":  f"With {int(confidence*100)}% confidence, max 1-day loss ≤ ${var_1d_usd:,.2f} ({var_1d_pct:.2f}%)",
+    }
+    _redis_set_ohlcv(cache_key, result)
+    return jsonify(result)
+
+# ─── 5c: STRESS TESTING ───────────────────────────────────────
+
+_STRESS_SHOCKS = {
+    "crypto":    -0.30,   # −30%
+    "stock":     -0.20,   # −20%
+    "forex":     -0.10,   # −10%
+    "index":     -0.15,   # −15%
+    "commodity": -0.20,   # −20%
+}
+
+@app.route("/api/stress", methods=["POST"])
+@login_required
+def stress_test():
+    """
+    Apply configurable % shock per asset class to all open positions.
+    Body: { portfolio_value: float, shocks: { crypto: -0.30, stock: -0.20, ... } }
+    Returns: { rows: [{ticker, asset_type, shock_pct, pnl_usd, new_price}], total_pnl_usd }
+    """
+    if not _DBSession:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data            = request.get_json(force=True) or {}
+    portfolio_value = float(data.get("portfolio_value", 10000))
+    custom_shocks   = data.get("shocks", {})
+    shocks          = {**_STRESS_SHOCKS, **custom_shocks}  # user overrides defaults
+
+    db   = _DBSession()
+    rows = []
+    try:
+        rows = db.query(Position).all()
+    finally:
+        db.close()
+
+    if not rows:
+        return jsonify({"error": "No open positions. Add positions first."}), 400
+
+    result_rows = []
+    total_pnl   = 0.0
+    for pos in rows:
+        shock     = shocks.get(pos.asset_type, -0.20)
+        alloc_usd = portfolio_value * (pos.size / 100.0)
+        pnl_usd   = round(alloc_usd * shock, 2)
+        new_price = round(pos.entry_price * (1 + shock), 4)
+        total_pnl += pnl_usd
+        result_rows.append({
+            "id":         pos.id,
+            "ticker":     pos.ticker,
+            "asset_type": pos.asset_type,
+            "signal":     pos.signal,
+            "entry_price": pos.entry_price,
+            "shock_pct":  round(shock * 100, 1),
+            "new_price":  new_price,
+            "alloc_usd":  round(alloc_usd, 2),
+            "pnl_usd":    pnl_usd,
+        })
+
+    return jsonify({
+        "rows":           result_rows,
+        "total_pnl_usd":  round(total_pnl, 2),
+        "total_pnl_pct":  round(total_pnl / portfolio_value * 100, 2) if portfolio_value else 0,
+        "portfolio_value": portfolio_value,
+        "shocks_applied": shocks,
+    })
+
+# ─── 5d: CROSS-ASSET CORRELATION DASHBOARD ───────────────────
+
+@app.route("/api/correlation", methods=["POST"])
+@login_required
+def correlation_matrix():
+    """
+    Compute correlation matrix for a list of tickers.
+    Body: { tickers: ["BTC-USD","AAPL","GC=F"], period: "6mo" }
+    Returns: { labels, matrix (2D list), min_date, max_date }
+    OHLCV cached in Redis for 5 min per ticker.
+    """
+    data    = request.get_json(force=True) or {}
+    tickers = data.get("tickers", [])
+    period  = data.get("period", "6mo")
+
+    if len(tickers) < 2:
+        return jsonify({"error": "Provide at least 2 tickers"}), 400
+    if len(tickers) > 15:
+        return jsonify({"error": "Maximum 15 tickers"}), 400
+
+    closes_map = {}
+    for ticker in tickers:
+        cache_key = f"corr:{ticker}:{period}"
+        cached    = _redis_get_ohlcv(cache_key)
+        if cached:
+            closes_map[ticker] = pd.Series(cached["closes"], index=pd.to_datetime(cached["index"]))
+            continue
+        try:
+            df = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=True)
+            if df.empty or len(df) < 10:
+                continue
+            closes = df["Close"].squeeze()
+            _redis_set_ohlcv(cache_key, {
+                "closes": closes.tolist(),
+                "index":  [str(i) for i in closes.index],
+            })
+            closes_map[ticker] = closes
+        except Exception:
+            pass
+
+    if len(closes_map) < 2:
+        return jsonify({"error": "Could not fetch data for enough tickers"}), 502
+
+    # Align on common dates, compute returns, then correlation
+    df_all  = pd.DataFrame(closes_map).dropna(how="all")
+    returns = df_all.pct_change().dropna(how="all")
+    corr    = returns.corr()
+
+    labels = list(corr.columns)
+    matrix = [[round(corr.loc[r, c], 4) for c in labels] for r in labels]
+
+    return jsonify({
+        "labels":   labels,
+        "matrix":   matrix,
+        "min_date": str(df_all.index.min().date()) if not df_all.empty else "",
+        "max_date": str(df_all.index.max().date()) if not df_all.empty else "",
+        "period":   period,
+    })
+
+# ─── 5e: OFFLINE PARAMETER OPTIMISATION ──────────────────────
+
+def _run_optimisation_job(asset_class, timeframe):
+    """
+    RQ worker job. Grid-searches RSI period + ATR mult + EMA pair.
+    Writes best result to optimisation_results table.
+    This function runs inside the RQ worker process, not the web process.
+    """
+    import yfinance as yf
+    import pandas as pd, numpy as np
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    import os, json
+    from datetime import datetime
+
+    BENCHMARK_TICKERS = {
+        "crypto":    "BTC-USD",
+        "stock":     "AAPL",
+        "forex":     "EURUSD=X",
+        "index":     "^GSPC",
+        "commodity": "GC=F",
+    }
+    ticker = BENCHMARK_TICKERS.get(asset_class, "AAPL")
+
+    try:
+        df = yf.download(ticker, period="2y", interval="1d", progress=False, auto_adjust=True)
+    except Exception as e:
+        return {"error": str(e)}
+
+    if df is None or len(df) < 60:
+        return {"error": "Insufficient data"}
+
+    closes = df["Close"].squeeze().values
+    highs  = df["High"].squeeze().values
+    lows   = df["Low"].squeeze().values
+
+    def _rma(arr, n):
+        alpha  = 1.0 / n
+        result = np.full(len(arr), np.nan)
+        valid  = [i for i, v in enumerate(arr) if not np.isnan(v)]
+        if len(valid) < n: return result
+        s = valid[n-1]
+        result[s] = np.nanmean(arr[valid[0]:valid[0]+n])
+        for i in range(s+1, len(arr)):
+            if not np.isnan(arr[i]):
+                result[i] = alpha * arr[i] + (1-alpha) * result[i-1]
+        return result
+
+    best = {"sharpe": -999}
+    rsi_range  = [10, 14, 21]
+    atr_range  = [2.0, 3.0, 4.0]
+    ema_pairs  = [(7,14), (9,21), (20,50)]
+
+    for rsi_p in rsi_range:
+        delta = np.diff(closes, prepend=closes[0])
+        gain  = _rma(np.maximum(delta, 0), rsi_p)
+        loss  = _rma(np.maximum(-delta, 0), rsi_p)
+        rsi   = 100 - 100 / (1 + gain / np.where(loss == 0, 1e-9, loss))
+
+        tr    = np.maximum(highs - lows,
+                np.maximum(np.abs(highs - np.roll(closes, 1)),
+                           np.abs(lows  - np.roll(closes, 1))))
+        tr[0] = highs[0] - lows[0]
+        atr14 = _rma(tr, 14)
+
+        for atr_m in atr_range:
+            for ef, es in ema_pairs:
+                alpha_f = 2.0 / (ef+1); alpha_s = 2.0 / (es+1)
+                ema_f   = np.full(len(closes), np.nan)
+                ema_s   = np.full(len(closes), np.nan)
+                ema_f[ef-1] = closes[ef-1]; ema_s[es-1] = closes[es-1]
+                for i in range(ef, len(closes)):
+                    ema_f[i] = alpha_f * closes[i] + (1-alpha_f) * ema_f[i-1]
+                for i in range(es, len(closes)):
+                    ema_s[i] = alpha_s * closes[i] + (1-alpha_s) * ema_s[i-1]
+
+                returns = []
+                in_trade = False; entry = 0.0; stop = 0.0
+                for i in range(es+1, len(closes)):
+                    if np.isnan(rsi[i]) or np.isnan(atr14[i]): continue
+                    if not in_trade:
+                        if rsi[i] < 50 and ema_f[i] > ema_s[i]:
+                            in_trade = True
+                            entry    = closes[i]
+                            stop     = entry - atr_m * atr14[i]
+                    else:
+                        if closes[i] < stop or ema_f[i] < ema_s[i]:
+                            r = (closes[i] - entry) / entry
+                            returns.append(r)
+                            in_trade = False
+
+                if len(returns) < 5: continue
+                arr    = np.array(returns)
+                sharpe = float(np.mean(arr) / (np.std(arr) + 1e-9) * np.sqrt(252))
+                wins   = float(np.mean(arr > 0))
+                if sharpe > best["sharpe"]:
+                    best = {"sharpe": sharpe, "win_rate": wins,
+                            "rsi_period": rsi_p, "atr_mult": atr_m,
+                            "ema_fast": ef, "ema_slow": es}
+
+    if best["sharpe"] == -999:
+        return {"error": "Grid search produced no valid results"}
+
+    # Write to PostgreSQL
+    db_url = os.environ.get("DATABASE_URL", "").replace("postgres://", "postgresql://", 1)
+    if db_url:
+        try:
+            engine = create_engine(db_url, pool_pre_ping=True)
+            Session = sessionmaker(bind=engine)
+            db = Session()
+            # Upsert: delete old result for this asset_class+timeframe, insert new
+            db.execute(
+                text("DELETE FROM optimisation_results WHERE asset_class=:ac AND timeframe=:tf"),
+                {"ac": asset_class, "tf": timeframe}
+            )
+            db.execute(
+                text("""INSERT INTO optimisation_results
+                        (asset_class, timeframe, rsi_period, atr_mult, ema_fast, ema_slow, sharpe, win_rate, computed_at)
+                        VALUES (:ac,:tf,:rp,:am,:ef,:es,:sh,:wr,:ts)"""),
+                {"ac": asset_class, "tf": timeframe,
+                 "rp": best["rsi_period"], "am": best["atr_mult"],
+                 "ef": best["ema_fast"],   "es": best["ema_slow"],
+                 "sh": best["sharpe"],     "wr": best["win_rate"],
+                 "ts": datetime.utcnow()}
+            )
+            db.commit()
+            db.close()
+        except Exception as e:
+            return {"error": f"DB write failed: {e}", "best": best}
+
+    return {"status": "ok", "asset_class": asset_class, "timeframe": timeframe, **best}
+
+
+@app.route("/api/optimise", methods=["POST"])
+@login_required
+def optimise_enqueue():
+    """
+    Enqueue a parameter optimisation job for a given asset class + timeframe.
+    Body: { asset_class: "stock", timeframe: "1d" }
+    Returns: { job_id, status: "enqueued" }
+    """
+    if not _rq_queue:
+        return jsonify({"error": "Redis / RQ not configured"}), 503
+
+    data        = request.get_json(force=True) or {}
+    asset_class = data.get("asset_class", "stock")
+    timeframe   = data.get("timeframe",   "1d")
+
+    valid_classes = list(ASSET_CONFIG.keys())
+    if asset_class not in valid_classes:
+        return jsonify({"error": f"asset_class must be one of {valid_classes}"}), 400
+
+    try:
+        job = _rq_queue.enqueue(
+            _run_optimisation_job,
+            asset_class,
+            timeframe,
+            job_timeout=300,
+            result_ttl=3600,
+        )
+        return jsonify({"job_id": job.id, "status": "enqueued",
+                        "asset_class": asset_class, "timeframe": timeframe})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/optimise/result", methods=["GET"])
+@login_required
+def optimise_result():
+    """
+    Poll job status or fetch stored result from DB.
+    Query params: job_id (optional), asset_class, timeframe
+    Returns: { status: "finished"|"running"|"not_found", result: {...} }
+    """
+    job_id      = request.args.get("job_id")
+    asset_class = request.args.get("asset_class", "stock")
+    timeframe   = request.args.get("timeframe",   "1d")
+
+    # If job_id provided, check RQ job status
+    if job_id and _rq_queue:
+        try:
+            from rq.job import Job
+            job = Job.fetch(job_id, connection=_rq_conn)
+            if job.is_finished:
+                return jsonify({"status": "finished", "result": job.result})
+            elif job.is_failed:
+                return jsonify({"status": "failed",   "error":  str(job.exc_info)})
+            else:
+                return jsonify({"status": "running"})
+        except Exception:
+            pass
+
+    # Fall back to reading latest stored result from DB
+    if _DBSession:
+        db = _DBSession()
+        try:
+            row = db.query(OptimisationResult).filter(
+                OptimisationResult.asset_class == asset_class,
+                OptimisationResult.timeframe   == timeframe
+            ).order_by(OptimisationResult.computed_at.desc()).first()
+            if row:
+                return jsonify({
+                    "status":      "finished",
+                    "result": {
+                        "asset_class": row.asset_class,
+                        "timeframe":   row.timeframe,
+                        "rsi_period":  row.rsi_period,
+                        "atr_mult":    row.atr_mult,
+                        "ema_fast":    row.ema_fast,
+                        "ema_slow":    row.ema_slow,
+                        "sharpe":      round(row.sharpe, 4),
+                        "win_rate":    round(row.win_rate, 4) if row.win_rate else None,
+                        "computed_at": row.computed_at.isoformat() if row.computed_at else None,
+                    }
+                })
+        finally:
+            db.close()
+
+    return jsonify({"status": "not_found",
+                    "message": "No result yet. Enqueue a job first via POST /api/optimise"})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
