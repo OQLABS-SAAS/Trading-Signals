@@ -1950,34 +1950,45 @@ body::before{
             <!-- Risk vs Reward summary bar -->
             <div id="calcRRBar" style="display:none;margin:10px 0 12px;border-radius:3px;overflow:hidden;border:1px solid var(--border);">
               <div style="background:var(--bg3);padding:6px 10px;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--muted2);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">
-                Your Risk vs Your Reward
+                Your Risk vs Your Reward — tap any box for details
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:var(--bg3);">
-                <!-- Worst case -->
-                <div style="padding:10px 10px;border-right:1px solid var(--border);background:rgba(255,68,89,.06);">
+
+                <!-- Worst case box -->
+                <div id="rrBoxSL" onclick="rrToggle('SL')" style="padding:10px 10px;border-right:1px solid var(--border);background:rgba(255,68,89,.06);cursor:pointer;transition:background .15s;">
                   <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;">Worst Case</div>
                   <div id="rrRisk" style="font-family:var(--mono);font-size:18px;font-weight:800;color:#FF4459;">—</div>
                   <div id="rrRiskLabel" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">if price hits —</div>
+                  <div style="font-family:var(--mono);font-size:8px;color:rgba(255,68,89,.5);margin-top:5px;letter-spacing:.5px;">▼ what happens</div>
                 </div>
-                <!-- TP1 -->
-                <div style="padding:10px 10px;border-right:1px solid var(--border);">
+
+                <!-- TP1 box -->
+                <div id="rrBoxTP1" onclick="rrToggle('TP1')" style="padding:10px 10px;border-right:1px solid var(--border);cursor:pointer;transition:background .15s;">
                   <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;">TP 1</div>
                   <div id="rrTP1" style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--green);">—</div>
                   <div id="rrTP1RR" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">—</div>
+                  <div style="font-family:var(--mono);font-size:8px;color:rgba(0,201,141,.4);margin-top:5px;letter-spacing:.5px;">▼ how to trade it</div>
                 </div>
-                <!-- TP2 -->
-                <div style="padding:10px 10px;border-right:1px solid var(--border);">
+
+                <!-- TP2 box -->
+                <div id="rrBoxTP2" onclick="rrToggle('TP2')" style="padding:10px 10px;border-right:1px solid var(--border);cursor:pointer;transition:background .15s;">
                   <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;">TP 2</div>
                   <div id="rrTP2" style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--green);">—</div>
                   <div id="rrTP2RR" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">—</div>
+                  <div style="font-family:var(--mono);font-size:8px;color:rgba(0,201,141,.4);margin-top:5px;letter-spacing:.5px;">▼ how to trade it</div>
                 </div>
-                <!-- TP3 (best case) -->
-                <div style="padding:10px 10px;background:rgba(0,201,141,.06);">
+
+                <!-- TP3 best case box -->
+                <div id="rrBoxTP3" onclick="rrToggle('TP3')" style="padding:10px 10px;background:rgba(0,201,141,.06);cursor:pointer;transition:background .15s;">
                   <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;">Best Case</div>
                   <div id="rrTP3" style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--green);">—</div>
                   <div id="rrTP3RR" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">—</div>
+                  <div style="font-family:var(--mono);font-size:8px;color:rgba(0,201,141,.4);margin-top:5px;letter-spacing:.5px;">▼ how to trade it</div>
                 </div>
               </div>
+
+              <!-- Expandable detail panel (shared, shown below the grid) -->
+              <div id="rrDetail" style="display:none;border-top:1px solid var(--border);background:var(--bg2);padding:14px 16px;font-size:12px;line-height:1.7;"></div>
             </div>
 
             <!-- TP rows -->
@@ -10385,33 +10396,113 @@ function recalc() {
   (function() {
     var bar = document.getElementById('calcRRBar');
     if (!bar) return;
-    var tpEls = [
-      { profit: document.getElementById('rrTP1'), rr: document.getElementById('rrTP1RR') },
-      { profit: document.getElementById('rrTP2'), rr: document.getElementById('rrTP2RR') },
-      { profit: document.getElementById('rrTP3'), rr: document.getElementById('rrTP3RR') },
-    ];
     var tpValues = [tp1, tp2, tp3];
-    var anyTP = tpValues.some(function(tp) { return tp && tp > 0; });
+    var anyTP = tpValues.some(function(v) { return v && v > 0; });
     if (!anyTP || !slLoss) { bar.style.display = 'none'; return; }
     bar.style.display = 'block';
-    // Risk cell
-    var riskEl = document.getElementById('rrRisk');
-    if (riskEl) riskEl.textContent = '−$' + slLoss.toFixed(0);
-    var riskLbl = document.getElementById('rrRiskLabel');
-    if (riskLbl) {
-      var slFmt = sl >= 100
-        ? '$' + sl.toLocaleString(undefined, {maximumFractionDigits: 2})
-        : sl.toFixed(sl < 1 ? 5 : 4);
-      riskLbl.textContent = 'if price hits ' + slFmt;
+
+    function fmtPrice(v) {
+      if (!v) return '—';
+      return v >= 100
+        ? '$' + v.toLocaleString(undefined, {maximumFractionDigits: 2})
+        : v.toFixed(v < 1 ? 5 : 4);
     }
+
+    // Worst case cell
+    var slFmt = fmtPrice(sl);
+    var acctAfterLoss = acct ? '$' + (acct - slLoss).toLocaleString(undefined,{maximumFractionDigits:0}) : null;
+    document.getElementById('rrRisk').textContent = '−$' + slLoss.toFixed(0);
+    document.getElementById('rrRiskLabel').textContent = 'if price hits ' + slFmt;
+
     // TP cells
+    var tpIds  = ['TP1','TP2','TP3'];
+    var tpCalc = [];
     tpValues.forEach(function(tp, i) {
-      if (!tp || tp <= 0) { tpEls[i].profit.textContent = '—'; tpEls[i].rr.textContent = '—'; return; }
+      var id = tpIds[i];
+      if (!tp || tp <= 0) {
+        document.getElementById('rrTP' + (i+1)).textContent  = '—';
+        document.getElementById('rrTP' + (i+1) + 'RR').textContent = '—';
+        tpCalc.push(null);
+        return;
+      }
       var t = calcTP(tp);
-      tpEls[i].profit.textContent = '+$' + t.netProfit.toFixed(0);
-      tpEls[i].rr.textContent = 'R:R 1 : ' + t.rr;
+      tpCalc.push(t);
+      document.getElementById('rrTP' + (i+1)).textContent         = '+$' + t.netProfit.toFixed(0);
+      document.getElementById('rrTP' + (i+1) + 'RR').textContent  = 'R:R 1 : ' + t.rr;
     });
+
+    // Build detail content for each panel
+    var isBuy = (currentData && currentData.signal === 'BUY') || (sl < entry);
+
+    function slDetail() {
+      var remaining = acct ? ' Your account would be <b style="color:var(--amber);">'+acctAfterLoss+'</b> remaining.' : '';
+      var action = isBuy
+        ? 'This means the market moved <b>against your trade</b> — it fell instead of rising.'
+        : 'This means the market moved <b>against your trade</b> — it rose instead of falling.';
+      return '<div style="color:#FF4459;font-weight:700;font-size:13px;margin-bottom:8px;">⛔ Worst Case — Stop Loss Triggered</div>'
+        + '<p style="color:var(--text2);">'+ action +' Your stop loss at <b style="color:var(--red);">'+ slFmt +'</b> automatically exits the trade — limiting your loss to <b style="color:var(--red);">−$'+ slLoss.toFixed(0) +'</b>.'+(remaining ? remaining : '')+'</p>'
+        + '<div style="border-left:2px solid #FF4459;padding-left:10px;margin:10px 0;color:var(--muted2);">'
+        + '<b style="color:var(--white);">What to do:</b> Accept the loss and move on. Do <b>not</b> move your stop further away — that turns a small controlled loss into a catastrophic one. The stop exists to protect you.'
+        + '</div>'
+        + '<div style="color:var(--muted2);font-size:11px;">The stop loss is not a failure — it\'s the system working correctly. Even the best traders lose 40% of their trades. What matters is that your wins are bigger than your losses.</div>';
+    }
+
+    function tpDetail(idx) {
+      var t = tpCalc[idx];
+      if (!t) return '<div style="color:var(--muted);">No target set.</div>';
+      var tp  = tpValues[idx];
+      var labels = ['First Target','Extended Target','Maximum Target'];
+      var actions = [
+        '<b>Take 50% of your position at TP1.</b> Then immediately move your stop loss up to your entry price — this means even if the trade reverses, you break even and <b>cannot lose money</b> on this trade anymore.',
+        '<b>Take another 30% of your position at TP2.</b> Let the remaining 20% run toward the final target. Use a trailing stop to lock in more profit as price climbs.',
+        '<b>This is the full target — take the rest of your position here.</b> TP3 is the maximum the signal engine projects. Celebrate — this is a great trade result.'
+      ];
+      var acctGainStr = t.acctNet + '% gain on your account';
+      var invGainStr  = '+' + t.pct + '% on your $' + (capital||0).toLocaleString() + ' investment';
+      return '<div style="color:var(--green);font-weight:700;font-size:13px;margin-bottom:8px;">🎯 TP'+(idx+1)+' — '+labels[idx]+'</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">'
+        + '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--muted2);margin-bottom:3px;font-family:var(--mono);">TARGET PRICE</div><div style="font-family:var(--mono);font-weight:700;color:var(--white);">'+ fmtPrice(tp) +'</div></div>'
+        + '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--muted2);margin-bottom:3px;font-family:var(--mono);">YOUR PROFIT</div><div style="font-family:var(--mono);font-weight:700;color:var(--green);">+$'+ t.netProfit.toFixed(0) +' net</div></div>'
+        + '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--muted2);margin-bottom:3px;font-family:var(--mono);">GAIN %</div><div style="font-family:var(--mono);font-weight:700;color:var(--green);">+'+ t.pct +'%</div></div>'
+        + '</div>'
+        + '<div style="border-left:2px solid var(--green);padding-left:10px;margin:10px 0;color:var(--muted2);">'
+        + '<b style="color:var(--white);">What to do when price reaches here:</b><br>'+ actions[idx]
+        + '</div>'
+        + '<div style="color:var(--muted2);font-size:11px;">'+ invGainStr +' · '+ acctGainStr +'</div>';
+    }
+
+    // Store detail builders on the bar element for rrToggle()
+    bar._rrDetails = {
+      SL:  slDetail,
+      TP1: function() { return tpDetail(0); },
+      TP2: function() { return tpDetail(1); },
+      TP3: function() { return tpDetail(2); }
+    };
   })();
+}
+
+function rrToggle(key) {
+  var bar    = document.getElementById('calcRRBar');
+  var detail = document.getElementById('rrDetail');
+  if (!bar || !detail || !bar._rrDetails) return;
+  var boxes  = { SL:'rrBoxSL', TP1:'rrBoxTP1', TP2:'rrBoxTP2', TP3:'rrBoxTP3' };
+  var isOpen = detail.style.display !== 'none' && bar._rrActive === key;
+  // Reset all box highlights
+  Object.keys(boxes).forEach(function(k) {
+    var el = document.getElementById(boxes[k]);
+    if (el) el.style.outline = '';
+  });
+  if (isOpen) {
+    detail.style.display = 'none';
+    bar._rrActive = null;
+    return;
+  }
+  // Highlight active box
+  var activeBox = document.getElementById(boxes[key]);
+  if (activeBox) activeBox.style.outline = '1px solid rgba(245,166,35,.4)';
+  detail.innerHTML = bar._rrDetails[key]();
+  detail.style.display = 'block';
+  bar._rrActive = key;
 }
 
 // ─── STRATEGY ENGINE ───
