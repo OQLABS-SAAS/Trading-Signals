@@ -1895,7 +1895,7 @@ body::before{
       </div>
 
       <!-- POSITION SIZE CALCULATOR -->
-      <div class="calc-section">
+      <div class="calc-section" id="calcAnchor">
         <div class="calc-toggle" onclick="toggleCalc()">
           <div class="section-hdr" style="padding:0;margin:0;">Position Size Calculator</div>
           <span class="calc-toggle-icon" id="calcIcon">▼ Expand</span>
@@ -1956,6 +1956,7 @@ body::before{
             <div style="font-size:10px;color:var(--muted2);margin-top:2px;padding-bottom:4px;">TP profits shown net of fees · Distances in pips/pts</div>
 
             <!-- Risk vs Reward summary bar -->
+            <div id="rrAnchor"></div>
             <div id="calcRRBar" style="display:none;margin:10px 0 12px;border-radius:3px;overflow:hidden;border:1px solid var(--border);">
               <div style="background:var(--bg3);padding:6px 10px;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--muted2);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">
                 Your Risk vs Your Reward — tap any box for details
@@ -8786,29 +8787,31 @@ function renderNextSteps(d) {
   } else {
     // BUY or SELL — full 5-step journey
     html += step('①', '⚖️', 'Understand your risk before anything else',
-      'Scroll down to the <b style="color:var(--white);">Risk vs Reward</b> bar. It shows exactly what you can lose and what you can gain on this trade. Read it before touching the calculator.',
-      null, null, 'You must know your downside before your upside.');
+      'See exactly what you can lose vs what you can gain on this trade — before touching the calculator.',
+      'View Risk vs Reward', 'nsScrollTo("rrAnchor")',
+      'You must know your downside before your upside.');
 
     html += step('②', '🧮', 'Set your position size in the calculator',
-      'Enter your <b style="color:var(--white);">Account ($)</b> and <b style="color:var(--white);">My Trade ($)</b> below. The calculator will show your exact loss if the stop hits and your exact profit at each target. All numbers match this signal.',
-      null, null, 'Entry, SL, TP1/2/3 are already pre-filled from this signal.');
+      'Enter your <b style="color:var(--white);">Account ($)</b> and <b style="color:var(--white);">My Trade ($)</b>. Entry, SL, TP1/2/3 are already pre-filled from this signal — you only need to add your amounts.',
+      'Go to Calculator', 'nsScrollTo("calcAnchor",true)',
+      'The calculator shows your exact loss if the stop hits and exact profit at each target.');
 
-    html += step('③', '📈', 'Verify the track record (optional but recommended)',
-      'Before committing real money, see how this exact strategy performed historically on ' + ticker + '. Click Backtest to see win rate, average profit and number of past trades.',
+    html += step('③', '📈', 'Verify the track record (optional — do once per ticker)',
+      'Before committing real money, see how this strategy performed historically on ' + ticker + '. Win rate, average profit, number of past trades.',
       'Run Backtest', 'switchMainTab(\'backtest\',document.querySelector(\'.nav-tab:nth-child(3)\')); setTimeout(function(){var b=document.getElementById(\'runBacktestBtn\');if(b)b.click();},400);',
-      'Backtest uses the ATR Research Script — for historical research only, not for your live trade.');
+      'Uses the ATR Research Script — historical research only. Do this once per ticker, not every trade.');
 
     html += step('④', '📋', 'Copy your exact levels to TradingView',
-      'This generates a TradingView script with your <b style="color:var(--white);">exact</b> entry <b style="color:var(--amber);">$' + (d.entry||'—') + '</b>, '
-      + 'stop loss <b style="color:#FF4459;">$' + (d.stop_loss||'—') + '</b>, '
-      + 'and TP1/2/3 — the same numbers in your calculator. Paste into TradingView → Pine Editor → Add to chart.',
-      'Copy to TradingView', 'copyPineScript()',
-      'These are EXACT levels — not ATR approximations. What you see on TradingView will match your calculator exactly.');
+      'Generates a TradingView script with your <b style="color:var(--amber);">entry $' + (d.entry||'—') + '</b>, '
+      + '<b style="color:#FF4459;">stop loss $' + (d.stop_loss||'—') + '</b>, '
+      + 'and TP1/2/3 — the same numbers as your calculator. Paste into TradingView → Pine Editor → Add to chart.',
+      'Copy to TradingView', 'copyPineScript(); setTimeout(function(){nsScrollTo("pineCodeWrap");},300)',
+      'EXACT levels — not ATR approximations. TradingView will show the same prices as your calculator.');
 
     html += step('⑤', '🔔', 'Set alerts so TradingView notifies you',
-      'After pasting the script, open TradingView Alerts (bell icon, top right). Your script has 4 alerts ready: SL hit, TP1 hit, TP2 hit, TP3 hit. Set them — then you can close TradingView and get a phone notification when any level is reached.',
+      'After pasting the script, open TradingView Alerts (bell icon, top right). Your script includes 4 ready-made alerts: SL hit, TP1, TP2, TP3. Set them and walk away — you\'ll get a phone notification when any level is reached.',
       'Set DotVerse Alert', 'toggleWatch()',
-      'DotVerse Alert watches the price on our server. TradingView Alerts watch on TradingView. Set both for maximum coverage.');
+      'DotVerse Alert watches on our server. TradingView Alerts watch on TradingView. Set both for maximum coverage.');
   }
 
   body.innerHTML = html;
@@ -10665,6 +10668,22 @@ function rrToggle(key) {
   detail.innerHTML = bar._rrDetails[key]();
   detail.style.display = 'block';
   bar._rrActive = key;
+}
+
+function nsScrollTo(id, expandCalc) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (expandCalc) {
+    // Give scrollIntoView a moment then expand the calculator if it's collapsed
+    setTimeout(function() {
+      var body = document.getElementById('calcBody');
+      if (body && (body.style.display === 'none' || body.style.display === '')) {
+        var tog = document.getElementById('calcToggleBtn');
+        if (tog) tog.click();
+      }
+    }, 400);
+  }
 }
 
 // ─── STRATEGY ENGINE ───
