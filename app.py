@@ -4112,14 +4112,42 @@ _Base       = declarative_base()
 
 if _DATABASE_URL:
     try:
+        import re as _re
         # Railway Postgres URLs start with postgres:// — SQLAlchemy needs postgresql://
-        _db_url    = _DATABASE_URL.replace("postgres://", "postgresql://", 1)
-        # Railway metro proxy handles TLS at TCP level — disable PostgreSQL-level SSL
-        if "sslmode" not in _db_url:
-            _db_url += ("&" if "?" in _db_url else "?") + "sslmode=disable"
-        _db_engine = create_engine(_db_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
-        _DBSession = sessionmaker(bind=_db_engine)
-        print("[db] SQLAlchemy engine created")
+        _db_url = _DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        # Strip any sslmode from the URL entirely — we set it via connect_args to avoid
+        # URL-vs-param conflicts that cause "received I" errors on Railway metro proxy
+        _db_url = _re.sub(r'[?&]sslmode=[^&]*', '', _db_url).rstrip('?').rstrip('&')
+        # Try sslmode=disable first (metro proxy handles TLS at TCP level),
+        # then fall back to require (some Railway setups need PostgreSQL-level SSL)
+        _ssl_modes = ["disable", "require"]
+        _db_engine = None
+        for _ssl_mode in _ssl_modes:
+            try:
+                _candidate = create_engine(
+                    _db_url,
+                    pool_pre_ping=False,
+                    pool_size=1,
+                    max_overflow=0,
+                    connect_args={"sslmode": _ssl_mode, "connect_timeout": 8}
+                )
+                with _candidate.connect() as _c:
+                    _c.execute(text("SELECT 1"))
+                # Success — build the real pool with this sslmode
+                _db_engine = create_engine(
+                    _db_url,
+                    pool_pre_ping=True,
+                    pool_size=5,
+                    max_overflow=10,
+                    connect_args={"sslmode": _ssl_mode, "connect_timeout": 10}
+                )
+                _DBSession = sessionmaker(bind=_db_engine)
+                print(f"[db] Connected with sslmode={_ssl_mode}")
+                break
+            except Exception as _ssl_err:
+                print(f"[db] sslmode={_ssl_mode} failed: {_ssl_err}")
+        if _db_engine is None:
+            print("[db] All SSL modes failed — database unavailable")
     except Exception as _e:
         print(f"[db] Engine creation failed: {_e}")
 
