@@ -10671,19 +10671,22 @@ function rrToggle(key) {
 }
 
 function nsScrollTo(id, expandCalc) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  if (expandCalc) {
-    // Give scrollIntoView a moment then expand the calculator if it's collapsed
-    setTimeout(function() {
-      var body = document.getElementById('calcBody');
-      if (body && (body.style.display === 'none' || body.style.display === '')) {
-        var tog = document.getElementById('calcToggleBtn');
-        if (tog) tog.click();
-      }
-    }, 400);
+  // Always expand the calculator first if the target lives inside it
+  var calcBody = document.getElementById('calcBody');
+  var needsExpand = expandCalc;
+  if (!needsExpand && calcBody) {
+    // Check if the target is a descendant of calcBody
+    var target = document.getElementById(id);
+    if (target && calcBody.contains(target)) needsExpand = true;
   }
+  if (needsExpand && calcBody && (calcBody.style.display === 'none' || calcBody.style.display === '')) {
+    toggleCalc(); // expand the panel
+  }
+  // Scroll after a short delay to let the DOM reflow
+  setTimeout(function() {
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, needsExpand ? 350 : 0);
 }
 
 // ─── STRATEGY ENGINE ───
