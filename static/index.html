@@ -1530,7 +1530,6 @@ body::before{
           <div class="win-badge" id="winRateBadge"><div class="wb-val" id="winRateVal">—</div><div class="wb-lbl">Win Rate</div><div id="winRateSample" style="font-size:9px;color:var(--muted2);text-align:center;margin-top:1px;"></div></div>
           <div class="sig-btns">
             <button class="btn-primary" onclick="switchMainTab('simulation',document.querySelector('.nav-tab:nth-child(5)'));if(currentData)runSimulation();">Simulate Trade</button>
-            <button class="btn-ghost" onclick="togglePineCode()">Pine Script</button>
             <button class="btn-ghost" id="alertBtn" onclick="toggleWatch()" style="border-color:var(--amber);color:var(--amber);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Alert Me</button>
           </div>
         </div>
@@ -1541,6 +1540,15 @@ body::before{
       <div id="stratLensPanel" style="display:none;margin:0 0 4px;background:rgba(245,158,11,.06);border-left:3px solid var(--amber);border-radius:0 4px 4px 0;padding:14px 18px;">
         <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--amber);letter-spacing:.08em;margin-bottom:8px;" id="stratLensTitle">STRATEGY LENS</div>
         <div id="stratLensBody" style="font-size:12px;color:var(--text);line-height:1.7;"></div>
+      </div>
+
+      <!-- ═══ WHAT TO DO NEXT — LINEAR JOURNEY PANEL ═══ -->
+      <div id="nextStepsPanel" style="display:none;margin:0 20px 12px;border-radius:3px;overflow:hidden;border:1px solid var(--border);">
+        <div style="background:var(--bg3);padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
+          <span style="font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--amber);font-weight:700;text-transform:uppercase;">What To Do Next</span>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--muted2);">— follow these steps in order</span>
+        </div>
+        <div id="nextStepsBody" style="display:flex;flex-direction:column;"></div>
       </div>
 
       <!-- PINE SCRIPT CODE VIEWER -->
@@ -2702,7 +2710,10 @@ body::before{
     <!-- Pine Script (collapsible) -->
     <div class="pine-section" id="btPineSection">
       <div class="pine-head" onclick="toggleBtPine()" style="cursor:pointer;">
-        <span class="pine-title">Pine Script v5</span>
+        <div>
+          <span class="pine-title">Research Script</span>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-left:6px;letter-spacing:.5px;">ATR-based · for backtesting only · not for live trades</span>
+        </div>
         <span id="btPineToggleIcon" style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-left:6px;">▼ Show</span>
         <div class="pine-tab-btns" id="btPineTabBtns" style="display:none;" onclick="event.stopPropagation();">
           <button class="ptb active" onclick="switchBtPineTab('strategy',this)">Strategy</button>
@@ -8727,6 +8738,81 @@ function renderResultsV2(d) {
   try { renderChart(d); } catch(e) { console.warn('renderChart:', e); }
 
   console.log('[dotverse] renderResultsV2 complete for', d.ticker);
+
+  // Render the guided "What To Do Next" journey panel
+  try { renderNextSteps(d); } catch(e) { console.warn('renderNextSteps:', e); }
+}
+
+/* ════════════════════════════════════════════
+   WHAT TO DO NEXT — LINEAR JOURNEY PANEL
+════════════════════════════════════════════ */
+function renderNextSteps(d) {
+  var panel = document.getElementById('nextStepsPanel');
+  var body  = document.getElementById('nextStepsBody');
+  if (!panel || !body) return;
+
+  var sig     = (d.signal || 'HOLD').toUpperCase();
+  var isTrade = (sig === 'BUY' || sig === 'SELL');
+  var ticker  = d.ticker || '';
+  var tf      = (d.timeframe || '').toUpperCase();
+  var sigCol  = sig === 'BUY' ? '#00c98d' : sig === 'SELL' ? '#FF4459' : 'var(--muted2)';
+
+  function step(num, icon, title, body, cta, ctaFn, note) {
+    return '<div style="display:flex;gap:0;border-bottom:1px solid var(--border);">'
+      + '<div style="width:36px;min-width:36px;display:flex;align-items:flex-start;justify-content:center;padding:14px 0;border-right:1px solid var(--border);background:var(--bg3);">'
+      + '<span style="font-family:var(--mono);font-size:11px;font-weight:800;color:var(--amber);">' + num + '</span></div>'
+      + '<div style="padding:12px 14px;flex:1;">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">'
+      + '<span style="font-size:14px;">' + icon + '</span>'
+      + '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--white);">' + title + '</span>'
+      + '</div>'
+      + '<div style="font-size:12px;color:var(--muted2);line-height:1.6;margin-bottom:' + (cta ? '8px' : '0') + ';">' + body + '</div>'
+      + (cta ? '<button onclick="' + ctaFn + '" style="padding:5px 14px;font-family:var(--mono);font-size:10px;font-weight:700;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;cursor:pointer;letter-spacing:.5px;">' + cta + '</button>' : '')
+      + (note ? '<div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:.3px;">' + note + '</div>' : '')
+      + '</div></div>';
+  }
+
+  var html = '';
+
+  if (!isTrade) {
+    // HOLD signal — simplified message
+    html += step('①', '⏸', 'Signal is HOLD — no trade right now',
+      'DotVerse\'s engine sees conflicting signals on ' + ticker + ' ' + tf + '. Not enough indicators agree to commit capital. '
+      + 'The safest move is to wait for the next candle close and re-analyse.',
+      'Re-Analyse', 'runAnalyze()', null);
+    html += step('②', '📊', 'Check a different timeframe',
+      'A HOLD on 4H can still be a BUY on 1D. Try switching the timeframe chip above to 1D or 1W to see if a higher timeframe gives a cleaner signal.',
+      null, null, null);
+  } else {
+    // BUY or SELL — full 5-step journey
+    html += step('①', '⚖️', 'Understand your risk before anything else',
+      'Scroll down to the <b style="color:var(--white);">Risk vs Reward</b> bar. It shows exactly what you can lose and what you can gain on this trade. Read it before touching the calculator.',
+      null, null, 'You must know your downside before your upside.');
+
+    html += step('②', '🧮', 'Set your position size in the calculator',
+      'Enter your <b style="color:var(--white);">Account ($)</b> and <b style="color:var(--white);">My Trade ($)</b> below. The calculator will show your exact loss if the stop hits and your exact profit at each target. All numbers match this signal.',
+      null, null, 'Entry, SL, TP1/2/3 are already pre-filled from this signal.');
+
+    html += step('③', '📈', 'Verify the track record (optional but recommended)',
+      'Before committing real money, see how this exact strategy performed historically on ' + ticker + '. Click Backtest to see win rate, average profit and number of past trades.',
+      'Run Backtest', 'switchMainTab(\'backtest\',document.querySelector(\'.nav-tab:nth-child(3)\')); setTimeout(function(){var b=document.getElementById(\'runBacktestBtn\');if(b)b.click();},400);',
+      'Backtest uses the ATR Research Script — for historical research only, not for your live trade.');
+
+    html += step('④', '📋', 'Copy your exact levels to TradingView',
+      'This generates a TradingView script with your <b style="color:var(--white);">exact</b> entry <b style="color:var(--amber);">$' + (d.entry||'—') + '</b>, '
+      + 'stop loss <b style="color:#FF4459;">$' + (d.stop_loss||'—') + '</b>, '
+      + 'and TP1/2/3 — the same numbers in your calculator. Paste into TradingView → Pine Editor → Add to chart.',
+      'Copy to TradingView', 'copyPineScript()',
+      'These are EXACT levels — not ATR approximations. What you see on TradingView will match your calculator exactly.');
+
+    html += step('⑤', '🔔', 'Set alerts so TradingView notifies you',
+      'After pasting the script, open TradingView Alerts (bell icon, top right). Your script has 4 alerts ready: SL hit, TP1 hit, TP2 hit, TP3 hit. Set them — then you can close TradingView and get a phone notification when any level is reached.',
+      'Set DotVerse Alert', 'toggleWatch()',
+      'DotVerse Alert watches the price on our server. TradingView Alerts watch on TradingView. Set both for maximum coverage.');
+  }
+
+  body.innerHTML = html;
+  panel.style.display = 'block';
 }
 
 
