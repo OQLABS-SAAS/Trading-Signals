@@ -1531,6 +1531,12 @@ body::before{
       </div>
       </div><!-- /sigHeroWrap -->
 
+      <!-- STRATEGY LENS PANEL — shown only when a strategy is selected -->
+      <div id="stratLensPanel" style="display:none;margin:0 0 4px;background:rgba(245,158,11,.06);border-left:3px solid var(--amber);border-radius:0 4px 4px 0;padding:14px 18px;">
+        <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--amber);letter-spacing:.08em;margin-bottom:8px;" id="stratLensTitle">STRATEGY LENS</div>
+        <div id="stratLensBody" style="font-size:12px;color:var(--text);line-height:1.7;"></div>
+      </div>
+
       <!-- PINE SCRIPT CODE VIEWER -->
       <div id="pineCodeWrap" style="display:none;margin:0 20px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);">
@@ -1583,6 +1589,18 @@ body::before{
         <!-- Hidden: keep for JS compat -->
         <div id="instGrid" style="display:none;"></div>
         <div id="instChips" style="display:none;"></div>
+
+        <!-- Row 4: Strategy lens selector -->
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 0 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.8px;white-space:nowrap;">STRATEGY</span>
+          <button id="stratBtn_none" class="strat-lens-btn active" onclick="setStratLens('none',this)" style="padding:4px 11px;font-size:10px;font-family:var(--mono);font-weight:600;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;cursor:pointer;">All Signals</button>
+          <button id="stratBtn_orderblock" class="strat-lens-btn" onclick="setStratLens('orderblock',this)" style="padding:4px 11px;font-size:10px;font-family:var(--mono);font-weight:600;background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;cursor:pointer;">Order Block</button>
+          <button id="stratBtn_supplydemand" class="strat-lens-btn" onclick="setStratLens('supplydemand',this)" style="padding:4px 11px;font-size:10px;font-family:var(--mono);font-weight:600;background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;cursor:pointer;">Supply &amp; Demand</button>
+          <button id="stratBtn_retracement" class="strat-lens-btn" onclick="setStratLens('retracement',this)" style="padding:4px 11px;font-size:10px;font-family:var(--mono);font-weight:600;background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;cursor:pointer;">Retracement</button>
+          <button id="stratBtn_pullback" class="strat-lens-btn" onclick="setStratLens('pullback',this)" style="padding:4px 11px;font-size:10px;font-family:var(--mono);font-weight:600;background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;cursor:pointer;">Pullback</button>
+          <button id="stratBtn_breakout" class="strat-lens-btn" onclick="setStratLens('breakout',this)" style="padding:4px 11px;font-size:10px;font-family:var(--mono);font-weight:600;background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;cursor:pointer;">Breakout</button>
+          <button id="stratBtn_liquidity" class="strat-lens-btn" onclick="setStratLens('liquidity',this)" style="padding:4px 11px;font-size:10px;font-family:var(--mono);font-weight:600;background:var(--bg2);color:var(--muted2);border:1px solid var(--border);border-radius:3px;cursor:pointer;">Liquidity Base</button>
+        </div>
       </div>
 
       <!-- SIGNAL RESULTS — default visible, populated on analyze -->
@@ -8202,6 +8220,9 @@ function renderResultsV2(d) {
     sigSub.textContent = confWord + ' ' + sigWord + ' signal';
   }
 
+  // Strategy lens (fires if a lens is selected)
+  try { renderStratLens(d); } catch(e) { console.warn('renderStratLens:', e); }
+
   // Plain English explanation
   var plainEl = _origGetById('sigPlainText');
   if (plainEl) {
@@ -11546,6 +11567,126 @@ function pfRunFullCheck() {
     }
     pfUpdateHealth();
   }).catch(function(){pfUpdateHealth();});
+}
+
+// ── Strategy Lens ─────────────────────────────────────────────
+var _dvStratLens = 'none';
+
+function setStratLens(key, btn) {
+  _dvStratLens = key;
+  // Update button styles
+  document.querySelectorAll('.strat-lens-btn').forEach(function(b) {
+    b.style.background    = 'var(--bg2)';
+    b.style.color         = 'var(--muted2)';
+    b.style.border        = '1px solid var(--border)';
+  });
+  btn.style.background = 'var(--amber)';
+  btn.style.color      = '#0C0A08';
+  btn.style.border     = 'none';
+  // If we already have analysis data, re-render the lens panel
+  if (window.currentData) renderStratLens(window.currentData);
+}
+
+function renderStratLens(d) {
+  var panel = document.getElementById('stratLensPanel');
+  var title = document.getElementById('stratLensTitle');
+  var body  = document.getElementById('stratLensBody');
+  if (!panel || !title || !body) return;
+  if (_dvStratLens === 'none') { panel.style.display = 'none'; return; }
+
+  var sig    = d.signal || 'HOLD';
+  var ticker = d.ticker || 'this asset';
+  var entry  = d.entry  ? parseFloat(d.entry).toLocaleString(undefined,{maximumFractionDigits:4}) : '—';
+  var sl     = d.stop_loss ? parseFloat(d.stop_loss).toLocaleString(undefined,{maximumFractionDigits:4}) : '—';
+  var tp1    = d.tp1   ? parseFloat(d.tp1).toLocaleString(undefined,{maximumFractionDigits:4}) : '—';
+  var rsi    = d.rsi   ? d.rsi.toFixed(1) : '—';
+  var ema_cross = d.ema_cross || '';
+  var vol_ratio = d.vol_ratio || 1;
+  var isBull = sig === 'BUY';
+  var isBear = sig === 'SELL';
+
+  var lensMap = {
+    orderblock: {
+      name: 'ORDER BLOCK',
+      text: function() {
+        var base = 'An Order Block is a price zone where large institutional buyers or sellers placed big orders — leaving an imprint on the chart. When price returns to this zone, it often reverses sharply.';
+        var reading = isBull
+          ? ticker + ' has a BUY signal near a bullish order block. Institutions have been active buyers in this zone. Entry at ' + entry + ' is inside or just above the block. Stop at ' + sl + ' is below it — if price closes below the block, the setup is invalidated.'
+          : isBear
+          ? ticker + ' has a SELL signal near a bearish order block. Institutions have been sellers in this zone. Entry at ' + entry + ' is inside or just below the block.'
+          : 'No clear order block signal right now. Price is not at a high-probability institutional zone. Wait for price to pull back into a confirmed block before entering.';
+        return base + '<br><br>' + reading;
+      }
+    },
+    supplydemand: {
+      name: 'SUPPLY & DEMAND',
+      text: function() {
+        var base = 'Supply zones are price areas where sellers overwhelm buyers (price falls sharply from there). Demand zones are areas where buyers overwhelm sellers (price rises sharply from there).';
+        var reading = isBull
+          ? ticker + ' is showing a BUY signal. Price appears to have come out of a demand zone. The strong move up from ' + entry + ' suggests buyers are in control. Volume ratio ' + vol_ratio + '× confirms the demand.'
+          : isBear
+          ? ticker + ' is at or near a supply zone. Sellers are dominating at this price level. The SELL signal confirms the zone is holding. Consider shorting from ' + entry + ' with stop at ' + sl + '.'
+          : 'Price is between zones — not at a high-probability supply or demand area. Waiting for price to reach a fresh zone will give a much higher probability trade.';
+        return base + '<br><br>' + reading;
+      }
+    },
+    retracement: {
+      name: 'RETRACEMENT',
+      text: function() {
+        var base = 'A retracement is when price temporarily moves against the main trend before continuing in the original direction. Fibonacci levels (38.2%, 50%, 61.8%) are the key zones to watch for entries.';
+        var reading = isBull
+          ? ticker + ' has pulled back from a recent high and the BUY signal fires here. RSI at ' + rsi + (parseFloat(rsi) < 50 ? ' (below 50, which confirms a pullback in an uptrend)' : ' (above 50, momentum still bullish)') + '. This is a potential retracement entry. Ideal setup: price has retraced ~50–61.8% of the prior up-move and is now bouncing.'
+          : isBear
+          ? ticker + ' has retraced upward in a downtrend. The SELL signal at ' + entry + ' suggests the retracement is ending and the downtrend is resuming. RSI at ' + rsi + '.'
+          : 'No retracement entry signal. Either there is no clear prior trend to retrace, or price has not yet reached a key Fibonacci level. Wait for a clear swing high/low and a 38–62% pullback.';
+        return base + '<br><br>' + reading;
+      }
+    },
+    pullback: {
+      name: 'PULLBACK',
+      text: function() {
+        var base = 'A pullback is a short-term dip against the main trend. The idea: buy the dip in an uptrend (or sell the rally in a downtrend) instead of chasing the move at its peak.';
+        var reading = isBull
+          ? ticker + ' is in an uptrend and has dipped. The BUY signal here means price has pulled back to the EMA or support and is resuming upward. EMA cross: ' + (ema_cross || 'bullish') + '. RSI at ' + rsi + ' — ' + (parseFloat(rsi) < 50 ? 'oversold short-term, good pullback depth.' : 'still in bullish territory.') + ' Entry at ' + entry + ', stop below the pullback low at ' + sl + '.'
+          : isBear
+          ? ticker + ' is in a downtrend and has had a short rally. The SELL signal confirms the rally is failing. This is a pullback-into-resistance entry. Short from ' + entry + '.'
+          : 'No confirmed pullback signal. The trend may be unclear or price may still be pulling back. Wait for the EMA to act as support/resistance and for RSI to reset before entering.';
+        return base + '<br><br>' + reading;
+      }
+    },
+    breakout: {
+      name: 'BREAKOUT',
+      text: function() {
+        var base = 'A breakout is when price moves above a resistance level (or below support) with strong volume, signalling a potential new trend. False breakouts are common — volume confirmation is critical.';
+        var volTxt = vol_ratio >= 1.5 ? 'Volume is ' + vol_ratio + '× average — a strong confirmation of the breakout.' : vol_ratio >= 1.0 ? 'Volume is average (' + vol_ratio + '×). Acceptable but not ideal for a breakout.' : 'Volume is low (' + vol_ratio + '×) — this breakout is at risk of being a false move. Reduce size or wait for a retest.';
+        var reading = isBull
+          ? ticker + ' has a BUY signal consistent with a breakout above resistance. ' + volTxt + ' Entry at ' + entry + '. If price rejects back below the breakout level, stop at ' + sl + ' closes the trade with minimal loss. Target TP1 at ' + tp1 + '.'
+          : isBear
+          ? ticker + ' has broken down below a support level. SELL signal confirms the breakdown. ' + volTxt + ' Short from ' + entry + ' with stop at ' + sl + '.'
+          : 'No breakout signal. Price is likely consolidating inside a range. Breakout trades should not be forced — wait for a close above resistance or below support with strong volume.';
+        return base + '<br><br>' + reading;
+      }
+    },
+    liquidity: {
+      name: 'LIQUIDITY BASE',
+      text: function() {
+        var base = 'Liquidity pools are areas where a large number of stop-loss orders are clustered — typically just above recent highs (where shorts have stops) or below recent lows (where longs have stops). Institutional traders hunt these areas before reversing.';
+        var reading = isBull
+          ? 'The BUY signal on ' + ticker + ' may indicate a liquidity sweep below recent lows — where retail stop losses were triggered — followed by a sharp reversal upward. If price swept below a support low and is now recovering, this is a classic liquidity grab. Entry at ' + entry + ', stop at ' + sl + ' should be placed below the swept low. RSI at ' + rsi + (parseFloat(rsi) < 35 ? ' — deeply oversold, consistent with a stop hunt.' : '.') + ''
+          : isBear
+          ? 'The SELL signal on ' + ticker + ' may indicate a liquidity sweep above recent highs, where buy-stop orders were triggered. Price may now reverse downward. Short from ' + entry + ' with stop at ' + sl + '.'
+          : 'No liquidity sweep signal detected. The conditions for a liquidity-driven reversal (a sharp move into a stop cluster followed by rejection) are not clearly present. Wait for a more decisive sweep with strong RSI divergence.';
+        return base + '<br><br>' + reading;
+      }
+    }
+  };
+
+  var lens = lensMap[_dvStratLens];
+  if (!lens) { panel.style.display = 'none'; return; }
+
+  title.textContent = lens.name + ' — ANALYSIS';
+  body.innerHTML    = lens.text();
+  panel.style.display = 'block';
 }
 
 // ── Portfolio: Guide toggle ───────────────────────────────────
