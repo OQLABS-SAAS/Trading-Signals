@@ -443,3 +443,42 @@ Fix (commits `5eab9e7`, `6b244d3`, `dcc553e`):
 
 **Deploy:** `git push origin main` → Railway auto-deploys.
 **Verify:** Click 1W chip → analysis should run on 1W → MTF should show all 6 cells with real data → MTF current TF should match main signal direction.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-13 (UX journey + Pine Script exact levels)
+
+**All changes committed. Deploy: `git push origin main`.**
+
+**Pine Script exact levels — commit `f1f4dd6`:**
+- `togglePineCode()` now calls `copyPineScript()` when a signal is loaded (instead of static ATR-based PINE_SIGNALS).
+- `copyPineScript()` rewritten: hardcodes exact entry, SL, TP1/2/3 from `currentData`. Matches calculator exactly.
+- Level lines labelled with 'take 50%', 'take 30%', 'take rest'. Dashboard mirrors signal card. 4 alert conditions generated.
+- Backtest tab Pine Script renamed → **"Research Script · ATR-based · for backtesting only · not for live trades"**.
+
+**Guided 'What To Do Next' journey panel — commit `d90e342`:**
+- After every signal fires, a 5-step linear panel appears below the signal card.
+- BUY/SELL: ① Understand risk → ② Set position → ③ Verify track record (Backtest) → ④ Copy to TradingView → ⑤ Set alerts.
+- HOLD: simplified 2-step: wait / try another timeframe.
+- Step ③ explains ATR Research Script = historical only. Step ④ explains exact levels = live trade.
+- 'Pine Script' button removed from sig-btns — replaced by Step ④ CTA.
+- No jargon decisions left for the user.
+
+**UX improvements — commits `1ffb23b`, `e3e9fa3`, `6885448`:**
+- Risk vs Reward summary bar: −$80 vs +$109 side by side above TP rows.
+- SL label shows actual price: "if price hits $61,638".
+- Redundant "Calculate Position" button removed → "RESULTS UPDATE AS YOU TYPE".
+- Each RR box expandable: Worst Case explains stop loss in plain English; TP1/2/3 explain scaling out strategy.
+
+**Calculator: My Trade ($) — commit `458493b`:**
+- Risk % replaced with My Trade ($). posVal = capital exactly. No position-exceeds-account problem.
+
+**Key commits this session (all unpushed — push together):**
+- `416bc38` — MTF alignment + TIMEFRAME_CONFIG 1W/1M
+- `458493b` — My Trade ($) calculator
+- `b4f4f2d` — 1W/1M gpill chips
+- `1ffb23b` — Risk vs Reward bar
+- `e3e9fa3` — Remove Calculate button + SL price label
+- `6885448` — Expandable RR boxes
+- `f1f4dd6` — Exact-levels Pine Script
+- `d90e342` — Guided journey panel
