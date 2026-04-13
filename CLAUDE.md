@@ -409,3 +409,37 @@ Fix (commits `5eab9e7`, `6b244d3`, `dcc553e`):
 **Account footer always shown** when acct + risk filled: "$X at Y% risk = $Z max loss per trade".
 
 **Deploy:** `git push origin main` → Railway auto-deploys.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-13 (MTF + My Trade calculator + 1W/1M chips)
+
+**All changes committed. NOT YET runtime verified — needs `git push origin main` then user to test.**
+
+**Calculator: Risk % → My Trade ($) — commit `458493b`:**
+- `cRisk` input replaced with `cCapital` ("My Trade ($)") — user enters how much they want to invest.
+- Position sizing: `posSize = (capital / assetPrice) * lev`. posVal = capital (exactly what user invests). No more position-exceeds-account problem.
+- `autoFillCalc(d)` still populates entry, SL, TP1/2/3 from signal — user only needs to set Account and My Trade.
+- Coaching Step 2 updated to show 5%, 10%, 20% of account as dollar examples.
+- Capital > account guard added.
+- Margin display: `capital / lev`.
+
+**MTF alignment fix — commit `416bc38`:**
+- Root cause 1: `get_mtf_trend()` only computed 2 TFs (4H, 1D) via yfinance. All 6 now computed: 15m, 1H, 4H, 1D, 1W, 1M.
+- Root cause 2: MTF 1D could show NEUTRAL while main signal showed BUY because EMA stacking ≠ 65% confluence gate. Fixed: after `get_analysis()` returns, MTF entry for the current TF is overridden with the actual signal result.
+- `_tf_key_map` + `_sig_to_trend` added to `analyze()` endpoint.
+- `get_mtf_trend()` expanded to 6 configs using yfinance at appropriate intervals.
+- `TIMEFRAME_CONFIG` in app.py: added `"1w"` (1wk/5y) and `"1mo"` (1mo/10y) entries.
+
+**1W and 1M timeframe chips — commit `b4f4f2d`:**
+- Root cause: `gpill` timeframe buttons in the signals control bar (Row 2) only had 15M, 1H, 4H, 1D.
+- Backend + hidden select + chart tf-pills already supported 1W/1M but the user had no visible button to select them.
+- Fix: added two `gpill` buttons for 1W and 1M in the signals control bar.
+
+**Key commits:**
+- `416bc38` — MTF alignment fix + TIMEFRAME_CONFIG 1W/1M + expand get_mtf_trend() to 6 TFs
+- `458493b` — Calculator: My Trade ($) replaces Risk %
+- `b4f4f2d` — 1W and 1M gpill chips added to signals control bar
+
+**Deploy:** `git push origin main` → Railway auto-deploys.
+**Verify:** Click 1W chip → analysis should run on 1W → MTF should show all 6 cells with real data → MTF current TF should match main signal direction.
