@@ -311,5 +311,23 @@ Each phase must be runtime-verified in a live Railway deploy before the next pha
 
 **Session sequencing rule:** Each phase must be runtime-verified in a live Railway deploy before the next phase starts.
 
+**Phase 5 code: COMPLETE — committed `932b6b1`, `f89eecf`. NOT YET runtime verified.**
+
+**Phase 5 runtime verification BLOCKED by DATABASE_URL issue:**
+- Web service (`rare-communication` project) and Postgres/Redis (`exquisite-upliftment` project) are in DIFFERENT Railway projects.
+- Cross-project reference variables `${{Postgres.DATABASE_URL}}` resolve to empty string.
+- Fix: set DATABASE_URL in web service to the `DATABASE_PUBLIC_URL` value from Postgres service (uses `metro.proxy.rlwy.net` hostname, not `.railway.internal`).
+- User attempted fix but DATABASE_URL keeps showing `<empty string>` after deploy.
+- User must: Raw Editor → paste actual postgresql://...@metro.proxy.rlwy.net:PORT/railway → save → redeploy.
+- REDIS_URL may have same cross-project issue — check after DB is working.
+
+**Phase 5 frontend validation fix:**
+- `pfAddPosition()` now reads inputs as strings before parsing (Safari type=number bug). Committed `f89eecf`.
+- Ticker field was showing placeholder "AAPL" — user must actually type the ticker.
+
 **Next session — start here:**
-Say "Protocol active." Re-read this file. Run Six Stop Gates for Phase 5. Get explicit user go-ahead before writing any code.
+1. Say "Protocol active." Re-read this file.
+2. Fix DATABASE_URL cross-project issue (see above).
+3. Once positions save successfully, verify all 5 Phase 5 features in browser.
+4. Update CLAUDE.md marking Phase 5 complete.
+5. Generate the full implementation report (user requested this at start of Phase 3 session).
