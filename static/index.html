@@ -1947,6 +1947,39 @@ body::before{
             </div>
             <div style="font-size:10px;color:var(--muted2);margin-top:2px;padding-bottom:4px;">TP profits shown net of fees · Distances in pips/pts</div>
 
+            <!-- Risk vs Reward summary bar -->
+            <div id="calcRRBar" style="display:none;margin:10px 0 12px;border-radius:3px;overflow:hidden;border:1px solid var(--border);">
+              <div style="background:var(--bg3);padding:6px 10px;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--muted2);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">
+                Your Risk vs Your Reward
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:var(--bg3);">
+                <!-- Worst case -->
+                <div style="padding:10px 10px;border-right:1px solid var(--border);background:rgba(255,68,89,.06);">
+                  <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;">Worst Case</div>
+                  <div id="rrRisk" style="font-family:var(--mono);font-size:18px;font-weight:800;color:#FF4459;">—</div>
+                  <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">if stop loss hit</div>
+                </div>
+                <!-- TP1 -->
+                <div style="padding:10px 10px;border-right:1px solid var(--border);">
+                  <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;">TP 1</div>
+                  <div id="rrTP1" style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--green);">—</div>
+                  <div id="rrTP1RR" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">—</div>
+                </div>
+                <!-- TP2 -->
+                <div style="padding:10px 10px;border-right:1px solid var(--border);">
+                  <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;">TP 2</div>
+                  <div id="rrTP2" style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--green);">—</div>
+                  <div id="rrTP2RR" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">—</div>
+                </div>
+                <!-- TP3 (best case) -->
+                <div style="padding:10px 10px;background:rgba(0,201,141,.06);">
+                  <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;">Best Case</div>
+                  <div id="rrTP3" style="font-family:var(--mono);font-size:18px;font-weight:800;color:var(--green);">—</div>
+                  <div id="rrTP3RR" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">—</div>
+                </div>
+              </div>
+            </div>
+
             <!-- TP rows -->
             <div class="calc-tp-title">Take Profit Levels</div>
             <div class="calc-tp-table">
@@ -10347,6 +10380,31 @@ function recalc() {
   });
 
   document.getElementById('cpSLVal').textContent = slPips.toFixed(decimals) + ' ' + pipLabel;
+
+  // ── Risk vs Reward summary bar ──────────────────────────────────────────
+  (function() {
+    var bar = document.getElementById('calcRRBar');
+    if (!bar) return;
+    var tpEls = [
+      { profit: document.getElementById('rrTP1'), rr: document.getElementById('rrTP1RR') },
+      { profit: document.getElementById('rrTP2'), rr: document.getElementById('rrTP2RR') },
+      { profit: document.getElementById('rrTP3'), rr: document.getElementById('rrTP3RR') },
+    ];
+    var tpValues = [tp1, tp2, tp3];
+    var anyTP = tpValues.some(function(tp) { return tp && tp > 0; });
+    if (!anyTP || !slLoss) { bar.style.display = 'none'; return; }
+    bar.style.display = 'block';
+    // Risk cell
+    var riskEl = document.getElementById('rrRisk');
+    if (riskEl) riskEl.textContent = '−$' + slLoss.toFixed(0);
+    // TP cells
+    tpValues.forEach(function(tp, i) {
+      if (!tp || tp <= 0) { tpEls[i].profit.textContent = '—'; tpEls[i].rr.textContent = '—'; return; }
+      var t = calcTP(tp);
+      tpEls[i].profit.textContent = '+$' + t.netProfit.toFixed(0);
+      tpEls[i].rr.textContent = 'R:R 1 : ' + t.rr;
+    });
+  })();
 }
 
 // ─── STRATEGY ENGINE ───
