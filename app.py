@@ -4114,6 +4114,9 @@ if _DATABASE_URL:
     try:
         # Railway Postgres URLs start with postgres:// — SQLAlchemy needs postgresql://
         _db_url    = _DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        # Railway public URLs require SSL — add sslmode=require if not already present
+        if "sslmode" not in _db_url:
+            _db_url += ("&" if "?" in _db_url else "?") + "sslmode=require"
         _db_engine = create_engine(_db_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
         _DBSession = sessionmaker(bind=_db_engine)
         print("[db] SQLAlchemy engine created")
