@@ -11188,17 +11188,24 @@ function pfShowAddForm() {
 }
 
 function pfAddPosition() {
-  var ticker  = (document.getElementById('pfTicker')    || {}).value || '';
-  var atype   = (document.getElementById('pfAssetType') || {}).value || 'stock';
-  var signal  = (document.getElementById('pfSignal')    || {}).value || 'BUY';
-  var entry   = parseFloat((document.getElementById('pfEntry')    || {}).value);
-  var stop    = parseFloat((document.getElementById('pfStop')     || {}).value);
-  var tp1     = parseFloat((document.getElementById('pfTp1')      || {}).value);
-  var size    = parseFloat((document.getElementById('pfSize')     || {}).value);
-  var tf      = (document.getElementById('pfTimeframe') || {}).value || '1d';
+  // Read as string first — avoids Safari type="number" returning empty on hidden inputs
+  function _fv(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+  var ticker  = _fv('pfTicker').toUpperCase();
+  var atype   = _fv('pfAssetType') || 'stock';
+  var signal  = (_fv('pfSignal') || 'BUY').toUpperCase();
+  var entryS  = _fv('pfEntry').replace(',', '.');
+  var stopS   = _fv('pfStop').replace(',', '.');
+  var tp1S    = _fv('pfTp1').replace(',', '.');
+  var sizeS   = _fv('pfSize').replace(',', '.');
+  var tf      = _fv('pfTimeframe') || '1d';
+  var entry   = parseFloat(entryS);
+  var stop    = parseFloat(stopS);
+  var tp1     = parseFloat(tp1S);
+  var size    = parseFloat(sizeS);
 
-  if (!ticker || isNaN(entry) || isNaN(size)) {
-    alert('Ticker, Entry Price and Size are required.'); return;
+  if (!ticker || !entryS || isNaN(entry) || !sizeS || isNaN(size)) {
+    alert('Ticker, Entry Price and Size are required.\n\nTicker: "' + ticker + '"\nEntry: "' + entryS + '"\nSize: "' + sizeS + '"');
+    return;
   }
   fetch('/api/positions', {
     method: 'POST',
