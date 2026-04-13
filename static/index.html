@@ -1923,6 +1923,9 @@ body::before{
 
           <button class="calc-go-btn" onclick="recalc()">⚡ Calculate Position</button>
 
+          <!-- Guidance / validation panel -->
+          <div id="calcGuidance" style="display:none;margin:10px 0 0;border-radius:var(--r2);overflow:hidden;font-size:12px;line-height:1.5;"></div>
+
           <!-- Results -->
           <div class="calc-results" id="calcResults">
             <div class="calc-result-main">
@@ -10051,14 +10054,112 @@ function recalc() {
   const assetPrice = parseFloat(document.getElementById('cAsset').value) || entry;
 
   const riskAmt = acct * (risk / 100);
-  document.getElementById('cRiskDollar').textContent = '$' + riskAmt.toFixed(0);
+  document.getElementById('cRiskDollar').textContent = acct && risk ? '$' + riskAmt.toFixed(0) : '—';
 
-  if (!acct || !risk || !entry || !sl) return;
+  // ── Guidance panel helper ──
+  const guidEl = document.getElementById('calcGuidance');
+  function showGuidance(lines) {
+    if (!guidEl) return;
+    guidEl.style.display = 'block';
+    guidEl.innerHTML = lines.map(function(l) {
+      var bg = l.type === 'error'   ? 'rgba(255,68,89,.10)'    :
+               l.type === 'warn'    ? 'rgba(245,166,35,.10)'   :
+               l.type === 'info'    ? 'rgba(77,159,255,.10)'   :
+               l.type === 'success' ? 'rgba(0,201,141,.10)'    : 'rgba(255,255,255,.04)';
+      var col = l.type === 'error'   ? 'var(--red)'    :
+                l.type === 'warn'    ? 'var(--amber)'  :
+                l.type === 'info'    ? 'var(--blue)'   :
+                l.type === 'success' ? 'var(--green)'  : 'var(--muted2)';
+      var icon = l.type === 'error' ? '✖' : l.type === 'warn' ? '⚠' : l.type === 'info' ? 'ℹ' : l.type === 'success' ? '✔' : '·';
+      return '<div style="background:' + bg + ';border-left:2px solid ' + col + ';padding:7px 10px;margin-bottom:3px;display:flex;gap:8px;align-items:flex-start;">'
+           + '<span style="color:' + col + ';flex-shrink:0;margin-top:1px;">' + icon + '</span>'
+           + '<span style="color:var(--white2);">' + l.msg + '</span></div>';
+    }).join('');
+  }
+  function hideGuidance() { if (guidEl) guidEl.style.display = 'none'; }
+
+  // ── Build guidance state ──
+  const cd = window.currentData || {};
+  const sigLabel   = cd.signal    || null;
+  const sigEntry   = cd.entry     || null;
+  const sigSL      = cd.stop_loss || null;
+  const sigTicker  = cd.ticker    || null;
+  const sigPrice   = cd.price     || null;
+
+  var guidance = [];
+
+  // Signal context line — always shown when validation fails
+  if (sigLabel && sigTicker) {
+    var entryStr = sigEntry ? '$' + (sigEntry >= 100 ? sigEntry.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(sigEntry.toFixed(6))) : 'none';
+    var slStr    = sigSL    ? '$' + (sigSL    >= 100 ? sigSL.toLocaleString(undefined,{maximumFractionDigits:2})    : parseFloat(sigSL.toFixed(6)))    : 'none';
+    guidance.push({type:'info', msg:'<b>' + sigTicker + '</b> signal: <b style="color:' + (sigLabel==='BUY'?'var(--green)':sigLabel==='SELL'?'var(--red)':'var(--amber)') + '">' + sigLabel + '</b> · Entry ' + entryStr + ' · SL ' + slStr});
+  } else if (!sigLabel) {
+    guidance.push({type:'neutral', msg:'No signal loaded — run an analysis first, then use the calculator.'});
+  }
+
+  // Account context (shown whenever acct + risk are present)
+  if (acct && risk) {
+    guidance.push({type:'neutral', msg:'Account <b>$' + acct.toLocaleString() + '</b> at <b>' + risk + '%</b> risk = <b style="color:var(--amber)">$' + riskAmt.toFixed(0) + '</b> at risk per trade'});
+  }
+
+  // HOLD signal
+  if (sigLabel === 'HOLD') {
+    guidance.push({type:'warn', msg:'HOLD signal — no entry level available. Position sizing requires a BUY or SELL signal. Run a new analysis or change the ticker.'});
+    showGuidance(guidance);
+    return;
+  }
+
+  // Missing account size
+  if (!acct) {
+    guidance.push({type:'error', msg:'Enter your <b>Account Size</b> (USD) to calculate position.'});
+    showGuidance(guidance);
+    return;
+  }
+
+  // Missing risk %
+  if (!risk) {
+    guidance.push({type:'error', msg:'Enter your <b>Risk %</b> — typical professional range is 0.5%–2% per trade.'});
+    showGuidance(guidance);
+    return;
+  }
+
+  // Missing entry — but signal has one
+  if (!entry) {
+    if (sigEntry) {
+      guidance.push({type:'warn', msg:'Entry field is empty. Signal entry is <b>$' + (sigEntry >= 100 ? sigEntry.toLocaleString(undefined,{maximumFractionDigits:2}) : sigEntry.toFixed(6)) + '</b> — it should have auto-filled. Refresh the analysis or type it manually.'});
+    } else {
+      guidance.push({type:'error', msg:'Enter the <b>Entry Price</b> from your analysis.'});
+    }
+    showGuidance(guidance);
+    return;
+  }
+
+  // Entry vs current market price sanity check
+  if (sigPrice && entry && Math.abs(entry - sigPrice) / sigPrice > 0.15) {
+    guidance.push({type:'warn', msg:'Entry price <b>$' + entry + '</b> is more than 15% away from current market price <b>$' + (sigPrice >= 100 ? sigPrice.toLocaleString(undefined,{maximumFractionDigits:2}) : sigPrice.toFixed(6)) + '</b>. Double-check your entry.'});
+  }
+
+  // Missing stop loss
+  if (!sl) {
+    var slHint = sigSL ? 'Signal stop loss is <b>$' + (sigSL >= 100 ? sigSL.toLocaleString(undefined,{maximumFractionDigits:2}) : sigSL.toFixed(6)) + '</b> — it should have auto-filled. Refresh or type it manually.' : 'A Stop Loss is required to calculate position size. Use the signal\'s SL or define your own level.';
+    guidance.push({type:'error', msg:'Missing <b>Stop Loss</b>. ' + slHint});
+    showGuidance(guidance);
+    return;
+  }
+
+  // SL on wrong side of entry
+  const dir = calcDir || 'BUY';
+  if ((dir === 'BUY' && sl >= entry) || (dir === 'SELL' && sl <= entry)) {
+    guidance.push({type:'error', msg:'Stop Loss ($' + sl + ') is on the <b>wrong side</b> of entry ($' + entry + ') for a <b>' + dir + '</b> trade. SL must be ' + (dir==='BUY' ? 'below' : 'above') + ' entry.'});
+    showGuidance(guidance);
+    return;
+  }
+
+  // All valid — hide guidance, run calculation
+  hideGuidance();
 
   // ── Asset type + pip size ──
-  const cd = window.currentData || {};
-  const assetType = cd.asset_type || 'crypto';
-  const ticker    = (cd.ticker || '').toUpperCase();
+  const ticker = (cd.ticker || '').toUpperCase();
   let pipSize = 1, pipLabel = 'pts';
   if (assetType === 'forex') {
     pipSize  = ticker.includes('JPY') ? 0.01 : 0.0001;
