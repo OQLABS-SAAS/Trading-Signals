@@ -10056,107 +10056,168 @@ function recalc() {
   const riskAmt = acct * (risk / 100);
   document.getElementById('cRiskDollar').textContent = acct && risk ? '$' + riskAmt.toFixed(0) : '—';
 
-  // ── Guidance panel helper ──
+  // ── Coach panel ──
   const guidEl = document.getElementById('calcGuidance');
-  function showGuidance(lines) {
-    if (!guidEl) return;
-    guidEl.style.display = 'block';
-    guidEl.innerHTML = lines.map(function(l) {
-      var bg = l.type === 'error'   ? 'rgba(255,68,89,.10)'    :
-               l.type === 'warn'    ? 'rgba(245,166,35,.10)'   :
-               l.type === 'info'    ? 'rgba(77,159,255,.10)'   :
-               l.type === 'success' ? 'rgba(0,201,141,.10)'    : 'rgba(255,255,255,.04)';
-      var col = l.type === 'error'   ? 'var(--red)'    :
-                l.type === 'warn'    ? 'var(--amber)'  :
-                l.type === 'info'    ? 'var(--blue)'   :
-                l.type === 'success' ? 'var(--green)'  : 'var(--muted2)';
-      var icon = l.type === 'error' ? '✖' : l.type === 'warn' ? '⚠' : l.type === 'info' ? 'ℹ' : l.type === 'success' ? '✔' : '·';
-      return '<div style="background:' + bg + ';border-left:2px solid ' + col + ';padding:7px 10px;margin-bottom:3px;display:flex;gap:8px;align-items:flex-start;">'
-           + '<span style="color:' + col + ';flex-shrink:0;margin-top:1px;">' + icon + '</span>'
-           + '<span style="color:var(--white2);">' + l.msg + '</span></div>';
-    }).join('');
+  function coach(html) { if (guidEl) { guidEl.style.display = 'block'; guidEl.innerHTML = html; } }
+  function hideCoach() { if (guidEl) guidEl.style.display = 'none'; }
+
+  // ── Signal data ──
+  const cd        = currentData || {};
+  const sigLabel  = cd.signal    || null;
+  const sigEntry  = cd.entry     || null;
+  const sigSL     = cd.stop_loss || null;
+  const sigTP1    = cd.tp1       || null;
+  const sigTP2    = cd.tp2       || null;
+  const sigTP3    = cd.tp3       || null;
+  const sigTicker = cd.ticker    || null;
+  const sigPrice  = cd.price     || null;
+  const assetType = cd.asset_type || 'crypto';
+
+  // ── Format helpers ──
+  function fmtP(v) {
+    if (v == null || isNaN(v)) return '—';
+    return v >= 100 ? '$' + v.toLocaleString(undefined,{maximumFractionDigits:2}) : '$' + parseFloat(v.toFixed(6));
   }
-  function hideGuidance() { if (guidEl) guidEl.style.display = 'none'; }
+  function fmtD(v) { return v == null ? '—' : '$' + v.toLocaleString(undefined,{maximumFractionDigits:0}); }
 
-  // ── Build guidance state ──
-  const cd = currentData || {};
-  const sigLabel   = cd.signal    || null;
-  const sigEntry   = cd.entry     || null;
-  const sigSL      = cd.stop_loss || null;
-  const sigTicker  = cd.ticker    || null;
-  const sigPrice   = cd.price     || null;
-
-  var guidance = [];
-
-  // Signal context line — always shown when validation fails
-  if (sigLabel && sigTicker) {
-    var entryStr = sigEntry ? '$' + (sigEntry >= 100 ? sigEntry.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(sigEntry.toFixed(6))) : 'none';
-    var slStr    = sigSL    ? '$' + (sigSL    >= 100 ? sigSL.toLocaleString(undefined,{maximumFractionDigits:2})    : parseFloat(sigSL.toFixed(6)))    : 'none';
-    guidance.push({type:'info', msg:'<b>' + sigTicker + '</b> signal: <b style="color:' + (sigLabel==='BUY'?'var(--green)':sigLabel==='SELL'?'var(--red)':'var(--amber)') + '">' + sigLabel + '</b> · Entry ' + entryStr + ' · SL ' + slStr});
-  } else if (!sigLabel) {
-    guidance.push({type:'neutral', msg:'No signal loaded — run an analysis first, then use the calculator.'});
+  // ── Signal summary card (shown in every coaching state when a signal is loaded) ──
+  function sigCard() {
+    if (!sigLabel || !sigTicker) return '';
+    var sc = sigLabel==='BUY' ? 'var(--green)' : sigLabel==='SELL' ? 'var(--red)' : 'var(--amber)';
+    var sb = sigLabel==='BUY' ? 'rgba(0,201,141,.08)' : sigLabel==='SELL' ? 'rgba(255,68,89,.08)' : 'rgba(245,166,35,.08)';
+    var si = sigLabel==='BUY' ? '▲' : sigLabel==='SELL' ? '▼' : '—';
+    var tpRow = '';
+    if (sigTP1) tpRow += '<span><span style="color:var(--muted2);">TP1 </span><span style="color:var(--green);font-weight:600;">' + fmtP(sigTP1) + '</span></span>';
+    if (sigTP2) tpRow += ' <span><span style="color:var(--muted2);">TP2 </span><span style="color:var(--green);font-weight:600;">' + fmtP(sigTP2) + '</span></span>';
+    if (sigTP3) tpRow += ' <span><span style="color:var(--muted2);">TP3 </span><span style="color:var(--green);font-weight:600;">' + fmtP(sigTP3) + '</span></span>';
+    return '<div style="background:' + sb + ';border:1px solid ' + sc + '33;border-radius:var(--r2);padding:10px 14px;margin-bottom:8px;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">'
+      + '<span style="color:var(--muted2);font-size:11px;text-transform:uppercase;letter-spacing:.06em;">' + sigTicker + ' — Signal Reading</span>'
+      + '<span style="color:' + sc + ';font-weight:700;font-size:14px;">' + si + ' ' + sigLabel + '</span>'
+      + '</div>'
+      + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;">'
+      + '<span><span style="color:var(--muted2);">Enter at </span><span style="color:var(--white);font-weight:700;">' + fmtP(sigEntry) + '</span></span>'
+      + '<span><span style="color:var(--muted2);">Stop Loss </span><span style="color:var(--red);font-weight:700;">' + fmtP(sigSL) + '</span></span>'
+      + (tpRow ? tpRow : '')
+      + '</div>'
+      + '</div>';
   }
 
-  // Account context (shown whenever acct + risk are present)
-  if (acct && risk) {
-    guidance.push({type:'neutral', msg:'Account <b>$' + acct.toLocaleString() + '</b> at <b>' + risk + '%</b> risk = <b style="color:var(--amber)">$' + riskAmt.toFixed(0) + '</b> at risk per trade'});
+  // ── Account footer (shown when acct + risk are filled) ──
+  function acctFooter() {
+    if (!acct || !risk) return '';
+    return '<div style="margin-top:6px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:var(--r);font-size:12px;display:flex;justify-content:space-between;align-items:center;">'
+      + '<span style="color:var(--muted2);">Your $' + acct.toLocaleString() + ' at ' + risk + '% risk</span>'
+      + '<span style="color:var(--amber);font-weight:700;">$' + riskAmt.toFixed(0) + ' max loss per trade</span>'
+      + '</div>';
   }
 
-  // HOLD signal
+  // ── STATE: No signal loaded ──
+  if (!sigLabel) {
+    coach('<div style="background:rgba(255,255,255,.04);border-radius:var(--r2);padding:16px;text-align:center;">'
+      + '<div style="font-size:22px;margin-bottom:8px;">📊</div>'
+      + '<div style="color:var(--white);font-weight:600;margin-bottom:5px;">Run an analysis first</div>'
+      + '<div style="color:var(--muted2);font-size:12px;line-height:1.6;">Pick any ticker above and click Analyze. I\'ll read the signal and walk you through exactly how much to put in — step by step.</div>'
+      + '</div>');
+    return;
+  }
+
+  // ── STATE: HOLD signal ──
   if (sigLabel === 'HOLD') {
-    guidance.push({type:'warn', msg:'HOLD signal — no entry level available. Position sizing requires a BUY or SELL signal. Run a new analysis or change the ticker.'});
-    showGuidance(guidance);
+    var unitWord = assetType === 'forex' ? 'currency' : assetType === 'crypto' ? 'coins' : 'shares';
+    coach(sigCard()
+      + '<div style="background:rgba(245,166,35,.10);border-left:3px solid var(--amber);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
+      + '<div style="color:var(--amber);font-weight:700;font-size:13px;margin-bottom:6px;">No trade to make right now</div>'
+      + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">'
+      + sigTicker + '\'s conditions aren\'t strong enough to enter. The system looked at every indicator and couldn\'t find a clear setup worth risking your money on.<br><br>'
+      + '<b style="color:var(--white);">What this means for you:</b> Do not open a position. Your $' + (acct ? acct.toLocaleString() : '—') + ' stays safe until a real BUY or SELL signal appears.<br><br>'
+      + '<b style="color:var(--white);">What to do next:</b> Try a different timeframe (e.g. 4H instead of 1H), or run a different ticker — the signal will tell you when conditions are right.'
+      + '</div>'
+      + '</div>'
+      + acctFooter());
     return;
   }
 
-  // Missing account size
+  // ── STATE: Missing account size ──
   if (!acct) {
-    guidance.push({type:'error', msg:'Enter your <b>Account Size</b> (USD) to calculate position.'});
-    showGuidance(guidance);
+    var unitWordA = assetType === 'forex' ? 'currency units' : assetType === 'crypto' ? 'coins' : 'shares';
+    coach(sigCard()
+      + '<div style="background:rgba(255,68,89,.08);border-left:3px solid var(--red);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
+      + '<div style="color:var(--white);font-weight:700;font-size:13px;margin-bottom:6px;">Step 1 — How much money do you have?</div>'
+      + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">'
+      + 'Enter your total account size in the <b style="color:var(--white);">Account ($)</b> field above. This is all the money you have available to trade — not just what you want to put in this trade.<br><br>'
+      + 'I use this to calculate exactly how many <b>' + unitWordA + '</b> to buy so you never accidentally risk more than you\'re comfortable with.'
+      + '</div>'
+      + '</div>');
     return;
   }
 
-  // Missing risk %
+  // ── STATE: Missing risk % ──
   if (!risk) {
-    guidance.push({type:'error', msg:'Enter your <b>Risk %</b> — typical professional range is 0.5%–2% per trade.'});
-    showGuidance(guidance);
+    coach(sigCard()
+      + '<div style="background:rgba(255,68,89,.08);border-left:3px solid var(--red);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
+      + '<div style="color:var(--white);font-weight:700;font-size:13px;margin-bottom:6px;">Step 2 — How much are you willing to lose on this trade?</div>'
+      + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">'
+      + 'Enter a percentage in the <b style="color:var(--white);">Risk %</b> field. This is the most you lose if the trade goes wrong — not of the position, of your whole account.<br><br>'
+      + '<b style="color:var(--amber);">Beginner rule: start with 1%–2%.</b><br>'
+      + '&nbsp;&nbsp;· 1% of your $' + acct.toLocaleString() + ' = <b style="color:var(--white);">$' + (acct*0.01).toFixed(0) + '</b> at risk<br>'
+      + '&nbsp;&nbsp;· 2% of your $' + acct.toLocaleString() + ' = <b style="color:var(--white);">$' + (acct*0.02).toFixed(0) + '</b> at risk<br><br>'
+      + 'The app controls everything else — you just set your limit.'
+      + '</div>'
+      + '</div>');
     return;
   }
 
-  // Missing entry — but signal has one
+  // ── STATE: Missing entry ──
   if (!entry) {
-    if (sigEntry) {
-      guidance.push({type:'warn', msg:'Entry field is empty. Signal entry is <b>$' + (sigEntry >= 100 ? sigEntry.toLocaleString(undefined,{maximumFractionDigits:2}) : sigEntry.toFixed(6)) + '</b> — it should have auto-filled. Refresh the analysis or type it manually.'});
-    } else {
-      guidance.push({type:'error', msg:'Enter the <b>Entry Price</b> from your analysis.'});
-    }
-    showGuidance(guidance);
+    var entryMsg = sigEntry
+      ? 'The signal says to enter ' + sigTicker + ' at <b style="color:var(--white);font-size:13px;">' + fmtP(sigEntry) + '</b>. This should have auto-filled when you ran the analysis — try clicking Analyze again, or type it into the <b>Entry Price</b> field manually.'
+      : 'Type the entry price from your chart into the <b>Entry Price</b> field. This is the price you plan to buy ' + sigTicker + ' at.';
+    coach(sigCard()
+      + '<div style="background:rgba(245,166,35,.08);border-left:3px solid var(--amber);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
+      + '<div style="color:var(--white);font-weight:700;font-size:13px;margin-bottom:6px;">Step 3 — Confirm your entry price</div>'
+      + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">' + entryMsg + '</div>'
+      + '</div>'
+      + acctFooter());
     return;
   }
 
-  // Entry vs current market price sanity check
-  if (sigPrice && entry && Math.abs(entry - sigPrice) / sigPrice > 0.15) {
-    guidance.push({type:'warn', msg:'Entry price <b>$' + entry + '</b> is more than 15% away from current market price <b>$' + (sigPrice >= 100 ? sigPrice.toLocaleString(undefined,{maximumFractionDigits:2}) : sigPrice.toFixed(6)) + '</b>. Double-check your entry.'});
-  }
-
-  // Missing stop loss
+  // ── STATE: Missing stop loss ──
   if (!sl) {
-    var slHint = sigSL ? 'Signal stop loss is <b>$' + (sigSL >= 100 ? sigSL.toLocaleString(undefined,{maximumFractionDigits:2}) : sigSL.toFixed(6)) + '</b> — it should have auto-filled. Refresh or type it manually.' : 'A Stop Loss is required to calculate position size. Use the signal\'s SL or define your own level.';
-    guidance.push({type:'error', msg:'Missing <b>Stop Loss</b>. ' + slHint});
-    showGuidance(guidance);
+    var slDist0 = sigSL ? Math.abs(entry - sigSL) : null;
+    var slPct0  = slDist0 ? ((slDist0 / entry) * 100).toFixed(1) : null;
+    var slExplain = sigSL
+      ? 'The signal places your stop loss at <b style="color:var(--red);font-size:13px;">' + fmtP(sigSL) + '</b> — that\'s <b>' + fmtP(slDist0) + ' (' + slPct0 + '%) below your entry</b>. If ' + sigTicker + ' drops to that price, the trade closes and you lose exactly <b style="color:var(--amber);">$' + riskAmt.toFixed(0) + '</b>. Not a penny more.'
+      : 'A stop loss is the price where you exit if the trade goes against you. Set it below your entry for a BUY — the chart shows the recommended level.';
+    var slBtn = sigSL
+      ? '<button onclick="document.getElementById(\'cSL\').value=\'' + (sigSL >= 100 ? Math.round(sigSL*100)/100 : parseFloat(sigSL.toFixed(6))) + '\';recalc();" style="display:block;width:100%;margin-top:12px;padding:9px;background:var(--amber);color:#000;font-weight:700;font-size:12px;border:none;border-radius:var(--r);cursor:pointer;letter-spacing:.03em;">Use Signal Stop Loss — ' + fmtP(sigSL) + '</button>'
+      : '';
+    coach(sigCard()
+      + '<div style="background:rgba(255,68,89,.08);border-left:3px solid var(--red);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
+      + '<div style="color:var(--white);font-weight:700;font-size:13px;margin-bottom:6px;">Step 4 — Set your Stop Loss</div>'
+      + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">' + slExplain + slBtn + '</div>'
+      + '</div>'
+      + acctFooter());
     return;
   }
 
-  // SL on wrong side of entry
+  // ── SL on wrong side ──
   const dir = calcDir || 'BUY';
   if ((dir === 'BUY' && sl >= entry) || (dir === 'SELL' && sl <= entry)) {
-    guidance.push({type:'error', msg:'Stop Loss ($' + sl + ') is on the <b>wrong side</b> of entry ($' + entry + ') for a <b>' + dir + '</b> trade. SL must be ' + (dir==='BUY' ? 'below' : 'above') + ' entry.'});
-    showGuidance(guidance);
+    coach(sigCard()
+      + '<div style="background:rgba(255,68,89,.10);border-left:3px solid var(--red);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
+      + '<div style="color:var(--red);font-weight:700;font-size:13px;margin-bottom:6px;">Stop loss is on the wrong side</div>'
+      + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">'
+      + 'For a <b>' + dir + '</b> trade your stop loss must be <b>' + (dir==='BUY'?'below':'above') + '</b> your entry — otherwise it would trigger the moment you enter.<br><br>'
+      + 'Entry: <b>' + fmtP(entry) + '</b> · Stop Loss: <b style="color:var(--red)">' + fmtP(sl) + '</b> — move the stop loss ' + (dir==='BUY'?'lower (a smaller number)':'higher (a larger number)') + '.'
+      + '</div>'
+      + '</div>'
+      + acctFooter());
     return;
   }
 
-  // All valid — hide guidance, run calculation
-  hideGuidance();
+  // ── All valid — hide coach, run calculation ──
+  hideCoach();
 
   // ── Asset type + pip size ──
   const ticker = (cd.ticker || sigTicker || '').toUpperCase();
