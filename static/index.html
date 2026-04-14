@@ -5929,7 +5929,7 @@ function calcRisk() {
 
   document.getElementById('riskVal').textContent    = lotLabel; // e.g. "0.2632 coins" or "1.20 lots"
   document.getElementById('riskLots').textContent   = lotLabel;
-  document.getElementById('riskPips').textContent   = pips.toFixed(1) + ' ' + pipLabel;
+  document.getElementById('riskPips').textContent   = Math.round(pips) + ' ' + pipLabel;
   document.getElementById('riskDollar').textContent = sym + riskAmt.toFixed(2);
 
   // ── TP Profit + R/R rows ──
@@ -10204,7 +10204,7 @@ function recalc() {
   // ── Core distances ──
   const slDist = Math.abs(entry - sl);
   const slPips = slDist / pipSize;
-  const decimals = assetType === 'forex' ? 1 : 0;
+  const decimals = 0;  // MT5: always integer pips/pts
 
   // ══════════════════════════════════════════════════
   // POSITION SIZING — Risk % approach (professional)
@@ -10237,8 +10237,8 @@ function recalc() {
       ? lots.toFixed(4)   // sub-micro — show 4dp so it's not zero
       : lots.toFixed(2);  // MT5 standard 2dp for all normal sizes
 
-    const pipValAtSize = lots * pipValuePerLot;
-    pipValStr = ' · $' + pipValAtSize.toFixed(2) + '/pip';
+    // pipValStr intentionally blank — MT5 does not show per-pip value inline
+    pipValStr = '';
 
   } else if (assetType === 'crypto') {
     // units = moneyAtRisk / slDist  → loss if SL hit = units × slDist = moneyAtRisk ✓
@@ -10280,12 +10280,12 @@ function recalc() {
     _set('csrRR',  '—');
     _set('csrPnL', '—');
   }
-  _set('csrStopLine', slPips.toFixed(decimals) + ' ' + pipLabel + ' stop' + pipValStr + ' · $' + slLoss.toFixed(2) + ' at risk');
+  _set('csrStopLine', Math.round(slPips) + ' ' + pipLabel + ' stop · $' + slLoss.toFixed(2) + ' at risk');
 
   // ── Detail results ──
   document.getElementById('cPosSize').textContent   = lotsDisplay;
   document.getElementById('cPosVal').textContent    = '$' + posVal.toLocaleString(undefined, {maximumFractionDigits: 0}) + (assetType === 'forex' ? ' notional' : acct ? ' (' + ((posVal/acct)*100).toFixed(0) + '% of account)' : '');
-  document.getElementById('cStopDist').textContent  = slPips.toFixed(decimals) + ' ' + pipLabel + pipValStr + ' · lose $' + slLoss.toFixed(2) + ' if hit (' + riskPct + '% of account)';
+  document.getElementById('cStopDist').textContent  = Math.round(slPips) + ' ' + pipLabel + ' · $' + slLoss.toFixed(2) + ' if hit (' + riskPct + '% of account)';
   document.getElementById('cMarginReq').textContent = assetType === 'forex' ? '~$' + margin.toLocaleString(undefined, {maximumFractionDigits: 0}) + ' (approx)' : lev > 1 ? '$' + margin.toLocaleString(undefined, {maximumFractionDigits: 0}) : '— (spot)';
 
   // ── Win rate from last backtest ──
