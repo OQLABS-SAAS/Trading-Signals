@@ -3479,12 +3479,7 @@ function updateInlineInst(assetType) {
   const key  = _AT_TAB_MAP[assetType] || 'crypto';
   const list = INST_TABS[key] || [];
   row.innerHTML = list.map(({sym, tf, at}) =>
-    `<button class="inst-chip" style="flex-shrink:0;padding:4px 11px;font-size:11px;font-weight:700;
-      border-radius:20px;border:1px solid var(--border);background:var(--surface);
-      color:var(--text2);cursor:pointer;white-space:nowrap;font-family:var(--mono);"
-      onmouseover="this.style.borderColor='var(--orange)';this.style.color='var(--orange)';"
-      onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text2)';"
-      onclick="quickLoad('${sym}','${at}','${tf.toLowerCase()}')">${sym} <span style="font-size:9px;opacity:.5;">${tf}</span></button>`
+    `<button class="inst-chip" onclick="quickLoad('${sym}','${at}','${tf.toLowerCase()}')">${sym} <span>${tf}</span></button>`
   ).join('');
 }
 
@@ -5197,13 +5192,15 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
   html += '<table class="scan-mtf-table"><thead><tr><th>Symbol</th>';
   tfList.forEach(function(tf) { html += '<th>' + tf.toUpperCase() + '</th>'; });
   html += '</tr></thead><tbody>';
+  // ── Store scan data in a lookup table so onclick attributes only need ticker+tf keys.
+  //    This avoids all JSON-in-HTML-attribute fragility (single quotes, parens, em dashes
+  //    in reason strings can silently truncate onclick text).
+  window._smtfData = {};
   tickers.forEach(function(ticker) {
     var tfResults = resultsByTicker[ticker];
     // ── Resolve per-ticker asset_type from scan results (fixes 'mixed' passthrough bug) ──
-    // When running "All Instruments", assetType is 'mixed'. normalise_ticker('AVAX','mixed')
-    // falls through all branches and returns 'AVAX' unchanged → TV/yfinance both fail → 404.
-    // Fix: read the actual asset_type stored in each scan result (set per-batch in runScanner).
     var tickerAt = (Object.values(tfResults).find(function(r){ return r && r.asset_type && r.asset_type !== 'mixed'; }) || {}).asset_type || assetType;
+    window._smtfData[ticker] = { at: tickerAt, tfs: {} };
     var rowId = 'smtf-row-' + ticker.replace(/[^A-Za-z0-9]/g,'');
     // ── Row has NO onclick — ticker column handles "go to signals" click,
     //    TF columns handle "expand detail" click. No stopPropagation() needed. ──
@@ -5215,9 +5212,18 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
       var sig = res ? (res.signal_hint || 'HOLD') : '—';
       var rsi = res ? (res.rsi != null ? res.rsi.toFixed(1) : '—') : '—';
       var sigClass = sig === 'BUY' || sig.includes('BUY') ? 'buy' : sig === 'SELL' || sig.includes('SELL') ? 'sell' : 'hold';
-      var resJson = res ? encodeURIComponent(JSON.stringify({sig:sig,rsi:rsi,ema:res.ema_trend||'',conf:res.confidence||'',reason:res.reason||'',bull:res.bull_score||0,bear:res.bear_score||0,at:tickerAt})) : '';
-      // TF column: click → expand inline detail. No stopPropagation() needed (row has no handler).
-      html += '<td onclick="scannerExpandTF(\'' + ticker + '\',\'' + tickerAt + '\',\'' + tf + '\',\'' + rowId + '\',\'' + resJson + '\')" style="cursor:pointer;">';
+      // Store full result data in lookup — no JSON in onclick
+      window._smtfData[ticker].tfs[tf] = {
+        sig: sig, rsi: rsi,
+        ema: res ? (res.ema_trend || '') : '',
+        conf: res ? (res.confidence || '') : '',
+        reason: res ? (res.reason || '') : '',
+        bull: res ? (res.bull_score || 0) : 0,
+        bear: res ? (res.bear_score || 0) : 0,
+        at: tickerAt
+      };
+      // TF column: onclick passes only ticker + tf strings — safe, no special chars
+      html += '<td onclick="scannerExpandTF(\'' + ticker + '\',\'' + tf + '\',\'' + rowId + '\')" style="cursor:pointer;">';
       html += '<div class="scan-mtf-cell">';
       html += '<div class="scan-mtf-pill ' + sigClass + '">' + (sig === 'COUNTER_BUY' ? 'CTR' : sig === 'POSSIBLE_BUY' ? 'PBY' : sig === 'POSSIBLE_SELL' ? 'PSL' : sig) + '</div>';
       html += '<div class="scan-mtf-rsi">' + rsi + '</div>';
@@ -5232,9 +5238,12 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
 }
 
 // ── Scanner TF expand: show inline detail row instead of immediately navigating ──
-function scannerExpandTF(ticker, assetType, tf, rowId, resJsonEncoded) {
+// No JSON in onclick — data is looked up from window._smtfData[ticker].tfs[tf]
+function scannerExpandTF(ticker, tf, rowId) {
   var detailRowId = rowId + '-detail';
   var detailRow = document.getElementById(detailRowId);
+  var tickerData = (window._smtfData || {})[ticker] || {};
+  var assetType = tickerData.at || 'crypto';
   if (!detailRow) { scannerLoadTicker(ticker, assetType, tf); return; }
 
   // Toggle: if already open for this TF, close it
@@ -5244,8 +5253,8 @@ function scannerExpandTF(ticker, assetType, tf, rowId, resJsonEncoded) {
     return;
   }
 
-  var res = {};
-  try { res = JSON.parse(decodeURIComponent(resJsonEncoded)); } catch(e) {}
+  // Look up data from module-level store — no parsing of encoded strings
+  var res = (tickerData.tfs || {})[tf] || {};
 
   var sig = res.sig || '—';
   var rsi = res.rsi || '—';
