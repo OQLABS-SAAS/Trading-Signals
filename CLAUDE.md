@@ -487,7 +487,7 @@ Fix (commits `5eab9e7`, `6b244d3`, `dcc553e`):
 
 ### SESSION HANDOFF NOTES — 2026-04-14 (Journey panel scroll-to fixes)
 
-**All changes committed and deployed. Runtime verified by user.**
+**All changes committed, deployed, and runtime verified by user on 2026-04-14.**
 
 **nsScrollTo() — commit `07a692d`:**
 - Journey panel step buttons called `nsScrollTo()` but the function did not exist. Added it to `static/index.html`.
