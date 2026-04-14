@@ -526,3 +526,55 @@ Fix (commits `5eab9e7`, `6b244d3`, `dcc553e`):
 - `07a692d` — Add nsScrollTo() function
 - `8bc9c34` — Fix onclick double-quote truncation on journey panel buttons
 - `78eca72` — Fix scrollIntoView no-op on hidden calcBody children
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-14 (R2 signal history + calculator rebuild)
+
+**All changes committed. Deploy: `git push origin main` → Railway auto-deploys.**
+
+**R1: Mobile responsiveness — COMPLETE (prior session).**
+
+**R2: Signal history log — commit `e8b871b` — runtime verified by user.**
+- New `signal_history` Postgres table (auto-created on deploy via `_Base.metadata.create_all`).
+- `SignalHistory` model: ticker, asset_type, timeframe, signal, price, entry, stop_loss, tp1, confidence, confidence_label, fired_at.
+- Every `analyze()` call saves a row after building `response_data` (fire-and-forget, never blocks the response).
+- `/api/signals/history` GET endpoint — returns last 30 signals for current user.
+- Frontend: collapsible "Signal History" table inline on signals page (click header to expand). Loads from Postgres on login (`unlockApp()`) and after every analysis (`addToHistory()` calls `loadSigHistory()`). Each row clickable → re-analyzes that ticker.
+
+**Pine Script button restored — commit `70dc6a5`:**
+- Button re-added to `sig-btns` area (had been removed in prior session when journey panel was built).
+- Calls `copyPineScript()` and scrolls to `pineCodeWrap`.
+
+**R3: Telegram alerts — code already built (prior session). Waiting on user to set Railway env vars:**
+- `TELEGRAM_BOT_TOKEN` = bot token from BotFather
+- `TELEGRAM_CHAT_ID` = user's chat ID (message the bot, then call getUpdates URL)
+- No code changes needed once vars are set.
+
+**Calculator rebuild — commit `44f73ce` — runtime verified by user (EURUSD numbers correct).**
+
+Root cause of old approach: "My Trade ($)" is not how professional traders size positions.
+
+New approach (SonarLab / industry standard):
+- `cCapital` (My Trade $) removed. `cRisk` (Risk %) replaces it as a real input.
+- `moneyAtRisk = account × (riskPct / 100)`
+- **Forex:** `lots = moneyAtRisk / (slPips × pipValuePerLot)`. Pip value per lot:
+  - USD-quoted pairs (EURUSD, GBPUSD, AUDUSD): `pipSize × contractSize` → $10/pip per std lot
+  - USD-base pairs (USDJPY, USDCHF, USDCAD): `(pipSize / entry) × contractSize`
+  - Forex third field changed from "Leverage" to "Contract Size" (Standard 100k / Mini 10k / Micro 1k)
+- **Crypto:** `units = moneyAtRisk / slDist` (leverage affects margin display only)
+- **Stocks/indices/commodities:** `shares = moneyAtRisk / slDist`
+- SL hit always = exactly `moneyAtRisk` by construction.
+- Summary bar now shows: **Money at Risk** (amber, prominent) + position size.
+- Coaching step 2 updated: explains Risk % with real dollar examples (1% = $X, 2% = $Y, 5% = $Z).
+- Added >10% risk warning coaching state.
+- `autoFillCalc(d)` still auto-fills entry/SL/TP1/2/3 from signal — user only needs Account + Risk %.
+
+**Key commits this session:**
+- `70dc6a5` — Pine Script button restored
+- `e8b871b` — R2 signal history log
+- `44f73ce` — Calculator rebuild (Risk % lot-size approach)
+
+**Pending:**
+- R3: Telegram — set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in Railway → works immediately, no code needed.
+- R4: Tighten signals page layout (not yet started).
