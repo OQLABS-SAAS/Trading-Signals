@@ -1393,19 +1393,21 @@ def detect_counter_trade(ind):
     if not price or not atr:
         return {"counter_trade": False}
     entry  = price
-    sl     = round(min(sup - atr * 0.3, price - atr * 4.0), 4)
+    _dpc = 2 if price >= 100 else 4 if price >= 1 else 6 if price >= 0.01 else 8
+    prnd_c = lambda v: round(v, _dpc)
+    sl     = prnd_c(min(sup - atr * 0.3, price - atr * 4.0))
     risk   = entry - sl
     if risk <= 0:
         return {"counter_trade": False}
 
-    tp1 = round(entry + risk * 1.5, 4)
-    tp2 = round(entry + risk * 2.5, 4)
-    tp3 = round(entry + risk * 4.0, 4)
+    tp1 = prnd_c(entry + risk * 1.5)
+    tp2 = prnd_c(entry + risk * 2.5)
+    tp3 = prnd_c(entry + risk * 4.0)
     # ── 2d: Net RR after fees — 0.2% round-trip ──────────────────────────
     fee_adj = entry * 0.002
-    tp1 = round(tp1 - fee_adj, 4)
-    tp2 = round(tp2 - fee_adj, 4)
-    tp3 = round(tp3 - fee_adj, 4)
+    tp1 = prnd_c(tp1 - fee_adj)
+    tp2 = prnd_c(tp2 - fee_adj)
+    tp3 = prnd_c(tp3 - fee_adj)
     rr1 = round((tp1 - entry) / risk, 1)
     rr2 = round((tp2 - entry) / risk, 1)
     rr3 = round((tp3 - entry) / risk, 1)
@@ -2062,29 +2064,34 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
 
     # Generate trade levels based on ATR
     if signal != "HOLD" and atr > 0:
-        entry = round(price, 4) if price > 100 else round(price, 2)
+        # Adaptive decimal places: cheap altcoins (< $1) need 6dp so TP levels
+        # don't collapse to the same displayed value after rounding.
+        _dp = 2 if price >= 100 else 4 if price >= 1 else 6 if price >= 0.01 else 8
+        prnd = lambda v: round(v, _dp)
+
+        entry = prnd(price)
 
         if signal == "BUY":
-            stop_loss = round(price - (4.0 * atr), 4) if price > 100 else round(price - (4.0 * atr), 2)
-            tp1 = round(price + (2 * atr), 4) if price > 100 else round(price + (2 * atr), 2)
-            tp2 = round(price + (3.5 * atr), 4) if price > 100 else round(price + (3.5 * atr), 2)
-            tp3 = round(price + (5.5 * atr), 4) if price > 100 else round(price + (5.5 * atr), 2)
+            stop_loss = prnd(price - (4.0 * atr))
+            tp1 = prnd(price + (2 * atr))
+            tp2 = prnd(price + (3.5 * atr))
+            tp3 = prnd(price + (5.5 * atr))
         else:  # SELL
-            stop_loss = round(price + (4.0 * atr), 4) if price > 100 else round(price + (4.0 * atr), 2)
-            tp1 = round(price - (2 * atr), 4) if price > 100 else round(price - (2 * atr), 2)
-            tp2 = round(price - (3.5 * atr), 4) if price > 100 else round(price - (3.5 * atr), 2)
-            tp3 = round(price - (5.5 * atr), 4) if price > 100 else round(price - (5.5 * atr), 2)
+            stop_loss = prnd(price + (4.0 * atr))
+            tp1 = prnd(price - (2 * atr))
+            tp2 = prnd(price - (3.5 * atr))
+            tp3 = prnd(price - (5.5 * atr))
 
         # ── 2d: Net RR after fees — 0.2% round-trip (0.1% entry + 0.1% exit) ──
         fee_adj = entry * 0.002
         if signal == "BUY":
-            tp1 = round(tp1 - fee_adj, 4) if price > 100 else round(tp1 - fee_adj, 2)
-            tp2 = round(tp2 - fee_adj, 4) if price > 100 else round(tp2 - fee_adj, 2)
-            tp3 = round(tp3 - fee_adj, 4) if price > 100 else round(tp3 - fee_adj, 2)
+            tp1 = prnd(tp1 - fee_adj)
+            tp2 = prnd(tp2 - fee_adj)
+            tp3 = prnd(tp3 - fee_adj)
         else:  # SELL — fees add to cost, reducing net gain
-            tp1 = round(tp1 + fee_adj, 4) if price > 100 else round(tp1 + fee_adj, 2)
-            tp2 = round(tp2 + fee_adj, 4) if price > 100 else round(tp2 + fee_adj, 2)
-            tp3 = round(tp3 + fee_adj, 4) if price > 100 else round(tp3 + fee_adj, 2)
+            tp1 = prnd(tp1 + fee_adj)
+            tp2 = prnd(tp2 + fee_adj)
+            tp3 = prnd(tp3 + fee_adj)
 
         # Calculate R:R ratios (after fee adjustment)
         risk = abs(entry - stop_loss)
@@ -2404,28 +2411,30 @@ def get_watch_signal(ticker, asset_type, ind, timeframe):
 
     # Trade levels
     if signal != "HOLD" and atr > 0:
-        entry = round(price, 4) if price > 100 else round(price, 2)
+        _dp2 = 2 if price >= 100 else 4 if price >= 1 else 6 if price >= 0.01 else 8
+        prnd2 = lambda v: round(v, _dp2)
+        entry = prnd2(price)
         if signal == "BUY":
-            stop_loss = round(price - (4.0 * atr), 4) if price > 100 else round(price - (4.0 * atr), 2)
-            tp1 = round(price + (2 * atr), 4) if price > 100 else round(price + (2 * atr), 2)
-            tp2 = round(price + (3.5 * atr), 4) if price > 100 else round(price + (3.5 * atr), 2)
-            tp3 = round(price + (5.5 * atr), 4) if price > 100 else round(price + (5.5 * atr), 2)
+            stop_loss = prnd2(price - (4.0 * atr))
+            tp1 = prnd2(price + (2 * atr))
+            tp2 = prnd2(price + (3.5 * atr))
+            tp3 = prnd2(price + (5.5 * atr))
         else:  # SELL
-            stop_loss = round(price + (4.0 * atr), 4) if price > 100 else round(price + (4.0 * atr), 2)
-            tp1 = round(price - (2 * atr), 4) if price > 100 else round(price - (2 * atr), 2)
-            tp2 = round(price - (3.5 * atr), 4) if price > 100 else round(price - (3.5 * atr), 2)
-            tp3 = round(price - (5.5 * atr), 4) if price > 100 else round(price - (5.5 * atr), 2)
+            stop_loss = prnd2(price + (4.0 * atr))
+            tp1 = prnd2(price - (2 * atr))
+            tp2 = prnd2(price - (3.5 * atr))
+            tp3 = prnd2(price - (5.5 * atr))
 
         # ── 2d: Net RR after fees — 0.2% round-trip ──────────────────────────
         fee_adj = entry * 0.002
         if signal == "BUY":
-            tp1 = round(tp1 - fee_adj, 4) if price > 100 else round(tp1 - fee_adj, 2)
-            tp2 = round(tp2 - fee_adj, 4) if price > 100 else round(tp2 - fee_adj, 2)
-            tp3 = round(tp3 - fee_adj, 4) if price > 100 else round(tp3 - fee_adj, 2)
+            tp1 = prnd2(tp1 - fee_adj)
+            tp2 = prnd2(tp2 - fee_adj)
+            tp3 = prnd2(tp3 - fee_adj)
         else:
-            tp1 = round(tp1 + fee_adj, 4) if price > 100 else round(tp1 + fee_adj, 2)
-            tp2 = round(tp2 + fee_adj, 4) if price > 100 else round(tp2 + fee_adj, 2)
-            tp3 = round(tp3 + fee_adj, 4) if price > 100 else round(tp3 + fee_adj, 2)
+            tp1 = prnd2(tp1 + fee_adj)
+            tp2 = prnd2(tp2 + fee_adj)
+            tp3 = prnd2(tp3 + fee_adj)
 
         risk = abs(entry - stop_loss)
         if risk > 0:

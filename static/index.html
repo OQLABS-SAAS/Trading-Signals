@@ -5204,15 +5204,19 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
     // Fix: read the actual asset_type stored in each scan result (set per-batch in runScanner).
     var tickerAt = (Object.values(tfResults).find(function(r){ return r && r.asset_type && r.asset_type !== 'mixed'; }) || {}).asset_type || assetType;
     var rowId = 'smtf-row-' + ticker.replace(/[^A-Za-z0-9]/g,'');
-    html += '<tr id="' + rowId + '" onclick="scannerLoadTicker(\'' + ticker + '\',\'' + tickerAt + '\')" style="cursor:pointer;">';
-    html += '<td style="text-align:left;font-weight:700;color:var(--amber);">' + ticker + '</td>';
+    // ── Row has NO onclick — ticker column handles "go to signals" click,
+    //    TF columns handle "expand detail" click. No stopPropagation() needed. ──
+    html += '<tr id="' + rowId + '">';
+    // Ticker column: click → open on best available TF (4h default)
+    html += '<td onclick="scannerLoadTicker(\'' + ticker + '\',\'' + tickerAt + '\')" style="text-align:left;font-weight:700;color:var(--amber);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;" title="Open in Signals (default TF)">' + ticker + '</td>';
     tfList.forEach(function(tf) {
       var res = tfResults[tf];
       var sig = res ? (res.signal_hint || 'HOLD') : '—';
       var rsi = res ? (res.rsi != null ? res.rsi.toFixed(1) : '—') : '—';
       var sigClass = sig === 'BUY' || sig.includes('BUY') ? 'buy' : sig === 'SELL' || sig.includes('SELL') ? 'sell' : 'hold';
       var resJson = res ? encodeURIComponent(JSON.stringify({sig:sig,rsi:rsi,ema:res.ema_trend||'',conf:res.confidence||'',reason:res.reason||'',bull:res.bull_score||0,bear:res.bear_score||0,at:tickerAt})) : '';
-      html += '<td onclick="event.stopPropagation();scannerExpandTF(\'' + ticker + '\',\'' + tickerAt + '\',\'' + tf + '\',\'' + rowId + '\',\'' + resJson + '\')" style="cursor:pointer;">';
+      // TF column: click → expand inline detail. No stopPropagation() needed (row has no handler).
+      html += '<td onclick="scannerExpandTF(\'' + ticker + '\',\'' + tickerAt + '\',\'' + tf + '\',\'' + rowId + '\',\'' + resJson + '\')" style="cursor:pointer;">';
       html += '<div class="scan-mtf-cell">';
       html += '<div class="scan-mtf-pill ' + sigClass + '">' + (sig === 'COUNTER_BUY' ? 'CTR' : sig === 'POSSIBLE_BUY' ? 'PBY' : sig === 'POSSIBLE_SELL' ? 'PSL' : sig) + '</div>';
       html += '<div class="scan-mtf-rsi">' + rsi + '</div>';
