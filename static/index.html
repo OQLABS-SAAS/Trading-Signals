@@ -352,7 +352,7 @@ body::before{
   transition:all .15s;text-transform:uppercase;
   display:inline-flex;align-items:center;gap:6px;
 }
-.btn-primary:hover{background:var(--amber2);transform:translateY(-1px);}
+.btn-primary:hover{background:var(--amber2);transform:translateY(-1px);box-shadow:0 0 0 2px rgba(245,166,35,.3),0 4px 16px rgba(245,166,35,.25);}
 .btn-ghost{
   background:transparent;color:var(--muted2);
   font-family:var(--mono);font-size:11px;font-weight:500;
@@ -360,7 +360,7 @@ body::before{
   border:1px solid var(--border2);border-radius:2px;
   cursor:pointer;transition:all .15s;text-transform:uppercase;
 }
-.btn-ghost:hover{color:var(--amber);border-color:var(--amber);}
+.btn-ghost:hover{color:var(--amber);border-color:var(--amber);box-shadow:0 0 0 2px rgba(245,166,35,.15),0 2px 10px rgba(245,166,35,.12);}
 
 /* Win rate badge */
 .win-badge{
@@ -389,8 +389,8 @@ body::before{
   background:transparent;color:var(--muted2);
   cursor:pointer;transition:all .15s;
 }
-.rb-btn:hover{color:var(--amber);border-color:var(--amber);}
-.rb-btn.active{background:var(--amber-glow);border-color:var(--amber);color:var(--amber);}
+.rb-btn:hover{color:var(--amber);border-color:var(--amber);box-shadow:0 0 0 2px rgba(245,166,35,.2),0 2px 8px rgba(245,166,35,.15);}
+.rb-btn.active{background:var(--amber-glow);border-color:var(--amber);color:var(--amber);box-shadow:0 0 8px rgba(245,166,35,.3);}
 .rb-time{font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:auto;}
 .rb-spin{
   display:none;width:14px;height:14px;
@@ -850,7 +850,7 @@ body::before{
   background:transparent;color:var(--muted2);cursor:pointer;
   transition:all .15s;text-transform:uppercase;letter-spacing:.5px;
 }
-.scan-filter-btn.active,.scan-filter-btn:hover{border-color:var(--amber);color:var(--amber);}
+.scan-filter-btn.active,.scan-filter-btn:hover{border-color:var(--amber);color:var(--amber);box-shadow:0 0 0 2px rgba(245,166,35,.18),0 2px 8px rgba(245,166,35,.12);}
 .scan-table{width:100%;border-collapse:collapse;}
 .scan-table th{
   font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:1.5px;
@@ -5170,14 +5170,21 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
   html += '</tr></thead><tbody>';
   tickers.forEach(function(ticker) {
     var tfResults = resultsByTicker[ticker];
-    html += '<tr onclick="scannerLoadTicker(\'' + ticker + '\',\'' + assetType + '\')" style="cursor:pointer;">';
+    // ── Resolve per-ticker asset_type from scan results (fixes 'mixed' passthrough bug) ──
+    // When running "All Instruments", assetType is 'mixed'. normalise_ticker('AVAX','mixed')
+    // falls through all branches and returns 'AVAX' unchanged → TV/yfinance both fail → 404.
+    // Fix: read the actual asset_type stored in each scan result (set per-batch in runScanner).
+    var tickerAt = (Object.values(tfResults).find(function(r){ return r && r.asset_type && r.asset_type !== 'mixed'; }) || {}).asset_type || assetType;
+    var rowId = 'smtf-row-' + ticker.replace(/[^A-Za-z0-9]/g,'');
+    html += '<tr id="' + rowId + '" onclick="scannerLoadTicker(\'' + ticker + '\',\'' + tickerAt + '\')" style="cursor:pointer;">';
     html += '<td style="text-align:left;font-weight:700;color:var(--amber);">' + ticker + '</td>';
     tfList.forEach(function(tf) {
       var res = tfResults[tf];
       var sig = res ? (res.signal_hint || 'HOLD') : '—';
       var rsi = res ? (res.rsi != null ? res.rsi.toFixed(1) : '—') : '—';
       var sigClass = sig === 'BUY' || sig.includes('BUY') ? 'buy' : sig === 'SELL' || sig.includes('SELL') ? 'sell' : 'hold';
-      html += '<td onclick="event.stopPropagation();scannerLoadTicker(\'' + ticker + '\',\'' + assetType + '\',\'' + tf + '\')" style="cursor:pointer;">';
+      var resJson = res ? encodeURIComponent(JSON.stringify({sig:sig,rsi:rsi,ema:res.ema_trend||'',conf:res.confidence||'',reason:res.reason||'',bull:res.bull_score||0,bear:res.bear_score||0,at:tickerAt})) : '';
+      html += '<td onclick="event.stopPropagation();scannerExpandTF(\'' + ticker + '\',\'' + tickerAt + '\',\'' + tf + '\',\'' + rowId + '\',\'' + resJson + '\')" style="cursor:pointer;">';
       html += '<div class="scan-mtf-cell">';
       html += '<div class="scan-mtf-pill ' + sigClass + '">' + (sig === 'COUNTER_BUY' ? 'CTR' : sig === 'POSSIBLE_BUY' ? 'PBY' : sig === 'POSSIBLE_SELL' ? 'PSL' : sig) + '</div>';
       html += '<div class="scan-mtf-rsi">' + rsi + '</div>';
@@ -5185,9 +5192,61 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
       html += '</td>';
     });
     html += '</tr>';
+    html += '<tr id="' + rowId + '-detail" style="display:none;"><td colspan="6" style="padding:0;"></td></tr>';
   });
   html += '</tbody></table>';
   document.getElementById('scanResults').innerHTML = html;
+}
+
+// ── Scanner TF expand: show inline detail row instead of immediately navigating ──
+function scannerExpandTF(ticker, assetType, tf, rowId, resJsonEncoded) {
+  var detailRowId = rowId + '-detail';
+  var detailRow = document.getElementById(detailRowId);
+  if (!detailRow) { scannerLoadTicker(ticker, assetType, tf); return; }
+
+  // Toggle: if already open for this TF, close it
+  if (detailRow.style.display !== 'none' && detailRow.dataset.tf === tf) {
+    detailRow.style.display = 'none';
+    detailRow.dataset.tf = '';
+    return;
+  }
+
+  var res = {};
+  try { res = JSON.parse(decodeURIComponent(resJsonEncoded)); } catch(e) {}
+
+  var sig = res.sig || '—';
+  var rsi = res.rsi || '—';
+  var ema = res.ema || '—';
+  var conf = res.conf || '';
+  var reason = res.reason || '';
+  var bull = res.bull || 0;
+  var bear = res.bear || 0;
+  var at = res.at || assetType;
+
+  var sigColor = sig === 'BUY' || (sig||'').includes('BUY') ? 'var(--green)' : sig === 'SELL' || (sig||'').includes('SELL') ? 'var(--red)' : 'var(--muted2)';
+  var sigBg = sig === 'BUY' || (sig||'').includes('BUY') ? 'rgba(0,201,141,.12)' : sig === 'SELL' || (sig||'').includes('SELL') ? 'rgba(255,68,89,.12)' : 'rgba(255,255,255,.05)';
+  var emaColor = ema === 'BULLISH' ? 'var(--green)' : ema === 'BEARISH' ? 'var(--red)' : 'var(--muted2)';
+  var rsiNum = parseFloat(rsi);
+  var rsiCtx = isNaN(rsiNum) ? '' : rsiNum >= 70 ? ' · Overbought' : rsiNum <= 30 ? ' · Oversold' : '';
+  var total = (bull||0) + (bear||0);
+  var bullPct = total > 0 ? Math.round((bull||0)/total*100) : 0;
+
+  var html = '<td colspan="6" style="padding:0;border-top:none;">' +
+    '<div style="padding:10px 14px;background:rgba(245,166,35,.04);border-top:1px solid rgba(245,166,35,.12);border-bottom:1px solid rgba(255,255,255,.05);display:flex;flex-wrap:wrap;gap:12px;align-items:center;">' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;">' + ticker + ' · ' + tf.toUpperCase() + '</span>' +
+        '<span style="font-family:var(--mono);font-size:11px;font-weight:800;color:' + sigColor + ';background:' + sigBg + ';padding:2px 8px;border-radius:2px;">' + sig + '</span>' +
+      '</div>' +
+      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">RSI <span style="color:var(--white);font-weight:700;">' + rsi + '</span>' + rsiCtx + '</div>' +
+      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Trend <span style="color:' + emaColor + ';font-weight:700;">' + ema + '</span></div>' +
+      (total > 0 ? '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Agreement <span style="color:var(--amber);font-weight:700;">' + bullPct + '%</span> bull</div>' : '') +
+      (reason ? '<div style="font-family:var(--mono);font-size:9px;color:var(--muted);flex:1;min-width:140px;line-height:1.4;">' + reason.substring(0,80) + (reason.length>80?'…':'') + '</div>' : '') +
+      '<button onclick="scannerLoadTicker(\'' + ticker + '\',\'' + at + '\',\'' + tf + '\')" style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:5px 12px;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;cursor:pointer;white-space:nowrap;">Open in Signals →</button>' +
+    '</div></td>';
+
+  detailRow.innerHTML = html;
+  detailRow.style.display = '';
+  detailRow.dataset.tf = tf;
 }
 
 // Helper: load ticker from scanner, switch to signals tab, then analyze.
@@ -10175,7 +10234,8 @@ function recalc() {
     var tsTP1  = tp1 > 0 ? tsPct(tp1) * tradeSize : 0;
     var tsTP2  = tp2 > 0 ? tsPct(tp2) * tradeSize : 0;
     var tsTP3  = tp3 > 0 ? tsPct(tp3) * tradeSize : 0;
-    _set('csrTradeSizeVal', '$' + tradeSize.toLocaleString());
+    var tradeSizePctOfAcct = acct > 0 ? (tradeSize / acct * 100).toFixed(1) : null;
+    _set('csrTradeSizeVal', '$' + tradeSize.toLocaleString() + (tradeSizePctOfAcct ? ' (' + tradeSizePctOfAcct + '% of account)' : ''));
     _set('csrTradeSL',  sl  > 0 ? '−$' + tsSL.toFixed(2)  : '—');
     _set('csrTradeTP1', tp1 > 0 ? '+$' + tsTP1.toFixed(2) : '—');
     _set('csrTradeTP2', tp2 > 0 ? '+$' + tsTP2.toFixed(2) : '—');
