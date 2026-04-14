@@ -10014,15 +10014,34 @@ function recalc() {
   const decimals = assetType === 'forex' ? 1 : 0;
 
   // ── Unit label ──
-  const unitLabel = assetType === 'crypto'
-    ? (posSize >= 1 ? posSize.toFixed(4) + ' coins' : posSize.toFixed(6) + ' coins')
-    : assetType === 'forex'
-      ? (posSize / 100000).toFixed(2) + ' lots'
-      : posSize.toFixed(2) + ' shares';
+  let unitLabel;
+  if (assetType === 'crypto') {
+    unitLabel = posSize >= 1 ? posSize.toFixed(4) + ' coins' : posSize.toFixed(6) + ' coins';
+  } else if (assetType === 'forex') {
+    // Fix 1: classify into standard / mini / micro lots properly
+    const lots = posSize / 100000;
+    if (lots >= 1)        unitLabel = lots.toFixed(2) + ' lots';
+    else if (lots >= 0.1) unitLabel = (lots * 10).toFixed(2) + ' mini lots';
+    else if (lots >= 0.001) unitLabel = (lots * 100).toFixed(3) + ' micro lots';
+    else                  unitLabel = Math.round(posSize) + ' units';
+  } else {
+    unitLabel = posSize.toFixed(2) + ' shares';
+  }
+
+  // Fix 2: pip value at trader's position size (forex only)
+  let pipValStr = '';
+  if (assetType === 'forex') {
+    // pip value in account currency = posSize × pipSize (for USD-quoted pairs)
+    // for JPY pairs divide by entry to convert yen→USD
+    const pipValRaw = ticker.includes('JPY')
+      ? (posSize * pipSize) / (entry || 1)
+      : posSize * pipSize;
+    pipValStr = ' · pip value $' + pipValRaw.toFixed(2);
+  }
 
   document.getElementById('cPosSize').textContent   = unitLabel;
   document.getElementById('cPosVal').textContent    = '$' + posVal.toLocaleString(undefined, {maximumFractionDigits: 0}) + (acct ? ' (' + ((posVal/acct)*100).toFixed(0) + '% of account)' : '');
-  document.getElementById('cStopDist').textContent  = slPips.toFixed(decimals) + ' ' + pipLabel + ' · lose $' + slLoss.toFixed(2) + ' if hit' + (acct ? ' (' + ((slLoss/acct)*100).toFixed(2) + '% of account)' : '');
+  document.getElementById('cStopDist').textContent  = slPips.toFixed(decimals) + ' ' + pipLabel + pipValStr + ' · lose $' + slLoss.toFixed(2) + ' if hit' + (acct ? ' (' + ((slLoss/acct)*100).toFixed(2) + '% of account)' : '');
   document.getElementById('cMarginReq').textContent = lev > 1 ? '$' + margin.toLocaleString(undefined, {maximumFractionDigits: 0}) : '— (spot)';
 
   // ── Win rate from last backtest ──
@@ -10061,8 +10080,21 @@ function recalc() {
     document.getElementById('c' + lbl + 'RR').textContent         = 'R:R 1 : ' + t.rr;
     document.getElementById('c' + lbl + 'Profit').textContent     = '+$' + t.netProfit.toFixed(0) + ' net';
     document.getElementById('c' + lbl + 'Dist').textContent       = t.tpPips.toFixed(decimals) + ' ' + pipLabel;
-    document.getElementById('c' + lbl + 'Pct').textContent        = '+' + t.pct + '%';
+    // Fix 3: label % gain clearly per asset type
+    const pctLabel = document.querySelector('#c' + lbl + 'Pct')?.closest('.ctp-detail-row')?.querySelector('.ctp-detail-label');
+    if (pctLabel) {
+      pctLabel.textContent = assetType === 'forex' ? 'Pips to target' :
+                             assetType === 'crypto' ? 'Price move %' : '% gain at ' + lbl;
+    }
+    document.getElementById('c' + lbl + 'Pct').textContent        = assetType === 'forex'
+      ? t.tpPips.toFixed(1) + ' pips'
+      : '+' + t.pct + '%';
     document.getElementById('c' + lbl + 'TotalProfit').textContent = '+$' + t.grossProfit.toFixed(0) + ' gross  (fees −$' + t.fees.toFixed(0) + ')';
+    // Fix 3: for crypto show clearly as % of capital, for forex show as % of account
+    const acctPctLabel = document.querySelector('#c' + lbl + 'AcctPct')?.closest('.ctp-detail-row')?.querySelector('.ctp-detail-label');
+    if (acctPctLabel) {
+      acctPctLabel.textContent = assetType === 'crypto' ? '% of your capital' : 'Account % gain';
+    }
     document.getElementById('c' + lbl + 'AcctPct').textContent    = '+' + t.acctNet + '% net  /  +' + t.acctGross + '% gross';
     if (barEl) barEl.style.width = Math.min(100, (t.dist / maxDistAbs) * 100) + '%';
     if (valEl) valEl.textContent = t.tpPips.toFixed(decimals) + ' ' + pipLabel;
