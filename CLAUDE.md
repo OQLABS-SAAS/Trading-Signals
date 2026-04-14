@@ -62,6 +62,23 @@
 - Never expand scope mid-task without explicit user approval
 - One confirmation = one scope
 
+### Feature Preservation — NON-NEGOTIABLE
+- **Never remove any existing feature unless the user explicitly asks for it by name.**
+- Before every commit, run a mental checklist of all known features and verify none have been accidentally removed.
+- Known DotVerse features to check before every commit:
+  - Auto-refresh (OFF / 15s / 30s / 1m / 5m / 15m buttons + spin indicator)
+  - Signals tab: analyze, chart, indicators, MTF, RSI divergence trendlines
+  - Scanner tab: scan all, scanner table, click-to-analyze
+  - Backtest tab: run backtest, Pine Script (ATR research script)
+  - Simulation tab: scenario cards, trade plan
+  - Calculator: account, my trade, leverage, entry/SL/TP fields, RR bar, guidance coach
+  - Journey panel: 5-step What To Do Next
+  - Portfolio: positions table, VaR, stress test, correlation heatmap, optimisation
+  - Watch/alert: toggleWatch, DotVerse alert
+  - Fear & Greed, Latest News, Scenarios sidebar panels
+- If a change touches a section of the page near any of the above, explicitly confirm the feature still renders after the edit.
+- "I only changed X" is not sufficient — side-effects in shared CSS, JS scope, or HTML structure can silently break adjacent features.
+
 ### Understanding Before Acting
 - Never assume intent — restate the requirement in your own words before starting
 - If the instruction is ambiguous, ask one clarifying question before proceeding
@@ -126,6 +143,8 @@ Do not silently investigate then present conclusions and fixes together as if th
 | Code copying | State what the code does before pasting it. Verify it fits. |
 | Risk dismissal | Never skip risk statement. "Low risk" must be argued, not assumed. |
 | Fix proposal | Five elements required: problem, root cause, change, risk, verification. |
+| Before every commit | Run feature checklist. Confirm nothing was accidentally removed. |
+| Feature removal | Only if user explicitly names the feature. Never as a side-effect. |
 
 ---
 
