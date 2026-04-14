@@ -3033,6 +3033,29 @@ def analyze():
             **counter,
             "tv": tv,
         })
+        # ── Persist to signal history (fire-and-forget, never block the response) ──
+        try:
+            if _DBSession:
+                _sh_db = _DBSession()
+                _sh = SignalHistory(
+                    user_id   = session.get("user", {}).get("localId", "default"),
+                    ticker    = ticker,
+                    asset_type= asset_type,
+                    timeframe = timeframe,
+                    signal    = response_data.get("signal", "HOLD"),
+                    price     = response_data.get("price"),
+                    entry     = response_data.get("entry"),
+                    stop_loss = response_data.get("stop_loss"),
+                    tp1       = response_data.get("tp1"),
+                    confidence= response_data.get("confidence"),
+                    confidence_label = response_data.get("confidence_label"),
+                )
+                _sh_db.add(_sh)
+                _sh_db.commit()
+                _sh_db.close()
+        except Exception as _she:
+            print(f"[signal_history] save failed (non-fatal): {_she}")
+
         # Log key response fields for debugging
         print(f"[analyze] RESPONSE FIELDS: signal={response_data.get('signal')} "
               f"price={response_data.get('price')} rsi={response_data.get('rsi')} "
@@ -4219,6 +4242,23 @@ class OptimisationResult(_Base):
     win_rate     = Column(Float,      nullable=True)
     computed_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
 
+class SignalHistory(_Base):
+    """Every signal fired from /api/analyze — one row per analysis."""
+    __tablename__ = "signal_history"
+    id           = Column(Integer,  primary_key=True, autoincrement=True)
+    user_id      = Column(String(64), nullable=False, default="default")
+    ticker       = Column(String(32), nullable=False)
+    asset_type   = Column(String(16), nullable=False)
+    timeframe    = Column(String(8),  nullable=False)
+    signal       = Column(String(8),  nullable=False)   # BUY / SELL / HOLD
+    price        = Column(Float,      nullable=True)
+    entry        = Column(Float,      nullable=True)
+    stop_loss    = Column(Float,      nullable=True)
+    tp1          = Column(Float,      nullable=True)
+    confidence   = Column(Float,      nullable=True)    # 0–100
+    confidence_label = Column(String(16), nullable=True)
+    fired_at     = Column(DateTime,   nullable=False, default=datetime.utcnow)
+
 # Create tables on startup (idempotent — skips existing tables)
 def _init_db():
     if _db_engine:
@@ -4323,6 +4363,38 @@ def positions_delete(pos_id):
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+# ─── Signal History ──────────────────────────────────────────
+
+@app.route("/api/signals/history", methods=["GET"])
+@login_required
+def signal_history_get():
+    """Return the last N signals fired for the current user."""
+    if not _DBSession:
+        return jsonify([])
+    db = _DBSession()
+    try:
+        limit = min(int(request.args.get("limit", 50)), 200)
+        rows = (db.query(SignalHistory)
+                  .order_by(SignalHistory.fired_at.desc())
+                  .limit(limit)
+                  .all())
+        return jsonify([{
+            "id":         r.id,
+            "ticker":     r.ticker,
+            "asset_type": r.asset_type,
+            "timeframe":  r.timeframe,
+            "signal":     r.signal,
+            "price":      r.price,
+            "entry":      r.entry,
+            "stop_loss":  r.stop_loss,
+            "tp1":        r.tp1,
+            "confidence": r.confidence,
+            "confidence_label": r.confidence_label,
+            "fired_at":   r.fired_at.strftime("%d %b %H:%M") if r.fired_at else None,
+        } for r in rows])
     finally:
         db.close()
 

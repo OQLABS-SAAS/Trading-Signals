@@ -1374,6 +1374,34 @@ body::before{
         <div id="nextStepsBody" style="display:flex;flex-direction:column;"></div>
       </div>
 
+      <!-- SIGNAL HISTORY LOG -->
+      <div id="sigHistPanel" style="margin:0 20px 12px;border-radius:3px;overflow:hidden;border:1px solid var(--border);">
+        <div style="background:var(--bg3);padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="var b=document.getElementById('sigHistBody');var a=document.getElementById('sigHistArrow');if(b.style.display==='none'){b.style.display='block';a.textContent='▾';}else{b.style.display='none';a.textContent='▸';}">
+          <span style="font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--muted2);font-weight:700;text-transform:uppercase;">Signal History</span>
+          <span id="sigHistCount" style="font-family:var(--mono);font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(245,166,35,.12);color:var(--amber);font-weight:700;"></span>
+          <span id="sigHistArrow" style="margin-left:auto;color:var(--muted2);font-size:12px;">▸</span>
+        </div>
+        <div id="sigHistBody" style="display:none;overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+            <thead>
+              <tr style="background:var(--bg2);">
+                <th style="padding:5px 8px;text-align:left;color:var(--muted2);font-weight:700;letter-spacing:.5px;white-space:nowrap;">Ticker</th>
+                <th style="padding:5px 8px;text-align:left;color:var(--muted2);font-weight:700;letter-spacing:.5px;">TF</th>
+                <th style="padding:5px 8px;text-align:left;color:var(--muted2);font-weight:700;letter-spacing:.5px;">Signal</th>
+                <th style="padding:5px 8px;text-align:right;color:var(--muted2);font-weight:700;letter-spacing:.5px;white-space:nowrap;">Entry</th>
+                <th style="padding:5px 8px;text-align:right;color:var(--muted2);font-weight:700;letter-spacing:.5px;white-space:nowrap;">SL</th>
+                <th style="padding:5px 8px;text-align:right;color:var(--muted2);font-weight:700;letter-spacing:.5px;white-space:nowrap;">TP1</th>
+                <th style="padding:5px 8px;text-align:right;color:var(--muted2);font-weight:700;letter-spacing:.5px;">Conf.</th>
+                <th style="padding:5px 8px;text-align:right;color:var(--muted2);font-weight:700;letter-spacing:.5px;white-space:nowrap;">Time</th>
+              </tr>
+            </thead>
+            <tbody id="sigHistRows">
+              <tr><td colspan="8" style="padding:12px;text-align:center;color:var(--muted);font-style:italic;">No history yet — run an analysis to start tracking</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- PINE SCRIPT CODE VIEWER -->
       <div id="pineCodeWrap" style="display:none;margin:0 20px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);">
@@ -2887,6 +2915,7 @@ function unlockApp() {
   setInterval(refreshWatchPanel, 60000);
   setInterval(loadMarketPulse, 30 * 60 * 1000);
   setInterval(loadSidebarTickers, 60000);
+  try { loadSigHistory(); } catch(e) {}
 }
 
 async function loadSidebarTickers() {
@@ -5346,8 +5375,10 @@ async function refreshWatchPanel() {
 function addToHistory(d) {
   signalHistory.unshift({ticker:d.ticker,timeframe:d.timeframe,signal:d.signal,price:d.price,asset_type:d.asset_type});
   if (signalHistory.length > 15) signalHistory.pop();
-  document.getElementById('histCount').textContent = signalHistory.length;
-  document.getElementById('historyList').innerHTML = signalHistory.map(h =>
+  // Legacy histCount/historyList — safe no-op if elements absent
+  var hc = document.getElementById('histCount'); if (hc) hc.textContent = signalHistory.length;
+  var hl = document.getElementById('historyList');
+  if (hl) hl.innerHTML = signalHistory.map(h =>
     `<div class="wl-item" onclick="quickLoad('${h.ticker}','${h.asset_type}','${h.timeframe}')">
       <span class="sig-pill ${h.signal==='BUY'?'BUY':h.signal==='SELL'?'SELL':'HOLD'}">${h.signal}</span>
       <div style="flex:1;margin-left:6px;">
@@ -5356,6 +5387,47 @@ function addToHistory(d) {
       <div class="wl-price" style="font-size:11px;">${fmt(h.price)}</div>
     </div>`
   ).join('');
+  // Refresh the persistent history panel from backend
+  loadSigHistory();
+}
+
+function _sigColor(sig) {
+  if (sig === 'BUY')  return '#00c98d';
+  if (sig === 'SELL') return '#FF4459';
+  return 'var(--muted2)';
+}
+
+function loadSigHistory() {
+  fetch('/api/signals/history?limit=30')
+    .then(function(r){ return r.ok ? r.json() : []; })
+    .then(function(rows){
+      var tbody = document.getElementById('sigHistRows');
+      var count = document.getElementById('sigHistCount');
+      if (!tbody) return;
+      if (!rows || !rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="padding:12px;text-align:center;color:var(--muted);font-style:italic;">No history yet — run an analysis to start tracking</td></tr>';
+        if (count) count.textContent = '';
+        return;
+      }
+      if (count) count.textContent = rows.length;
+      tbody.innerHTML = rows.map(function(r){
+        var sc = _sigColor(r.signal);
+        var sigBadge = '<span style="display:inline-block;padding:1px 6px;border-radius:2px;font-size:9px;font-weight:800;letter-spacing:.5px;background:' + sc + '22;color:' + sc + ';border:1px solid ' + sc + '44;">' + r.signal + '</span>';
+        var confBadge = r.confidence ? Math.round(r.confidence) + '%' : '—';
+        var row = '<tr style="border-bottom:1px solid var(--border);cursor:pointer;" onclick="quickLoad(\'' + r.ticker + '\',\'' + r.asset_type + '\',\'' + r.timeframe + '\')" onmouseenter="this.style.background=\'var(--bg2)\'" onmouseleave="this.style.background=\'\'">'
+          + '<td style="padding:5px 8px;color:var(--white);font-weight:700;white-space:nowrap;">' + r.ticker + '</td>'
+          + '<td style="padding:5px 8px;color:var(--muted2);text-transform:uppercase;">' + r.timeframe + '</td>'
+          + '<td style="padding:5px 8px;">' + sigBadge + '</td>'
+          + '<td style="padding:5px 8px;text-align:right;color:var(--white);">' + (r.entry ? fmt(r.entry) : '—') + '</td>'
+          + '<td style="padding:5px 8px;text-align:right;color:#FF4459;">' + (r.stop_loss ? fmt(r.stop_loss) : '—') + '</td>'
+          + '<td style="padding:5px 8px;text-align:right;color:#00c98d;">' + (r.tp1 ? fmt(r.tp1) : '—') + '</td>'
+          + '<td style="padding:5px 8px;text-align:right;color:var(--amber);">' + confBadge + '</td>'
+          + '<td style="padding:5px 8px;text-align:right;color:var(--muted);white-space:nowrap;">' + (r.fired_at || '—') + '</td>'
+          + '</tr>';
+        return row;
+      }).join('');
+    })
+    .catch(function(){ /* silently ignore — DB may not be connected */ });
 }
 
 /* ════════════════════════════════════════════
