@@ -48,6 +48,14 @@
 
 ## CORE RULES — NON-NEGOTIABLE
 
+### UI Integrity — NON-NEGOTIABLE
+- **The UI must never be broken, damaged, or visually degraded by any change.**
+- Before every commit: grep for all new/changed element IDs and confirm each one exists in BOTH the HTML and the JS that writes to it.
+- Before every commit: grep for any IDs removed from HTML and confirm no JS still references them.
+- CSS changes must be checked for unintended side-effects on adjacent components.
+- If a change touches shared CSS classes, explicitly confirm all components using that class still render correctly.
+- "I only changed X" is never sufficient — always verify downstream.
+
 ### Bug Reports
 - Do NOT open files immediately
 - Do NOT start grepping
