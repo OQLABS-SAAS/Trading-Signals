@@ -655,3 +655,12 @@ New approach (SonarLab / industry standard):
 **Amber glow follow-up — commit `62e019c`:**
 - Root cause of missing glow on ticker chips: `.inst-chip:hover`, `.sq-btn:hover`, `.bt-ticker-btn:hover` all had amber border/colour changes but no `box-shadow`. Prior glow pass only covered btn-primary, btn-ghost, rb-btn, scan-filter-btn, gpill, nav-tab.
 - Fix: added `box-shadow` to all three missed hover rules.
+
+**Amber glow REAL root cause — commit `0c83d6c`:**
+- `updateInlineInst()` (line ~3481) generated `<button>` elements with inline `onmouseover="this.style.borderColor='var(--orange)';this.style.color='var(--orange)';"` and `onmouseout` handlers. These JS-written inline styles completely override CSS, so the `.inst-chip:hover` box-shadow CSS rule never applied.
+- Additionally used `var(--orange)` not `var(--amber)`.
+- Fix: stripped all inline style, onmouseover, onmouseout from the button template. Buttons now use only `class="inst-chip"`. All hover effects (glow, border, colour) handled purely by CSS `:hover` rule.
+
+**Scanner TF expand data lookup — commit `0c83d6c`:**
+- Root cause: `resJson = encodeURIComponent(JSON.stringify(...))` embedded in onclick HTML attribute. `encodeURIComponent` does NOT encode `'`, `(`, `)`, em-dashes. Reason strings from backend contain these characters — they silently truncate the onclick attribute, causing `scannerExpandTF` to receive corrupted or empty data → always showed first-TF (15M) data or nothing.
+- Fix: store all scan data in `window._smtfData[ticker].tfs[tf]` at render time. `scannerExpandTF(ticker, tf, rowId)` — no JSON param — looks up data from the store. onclick attributes only carry simple `ticker` and `tf` strings which are always safe.
