@@ -667,6 +667,20 @@ New approach (SonarLab / industry standard):
 
 ---
 
+### SESSION HANDOFF NOTES — 2026-04-14 (RR $0 fix + scanner pill buttons)
+
+**RUNTIME VERIFIED by user on 2026-04-14. Commit `ec4f263`.**
+
+**RR section $0 display fix:**
+- Root cause: `moneyAtRisk = 0` when no account/risk entered → `posSize = 0` → `netProfit = 0` → "+$0 net" rendered in all TP rows and RR bar.
+- Fix: 3-line conditional change in `recalc()`. Lines 10412, 10455, 10471 — show "—" instead of "$X" when `moneyAtRisk === 0`. RR ratios and pip distances untouched.
+
+**Scanner TF pills — converted to real buttons:**
+- Root cause: `.scan-mtf-pill` was a plain `<div>` inside a clickable `<td>`. No hover state, no cursor change. Felt like the whole row was clicking.
+- Fix: Changed to `<button>` element with direct `onclick="scannerLoadTicker(ticker, at, tf)"`. Each badge navigates straight to Signals on that exact TF. Removed `onclick` from `<td>`. Added hover glow CSS for buy/sell/hold states.
+
+---
+
 ### SESSION HANDOFF NOTES — 2026-04-14 (Scanner full analysis upgrade)
 
 **All changes committed. Deploy: `git push origin main` → Railway auto-deploys.**
