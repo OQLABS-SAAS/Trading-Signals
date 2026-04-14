@@ -650,3 +650,8 @@ New approach (SonarLab / industry standard):
 - [ ] Analyze a cheap altcoin (e.g. AVAX, MATIC, price < $1) → TP1, TP2, TP3 should show distinct values with 6dp
 - [ ] Win badge: run backtest → badge should colour green/amber/red with animated bar fill
 - [ ] Hover over gpill buttons and nav tabs → amber glow should be visible
+- [ ] Hover over instrument chip buttons (BTC, ETH, AAPL etc) → amber glow visible
+
+**Amber glow follow-up — commit `62e019c`:**
+- Root cause of missing glow on ticker chips: `.inst-chip:hover`, `.sq-btn:hover`, `.bt-ticker-btn:hover` all had amber border/colour changes but no `box-shadow`. Prior glow pass only covered btn-primary, btn-ghost, rb-btn, scan-filter-btn, gpill, nav-tab.
+- Fix: added `box-shadow` to all three missed hover rules.
