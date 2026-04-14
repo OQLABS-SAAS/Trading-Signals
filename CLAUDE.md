@@ -482,3 +482,28 @@ Fix (commits `5eab9e7`, `6b244d3`, `dcc553e`):
 - `6885448` — Expandable RR boxes
 - `f1f4dd6` — Exact-levels Pine Script
 - `d90e342` — Guided journey panel
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-14 (Journey panel scroll-to fixes)
+
+**All changes committed and deployed. Runtime verified by user.**
+
+**nsScrollTo() — commit `07a692d`:**
+- Journey panel step buttons called `nsScrollTo()` but the function did not exist. Added it to `static/index.html`.
+- Behaviour: smooth-scrolls to any element by ID. If `expandCalc=true`, expands `calcBody` first then scrolls after 350ms reflow.
+
+**onclick double-quote bug — commit `8bc9c34`:**
+- Root cause: `onclick="nsScrollTo("rrAnchor")"` — inner double quotes closed the attribute early. Browser parsed `onclick="nsScrollTo("` and stopped — button was a dead no-op.
+- Fix: changed all inner string literals to escaped single quotes (`nsScrollTo(\'rrAnchor\')`).
+- Why Backtest and Alert worked: their ctaFn strings had no inner double quotes.
+
+**Scroll into hidden element bug — commit `78eca72`:**
+- Root cause: `rrAnchor` and `calcAnchor` are inside `calcBody` which starts collapsed (`display:none`). `scrollIntoView` on a hidden element silently does nothing.
+- Fix: `nsScrollTo` now checks if the target is a descendant of `calcBody`. If it is and `calcBody` is collapsed, calls `toggleCalc()` first, waits 350ms for DOM reflow, then scrolls.
+- Also removed dead lookup for `calcToggleBtn` (no such ID in the HTML — toggle fires via `onclick="toggleCalc()"`).
+
+**Key commits:**
+- `07a692d` — Add nsScrollTo() function
+- `8bc9c34` — Fix onclick double-quote truncation on journey panel buttons
+- `78eca72` — Fix scrollIntoView no-op on hidden calcBody children
