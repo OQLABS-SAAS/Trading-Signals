@@ -3057,6 +3057,22 @@ def analyze():
             **counter,
             "tv": tv,
         })
+        # ── Scanner/Signals consistency: override signal fields with cached scanner result ──
+        # When user navigates from scanner, the scanner's computed signal is returned so the
+        # Signals page always matches what the scanner showed. Chart, MTF, indicators stay fresh.
+        if _redis_client:
+            try:
+                _sc = _redis_client.get(f"scanner_signal:{ticker}:{timeframe}")
+                if _sc:
+                    _sc_data = json.loads(_sc)
+                    for _key in ("signal","entry","stop_loss","tp1","tp2","tp3",
+                                 "rr1","rr2","rr3","confidence","confidence_label",
+                                 "summary","bullish_count","bearish_count","position_pct"):
+                        if _key in _sc_data:
+                            response_data[_key] = _sc_data[_key]
+                    print(f"[analyze] Scanner cache hit — signal overridden to {_sc_data.get('signal')}")
+            except Exception:
+                pass
         # ── Persist to signal history (fire-and-forget, never block the response) ──
         try:
             if _DBSession:
@@ -3488,7 +3504,7 @@ def scan_list():
                     # Cache TV data so Signals page uses identical data when navigating from scanner
                     if _redis_client:
                         try:
-                            _redis_client.setex(f"tv_cache:{raw}:{timeframe}", 120, json.dumps(tv))
+                            _redis_client.setex(f"tv_cache:{raw}:{timeframe}", 300, json.dumps(tv))
                         except Exception:
                             pass
                     ind = build_ind_from_tv(tv)
@@ -3523,6 +3539,17 @@ def scan_list():
                         "confidence":       analysis.get("confidence", "LOW"),
                         "confidence_label": analysis.get("confidence_label", "HYPOTHESIS"),
                     })
+                    # Cache scanner signal so Signals page returns same result when user navigates from scanner
+                    if _redis_client:
+                        try:
+                            _scan_payload = {k: analysis.get(k) for k in (
+                                "signal","entry","stop_loss","tp1","tp2","tp3",
+                                "rr1","rr2","rr3","confidence","confidence_label",
+                                "summary","bullish_count","bearish_count","position_pct"
+                            )}
+                            _redis_client.setex(f"scanner_signal:{raw}:{timeframe}", 300, json.dumps(_scan_payload))
+                        except Exception:
+                            pass
                     continue
 
                 # ── FALLBACK: yfinance / Binance (slower, may 429) ──
@@ -3567,6 +3594,17 @@ def scan_list():
                     "confidence":       analysis.get("confidence", "LOW"),
                     "confidence_label": analysis.get("confidence_label", "HYPOTHESIS"),
                 })
+                # Cache scanner signal so Signals page returns same result when user navigates from scanner
+                if _redis_client:
+                    try:
+                        _scan_payload = {k: analysis.get(k) for k in (
+                            "signal","entry","stop_loss","tp1","tp2","tp3",
+                            "rr1","rr2","rr3","confidence","confidence_label",
+                            "summary","bullish_count","bearish_count","position_pct"
+                        )}
+                        _redis_client.setex(f"scanner_signal:{raw}:{timeframe}", 300, json.dumps(_scan_payload))
+                    except Exception:
+                        pass
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
                 results.append({"ticker": ticker, "error": str(e)[:80]})
