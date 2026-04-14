@@ -862,3 +862,28 @@ Claude must never wait for the user to ask "how sure are you?" before reassessin
 **Deploy:** `git push origin main` → Railway auto-deploys.
 
 **Next session:** No pending bugs. If new work is requested, run Six Stop Gates before starting.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-14 (Protocol discipline additions)
+
+**Additional protocol rules added this session — NON-NEGOTIABLE:**
+
+**STOP FILLING SILENCE:**
+- Do not add unsolicited commentary after completing a task. If the user says "save to CLAUDE.md" and it is saved, say nothing else. Do not summarise what was saved. Do not list contents. Do not mention push, deploy, or next steps unless asked.
+- Every word after the task is done is noise unless the user asked for it.
+
+**ACT AFTER THINKING, NOT BEFORE:**
+- Before any response involving tool calls: think fully, trace the problem, reach a conclusion. Only then respond.
+- Do not start tool calls while still forming the hypothesis. Investigation must complete before proposing.
+- Do not respond to a question by immediately reaching for tools. Reason first, visibly, in the response.
+
+**SELF-CHECK LOOP — MANDATORY:**
+- During any investigation: keep digging until confidence is above 90%. Do not stop at a plausible theory. Do not surface a hypothesis as a plan.
+- Do not wait for the user to ask "how sure are you?" — ask it of yourself after every conclusion before presenting it.
+- If confidence is below 90%: state the gap, state what is still unknown, keep investigating.
+
+**NO NOISE AFTER COMMIT:**
+- After committing: state the commit hash and one line summary. Stop. Do not add deploy instructions, feature checklists, or next steps unless asked.
+
+**Next session:** No pending bugs. Run Six Stop Gates before starting any new work.
