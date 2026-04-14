@@ -828,17 +828,37 @@ New approach (SonarLab / industry standard):
 
 ### SESSION HANDOFF NOTES — 2026-04-14 (Scanner/Signals signal mismatch — RESOLVED)
 
-**Root cause identified and fixed. Local runtime verification complete. NOT YET user-verified in browser.**
+**Status: RESOLVED — runtime verified by user on 2026-04-14.**
 
-**Root cause:** Gate 2 (candle footprint sanity check) in `get_analysis()` ran in the analyze endpoint (which enriches `ind` with yfinance OHLCV chart data) but was silently skipped in the scanner (which has no OHLCV chart data in `ind` — scanner only uses `build_ind_from_tv(tv)`). Gate 2 could downgrade a TV-sourced BUY → HOLD when bearish candles showed 70%+ seller pressure. Gate 1 already had `if not tv_signal_used:` guard. Gate 2 did not.
+**Root cause (two layers):**
+- Layer 1 (Gate 2): footprint sanity check in `get_analysis()` ran in analyze (which enriches `ind` with yfinance OHLCV) but was silently skipped in scanner (scanner uses `build_ind_from_tv` only, no chart arrays). Gate 2 could downgrade TV-sourced BUY → HOLD. Fixed by adding `if not tv_signal_used` guard to Gate 2. Commit `41046cb`.
+- Layer 2 (TV timing): scanner and analyze fetch TV data at different moments. If TV was unavailable at scan time (scanner fell back to yfinance → HOLD), Redis cache was never written. When user clicked "Open on Signals →" seconds later, TV became available → TV override → BUY. Fix: scanner caches its final computed signal in Redis (`scanner_signal:{raw}:{tf}`, 300s TTL) on both TV and yfinance paths. Analyze reads this and overrides signal fields after building response. Chart, MTF, indicators stay fresh from analyze. Also extended TV cache TTL 120s → 300s. Commit `48d7c7a`.
 
-**Fix:** Added `if not tv_signal_used` to Gate 2 condition in `get_analysis()` (~line 2042). Same pattern as Gate 1. Gate 2 still runs on the yfinance-only path (TV unavailable). Verified locally — scanner and analyze now return identical signals for same TV data.
+**Key commits:**
+- `41046cb` — Gate 2 `if not tv_signal_used` guard
+- `48d7c7a` — Scanner signal cache (scanner_signal Redis key, analyze override, TV TTL 300s)
+
+**Protocol addition this session — SELF-CHECK LOOP:**
+Claude must never wait for the user to ask "how sure are you?" before reassessing confidence. The self-check loop runs continuously during investigation: keep digging until the root cause is confirmed, then verify in sandbox, then present the plan. Only then ask for commit confirmation. If confidence is below 90%, state the gap explicitly and keep investigating before proposing.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-14 (Scanner/signals mismatch RESOLVED + protocol hardened)
+
+**Status of all known bugs:**
+- BUG 1 (RSI divergence trendlines): RESOLVED
+- BUG 2 (Scanner zero-width chart): RESOLVED
+- BUG 3 (doAnalyze called directly): RESOLVED
+- BUG 4 (backtest missing login_required): RESOLVED
+- Scanner/Signals signal mismatch: RESOLVED — commit `48d7c7a`, runtime verified by user 2026-04-14
+
+**All five phases: COMPLETE and verified.**
+
+**Protocol changes this session:**
+- Universal three-path runtime verification added to CLAUDE.md (Path A backend, Path B frontend, Path C config)
+- Visible gate check required in every response before any tool call
+- Self-check loop rule: Claude must investigate fully and self-assess confidence continuously — never wait for user to prompt "how sure are you?"
 
 **Deploy:** `git push origin main` → Railway auto-deploys.
 
-**User verification (browser only, no logs needed):**
-1. Run market scanner on any preset
-2. Note the signal for a specific ticker (e.g. BTC 1H = BUY)
-3. Click "Open on Signals →" for that ticker
-4. Signal on Signals page must match scanner — BUY = BUY, HOLD = HOLD
-5. Repeat for 3–4 different tickers to confirm consistency
+**Next session:** No pending bugs. If new work is requested, run Six Stop Gates before starting.
