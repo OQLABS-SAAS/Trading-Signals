@@ -2730,7 +2730,18 @@ def analyze():
         # For most asset types we fall through to yfinance/Stooq if TV fails,
         # but FOREX data from yfinance/Stooq is unreliable (bid-only, delayed,
         # session-mismatched) so forex is locked to TradingView only.
-        tv = fetch_tv_data(ticker, asset_type, timeframe)
+        # Use cached TV data from scanner if available (guarantees scanner/signals consistency)
+        tv = None
+        if _redis_client:
+            try:
+                _cached = _redis_client.get(f"tv_cache:{ticker}:{timeframe}")
+                if _cached:
+                    tv = json.loads(_cached)
+                    print(f"[analyze] Using cached TV data for {ticker} {timeframe}")
+            except Exception:
+                pass
+        if not tv:
+            tv = fetch_tv_data(ticker, asset_type, timeframe)
         tv_ok = bool(tv and tv.get("tv_price"))
 
         # Forex data-source lock — reject if TradingView is unavailable.
@@ -3470,6 +3481,12 @@ def scan_list():
                 # ── PRIMARY: TradingView scanner (fast, works on Railway) ──
                 tv = fetch_tv_data(raw, asset_type, timeframe)
                 if tv and tv.get("tv_price"):
+                    # Cache TV data so Signals page uses identical data when navigating from scanner
+                    if _redis_client:
+                        try:
+                            _redis_client.setex(f"tv_cache:{raw}:{timeframe}", 120, json.dumps(tv))
+                        except Exception:
+                            pass
                     ind = build_ind_from_tv(tv)
                     analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv)
                     ct       = detect_counter_trade(ind)
