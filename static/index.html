@@ -1913,13 +1913,15 @@ body::before{
             <div class="calc-field"><label>My Trade ($)</label>
               <input class="calc-input" type="number" id="cCapital" placeholder="e.g. 200" oninput="recalc()">
             </div>
-            <div class="calc-field"><label>Leverage</label>
+            <div class="calc-field" id="cLevField">
+              <label id="cLevLabel">Your Leverage</label>
               <select class="calc-select" id="cLev" onchange="recalc()">
                 <option value="1">1× Spot</option>
                 <option value="2">2×</option>
                 <option value="5">5×</option>
                 <option value="10">10×</option>
               </select>
+              <div id="cLevNote" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;letter-spacing:.3px;line-height:1.4;">Set on your exchange before entering the trade</div>
             </div>
             <div class="calc-field"><label>Entry Price</label><input class="calc-input" type="number" id="cEntry" value="0" oninput="recalc()"></div>
             <div class="calc-field"><label>Stop Loss</label><input class="calc-input" type="number" id="cSL" value="0" oninput="recalc()"></div>
@@ -3818,7 +3820,10 @@ function setPill(btn) {
   try { updatePillStyles(); } catch(e) {}
   document.getElementById(sel).value = btn.dataset.val;
   // Sync inline instrument chips when asset type changes
-  if (sel === 'assetType') updateInlineInst(btn.dataset.val);
+  if (sel === 'assetType') {
+    updateInlineInst(btn.dataset.val);
+    try { updateLevField(btn.dataset.val); } catch(e) {}
+  }
 }
 /* Keep hidden selects in sync when set programmatically */
 const _origSetVal = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
@@ -10239,6 +10244,28 @@ function toggleCalc() {
   const icon = document.getElementById('calcIcon');
   body.classList.toggle('open');
   icon.textContent = body.classList.contains('open') ? '▲ Collapse' : '▼ Expand';
+}
+
+// ── Leverage field: label + options by asset type ──
+var _levConfigs = {
+  crypto:    { label: 'Your Leverage',   note: 'Set on your exchange before entering the trade',          options: [[1,'1× Spot'],[2,'2×'],[5,'5×'],[10,'10×'],[20,'20×'],[50,'50×'],[100,'100×']] },
+  stock:     { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',   options: [[1,'1× (no leverage)'],[2,'2×'],[5,'5×']] },
+  forex:     { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',   options: [[1,'1×'],[10,'10×'],[20,'20×'],[30,'30×']] },
+  index:     { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',   options: [[1,'1×'],[5,'5×'],[10,'10×'],[20,'20×']] },
+  commodity: { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',   options: [[1,'1×'],[5,'5×'],[10,'10×'],[20,'20×']] }
+};
+function updateLevField(assetType) {
+  var cfg = _levConfigs[assetType] || _levConfigs.crypto;
+  var lbl  = document.getElementById('cLevLabel');
+  var sel  = document.getElementById('cLev');
+  var note = document.getElementById('cLevNote');
+  if (!lbl || !sel || !note) return;
+  lbl.textContent  = cfg.label;
+  note.textContent = cfg.note;
+  sel.innerHTML = cfg.options.map(function(o) {
+    return '<option value="' + o[0] + '">' + o[1] + '</option>';
+  }).join('');
+  recalc();
 }
 
 // ── Auto-fill live calculator from signal ──
