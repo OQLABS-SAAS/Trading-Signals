@@ -29,6 +29,8 @@
 
 **Task discipline:** One task at a time. Fully closed before the next opens.
 
+**Deploy discipline — NON-NEGOTIABLE:** Verify every fix at runtime in the local bash sandbox before committing or pushing. Run the code. Reproduce the bug. Confirm the fix eliminates it. Only after local runtime verification is confirmed may the fix be committed and pushed. After deployment, the user confirms in the live browser — that is the final gate. A commit is not "done". A push is not "done". Never mark a task complete or claim it is verified until both local runtime verification AND user browser confirmation are complete.
+
 **You hold the gate:** If any of the five are missing, reject it.
 
 **The Clarifying Question Rule — NON-NEGOTIABLE:**
@@ -721,3 +723,22 @@ New approach (SonarLab / industry standard):
 - [ ] Expand row signal matches what Signals tab shows for same ticker + TF (both now use DotVerse 65% gate)
 - [ ] Scanner BUY filter shows only BUY signals (no POSSIBLE_BUY, CTR etc.)
 - [ ] High Confidence filter shows only signals where DotVerse confidence = HIGH
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-14 (Scanner/Signals signal mismatch — RESOLVED)
+
+**Root cause identified and fixed. Local runtime verification complete. NOT YET user-verified in browser.**
+
+**Root cause:** Gate 2 (candle footprint sanity check) in `get_analysis()` ran in the analyze endpoint (which enriches `ind` with yfinance OHLCV chart data) but was silently skipped in the scanner (which has no OHLCV chart data in `ind` — scanner only uses `build_ind_from_tv(tv)`). Gate 2 could downgrade a TV-sourced BUY → HOLD when bearish candles showed 70%+ seller pressure. Gate 1 already had `if not tv_signal_used:` guard. Gate 2 did not.
+
+**Fix:** Added `if not tv_signal_used` to Gate 2 condition in `get_analysis()` (~line 2042). Same pattern as Gate 1. Gate 2 still runs on the yfinance-only path (TV unavailable). Verified locally — scanner and analyze now return identical signals for same TV data.
+
+**Deploy:** `git push origin main` → Railway auto-deploys.
+
+**User verification (browser only, no logs needed):**
+1. Run market scanner on any preset
+2. Note the signal for a specific ticker (e.g. BTC 1H = BUY)
+3. Click "Open on Signals →" for that ticker
+4. Signal on Signals page must match scanner — BUY = BUY, HOLD = HOLD
+5. Repeat for 3–4 different tickers to confirm consistency

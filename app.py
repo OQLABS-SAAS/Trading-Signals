@@ -2037,9 +2037,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
     # GATE 2: Candle footprint sanity check
     # If the last few candles show strong one-sided pressure that
     # contradicts the proposed signal direction, downgrade to HOLD.
+    # Skip when TV signal is used — TV already aggregates 26 indicators
+    # including price action. Scanner does not enrich ind with chart data
+    # so running this gate only in analyze would create a systematic
+    # scanner/signals mismatch. Consistent with Gate 1 skip rule.
     # ══════════════════════════════════════════════════════════════
     buyer_pct, seller_pct = _compute_footprint_dominance(ind)
-    if buyer_pct is not None:
+    if not tv_signal_used and buyer_pct is not None:
         if signal == "SELL" and buyer_pct >= 70:
             print(f"[gate] footprint shows {buyer_pct}% buyers — blocking SELL on {ticker}")
             signal = "HOLD"
