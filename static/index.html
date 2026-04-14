@@ -161,7 +161,7 @@ body::before{
   color:var(--muted2);cursor:pointer;
   transition:all .15s;border:none;background:transparent;white-space:nowrap;
 }
-.nav-tab:hover{color:var(--white);background:var(--amber-dim);}
+.nav-tab:hover{color:var(--white);background:var(--amber-dim);box-shadow:0 0 0 2px rgba(245,166,35,.2),0 2px 10px rgba(245,166,35,.15);}
 .nav-tab.active{background:var(--amber);color:#0C0A08;font-weight:700;}
 
 /* HEADER RIGHT */
@@ -230,7 +230,8 @@ body::before{
 #cmdBar > div{justify-content:center;}
 
 /* ─── ROUNDED PILL BUTTONS for tickers & instruments ─── */
-.gpill{border-radius:20px!important;}
+.gpill{border-radius:20px!important;transition:box-shadow .15s,color .15s,background .15s;}
+.gpill:not(.active):hover{box-shadow:0 0 0 2px rgba(245,166,35,.22),0 2px 8px rgba(245,166,35,.15);}
 #inlineInstRow button{border-radius:20px!important;}
 .side-col{display:flex;flex-direction:column;overflow-y:auto;background:var(--bg1);}
 
@@ -364,12 +365,25 @@ body::before{
 
 /* Win rate badge */
 .win-badge{
-  display:flex;flex-direction:column;align-items:center;gap:1px;
-  padding:5px 10px;background:rgba(255,255,255,.04);
-  border:1px solid var(--border);border-radius:4px;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:8px 12px 7px;background:rgba(255,255,255,.03);
+  border:1px solid var(--border);border-radius:5px;min-width:90px;
+  transition:border-color .2s,background .2s;
 }
-.wb-val{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--amber);line-height:1;}
-.wb-lbl{font-family:var(--mono);font-size:8.5px;color:var(--muted2);letter-spacing:1.2px;text-transform:uppercase;margin-top:2px;}
+.win-badge.wb-high{background:rgba(0,201,141,.06);border-color:rgba(0,201,141,.22);}
+.win-badge.wb-mid {background:rgba(245,166,35,.06);border-color:rgba(245,166,35,.2);}
+.win-badge.wb-low {background:rgba(255,68,89,.06); border-color:rgba(255,68,89,.2);}
+.wb-val{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--muted2);line-height:1;transition:color .2s;}
+.win-badge.wb-high .wb-val{color:var(--green);}
+.win-badge.wb-mid  .wb-val{color:var(--amber);}
+.win-badge.wb-low  .wb-val{color:var(--red);}
+.wb-bar-track{width:66px;height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden;}
+.wb-bar-fill{height:100%;border-radius:2px;width:0%;transition:width .8s cubic-bezier(.4,0,.2,1);}
+.win-badge.wb-high .wb-bar-fill{background:var(--green);box-shadow:0 0 5px rgba(0,201,141,.5);}
+.win-badge.wb-mid  .wb-bar-fill{background:var(--amber);box-shadow:0 0 5px rgba(245,166,35,.4);}
+.win-badge.wb-low  .wb-bar-fill{background:var(--red);  box-shadow:0 0 5px rgba(255,68,89,.4);}
+.wb-lbl{font-family:var(--mono);font-size:8px;color:var(--muted2);letter-spacing:1.2px;text-transform:uppercase;}
+@keyframes wbPop{from{opacity:0;transform:scale(.85);}to{opacity:1;transform:scale(1);}}
 
 /* ═══════════════════════════════════════════════
    AUTO-REFRESH BAR
@@ -1370,7 +1384,7 @@ body::before{
             <div class="conf-inner"><span class="conf-pct" id="confPct">—</span><span class="conf-lbl">CONF</span></div>
             <div id="confLabel" style="text-align:center;margin-top:3px;height:14px;"></div>
           </div>
-          <div class="win-badge" id="winRateBadge"><div class="wb-val" id="winRateVal">—</div><div class="wb-lbl">Win Rate</div><div id="winRateSample" style="font-size:9px;color:var(--muted2);text-align:center;margin-top:1px;"></div></div>
+          <div class="win-badge" id="winRateBadge"><div class="wb-val" id="winRateVal">—</div><div class="wb-bar-track"><div class="wb-bar-fill" id="winRateBar"></div></div><div class="wb-lbl">Win Rate</div><div id="winRateSample" style="font-family:var(--mono);font-size:8px;color:var(--muted2);text-align:center;"></div></div>
           <div class="sig-btns">
             <button class="btn-primary" onclick="switchMainTab('simulation',document.querySelector('.nav-tab:nth-child(5)'));if(currentData)runSimulation();">Simulate Trade</button>
             <button class="btn-ghost" onclick="copyPineScript();setTimeout(function(){var w=document.getElementById('pineCodeWrap');if(w&&w.style.display!=='none')w.scrollIntoView({behavior:'smooth',block:'start'});},350);" style="border-color:rgba(245,166,35,.5);color:var(--amber);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>Pine Script</button>
@@ -1786,6 +1800,7 @@ body::before{
                 <div class="calc-field">
                   <label>Trade Size ($) <span style="font-size:9px;color:var(--muted);font-weight:400;letter-spacing:.3px;">— how much you want to put in</span></label>
                   <input class="calc-input" type="number" id="cTradeSize" placeholder="e.g. 500" oninput="recalc()">
+                  <div id="tradeSizePctNote" style="display:none;font-family:var(--mono);font-size:9px;color:var(--amber);letter-spacing:.5px;margin-top:3px;"></div>
                 </div>
 
                 <!-- Contract size / leverage -->
@@ -3754,12 +3769,22 @@ function renderResults(d) {
   // Win rate badge — shows historical success rate + sample size for context
   const wrBadgeEl  = document.getElementById('winRateBadge');
   const wrValEl    = document.getElementById('winRateVal');
+  const wrBarEl    = document.getElementById('winRateBar');
   const wrSampleEl = document.getElementById('winRateSample');
   if (d.win_rate != null) {
-    wrValEl.textContent    = d.win_rate + '%';
+    var wr0 = d.win_rate;
+    wrValEl.textContent    = wr0 + '%';
     wrSampleEl.textContent = d.sample_size ? `${d.sample_size} past signals` : '';
-    wrBadgeEl.style.display = 'inline-flex';
-  } else { wrBadgeEl.style.display = 'none'; }
+    var wbCls0 = wr0 >= 55 ? 'wb-high' : wr0 >= 45 ? 'wb-mid' : 'wb-low';
+    wrBadgeEl.className = 'win-badge ' + wbCls0;
+    wrBadgeEl.style.animation = 'wbPop .4s cubic-bezier(.34,1.56,.64,1) both';
+    if (wrBarEl) { wrBarEl.style.width = '0%'; setTimeout(function(){ wrBarEl.style.width = Math.min(wr0,100) + '%'; }, 80); }
+  } else {
+    wrValEl.textContent = '—';
+    wrBadgeEl.className = 'win-badge';
+    if (wrBarEl) wrBarEl.style.width = '0%';
+    if (wrSampleEl) wrSampleEl.textContent = 'run backtest';
+  }
 
   document.getElementById('alertBtn').innerHTML = isWatching ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><line x1="1" y1="1" x2="23" y2="23"/></svg>Stop Alert' : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Alert Me';
 
@@ -5164,7 +5189,10 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
   document.querySelectorAll('#tab-scanner > .scanner-layout > .scan-table').forEach(function(t) { t.style.display = 'none'; });
   var mf = document.getElementById('scanFilterRow') || document.querySelector('.scan-filter-row'); if (mf) mf.style.display = 'flex';
   var tfList = ['15m','1h','4h','1d','1w'];
-  var html = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;">' + tickers.length + ' results</div>';
+  var html = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">' +
+    '<span style="font-family:var(--mono);font-size:10px;color:var(--muted);">' + tickers.length + ' results</span>' +
+    '<span style="font-family:var(--mono);font-size:9px;color:var(--muted);opacity:.7;letter-spacing:.3px;">Signals shown are TradingView pre-screens. Click a cell → Run Full Analysis for DotVerse verdict.</span>' +
+  '</div>';
   html += '<table class="scan-mtf-table"><thead><tr><th>Symbol</th>';
   tfList.forEach(function(tf) { html += '<th>' + tf.toUpperCase() + '</th>'; });
   html += '</tr></thead><tbody>';
@@ -5241,7 +5269,10 @@ function scannerExpandTF(ticker, assetType, tf, rowId, resJsonEncoded) {
       '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Trend <span style="color:' + emaColor + ';font-weight:700;">' + ema + '</span></div>' +
       (total > 0 ? '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Agreement <span style="color:var(--amber);font-weight:700;">' + bullPct + '%</span> bull</div>' : '') +
       (reason ? '<div style="font-family:var(--mono);font-size:9px;color:var(--muted);flex:1;min-width:140px;line-height:1.4;">' + reason.substring(0,80) + (reason.length>80?'…':'') + '</div>' : '') +
-      '<button onclick="scannerLoadTicker(\'' + ticker + '\',\'' + at + '\',\'' + tf + '\')" style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:5px 12px;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;cursor:pointer;white-space:nowrap;">Open in Signals →</button>' +
+      '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;">' +
+        '<button onclick="scannerLoadTicker(\'' + ticker + '\',\'' + at + '\',\'' + tf + '\')" style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:5px 12px;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;cursor:pointer;white-space:nowrap;">Run Full Analysis →</button>' +
+        '<span style="font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.3px;">Pre-screen (TV). DotVerse analysis may differ.</span>' +
+      '</div>' +
     '</div></td>';
 
   detailRow.innerHTML = html;
@@ -5258,9 +5289,12 @@ function scannerLoadTicker(ticker, assetType, overrideTF) {
   // can compute layout dimensions for the LWC chart containers.
   var firstNavTab = document.querySelector('.nav-tab');
   switchMainTab('signals', firstNavTab);
-  // Sync the TF dropdown to match what we're about to load
+  // Sync the TF dropdown and gpill active state to match what we're about to load
   var tfEl = document.getElementById('timeframe');
-  if (tfEl && sigTF) tfEl.value = sigTF;
+  if (tfEl && sigTF) {
+    tfEl.value = sigTF;
+    try { syncPillsFromSelect('timeframe'); } catch(e) {}
+  }
   // requestAnimationFrame defers quickLoad until AFTER the browser has painted
   // the newly-visible signals tab. This ensures lwcPriceWrap has real dimensions
   // when LightweightCharts.createChart() runs, preventing the zero-width blank
@@ -8137,11 +8171,26 @@ function renderResultsV2(d) {
     }
   }
   
-  // Win rate badge
-  var wbVal = document.querySelector('.wb-val');
-  var wbLbl = document.querySelector('.wb-lbl');
-  if (wbVal && d.win_rate != null) {
-    wbVal.textContent = d.win_rate + '%';
+  // Win rate badge — colour state + animated bar
+  var wbBadge = document.getElementById('winRateBadge');
+  var wbVal   = document.getElementById('winRateVal');
+  var wbBar   = document.getElementById('winRateBar');
+  var wbSamp  = document.getElementById('winRateSample');
+  if (wbBadge && wbVal) {
+    if (d.win_rate != null) {
+      var wr = d.win_rate;
+      wbVal.textContent = wr + '%';
+      var wbCls = wr >= 55 ? 'wb-high' : wr >= 45 ? 'wb-mid' : 'wb-low';
+      wbBadge.className = 'win-badge ' + wbCls;
+      wbBadge.style.animation = 'wbPop .4s cubic-bezier(.34,1.56,.64,1) both';
+      if (wbBar) { wbBar.style.width = '0%'; setTimeout(function(){ wbBar.style.width = Math.min(wr,100) + '%'; }, 80); }
+      if (wbSamp) wbSamp.textContent = d.sample_size ? d.sample_size + ' signals' : '';
+    } else {
+      wbVal.textContent = '—';
+      wbBadge.className = 'win-badge';
+      if (wbBar) wbBar.style.width = '0%';
+      if (wbSamp) wbSamp.textContent = 'run backtest';
+    }
   }
   
   // Info strip cells
@@ -9210,11 +9259,15 @@ async function runBacktest(d, showPanel = true) {
     // ── Win rate badge under confidence ring (backtest win rate + sample size) ──
     const wrBadge2  = document.getElementById('winRateBadge');
     const wrVal2    = document.getElementById('winRateVal');
+    const wrBar2    = document.getElementById('winRateBar');
     const wrSample2 = document.getElementById('winRateSample');
     if (wrBadge2 && wrVal2) {
-      wrVal2.textContent    = wr + '%';
+      wrVal2.textContent = wr + '%';
+      var wbCls2 = wr >= 55 ? 'wb-high' : wr >= 45 ? 'wb-mid' : 'wb-low';
+      wrBadge2.className = 'win-badge ' + wbCls2;
+      wrBadge2.style.animation = 'wbPop .4s cubic-bezier(.34,1.56,.64,1) both';
+      if (wrBar2) { wrBar2.style.width = '0%'; setTimeout(function(){ wrBar2.style.width = Math.min(wr,100) + '%'; }, 80); }
       if (wrSample2) wrSample2.textContent = bt.total_trades ? `${bt.total_trades} past signals` : '';
-      wrBadge2.style.display = 'inline-flex';
     }
 
   } catch(e) {
@@ -10080,6 +10133,17 @@ function recalc() {
   const riskPct    = parseFloat((document.getElementById('cRisk')      || {}).value) || 0;
   const tradeSize  = parseFloat((document.getElementById('cTradeSize') || {}).value) || 0;
   const levOrContr = parseFloat((document.getElementById('cLev')       || {}).value) || 1;
+  // ── Show % of account immediately next to Trade Size input ──
+  var tsNote = document.getElementById('tradeSizePctNote');
+  if (tsNote) {
+    if (tradeSize > 0 && acct > 0) {
+      var tsPctImm = (tradeSize / acct * 100).toFixed(1);
+      tsNote.textContent = '= ' + tsPctImm + '% of your account';
+      tsNote.style.display = 'block';
+    } else {
+      tsNote.style.display = 'none';
+    }
+  }
   const entry      = parseFloat((document.getElementById('cEntry')     || {}).value) || 0;
   const sl         = parseFloat((document.getElementById('cSL')        || {}).value) || 0;
   const tp1        = parseFloat((document.getElementById('cTP1')       || {}).value) || 0;
