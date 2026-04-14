@@ -1148,10 +1148,13 @@ body::before{
 .scan-mtf-table td{padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;}
 .scan-mtf-table tr:hover td{background:rgba(245,166,35,.04);}
 .scan-mtf-cell{display:flex;flex-direction:column;align-items:center;gap:2px;}
-.scan-mtf-pill{padding:1px 6px;border-radius:2px;font-size:9px;font-weight:700;letter-spacing:.5px;}
-.scan-mtf-pill.buy{background:rgba(0,201,141,.15);color:var(--green);}
-.scan-mtf-pill.sell{background:rgba(255,68,89,.15);color:var(--red);}
-.scan-mtf-pill.hold{background:rgba(255,255,255,.05);color:var(--muted);}
+.scan-mtf-pill{padding:3px 8px;border-radius:2px;font-size:9px;font-weight:700;letter-spacing:.5px;cursor:pointer;border:1px solid transparent;background:none;font-family:var(--mono);transition:background .15s,box-shadow .15s,border-color .15s;white-space:nowrap;}
+.scan-mtf-pill.buy{background:rgba(0,201,141,.15);color:var(--green);border-color:rgba(0,201,141,.25);}
+.scan-mtf-pill.sell{background:rgba(255,68,89,.15);color:var(--red);border-color:rgba(255,68,89,.25);}
+.scan-mtf-pill.hold{background:rgba(255,255,255,.05);color:var(--muted);border-color:rgba(255,255,255,.08);}
+.scan-mtf-pill.buy:hover{background:rgba(0,201,141,.28);box-shadow:0 0 0 2px rgba(0,201,141,.2);}
+.scan-mtf-pill.sell:hover{background:rgba(255,68,89,.28);box-shadow:0 0 0 2px rgba(255,68,89,.2);}
+.scan-mtf-pill.hold:hover{background:rgba(255,255,255,.1);box-shadow:0 0 0 2px rgba(255,255,255,.1);}
 .scan-mtf-rsi{font-size:8px;color:var(--muted);}
 
 /* ── Backtest Ticker Buttons ── */
@@ -5234,10 +5237,10 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
         rr1: res ? res.rr1 : null,
         at: tickerAt
       };
-      // TF column: onclick passes only ticker + tf strings — safe, no special chars
-      html += '<td onclick="scannerExpandTF(\'' + ticker + '\',\'' + tf + '\',\'' + rowId + '\')" style="cursor:pointer;">';
+      // TF column: pill is the clickable button — navigates directly to Signals on this TF
+      html += '<td style="text-align:center;vertical-align:middle;padding:6px 4px;">';
       html += '<div class="scan-mtf-cell">';
-      html += '<div class="scan-mtf-pill ' + sigClass + '">' + sig + '</div>';
+      html += '<button class="scan-mtf-pill ' + sigClass + '" onclick="scannerLoadTicker(\'' + ticker + '\',\'' + tickerAt + '\',\'' + tf + '\')" title="Open ' + ticker + ' ' + tf.toUpperCase() + ' on Signals">' + sig + '</button>';
       html += '<div class="scan-mtf-rsi">' + rsi + '</div>';
       html += '</div>';
       html += '</td>';
@@ -10409,7 +10412,7 @@ function recalc() {
     const valEl = document.getElementById('cp' + lbl + 'Val');
     document.getElementById('c' + lbl + 'Price').textContent      = t.priceStr;
     document.getElementById('c' + lbl + 'RR').textContent         = 'R:R 1 : ' + t.rr;
-    document.getElementById('c' + lbl + 'Profit').textContent     = '+$' + t.netProfit.toFixed(0) + ' net';
+    document.getElementById('c' + lbl + 'Profit').textContent     = moneyAtRisk > 0 ? '+$' + t.netProfit.toFixed(0) + ' net' : '—';
     document.getElementById('c' + lbl + 'Dist').textContent       = t.tpPips.toFixed(decimals) + ' ' + pipLabel;
     // Fix 3: label % gain clearly per asset type
     const pctLabel = document.querySelector('#c' + lbl + 'Pct')?.closest('.ctp-detail-row')?.querySelector('.ctp-detail-label');
@@ -10452,7 +10455,7 @@ function recalc() {
     // Worst case cell
     var slFmt = fmtPrice(sl);
     var acctAfterLoss = acct ? '$' + (acct - moneyAtRisk).toLocaleString(undefined,{maximumFractionDigits:0}) : null;
-    document.getElementById('rrRisk').textContent = '−$' + slLoss.toFixed(0);
+    document.getElementById('rrRisk').textContent = moneyAtRisk > 0 ? '−$' + slLoss.toFixed(0) : '—';
     document.getElementById('rrRiskLabel').textContent = 'if price hits ' + slFmt;
 
     // TP cells
@@ -10468,7 +10471,7 @@ function recalc() {
       }
       var t = calcTP(tp);
       tpCalc.push(t);
-      document.getElementById('rrTP' + (i+1)).textContent         = '+$' + t.netProfit.toFixed(0);
+      document.getElementById('rrTP' + (i+1)).textContent         = moneyAtRisk > 0 ? '+$' + t.netProfit.toFixed(0) : '—';
       document.getElementById('rrTP' + (i+1) + 'RR').textContent  = 'R:R 1 : ' + t.rr;
     });
 
