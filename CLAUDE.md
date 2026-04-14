@@ -670,9 +670,9 @@ New approach (SonarLab / industry standard):
 ### SESSION HANDOFF NOTES — 2026-04-14 (Scanner full analysis upgrade)
 
 **All changes committed. Deploy: `git push origin main` → Railway auto-deploys.**
-**NOT YET runtime verified — user must push and test.**
+**RUNTIME VERIFIED by user on 2026-04-14. Commit `ca432bc`.**
 
-**Scanner full DotVerse analysis — NOT YET runtime verified:**
+**Scanner full DotVerse analysis — RUNTIME VERIFIED:**
 
 **Root cause of prior scanner/signals discrepancy:**
 - Scanner used `pre_screen(ind, tv=tv)` — TradingView recommendation OR simple net_bull/net_bear score. No 65% confluence gate. No entry/SL/TP levels.
