@@ -1798,6 +1798,12 @@ body::before{
                   </div>
                 </div>
 
+                <!-- Trade Size -->
+                <div class="calc-field">
+                  <label>Trade Size ($) <span style="font-size:9px;color:var(--muted);font-weight:400;letter-spacing:.3px;">— how much you want to put in</span></label>
+                  <input class="calc-input" type="number" id="cTradeSize" placeholder="e.g. 500" oninput="recalc()">
+                </div>
+
                 <!-- Contract size / leverage -->
                 <div class="calc-field" id="cLevField">
                   <label id="cLevLabel">Contract Size</label>
@@ -1815,11 +1821,11 @@ body::before{
                 <!-- Entry + SL side by side -->
                 <div class="calc-field-group">
                   <div class="calc-field">
-                    <label>Enter Price</label>
+                    <label>Entry Price</label>
                     <input class="calc-input" type="text" inputmode="decimal" id="cEntry" value="" placeholder="0.00000" oninput="recalc()">
                   </div>
                   <div class="calc-field">
-                    <label>Stop Price</label>
+                    <label>Stop Loss</label>
                     <input class="calc-input" type="text" inputmode="decimal" id="cSL" value="" placeholder="0.00000" oninput="recalc()">
                   </div>
                 </div>
@@ -1827,11 +1833,11 @@ body::before{
                 <!-- TP1 + TP2 side by side -->
                 <div class="calc-field-group">
                   <div class="calc-field">
-                    <label>Target 1</label>
+                    <label>TP 1</label>
                     <input class="calc-input" type="text" inputmode="decimal" id="cTP1" value="" placeholder="0.00000" oninput="recalc()">
                   </div>
                   <div class="calc-field">
-                    <label>Target 2</label>
+                    <label>TP 2</label>
                     <input class="calc-input" type="text" inputmode="decimal" id="cTP2" value="" placeholder="0.00000" oninput="recalc()">
                   </div>
                 </div>
@@ -1839,7 +1845,7 @@ body::before{
                 <!-- TP3 + Asset price side by side -->
                 <div class="calc-field-group">
                   <div class="calc-field">
-                    <label>Target 3</label>
+                    <label>TP 3</label>
                     <input class="calc-input" type="text" inputmode="decimal" id="cTP3" value="" placeholder="0.00000" oninput="recalc()">
                   </div>
                   <div class="calc-field">
@@ -1892,6 +1898,28 @@ body::before{
                     <div class="csr-val green" id="csrPnL">—</div>
                   </div>
                 </div>
+                <!-- Trade Size section — appears when Trade Size is filled -->
+                <div id="csrTradeSizeRow" style="display:none;border-top:1px solid rgba(245,166,35,.2);background:rgba(245,166,35,.04);">
+                  <div style="padding:5px 12px;font-family:var(--mono);font-size:8px;color:rgba(245,166,35,.7);letter-spacing:1.5px;text-transform:uppercase;font-weight:700;border-bottom:1px solid rgba(245,166,35,.1);">Trade Size <span id="csrTradeSizeVal">—</span> — what you make / lose</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid rgba(255,255,255,.06);">
+                    <div class="csr-cell">
+                      <div class="csr-label">If SL Hit</div>
+                      <div class="csr-val red" id="csrTradeSL">—</div>
+                    </div>
+                    <div class="csr-cell">
+                      <div class="csr-label">If TP1 Hit</div>
+                      <div class="csr-val green" id="csrTradeTP1">—</div>
+                    </div>
+                    <div class="csr-cell">
+                      <div class="csr-label">If TP2 Hit</div>
+                      <div class="csr-val green" id="csrTradeTP2">—</div>
+                    </div>
+                    <div class="csr-cell" style="border-right:none;">
+                      <div class="csr-label">If TP3 Hit</div>
+                      <div class="csr-val green" id="csrTradeTP3">—</div>
+                    </div>
+                  </div>
+                </div>
                 <!-- Stop distance -->
                 <div style="padding:8px 12px;font-family:var(--mono);font-size:10px;color:var(--muted2);border-top:1px solid rgba(255,255,255,.05);">
                   <span id="csrStopLine">Enter levels to calculate</span>
@@ -1902,14 +1930,15 @@ body::before{
             </div><!-- /calc-right -->
           </div><!-- /calc-sonar-wrap -->
 
+          <!-- Hidden spans preserve IDs for JS — visual display is in SonarLab right box -->
+          <span id="cPosSize"   style="display:none;"></span>
+          <span id="cPosVal"    style="display:none;"></span>
+          <span id="cStopDist"  style="display:none;"></span>
+          <span id="cMarginReq" style="display:none;"></span>
+
           <!-- Full detail results (below the two-column layout) -->
           <div class="calc-results" id="calcResults">
-            <div class="calc-result-main">
-              <div class="crm-item"><div class="crm-label">Position Size</div><div class="crm-val a" id="cPosSize">—</div></div>
-              <div class="crm-item"><div class="crm-label">Position Value</div><div class="crm-val" id="cPosVal">—</div></div>
-              <div class="crm-item"><div class="crm-label">Stop Distance</div><div class="crm-val r" id="cStopDist">—</div></div>
-              <div class="crm-item"><div class="crm-label">Margin Required</div><div class="crm-val" id="cMarginReq">—</div></div>
-            </div>
+            <div>
             <!-- Win rate from last backtest + fees note -->
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-top:6px;font-size:11px;">
               <span style="color:var(--muted2);">Backtest Win Rate</span>
@@ -9983,15 +10012,16 @@ function autoFillCalc(d) {
 }
 
 function recalc() {
-  const acct       = parseFloat(document.getElementById('cAcct').value)  || 0;
-  const riskPct    = parseFloat(document.getElementById('cRisk').value)   || 0;
-  const levOrContr = parseFloat(document.getElementById('cLev').value)    || 1;
-  const entry      = parseFloat(document.getElementById('cEntry').value)  || 0;
-  const sl         = parseFloat(document.getElementById('cSL').value)     || 0;
-  const tp1        = parseFloat(document.getElementById('cTP1').value)    || 0;
-  const tp2        = parseFloat(document.getElementById('cTP2').value)    || 0;
-  const tp3        = parseFloat(document.getElementById('cTP3').value)    || 0;
-  const assetPrice = parseFloat(document.getElementById('cAsset').value)  || entry;
+  const acct       = parseFloat(document.getElementById('cAcct').value)      || 0;
+  const riskPct    = parseFloat(document.getElementById('cRisk').value)       || 0;
+  const tradeSize  = parseFloat(document.getElementById('cTradeSize').value)  || 0;
+  const levOrContr = parseFloat(document.getElementById('cLev').value)        || 1;
+  const entry      = parseFloat(document.getElementById('cEntry').value)      || 0;
+  const sl         = parseFloat(document.getElementById('cSL').value)         || 0;
+  const tp1        = parseFloat(document.getElementById('cTP1').value)        || 0;
+  const tp2        = parseFloat(document.getElementById('cTP2').value)        || 0;
+  const tp3        = parseFloat(document.getElementById('cTP3').value)        || 0;
+  const assetPrice = parseFloat(document.getElementById('cAsset').value)      || entry;
 
   // Derived
   const moneyAtRisk = acct * (riskPct / 100);
@@ -10281,6 +10311,24 @@ function recalc() {
     _set('csrPnL', '—');
   }
   _set('csrStopLine', Math.round(slPips) + ' ' + pipLabel + ' stop · $' + slLoss.toFixed(2) + ' at risk');
+
+  // ── Trade Size row ──
+  var tsRow = document.getElementById('csrTradeSizeRow');
+  if (tradeSize > 0 && entry > 0) {
+    var tsPct  = function(target) { return target > 0 ? Math.abs(target - entry) / entry : 0; };
+    var tsSL   = sl  > 0 ? tsPct(sl)  * tradeSize : 0;
+    var tsTP1  = tp1 > 0 ? tsPct(tp1) * tradeSize : 0;
+    var tsTP2  = tp2 > 0 ? tsPct(tp2) * tradeSize : 0;
+    var tsTP3  = tp3 > 0 ? tsPct(tp3) * tradeSize : 0;
+    _set('csrTradeSizeVal', '$' + tradeSize.toLocaleString());
+    _set('csrTradeSL',  sl  > 0 ? '−$' + tsSL.toFixed(2)  : '—');
+    _set('csrTradeTP1', tp1 > 0 ? '+$' + tsTP1.toFixed(2) : '—');
+    _set('csrTradeTP2', tp2 > 0 ? '+$' + tsTP2.toFixed(2) : '—');
+    _set('csrTradeTP3', tp3 > 0 ? '+$' + tsTP3.toFixed(2) : '—');
+    if (tsRow) tsRow.style.display = '';
+  } else {
+    if (tsRow) tsRow.style.display = 'none';
+  }
 
   // ── Detail results ──
   document.getElementById('cPosSize').textContent   = lotsDisplay;
