@@ -31,6 +31,10 @@
 
 **You hold the gate:** If any of the five are missing, reject it.
 
+**The Clarifying Question Rule — NON-NEGOTIABLE:**
+A plan that contains any unanswered behaviour question is NOT a confirmed plan. Gate 3 is not open.
+Before writing any plan, identify every behaviour question — *"when X happens, should it do A or B?"* — and ask them explicitly, one at a time, before proposing the plan. User saying "you already stated the plan" or "proceed" without answering a specific behaviour question is NOT confirmation of that behaviour. Stop and ask the specific question. Speed is not a virtue here. One wrong assumption costs more time than the question would have.
+
 ---
 
 ## MANDATORY MINDSET
