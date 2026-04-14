@@ -1747,11 +1747,12 @@ body::before{
             <button class="calc-dir-btn" id="cdSell" onclick="setDir('SELL')">▼ SHORT / SELL</button>
           </div>
 
-          <input type="hidden" id="cRisk" value="0">
           <div class="calc-grid">
             <div class="calc-field"><label>Account ($)</label><input class="calc-input" type="number" id="cAcct" placeholder="e.g. 10000" oninput="recalc()"></div>
-            <div class="calc-field"><label>My Trade ($)</label>
-              <input class="calc-input" type="number" id="cCapital" placeholder="e.g. 200" oninput="recalc()">
+            <div class="calc-field">
+              <label id="cRiskLabel">Risk %</label>
+              <input class="calc-input" type="number" id="cRisk" placeholder="e.g. 1" step="0.5" min="0.1" max="100" oninput="recalc()">
+              <div id="cRiskNote" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;letter-spacing:.3px;line-height:1.4;">Beginners: 1–2% · Max: 5%</div>
             </div>
             <div class="calc-field" id="cLevField">
               <label id="cLevLabel">Your Leverage</label>
@@ -1773,7 +1774,9 @@ body::before{
 
           <!-- Trade summary row -->
           <div class="calc-risk-row">
-            <span class="crr-label" id="cRiskLabel">Investing</span>
+            <span class="crr-label">Money at Risk</span>
+            <span class="crr-val" id="cMoneyAtRisk" style="color:var(--amber);">—</span>
+            <span class="crr-label" style="margin-left:16px;">Position Size</span>
             <span class="crr-val" id="cRiskDollar">—</span>
           </div>
 
@@ -9805,13 +9808,16 @@ function toggleCalc() {
   icon.textContent = body.classList.contains('open') ? '▲ Collapse' : '▼ Expand';
 }
 
-// ── Leverage field: label + options by asset type ──
+// ── Third field: label + options by asset type ──
+// For forex: Contract Size (standard/mini/micro lots)
+// For crypto: Your Leverage (set by trader per trade)
+// For stocks/indices/commodities: Broker Leverage (set by broker)
 var _levConfigs = {
-  crypto:    { label: 'Your Leverage',   note: 'Set on your exchange before entering the trade',          options: [[1,'1× Spot'],[2,'2×'],[5,'5×'],[10,'10×'],[20,'20×'],[50,'50×'],[100,'100×']] },
-  stock:     { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',   options: [[1,'1× (no leverage)'],[2,'2×'],[5,'5×']] },
-  forex:     { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',   options: [[1,'1×'],[10,'10×'],[20,'20×'],[30,'30×']] },
-  index:     { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',   options: [[1,'1×'],[5,'5×'],[10,'10×'],[20,'20×']] },
-  commodity: { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',   options: [[1,'1×'],[5,'5×'],[10,'10×'],[20,'20×']] }
+  crypto:    { label: 'Your Leverage',   note: 'Set on your exchange before entering the trade',                            options: [[1,'1× Spot'],[2,'2×'],[5,'5×'],[10,'10×'],[20,'20×'],[50,'50×'],[100,'100×']] },
+  stock:     { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',                     options: [[1,'1× (no leverage)'],[2,'2×'],[5,'5×']] },
+  forex:     { label: 'Contract Size',   note: 'Standard = 100k units · Mini = 10k · Micro = 1k',                          options: [[100000,'Standard (100,000)'],[10000,'Mini (10,000)'],[1000,'Micro (1,000)']] },
+  index:     { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',                     options: [[1,'1×'],[5,'5×'],[10,'10×'],[20,'20×']] },
+  commodity: { label: 'Broker Leverage', note: 'Check your broker\'s platform — set by them, not you',                     options: [[1,'1×'],[5,'5×'],[10,'10×'],[20,'20×']] }
 };
 function updateLevField(assetType) {
   var cfg = _levConfigs[assetType] || _levConfigs.crypto;
@@ -9849,37 +9855,31 @@ function autoFillCalc(d) {
   if (d.signal === 'BUY' || d.signal === 'SELL') {
     try { setDir(d.signal); } catch(e) {}
   }
-  // Run immediately if account or capital already populated
-  var acct    = parseFloat((document.getElementById('cAcct')    || {}).value) || 0;
-  var capital = parseFloat((document.getElementById('cCapital') || {}).value) || 0;
-  if (acct > 0 || capital > 0) try { recalc(); } catch(e) {}
+  // Run immediately if account size and risk % already populated
+  var acct    = parseFloat((document.getElementById('cAcct') || {}).value) || 0;
+  var riskPct = parseFloat((document.getElementById('cRisk') || {}).value) || 0;
+  if (acct > 0 || riskPct > 0) try { recalc(); } catch(e) {}
 }
 
 function recalc() {
-  const acct    = parseFloat(document.getElementById('cAcct').value)    || 0;
-  const capital = parseFloat(document.getElementById('cCapital').value) || 0;
-  const lev     = parseFloat(document.getElementById('cLev').value)     || 1;
-  const entry   = parseFloat(document.getElementById('cEntry').value)   || 0;
-  const sl      = parseFloat(document.getElementById('cSL').value)      || 0;
-  const tp1     = parseFloat(document.getElementById('cTP1').value)     || 0;
-  const tp2     = parseFloat(document.getElementById('cTP2').value)     || 0;
-  const tp3     = parseFloat(document.getElementById('cTP3').value)     || 0;
-  const assetPrice = parseFloat(document.getElementById('cAsset').value) || entry;
+  const acct       = parseFloat(document.getElementById('cAcct').value)  || 0;
+  const riskPct    = parseFloat(document.getElementById('cRisk').value)   || 0;
+  const levOrContr = parseFloat(document.getElementById('cLev').value)    || 1;
+  const entry      = parseFloat(document.getElementById('cEntry').value)  || 0;
+  const sl         = parseFloat(document.getElementById('cSL').value)     || 0;
+  const tp1        = parseFloat(document.getElementById('cTP1').value)    || 0;
+  const tp2        = parseFloat(document.getElementById('cTP2').value)    || 0;
+  const tp3        = parseFloat(document.getElementById('cTP3').value)    || 0;
+  const assetPrice = parseFloat(document.getElementById('cAsset').value)  || entry;
+
+  // Derived
+  const moneyAtRisk = acct * (riskPct / 100);
 
   // ── Trade summary bar ──
-  const labelEl = document.getElementById('cRiskLabel');
-  const valEl   = document.getElementById('cRiskDollar');
-  if (capital > 0 && acct > 0) {
-    const capPct = ((capital / acct) * 100).toFixed(0);
-    if (labelEl) labelEl.textContent = 'Investing (' + capPct + '% of account)';
-    if (valEl)   valEl.textContent   = '$' + capital.toLocaleString();
-  } else if (capital > 0) {
-    if (labelEl) labelEl.textContent = 'Investing';
-    if (valEl)   valEl.textContent   = '$' + capital.toLocaleString();
-  } else {
-    if (labelEl) labelEl.textContent = 'Investing';
-    if (valEl)   valEl.textContent   = '—';
-  }
+  const marEl  = document.getElementById('cMoneyAtRisk');
+  const sizeEl = document.getElementById('cRiskDollar');
+  if (marEl)  marEl.textContent  = (acct && riskPct) ? '$' + moneyAtRisk.toFixed(2) : '—';
+  if (sizeEl) sizeEl.textContent = '—'; // will be set later once posSize is known
 
   // ── Coach panel ──
   const guidEl = document.getElementById('calcGuidance');
@@ -9897,6 +9897,9 @@ function recalc() {
   const sigTicker = cd.ticker    || null;
   const sigPrice  = cd.price     || null;
   const assetType = cd.asset_type || 'crypto';
+  // Contract size (forex) or leverage (crypto/others)
+  const contractSize = (assetType === 'forex') ? levOrContr : 100000;
+  const lev          = (assetType === 'crypto') ? levOrContr : 1;
 
   // ── Format helpers ──
   function fmtP(v) {
@@ -9930,9 +9933,9 @@ function recalc() {
 
   // ── Account footer ──
   function acctFooter() {
-    if (!acct && !capital) return '';
-    var left  = acct ? 'Account: <b style="color:var(--white);">$' + acct.toLocaleString() + '</b>' : '';
-    var right = capital ? 'Putting in: <b style="color:var(--amber);">$' + capital.toLocaleString() + '</b>' + (acct ? ' (' + ((capital/acct)*100).toFixed(0) + '% of account)' : '') : '';
+    if (!acct) return '';
+    var left  = 'Account: <b style="color:var(--white);">$' + acct.toLocaleString() + '</b>';
+    var right = riskPct ? 'Risk: <b style="color:var(--amber);">' + riskPct + '%</b> = <b style="color:var(--amber);">$' + moneyAtRisk.toFixed(2) + '</b> max loss' : '';
     return '<div style="margin-top:6px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:var(--r);font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
       + '<span style="color:var(--muted2);">' + left + '</span>'
       + '<span style="color:var(--muted2);">' + right + '</span>'
@@ -9967,48 +9970,47 @@ function recalc() {
 
   // ── STATE: Missing account size ──
   if (!acct) {
-    var unitWordA = assetType === 'forex' ? 'currency units' : assetType === 'crypto' ? 'coins' : 'shares';
     coach(sigCard()
       + '<div style="background:rgba(255,68,89,.08);border-left:3px solid var(--red);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
-      + '<div style="color:var(--white);font-weight:700;font-size:13px;margin-bottom:6px;">Step 1 — How much money do you have?</div>'
+      + '<div style="color:var(--white);font-weight:700;font-size:13px;margin-bottom:6px;">Step 1 — What is your account balance?</div>'
       + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">'
-      + 'Enter your total account size in the <b style="color:var(--white);">Account ($)</b> field above. This is all the money you have available to trade — not just what you want to put in this trade.<br><br>'
-      + 'I use this to calculate exactly how many <b>' + unitWordA + '</b> to buy so you never accidentally risk more than you\'re comfortable with.'
+      + 'Enter your total account size in the <b style="color:var(--white);">Account ($)</b> field. This is all the money in your trading account.<br><br>'
+      + 'I use this with your Risk % to calculate exactly how many lots/units to trade — so you never risk more than you set.'
       + '</div>'
       + '</div>');
     return;
   }
 
-  // ── STATE: Missing trade capital ──
-  if (!capital) {
-    var unitWordC = assetType === 'forex' ? 'currency units' : assetType === 'crypto' ? 'coins' : 'shares';
-    var ex1 = acct ? '$' + Math.round(acct * 0.05).toLocaleString() : '$50';
-    var ex2 = acct ? '$' + Math.round(acct * 0.10).toLocaleString() : '$100';
-    var ex3 = acct ? '$' + Math.round(acct * 0.20).toLocaleString() : '$200';
+  // ── STATE: Missing risk % ──
+  if (!riskPct) {
+    var ex1d = acct ? '$' + (acct * 0.01).toFixed(2) : '$10';
+    var ex2d = acct ? '$' + (acct * 0.02).toFixed(2) : '$20';
+    var ex5d = acct ? '$' + (acct * 0.05).toFixed(2) : '$50';
     coach(sigCard()
       + '<div style="background:rgba(255,68,89,.08);border-left:3px solid var(--red);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
-      + '<div style="color:var(--white);font-weight:700;font-size:13px;margin-bottom:6px;">Step 2 — How much do you want to put into this trade?</div>'
+      + '<div style="color:var(--white);font-weight:700;font-size:13px;margin-bottom:6px;">Step 2 — How much of your account do you risk per trade?</div>'
       + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">'
-      + 'Enter the amount in the <b style="color:var(--white);">My Trade ($)</b> field. This is the money you\'re allocating to this specific trade — not your whole account.<br><br>'
-      + '<b style="color:var(--amber);">Beginner rule: never put more than 5%–20% of your account in one trade.</b><br>'
-      + (acct ? ('&nbsp;&nbsp;· 5% of your $' + acct.toLocaleString() + ' = <b style="color:var(--white);">' + ex1 + '</b><br>'
-               + '&nbsp;&nbsp;· 10% of your $' + acct.toLocaleString() + ' = <b style="color:var(--white);">' + ex2 + '</b><br>'
-               + '&nbsp;&nbsp;· 20% of your $' + acct.toLocaleString() + ' = <b style="color:var(--white);">' + ex3 + '</b><br><br>') : '')
-      + 'I\'ll calculate exactly how many <b>' + unitWordC + '</b> you get and what you stand to gain or lose.'
+      + 'Enter your <b style="color:var(--white);">Risk %</b> — the percentage of your account you are willing to lose if the stop loss hits. This is not your position size; it\'s your maximum loss on this trade.<br><br>'
+      + '<b style="color:var(--amber);">Professional rule: risk 1–2% per trade. Never exceed 5%.</b><br>'
+      + (acct ? ('&nbsp;&nbsp;· 1% of $' + acct.toLocaleString() + ' = <b style="color:var(--white);">' + ex1d + '</b> max loss<br>'
+               + '&nbsp;&nbsp;· 2% of $' + acct.toLocaleString() + ' = <b style="color:var(--white);">' + ex2d + '</b> max loss<br>'
+               + '&nbsp;&nbsp;· 5% of $' + acct.toLocaleString() + ' = <b style="color:var(--white);">' + ex5d + '</b> max loss<br><br>') : '')
+      + 'From your Risk % and Stop Loss distance, I calculate exactly how many lots to trade.'
       + '</div>'
       + '</div>'
       + acctFooter());
     return;
   }
 
-  // ── STATE: Capital exceeds account ──
-  if (acct && capital > acct) {
+  // ── STATE: Risk % too high ──
+  if (riskPct > 10) {
     coach(sigCard()
       + '<div style="background:rgba(255,68,89,.12);border-left:3px solid var(--red);border-radius:0 var(--r) var(--r) 0;padding:12px 14px;">'
-      + '<div style="color:var(--red);font-weight:700;font-size:13px;margin-bottom:6px;">Trade amount exceeds your account</div>'
+      + '<div style="color:var(--red);font-weight:700;font-size:13px;margin-bottom:6px;">Risk % is dangerously high</div>'
       + '<div style="color:var(--white2);font-size:12px;line-height:1.7;">'
-      + 'You\'re trying to invest <b style="color:var(--red);">$' + capital.toLocaleString() + '</b> but your account is only <b style="color:var(--white);">$' + acct.toLocaleString() + '</b>. You don\'t have enough money to take this position.<br><br>'
-      + 'Lower your trade amount to at most <b style="color:var(--amber);">$' + acct.toLocaleString() + '</b>, or update your account size if you have more funds available.'
+      + 'You\'ve set <b style="color:var(--red);">' + riskPct + '% risk</b> — that\'s <b style="color:var(--red);">$' + moneyAtRisk.toFixed(2) + '</b> at risk on a single trade.<br><br>'
+      + 'Professional traders risk <b style="color:var(--amber);">1–2% per trade</b>, never above 5%. Risking 10%+ on one trade means 10 consecutive losses wipe your account.<br><br>'
+      + 'Lower your Risk % to <b style="color:var(--white);">1–2%</b> to protect your capital.'
       + '</div>'
       + '</div>');
     return;
@@ -10032,9 +10034,8 @@ function recalc() {
   if (!sl) {
     var slDist0 = sigSL ? Math.abs(entry - sigSL) : null;
     var slPct0  = slDist0 ? ((slDist0 / entry) * 100).toFixed(1) : null;
-    var slLossEst = (capital && entry && slDist0) ? ((capital / entry) * slDist0) : null;
     var slExplain = sigSL
-      ? 'The signal places your stop loss at <b style="color:var(--red);font-size:13px;">' + fmtP(sigSL) + '</b> — that\'s <b>' + fmtP(slDist0) + ' (' + slPct0 + '%) below your entry</b>.' + (slLossEst ? ' If ' + sigTicker + ' drops to that price, you lose <b style="color:var(--amber);">$' + slLossEst.toFixed(2) + '</b> from your $' + capital.toLocaleString() + ' trade. Not a penny more.' : '')
+      ? 'The signal places your stop loss at <b style="color:var(--red);font-size:13px;">' + fmtP(sigSL) + '</b> — that\'s <b>' + fmtP(slDist0) + ' (' + slPct0 + '%) below your entry</b>.' + (moneyAtRisk ? ' If price hits that level, you lose exactly <b style="color:var(--amber);">$' + moneyAtRisk.toFixed(2) + '</b> — your ' + riskPct + '% risk cap.' : '')
       : 'A stop loss is the price where you exit if the trade goes against you. Set it below your entry for a BUY — the chart shows the recommended level.';
     var slBtn = sigSL
       ? '<button onclick="document.getElementById(\'cSL\').value=\'' + (sigSL >= 100 ? Math.round(sigSL*100)/100 : parseFloat(sigSL.toFixed(6))) + '\';recalc();" style="display:block;width:100%;margin-top:12px;padding:9px;background:var(--amber);color:#000;font-weight:700;font-size:12px;border:none;border-radius:var(--r);cursor:pointer;letter-spacing:.03em;">Use Signal Stop Loss — ' + fmtP(sigSL) + '</button>'
@@ -10066,56 +10067,81 @@ function recalc() {
   // ── All valid — hide coach, run calculation ──
   hideCoach();
 
-  // ── Asset type + pip size ──
+  // ── Asset type + pip/point size ──
   const ticker = (cd.ticker || sigTicker || '').toUpperCase();
+  const isJPY  = ticker.includes('JPY');
   let pipSize = 1, pipLabel = 'pts';
   if (assetType === 'forex') {
-    pipSize  = ticker.includes('JPY') ? 0.01 : 0.0001;
+    pipSize  = isJPY ? 0.01 : 0.0001;
     pipLabel = 'pips';
   }
 
   // ── Round-trip fee rate ──
-  const feeRate = assetType === 'crypto' ? 0.001 : 0.0005; // 0.1% crypto · 0.05% stocks/forex
+  const feeRate = assetType === 'crypto' ? 0.001 : 0.0005;
 
-  // ── Core sizing (capital mode: invest fixed $, size = capital / price) ──
-  const slDist  = Math.abs(entry - sl);
-  const posSize = (capital / (assetPrice || entry)) * lev;
-  const posVal  = capital;
-  const slLoss  = posSize * slDist;   // actual $ lost if SL hit
-  const margin  = posVal / lev;
-  const slPips  = slDist / pipSize;
+  // ── Core distances ──
+  const slDist = Math.abs(entry - sl);
+  const slPips = slDist / pipSize;
   const decimals = assetType === 'forex' ? 1 : 0;
 
-  // ── Unit label ──
-  let unitLabel;
-  if (assetType === 'crypto') {
-    unitLabel = posSize >= 1 ? posSize.toFixed(4) + ' coins' : posSize.toFixed(6) + ' coins';
-  } else if (assetType === 'forex') {
-    // Fix 1: classify into standard / mini / micro lots properly
-    const lots = posSize / 100000;
-    if (lots >= 1)        unitLabel = lots.toFixed(2) + ' lots';
-    else if (lots >= 0.1) unitLabel = (lots * 10).toFixed(2) + ' mini lots';
-    else if (lots >= 0.001) unitLabel = (lots * 100).toFixed(3) + ' micro lots';
-    else                  unitLabel = Math.round(posSize) + ' units';
-  } else {
-    unitLabel = posSize.toFixed(2) + ' shares';
-  }
+  // ══════════════════════════════════════════════════
+  // POSITION SIZING — Risk % approach (professional)
+  // moneyAtRisk = account × riskPct/100
+  // Lot/unit size derived so that SL hit = exactly moneyAtRisk
+  // ══════════════════════════════════════════════════
+  let posSize, posVal, lots, lotsDisplay, pipValuePerLot, pipValStr = '', margin;
 
-  // Fix 2: pip value at trader's position size (forex only)
-  let pipValStr = '';
   if (assetType === 'forex') {
-    // pip value in account currency = posSize × pipSize (for USD-quoted pairs)
-    // for JPY pairs divide by entry to convert yen→USD
-    const pipValRaw = ticker.includes('JPY')
-      ? (posSize * pipSize) / (entry || 1)
-      : posSize * pipSize;
-    pipValStr = ' · pip value $' + pipValRaw.toFixed(2);
+    // Pip value per lot in USD depends on pair structure:
+    //   USD-quoted (EURUSD, GBPUSD, AUDUSD, NZDUSD):  pipSize × contractSize  → $10 per std lot
+    //   USD-base   (USDJPY, USDCHF, USDCAD):           (pipSize / entry) × contractSize
+    //   Cross      (EURJPY, GBPJPY etc.):               approximate as USD-quoted
+    const isUSDBase = ticker.startsWith('USD') && !ticker.endsWith('USD');
+    pipValuePerLot  = isUSDBase
+      ? (pipSize / (entry || 1)) * contractSize
+      : pipSize * contractSize;
+
+    lots        = moneyAtRisk / (slPips * pipValuePerLot);
+    posSize     = lots * contractSize;                    // units
+    posVal      = posSize * (assetPrice || entry);        // full position value in account currency (approx)
+    margin      = posVal / 30;                            // approximate — broker-set, typically ~3% for forex
+
+    // Lot label: standard / mini / micro
+    const stdLots = lots;
+    if (stdLots >= 1)          lotsDisplay = stdLots.toFixed(2) + ' lots';
+    else if (stdLots >= 0.1)   lotsDisplay = (stdLots * 10).toFixed(2) + ' mini lots';
+    else if (stdLots >= 0.001) lotsDisplay = (stdLots * 100).toFixed(3) + ' micro lots';
+    else                       lotsDisplay = stdLots.toFixed(5) + ' lots';
+
+    const pipValAtSize = lots * pipValuePerLot;
+    pipValStr = ' · $' + pipValAtSize.toFixed(2) + '/pip';
+
+  } else if (assetType === 'crypto') {
+    // units = moneyAtRisk / slDist  → loss if SL hit = units × slDist = moneyAtRisk ✓
+    posSize     = moneyAtRisk / (slDist || 1);
+    posVal      = posSize * (assetPrice || entry);
+    margin      = posVal / lev;
+    lotsDisplay = posSize >= 1 ? posSize.toFixed(4) + ' units' : posSize.toFixed(6) + ' units';
+    lots        = null;
+
+  } else {
+    // stocks / indices / commodities: shares = moneyAtRisk / slDist
+    posSize     = moneyAtRisk / (slDist || 1);
+    posVal      = posSize * (assetPrice || entry);
+    margin      = posVal / (lev || 1);
+    lotsDisplay = posSize.toFixed(2) + (assetType === 'index' ? ' contracts' : assetType === 'commodity' ? ' contracts' : ' shares');
+    lots        = null;
   }
 
-  document.getElementById('cPosSize').textContent   = unitLabel;
-  document.getElementById('cPosVal').textContent    = '$' + posVal.toLocaleString(undefined, {maximumFractionDigits: 0}) + (acct ? ' (' + ((posVal/acct)*100).toFixed(0) + '% of account)' : '');
-  document.getElementById('cStopDist').textContent  = slPips.toFixed(decimals) + ' ' + pipLabel + pipValStr + ' · lose $' + slLoss.toFixed(2) + ' if hit' + (acct ? ' (' + ((slLoss/acct)*100).toFixed(2) + '% of account)' : '');
-  document.getElementById('cMarginReq').textContent = lev > 1 ? '$' + margin.toLocaleString(undefined, {maximumFractionDigits: 0}) : '— (spot)';
+  const slLoss = moneyAtRisk; // by construction: sizing ensures SL hit = exactly moneyAtRisk
+
+  // ── Update summary bar ──
+  if (sizeEl) sizeEl.textContent = lotsDisplay;
+
+  document.getElementById('cPosSize').textContent   = lotsDisplay;
+  document.getElementById('cPosVal').textContent    = '$' + posVal.toLocaleString(undefined, {maximumFractionDigits: 0}) + (assetType === 'forex' ? ' notional' : acct ? ' (' + ((posVal/acct)*100).toFixed(0) + '% of account)' : '');
+  document.getElementById('cStopDist').textContent  = slPips.toFixed(decimals) + ' ' + pipLabel + pipValStr + ' · lose $' + slLoss.toFixed(2) + ' if hit (' + riskPct + '% of account)';
+  document.getElementById('cMarginReq').textContent = assetType === 'forex' ? '~$' + margin.toLocaleString(undefined, {maximumFractionDigits: 0}) + ' (approx)' : lev > 1 ? '$' + margin.toLocaleString(undefined, {maximumFractionDigits: 0}) : '— (spot)';
 
   // ── Win rate from last backtest ──
   const wr   = window._lastBt ? (window._lastBt.win_rate != null ? window._lastBt.win_rate : null) : null;
@@ -10132,16 +10158,17 @@ function recalc() {
   function calcTP(tp) {
     const dist        = Math.abs(tp - entry);
     const grossProfit = dist * posSize;
-    const fees        = posVal * feeRate;  // entry fee + exit fee on position value
+    const fees        = posVal * feeRate;
     const netProfit   = grossProfit - fees;
-    const rr          = (dist / slDist).toFixed(1);
+    const rr          = slDist > 0 ? (dist / slDist).toFixed(1) : '—';
     const pct         = ((tp - entry) / entry * 100).toFixed(2);
-    const base        = capital || acct || 1;
-    const acctGross   = (grossProfit / base * 100).toFixed(2);
-    const acctNet     = (netProfit   / base * 100).toFixed(2);
+    const base        = moneyAtRisk || acct || 1;
+    const acctGross   = (grossProfit / (acct||1) * 100).toFixed(2);
+    const acctNet     = (netProfit   / (acct||1) * 100).toFixed(2);
+    const rrMoney     = slLoss > 0 ? (netProfit / slLoss).toFixed(1) : '—'; // R:R in $ terms
     const tpPips      = dist / pipSize;
     const priceStr    = tp >= 100 ? '$' + tp.toLocaleString(undefined,{maximumFractionDigits:2}) : tp.toFixed(5);
-    return { dist, grossProfit, netProfit, fees, rr, pct, acctGross, acctNet, tpPips, priceStr };
+    return { dist, grossProfit, netProfit, fees, rr, rrMoney, pct, acctGross, acctNet, tpPips, priceStr };
   }
 
   tpList.forEach(([tp, lbl]) => {
@@ -10193,7 +10220,7 @@ function recalc() {
 
     // Worst case cell
     var slFmt = fmtPrice(sl);
-    var acctAfterLoss = acct ? '$' + (acct - slLoss).toLocaleString(undefined,{maximumFractionDigits:0}) : null;
+    var acctAfterLoss = acct ? '$' + (acct - moneyAtRisk).toLocaleString(undefined,{maximumFractionDigits:0}) : null;
     document.getElementById('rrRisk').textContent = '−$' + slLoss.toFixed(0);
     document.getElementById('rrRiskLabel').textContent = 'if price hits ' + slFmt;
 
@@ -10241,7 +10268,7 @@ function recalc() {
         '<b>This is the full target — take the rest of your position here.</b> TP3 is the maximum the signal engine projects. Celebrate — this is a great trade result.'
       ];
       var acctGainStr = t.acctNet + '% gain on your account';
-      var invGainStr  = '+' + t.pct + '% on your $' + (capital||0).toLocaleString() + ' investment';
+      var invGainStr  = 'R:R 1:' + t.rrMoney + ' (risked $' + slLoss.toFixed(0) + ', profit $' + t.netProfit.toFixed(0) + ')';
       return '<div style="color:var(--green);font-weight:700;font-size:13px;margin-bottom:8px;">🎯 TP'+(idx+1)+' — '+labels[idx]+'</div>'
         + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">'
         + '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--muted2);margin-bottom:3px;font-family:var(--mono);">TARGET PRICE</div><div style="font-family:var(--mono);font-weight:700;color:var(--white);">'+ fmtPrice(tp) +'</div></div>'
