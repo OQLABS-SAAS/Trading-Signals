@@ -20,6 +20,11 @@
 
 **Before every session:** User says "Protocol active." Claude reads the six gates before responding to anything.
 
+**Gate check — VISIBLE IN EVERY RESPONSE before any tool call:**
+Before every single action, write this line in the response:
+Gate 1 — asked? Gate 2 — root cause known? Gate 3 — plan confirmed? Gate 4 — certain or assuming? Gate 5 — risks stated? Gate 6 — verification level?
+If this line is missing before a tool call, the gate was skipped. This makes thinking visible and auditable without the user needing to read code.
+
 **Before every fix — Claude must state all five or the gate does not open:**
 1. The problem
 2. The root cause
@@ -29,9 +34,104 @@
 
 **Task discipline:** One task at a time. Fully closed before the next opens.
 
-**Deploy discipline — NON-NEGOTIABLE:** Verify every fix at runtime in the local bash sandbox before committing or pushing. Run the code. Reproduce the bug. Confirm the fix eliminates it. Only after local runtime verification is confirmed may the fix be committed and pushed. After deployment, the user confirms in the live browser — that is the final gate. A commit is not "done". A push is not "done". Never mark a task complete or claim it is verified until both local runtime verification AND user browser confirmation are complete.
+**Runtime verification protocol — MANDATORY FOR EVERY FIX — THREE PATHS:**
 
-**You hold the gate:** If any of the five are missing, reject it.
+Before touching any code, identify what type of fix it is. Follow the correct path.
+
+---
+
+**PATH A — Backend fix (Python, Flask, app.py)**
+
+Install all dependencies first: `pip install -r requirements.txt --break-system-packages --quiet`
+
+Write a small Python test in the bash sandbox that imports the real functions directly from app.py. Never simulate or rewrite the logic:
+```python
+import sys, os
+sys.path.insert(0, '/path/to/trading-signals-saas')
+os.environ.setdefault('SECRET_KEY', 'test')
+os.environ.setdefault('DATABASE_URL', '')
+os.environ.setdefault('REDIS_URL', '')
+from app import [the functions relevant to the bug]
+```
+Reproduce the exact bug first using the exact asset type, ticker, timeframe, and input values the user described. Use the boundary value that triggers the bug — not an obvious value that always passes. The output must show the failure. If it does not fail the bug is not reproduced — stop, do not proceed, find out why first.
+
+Apply the fix in the same script and run it again. The output must change from failing to passing:
+```
+BEFORE FIX: [output showing the bug]   match=False
+AFTER FIX:  [output showing it fixed]  match=True
+```
+If both show match=True the bug was never reproduced. Start over.
+
+After the test passes, end with:
+```
+SANDBOX VERIFIED: [functions tested, exact inputs, scenarios, boundary values]
+NOT VERIFIED:     [mocked services — live API, Redis, database, Railway env]
+RESIDUAL RISK:    [what could still fail in production and why]
+```
+
+---
+
+**PATH B — Frontend fix (JavaScript, CSS, HTML)**
+
+Sandbox verification is not possible for frontend fixes.
+
+Before touching any code: state every element ID and function name being changed. Grep to confirm each one exists in both the HTML and the JS. Confirm no other component shares the same class or ID. Confirm no CSS change affects adjacent components.
+
+End with:
+```
+SANDBOX VERIFIED: not possible — frontend fix
+CODE REVIEW DONE: [IDs checked, JS references checked, CSS side effects checked]
+RESIDUAL RISK:    [what could break — adjacent components, shared classes, layout]
+```
+
+---
+
+**PATH C — Configuration fix (Procfile, requirements.txt, Railway env vars)**
+
+Sandbox verification is not possible for configuration fixes.
+
+Before touching any config: state exactly which line is changing, what the current value is, what the new value is, and what breaks in production if the change is wrong. If changing requirements.txt confirm no package conflicts. If changing Railway env vars confirm the variable name matches exactly what the code reads.
+
+After deployment confirm the Railway service started cleanly and is showing healthy status before doing anything else.
+
+End with:
+```
+SANDBOX VERIFIED: not possible — configuration fix
+CONFIG REVIEW DONE: [exact line changed, old value, new value, conflict check]
+RESIDUAL RISK:    [what fails if wrong, how quickly visible after deploy]
+```
+
+---
+
+**All three paths then follow these steps without exception:**
+
+Ask the user before committing. Ask again before pushing. Two separate gates. State what was verified and the residual risk, then ask: "Shall I commit?" Wait for yes. Then ask: "Shall I push?" Wait for yes. Never do either without explicit confirmation.
+
+After deployment, give the user plain browser steps to confirm the fix. No logs. No terminal. No code. Only what a non-technical person can do on screen. Only after the user confirms in the browser, mark the fix RESOLVED in CLAUDE.md with today's date.
+
+---
+
+**Strict definitions — these never change:**
+
+SANDBOX VERIFIED — Python test using real app functions showed fail then pass with exact scenario and boundary values.
+CODE REVIEW DONE — frontend or config change traced through every reference, no sandbox test possible.
+FULLY VERIFIED — either of the above plus user confirmed in live browser.
+RESOLVED — fully verified only, never before.
+RUNTIME VERIFIED — never means the code looks right. That is Level 4 code reading. Always state which level was reached.
+
+---
+
+**What can never be sandbox verified — state this on every fix touching these:**
+
+Live API responses, Redis cross-process caching, database queries, and Railway networking cannot be replicated locally. For any fix touching these write: "This path cannot be sandbox verified. Logic tested only. Residual risk: [specific risk]. Browser test that catches it: [exact step]."
+
+---
+
+**Mid-task message rule — NON-NEGOTIABLE:**
+
+When the user sends a message while work is in progress, stop all tool calls immediately, read the message fully, respond to it, then ask whether to continue. Never keep executing after a user message arrives.
+
+**You hold the gate:** If any element is missing, the gate does not open.
 
 **The Clarifying Question Rule — NON-NEGOTIABLE:**
 A plan that contains any unanswered behaviour question is NOT a confirmed plan. Gate 3 is not open.
