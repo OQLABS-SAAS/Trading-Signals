@@ -664,3 +664,42 @@ New approach (SonarLab / industry standard):
 **Scanner TF expand data lookup — commit `0c83d6c`:**
 - Root cause: `resJson = encodeURIComponent(JSON.stringify(...))` embedded in onclick HTML attribute. `encodeURIComponent` does NOT encode `'`, `(`, `)`, em-dashes. Reason strings from backend contain these characters — they silently truncate the onclick attribute, causing `scannerExpandTF` to receive corrupted or empty data → always showed first-TF (15M) data or nothing.
 - Fix: store all scan data in `window._smtfData[ticker].tfs[tf]` at render time. `scannerExpandTF(ticker, tf, rowId)` — no JSON param — looks up data from the store. onclick attributes only carry simple `ticker` and `tf` strings which are always safe.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-14 (Scanner full analysis upgrade)
+
+**All changes committed. Deploy: `git push origin main` → Railway auto-deploys.**
+**NOT YET runtime verified — user must push and test.**
+
+**Scanner full DotVerse analysis — NOT YET runtime verified:**
+
+**Root cause of prior scanner/signals discrepancy:**
+- Scanner used `pre_screen(ind, tv=tv)` — TradingView recommendation OR simple net_bull/net_bear score. No 65% confluence gate. No entry/SL/TP levels.
+- Full signal used `get_analysis()` — DotVerse's full 65% confluence gate, asset-specific settings, entry/SL/TP from ATR.
+- BUY in scanner could legitimately become SELL on signals tab. Different algorithms, not a bug.
+
+**Fix applied:**
+- `/api/scan-list` endpoint — both TV primary path and yfinance fallback: replaced `pre_screen()` with `get_analysis(ticker, asset_type, ind, timeframe, tv=tv)`.
+- Backend result dict now contains: `signal`, `entry`, `stop_loss`, `tp1`, `tp2`, `tp3`, `rr1`, `rr2`, `rr3`, `confidence`, `confidence_label`, `bull_score` (mapped from `bullish_count`), `bear_score` (mapped from `bearish_count`), `reason` (mapped from `summary`).
+- Removed `signal_hint`, `opportunity`, `call_claude` from response (pre_screen-specific fields).
+- `sort_key` updated: sorts BUY/SELL first, HOLD last (was sorting by `call_claude` and `opportunity` which no longer exist).
+- `confidence` is now a string ("HIGH"/"MEDIUM"/"LOW") not a number. `filterScanResults` highconf filter updated to check `r.confidence === 'HIGH'`.
+
+**Frontend changes:**
+- `renderScanResults` (single-TF): `r.signal_hint` → `r.signal`. Pill labels simplified to BUY/SELL/HOLD. Entry/SL/TP1 shown as sub-text below badge in signal cell.
+- `renderScanResultsMultiTF`: header text updated ("Full DotVerse analysis. Click any TF cell..."). `res.signal_hint` → `res.signal`. `window._smtfData` store now includes `entry`, `stop_loss`, `tp1`, `tp2`, `tp3`, `rr1`, `conf_lbl`.
+- `scannerExpandTF`: expand panel now shows ENTRY / STOP LOSS / TP1 / TP2 / TP3 in dedicated level blocks. Confidence label shown next to signal badge. "Pre-screen (TV)" disclaimer removed. Button renamed "Open on Signals →".
+- `filterScanResults`: `r.signal_hint` → `r.signal`. `pillMatchesFilter` simplified (no POSSIBLE_BUY, COUNTER_BUY etc.). Highconf: `parseInt(r.confidence) >= 65` → `r.confidence === 'HIGH'`.
+
+**Architecture note — `_narrate_data_openai` in scanner:**
+- `get_analysis()` calls `_narrate_data_openai()` at the end. This function checks for OpenAI API key first — if not configured, it returns immediately without any LLM call. The scanner loop remains pure Python math. No additional latency introduced by this change.
+
+**Deploy verification checklist:**
+- [ ] Run market scanner (All Instruments or crypto preset, any TF)
+- [ ] Single-TF results: BUY/SELL/HOLD badges with Entry/SL/TP1 sub-text below badge
+- [ ] Multi-TF results: cells show BUY/SELL/HOLD (no POSSIBLE_BUY/CTR etc.)
+- [ ] Click a TF cell → expand row shows ENTRY / STOP LOSS / TP1 / TP2 / TP3 levels
+- [ ] Expand row signal matches what Signals tab shows for same ticker + TF (both now use DotVerse 65% gate)
+- [ ] Scanner BUY filter shows only BUY signals (no POSSIBLE_BUY, CTR etc.)
+- [ ] High Confidence filter shows only signals where DotVerse confidence = HIGH

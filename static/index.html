@@ -5146,11 +5146,11 @@ function renderScanResults(results, assetType) {
     '<th>Symbol</th><th title="Quick signal direction — click the row to get the full confirmed analysis">Signal</th><th title="How many indicators agree (bull / bear count)">Strength</th><th>Price</th><th title="RSI: 0-30 oversold, 70-100 overbought, 30-70 normal">RSI</th><th title="Are prices trending up or down based on moving averages?">Trend Direction</th><th>Volume</th><th>24h Change</th><th>Timeframe</th>' +
     '</tr></thead><tbody>' + results.map(r => {
     if (r.error) return '<tr><td class="st-sym">' + r.ticker + '</td><td><span class="sig-badge-sm hold">ERR</span></td><td colspan="7" style="color:var(--muted);">' + (r.error||'Failed') + '</td></tr>';
-    const hint = r.signal_hint || 'HOLD';
+    const hint = r.signal || 'HOLD';
     const chg  = r.chg_1d != null ? (r.chg_1d >= 0 ? '+' + r.chg_1d + '%' : r.chg_1d + '%') : '—';
     const chgCls = r.chg_1d >= 0 ? 'style="color:var(--green)"' : 'style="color:var(--red)"';
-    const pillLbl = hint==='BUY'?'BUY SETUP':hint==='SELL'?'SELL SETUP':hint==='COUNTER_BUY'?'COUNTER':hint==='POSSIBLE_BUY'?'WATCH UP':hint==='POSSIBLE_SELL'?'WATCH DOWN':'NO SIGNAL';
-    var sigCls = (hint==='BUY'||hint==='POSSIBLE_BUY'||hint==='COUNTER_BUY')?'buy':(hint==='SELL'||hint==='POSSIBLE_SELL')?'sell':'hold';
+    const pillLbl = hint==='BUY'?'BUY':hint==='SELL'?'SELL':'HOLD';
+    var sigCls = hint==='BUY'?'buy':hint==='SELL'?'sell':'hold';
     var confColor = (r.confidence && parseInt(r.confidence) > 65) ? 'var(--amber)' : 'var(--muted2)';
     var trend = r.ema_trend || '—';
     var trendColor = trend.toLowerCase().includes('bull') ? 'var(--green)' : trend.toLowerCase().includes('bear') ? 'var(--red)' : 'var(--muted2)';
@@ -5159,9 +5159,14 @@ function renderScanResults(results, assetType) {
     var tf = (document.getElementById('scanTF')||{}).value || '4h';
     var bScore = r.bull_score||0; var beScore = r.bear_score||0;
     var strengthTxt = (bScore+beScore > 0) ? bScore + ' bull / ' + beScore + ' bear' : '—';
+    var levelsHtml = '';
+    if (hint !== 'HOLD' && r.entry != null) {
+      levelsHtml = '<div style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:3px;line-height:1.5;">' +
+        'E ' + fmt(r.entry) + ' · SL ' + fmt(r.stop_loss) + '<br>TP ' + fmt(r.tp1) + (r.rr1 ? ' (' + r.rr1 + 'R)' : '') + '</div>';
+    }
     return '<tr style="cursor:pointer;" onclick="scannerLoadTicker(\'' + r.ticker + '\',\'' + assetType + '\')">' +
       '<td class="st-sym">' + r.ticker + '</td>' +
-      '<td><span class="sig-badge-sm ' + sigCls + '" title="Click row to get full confirmed analysis">' + pillLbl + '</span></td>' +
+      '<td><span class="sig-badge-sm ' + sigCls + '" title="Click row to open full analysis on Signals page">' + pillLbl + '</span>' + levelsHtml + '</td>' +
       '<td style="font-family:var(--mono);font-size:11px;color:var(--muted2);" title="How many indicators are bullish vs bearish">' + strengthTxt + '</td>' +
       '<td>' + fmt(r.price) + '</td>' +
       '<td>' + (r.rsi||'—') + '</td>' +
@@ -5187,7 +5192,7 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
   var tfList = ['15m','1h','4h','1d','1w'];
   var html = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">' +
     '<span style="font-family:var(--mono);font-size:10px;color:var(--muted);">' + tickers.length + ' results</span>' +
-    '<span style="font-family:var(--mono);font-size:9px;color:var(--muted);opacity:.7;letter-spacing:.3px;">Signals shown are TradingView pre-screens. Click a cell → Run Full Analysis for DotVerse verdict.</span>' +
+    '<span style="font-family:var(--mono);font-size:9px;color:var(--amber);opacity:.85;letter-spacing:.3px;">Full DotVerse analysis. Click any TF cell to see entry · SL · TP levels.</span>' +
   '</div>';
   html += '<table class="scan-mtf-table"><thead><tr><th>Symbol</th>';
   tfList.forEach(function(tf) { html += '<th>' + tf.toUpperCase() + '</th>'; });
@@ -5209,23 +5214,30 @@ function renderScanResultsMultiTF(resultsByTicker, assetType) {
     html += '<td onclick="scannerLoadTicker(\'' + ticker + '\',\'' + tickerAt + '\')" style="text-align:left;font-weight:700;color:var(--amber);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;" title="Open in Signals (default TF)">' + ticker + '</td>';
     tfList.forEach(function(tf) {
       var res = tfResults[tf];
-      var sig = res ? (res.signal_hint || 'HOLD') : '—';
+      var sig = res ? (res.signal || 'HOLD') : '—';
       var rsi = res ? (res.rsi != null ? res.rsi.toFixed(1) : '—') : '—';
-      var sigClass = sig === 'BUY' || sig.includes('BUY') ? 'buy' : sig === 'SELL' || sig.includes('SELL') ? 'sell' : 'hold';
+      var sigClass = sig === 'BUY' ? 'buy' : sig === 'SELL' ? 'sell' : 'hold';
       // Store full result data in lookup — no JSON in onclick
       window._smtfData[ticker].tfs[tf] = {
         sig: sig, rsi: rsi,
         ema: res ? (res.ema_trend || '') : '',
         conf: res ? (res.confidence || '') : '',
+        conf_lbl: res ? (res.confidence_label || '') : '',
         reason: res ? (res.reason || '') : '',
         bull: res ? (res.bull_score || 0) : 0,
         bear: res ? (res.bear_score || 0) : 0,
+        entry: res ? res.entry : null,
+        stop_loss: res ? res.stop_loss : null,
+        tp1: res ? res.tp1 : null,
+        tp2: res ? res.tp2 : null,
+        tp3: res ? res.tp3 : null,
+        rr1: res ? res.rr1 : null,
         at: tickerAt
       };
       // TF column: onclick passes only ticker + tf strings — safe, no special chars
       html += '<td onclick="scannerExpandTF(\'' + ticker + '\',\'' + tf + '\',\'' + rowId + '\')" style="cursor:pointer;">';
       html += '<div class="scan-mtf-cell">';
-      html += '<div class="scan-mtf-pill ' + sigClass + '">' + (sig === 'COUNTER_BUY' ? 'CTR' : sig === 'POSSIBLE_BUY' ? 'PBY' : sig === 'POSSIBLE_SELL' ? 'PSL' : sig) + '</div>';
+      html += '<div class="scan-mtf-pill ' + sigClass + '">' + sig + '</div>';
       html += '<div class="scan-mtf-rsi">' + rsi + '</div>';
       html += '</div>';
       html += '</td>';
@@ -5260,33 +5272,66 @@ function scannerExpandTF(ticker, tf, rowId) {
   var rsi = res.rsi || '—';
   var ema = res.ema || '—';
   var conf = res.conf || '';
+  var confLbl = res.conf_lbl || '';
   var reason = res.reason || '';
   var bull = res.bull || 0;
   var bear = res.bear || 0;
   var at = res.at || assetType;
+  var entry = res.entry;
+  var stopLoss = res.stop_loss;
+  var tp1 = res.tp1;
+  var tp2 = res.tp2;
+  var tp3 = res.tp3;
+  var rr1 = res.rr1;
 
-  var sigColor = sig === 'BUY' || (sig||'').includes('BUY') ? 'var(--green)' : sig === 'SELL' || (sig||'').includes('SELL') ? 'var(--red)' : 'var(--muted2)';
-  var sigBg = sig === 'BUY' || (sig||'').includes('BUY') ? 'rgba(0,201,141,.12)' : sig === 'SELL' || (sig||'').includes('SELL') ? 'rgba(255,68,89,.12)' : 'rgba(255,255,255,.05)';
+  var sigColor = sig === 'BUY' ? 'var(--green)' : sig === 'SELL' ? 'var(--red)' : 'var(--muted2)';
+  var sigBg = sig === 'BUY' ? 'rgba(0,201,141,.12)' : sig === 'SELL' ? 'rgba(255,68,89,.12)' : 'rgba(255,255,255,.05)';
   var emaColor = ema === 'BULLISH' ? 'var(--green)' : ema === 'BEARISH' ? 'var(--red)' : 'var(--muted2)';
   var rsiNum = parseFloat(rsi);
   var rsiCtx = isNaN(rsiNum) ? '' : rsiNum >= 70 ? ' · Overbought' : rsiNum <= 30 ? ' · Oversold' : '';
   var total = (bull||0) + (bear||0);
   var bullPct = total > 0 ? Math.round((bull||0)/total*100) : 0;
+  var confColor = conf === 'HIGH' ? 'var(--green)' : conf === 'MEDIUM' ? 'var(--amber)' : 'var(--muted2)';
+
+  // Trade levels block — only shown when there's an actionable BUY or SELL
+  var fmtP = function(v) { return v != null ? parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:8}) : '—'; };
+  var levelsBlock = '';
+  if (sig !== 'HOLD' && entry != null) {
+    levelsBlock =
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;padding:8px 14px;background:rgba(0,0,0,.3);border-top:1px solid rgba(255,255,255,.04);">' +
+        '<div style="font-family:var(--mono);font-size:9px;">' +
+          '<div style="color:var(--muted2);margin-bottom:2px;">ENTRY</div>' +
+          '<div style="color:var(--white);font-weight:700;">' + fmtP(entry) + '</div>' +
+        '</div>' +
+        '<div style="font-family:var(--mono);font-size:9px;">' +
+          '<div style="color:var(--muted2);margin-bottom:2px;">STOP LOSS</div>' +
+          '<div style="color:var(--red);font-weight:700;">' + fmtP(stopLoss) + '</div>' +
+        '</div>' +
+        '<div style="font-family:var(--mono);font-size:9px;">' +
+          '<div style="color:var(--muted2);margin-bottom:2px;">TP1' + (rr1 ? ' · ' + rr1 + 'R' : '') + '</div>' +
+          '<div style="color:var(--green);font-weight:700;">' + fmtP(tp1) + '</div>' +
+        '</div>' +
+        (tp2 != null ? '<div style="font-family:var(--mono);font-size:9px;"><div style="color:var(--muted2);margin-bottom:2px;">TP2</div><div style="color:var(--green);font-weight:700;">' + fmtP(tp2) + '</div></div>' : '') +
+        (tp3 != null ? '<div style="font-family:var(--mono);font-size:9px;"><div style="color:var(--muted2);margin-bottom:2px;">TP3</div><div style="color:var(--green);font-weight:700;">' + fmtP(tp3) + '</div></div>' : '') +
+      '</div>';
+  }
 
   var html = '<td colspan="6" style="padding:0;border-top:none;">' +
-    '<div style="padding:10px 14px;background:rgba(245,166,35,.04);border-top:1px solid rgba(245,166,35,.12);border-bottom:1px solid rgba(255,255,255,.05);display:flex;flex-wrap:wrap;gap:12px;align-items:center;">' +
-      '<div style="display:flex;align-items:center;gap:8px;">' +
-        '<span style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;">' + ticker + ' · ' + tf.toUpperCase() + '</span>' +
-        '<span style="font-family:var(--mono);font-size:11px;font-weight:800;color:' + sigColor + ';background:' + sigBg + ';padding:2px 8px;border-radius:2px;">' + sig + '</span>' +
+    '<div style="background:rgba(245,166,35,.04);border-top:1px solid rgba(245,166,35,.15);border-bottom:1px solid rgba(255,255,255,.05);">' +
+      '<div style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span style="font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;">' + ticker + ' · ' + tf.toUpperCase() + '</span>' +
+          '<span style="font-family:var(--mono);font-size:11px;font-weight:800;color:' + sigColor + ';background:' + sigBg + ';padding:2px 8px;border-radius:2px;">' + sig + '</span>' +
+          (confLbl ? '<span style="font-family:var(--mono);font-size:8px;color:' + confColor + ';letter-spacing:.5px;">' + confLbl + '</span>' : '') +
+        '</div>' +
+        '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">RSI <span style="color:var(--white);font-weight:700;">' + rsi + '</span>' + rsiCtx + '</div>' +
+        '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Trend <span style="color:' + emaColor + ';font-weight:700;">' + ema + '</span></div>' +
+        (total > 0 ? '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Agreement <span style="color:var(--amber);font-weight:700;">' + bullPct + '%</span></div>' : '') +
+        '<div style="margin-left:auto;">' +
+          '<button onclick="scannerLoadTicker(\'' + ticker + '\',\'' + at + '\',\'' + tf + '\')" style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:5px 12px;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;cursor:pointer;white-space:nowrap;">Open on Signals →</button>' +
+        '</div>' +
       '</div>' +
-      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">RSI <span style="color:var(--white);font-weight:700;">' + rsi + '</span>' + rsiCtx + '</div>' +
-      '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Trend <span style="color:' + emaColor + ';font-weight:700;">' + ema + '</span></div>' +
-      (total > 0 ? '<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);">Agreement <span style="color:var(--amber);font-weight:700;">' + bullPct + '%</span> bull</div>' : '') +
-      (reason ? '<div style="font-family:var(--mono);font-size:9px;color:var(--muted);flex:1;min-width:140px;line-height:1.4;">' + reason.substring(0,80) + (reason.length>80?'…':'') + '</div>' : '') +
-      '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;">' +
-        '<button onclick="scannerLoadTicker(\'' + ticker + '\',\'' + at + '\',\'' + tf + '\')" style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:5px 12px;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;cursor:pointer;white-space:nowrap;">Run Full Analysis →</button>' +
-        '<span style="font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.3px;">Pre-screen (TV). DotVerse analysis may differ.</span>' +
-      '</div>' +
+      levelsBlock +
     '</div></td>';
 
   detailRow.innerHTML = html;
@@ -5361,10 +5406,10 @@ function filterScanResults(filter, btn) {
 
   function matchSignal(r, f) {
     if (f === 'all') return true;
-    var hint = (r.signal_hint || 'HOLD').toUpperCase();
-    if (f === 'buy') return hint === 'BUY' || hint === 'POSSIBLE_BUY' || hint === 'COUNTER_BUY';
-    if (f === 'sell') return hint === 'SELL' || hint === 'POSSIBLE_SELL';
-    if (f === 'highconf') return r.confidence && parseInt(r.confidence) >= 65;
+    var hint = (r.signal || 'HOLD').toUpperCase();
+    if (f === 'buy') return hint === 'BUY';
+    if (f === 'sell') return hint === 'SELL';
+    if (f === 'highconf') return r.confidence === 'HIGH';
     if (f === 'crypto') return r.asset_type === 'crypto';
     if (f === 'forex') return r.asset_type === 'forex';
     if (f === 'equities') return r.asset_type === 'stock';
@@ -5383,8 +5428,8 @@ function filterScanResults(filter, btn) {
   function pillMatchesFilter(pillText, f) {
     if (f === 'all') return true;
     var p = (pillText || '').toUpperCase().trim();
-    if (f === 'buy') return p === 'BUY' || p === 'PBY' || p === 'CTR';
-    if (f === 'sell') return p === 'SELL' || p === 'PSL';
+    if (f === 'buy') return p === 'BUY';
+    if (f === 'sell') return p === 'SELL';
     if (f === 'highconf') return true; // can't determine from pill alone
     return true;
   }

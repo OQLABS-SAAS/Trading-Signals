@@ -3471,28 +3471,36 @@ def scan_list():
                 tv = fetch_tv_data(raw, asset_type, timeframe)
                 if tv and tv.get("tv_price"):
                     ind = build_ind_from_tv(tv)
-                    screen = pre_screen(ind, tv=tv)
-                    ct     = detect_counter_trade(ind)
+                    analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv)
+                    ct       = detect_counter_trade(ind)
                     # Get volume from TV for display
                     volume = tv.get("tv_volume") or 0
                     results.append({
-                        "ticker":       ticker,
-                        "raw_ticker":   raw,
-                        "price":        ind["price"],
-                        "chg_1d":       ind["chg_1d"],
-                        "rsi":          ind["rsi"],
-                        "vol_ratio":    ind["vol_ratio"],
-                        "volume":       int(volume) if volume else 0,
-                        "ema_trend":    ind.get("ema_trend", "MIXED"),
-                        "supertrend":   ind.get("supertrend", "NEUTRAL"),
-                        "signal_hint":  screen["signal_hint"],
-                        "opportunity":  screen["opportunity"],
-                        "call_claude":  screen["call_claude"],
-                        "reason":       screen["reason"],
-                        "bull_score":   screen["bull_score"],
-                        "bear_score":   screen["bear_score"],
-                        "counter_trade": ct["counter_trade"],
-                        "confidence":   screen.get("confidence", ""),
+                        "ticker":           ticker,
+                        "raw_ticker":       raw,
+                        "asset_type":       asset_type,
+                        "price":            ind["price"],
+                        "chg_1d":           ind["chg_1d"],
+                        "rsi":              ind["rsi"],
+                        "vol_ratio":        ind["vol_ratio"],
+                        "volume":           int(volume) if volume else 0,
+                        "ema_trend":        ind.get("ema_trend", "MIXED"),
+                        "supertrend":       ind.get("supertrend", "NEUTRAL"),
+                        "signal":           analysis["signal"],
+                        "entry":            analysis.get("entry"),
+                        "stop_loss":        analysis.get("stop_loss"),
+                        "tp1":              analysis.get("tp1"),
+                        "tp2":              analysis.get("tp2"),
+                        "tp3":              analysis.get("tp3"),
+                        "rr1":              analysis.get("rr1"),
+                        "rr2":              analysis.get("rr2"),
+                        "rr3":              analysis.get("rr3"),
+                        "reason":           analysis.get("summary", ""),
+                        "bull_score":       analysis.get("bullish_count", 0),
+                        "bear_score":       analysis.get("bearish_count", 0),
+                        "counter_trade":    ct["counter_trade"],
+                        "confidence":       analysis.get("confidence", "LOW"),
+                        "confidence_label": analysis.get("confidence_label", "HYPOTHESIS"),
                     })
                     continue
 
@@ -3508,27 +3516,35 @@ def scan_list():
                 if df.empty or len(df) < 20:
                     results.append({"ticker": ticker, "error": "no data"})
                     continue
-                ind    = calculate_indicators(df, timeframe, asset_type)
-                screen = pre_screen(ind)
-                ct     = detect_counter_trade(ind)
+                ind      = calculate_indicators(df, timeframe, asset_type)
+                analysis = get_analysis(ticker, asset_type, ind, timeframe)
+                ct       = detect_counter_trade(ind)
                 results.append({
-                    "ticker":       ticker,
-                    "raw_ticker":   raw,
-                    "price":        ind["price"],
-                    "chg_1d":       ind["chg_1d"],
-                    "rsi":          ind["rsi"],
-                    "vol_ratio":    ind["vol_ratio"],
-                    "volume":       int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
-                    "ema_trend":    ind["ema_trend"],
-                    "supertrend":   ind["supertrend"],
-                    "signal_hint":  screen["signal_hint"],
-                    "opportunity":  screen["opportunity"],
-                    "call_claude":  screen["call_claude"],
-                    "reason":       screen["reason"],
-                    "bull_score":   screen["bull_score"],
-                    "bear_score":   screen["bear_score"],
-                    "counter_trade": ct["counter_trade"],
-                    "confidence":   screen.get("confidence", ""),
+                    "ticker":           ticker,
+                    "raw_ticker":       raw,
+                    "asset_type":       asset_type,
+                    "price":            ind["price"],
+                    "chg_1d":           ind["chg_1d"],
+                    "rsi":              ind["rsi"],
+                    "vol_ratio":        ind["vol_ratio"],
+                    "volume":           int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
+                    "ema_trend":        ind["ema_trend"],
+                    "supertrend":       ind["supertrend"],
+                    "signal":           analysis["signal"],
+                    "entry":            analysis.get("entry"),
+                    "stop_loss":        analysis.get("stop_loss"),
+                    "tp1":              analysis.get("tp1"),
+                    "tp2":              analysis.get("tp2"),
+                    "tp3":              analysis.get("tp3"),
+                    "rr1":              analysis.get("rr1"),
+                    "rr2":              analysis.get("rr2"),
+                    "rr3":              analysis.get("rr3"),
+                    "reason":           analysis.get("summary", ""),
+                    "bull_score":       analysis.get("bullish_count", 0),
+                    "bear_score":       analysis.get("bearish_count", 0),
+                    "counter_trade":    ct["counter_trade"],
+                    "confidence":       analysis.get("confidence", "LOW"),
+                    "confidence_label": analysis.get("confidence_label", "HYPOTHESIS"),
                 })
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
@@ -3536,8 +3552,8 @@ def scan_list():
 
         def sort_key(r):
             if r.get("error"): return 99
-            if r.get("call_claude"): return 0
-            if r.get("opportunity"): return 1
+            sig = r.get("signal", "HOLD")
+            if sig in ("BUY", "SELL"): return 0
             return 2
         results.sort(key=sort_key)
         return jsonify({"results": results, "timeframe": timeframe, "count": len(results)})
