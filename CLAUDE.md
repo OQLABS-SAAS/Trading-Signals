@@ -586,3 +586,67 @@ New approach (SonarLab / industry standard):
 **Pending:**
 - R3: Telegram — set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in Railway → works immediately, no code needed.
 - R4: Tighten signals page layout (not yet started).
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-14 (Win badge, TP precision, scanner TF click, amber glow)
+
+**All changes committed. Deploy: `git push origin main` → Railway auto-deploys.**
+**NOT YET runtime verified — user must push and test.**
+
+**Key commits this session:**
+- `5eaca75` — Win badge colours, amber glow all buttons, scanner pre-screen label, calculator % note
+- `7e62e6c` — TP level precision for low-price assets + scanner TF cell click fix
+
+---
+
+**Win badge — commit `5eaca75` — code complete, NOT YET runtime verified:**
+- All 3 paths updated: `renderResultsV2`, `renderSignal(d)`, and backtest path (~line 9266).
+- New class system: `wb-high` (≥55%), `wb-mid` (45–54%), `wb-low` (<45%).
+- Animated bar fill (`#winRateBar`) via CSS transition on `width`.
+- `@keyframes wbPop` spring entrance on every update.
+- HTML: `<div class="win-badge" id="winRateBadge">` + `wb-bar-track` + `wb-bar-fill` + `wb-lbl` + `winRateSample`.
+
+**Amber glow — commit `5eaca75` — code complete, NOT YET runtime verified:**
+- `.gpill:not(.active):hover` — added `box-shadow` glow (was missing from prior hover glow pass).
+- `.nav-tab:hover` — added `box-shadow` glow (prior rule only had `background` change, no glow).
+- `.btn-primary`, `.btn-ghost`, `.rb-btn`, `.scan-filter-btn` already had glow from prior session.
+
+**Calculator % of account — commit `5eaca75` — code complete, NOT YET runtime verified:**
+- Added `<div id="tradeSizePctNote">` below Trade Size input.
+- `recalc()` updates it immediately when `tradeSize > 0 && acct > 0` — no entry price required.
+- Shows `= X.X% of your account` in amber mono text.
+
+**Scanner pre-screen label — commit `5eaca75`:**
+- Multi-TF table header now shows: "Signals shown are TradingView pre-screens. Click a cell → Run Full Analysis for DotVerse verdict."
+- Expand panel button renamed "Run Full Analysis →" and shows disclaimer note below it.
+- Root cause of "buy in scanner shows sell in signals": scanner uses `pre_screen()` (TV-based, no confluence gate). Full `doAnalyze` uses DotVerse's 65% confluence gate. Both correct — different algorithms. UX label sets expectations.
+
+**TP level precision — commit `7e62e6c` — code complete, NOT YET runtime verified:**
+- Root cause: `round(price, 2)` for all prices < $100 caused TP1 and TP2 to collapse to same displayed value for cheap altcoins (e.g. $0.25 asset with ATR 0.003: TP1=0.244→0.24, TP2=0.2395→0.24).
+- Fix: adaptive decimal places via `prnd` lambda: `>=$100` → 2dp, `>=$1` → 4dp, `>=0.01` → 6dp, `<0.01` → 8dp.
+- Applied to all 3 TP blocks: `get_analysis()` (lines ~2065–2087), `get_watch_signal()` (lines ~2412–2433), `detect_counter_trade()` (lines ~1395–1408).
+
+**Scanner TF cell click fix — commit `7e62e6c` — code complete, NOT YET runtime verified:**
+- Root cause: `<tr onclick="scannerLoadTicker()">` competed with `<td onclick="event.stopPropagation();scannerExpandTF()">`. Inline `stopPropagation()` silently lost the race to the row handler in some browser contexts → every cell click navigated to signals (1H default) instead of expanding.
+- Fix: removed onclick entirely from `<tr>`. Ticker name column `<td>` now handles "go to signals" click (dotted underline hint). TF column `<td>`s handle "expand detail" click — no stopPropagation needed, zero conflict.
+- Also: `scannerLoadTicker` now calls `syncPillsFromSelect('timeframe')` after setting `tfEl.value`, so the gpill active state matches the loaded TF.
+
+**Scanner TF expand flow (how it works after fix):**
+1. User clicks ticker name → `scannerLoadTicker(ticker, tickerAt)` → signals tab, default TF.
+2. User clicks a TF cell (e.g. 4H BUY) → `scannerExpandTF()` → inline detail row toggles open below.
+3. Detail row shows: ticker · TF, signal badge, RSI, EMA trend, bull%, reason snippet, "Run Full Analysis →" button.
+4. "Run Full Analysis →" → `scannerLoadTicker(ticker, at, tf)` → signals tab on THAT exact TF.
+
+**Known architecture note — scanner vs full analysis discrepancy:**
+- Scanner `signal_hint` = TV recommendation OR custom net_bull/net_bear score (no confluence gate).
+- Full `doAnalyze` = DotVerse 65% confluence gate on own indicators.
+- BUY in scanner can legitimately become SELL in full analysis. Not a bug. Label added to UI.
+
+**Deploy verification checklist:**
+- [ ] Run market scanner (All Instruments or crypto preset)
+- [ ] Click a TF cell → expand row should appear inline, not navigate
+- [ ] Click "Run Full Analysis →" → signals tab opens on correct TF (not always 1H)
+- [ ] Analyze a cheap altcoin (e.g. AVAX, MATIC, price < $1) → TP1, TP2, TP3 should show distinct values with 6dp
+- [ ] Win badge: run backtest → badge should colour green/amber/red with animated bar fill
+- [ ] Hover over gpill buttons and nav tabs → amber glow should be visible
