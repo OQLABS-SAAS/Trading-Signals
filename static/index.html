@@ -11781,6 +11781,92 @@ function pfRunStress() {
 }
 
 // ── 5d: Correlation Heatmap ───────────────────────────────────
+function _corrShowDetail(i, j) {
+  var cm = window._corrMatrix;
+  if (!cm) return;
+  var a = cm.labels[i], b = cm.labels[j], v = cm.matrix[i][j];
+  var abs = Math.abs(v), isOne = i === j;
+  var clr = isOne ? '#F5A623' : v > 0 ? '#00C98D' : '#FF4459';
+  var label, what, portImpl;
+  if (isOne) {
+    label = 'Same asset — diagonal reference';
+    what  = 'Every asset is perfectly correlated with itself by definition. This cell is always 1.00 and carries no information about your portfolio diversification — it is just a reference point on the diagonal.';
+    portImpl = 'No action needed. This diagonal cell exists purely as a reference. Focus on the off-diagonal numbers to understand your portfolio relationships.';
+  } else if (abs >= 0.90) {
+    label = v > 0 ? 'Very strong positive' : 'Very strong negative';
+    what  = v > 0
+      ? 'These two assets almost always move in the same direction on any given day. If one rises 1%, the other tends to rise a very similar amount. Holding both is nearly equivalent to doubling your position in one — you are not getting meaningful diversification.'
+      : 'These two assets almost always move in opposite directions. When one rises, the other almost always falls. This is a near-perfect hedge relationship — rare to find in practice.';
+    portImpl = v > 0
+      ? 'Minimal diversification benefit. In a market crash, both will fall together. Consider replacing one of these with a less-correlated asset to genuinely spread your risk.'
+      : 'Excellent natural hedge. Holding both significantly reduces your overall portfolio volatility. The drawdown on one side is partially offset by a gain on the other.';
+  } else if (abs >= 0.70) {
+    label = v > 0 ? 'Strong positive' : 'Strong negative';
+    what  = v > 0
+      ? 'These assets tend to rise and fall together most of the time. There is meaningful overlap in what drives their prices — likely shared market sentiment, sector exposure, or common macro factors like interest rates or risk appetite.'
+      : 'These assets usually move in opposite directions. When risk appetite falls in markets, one tends to hold up or benefit while the other suffers. This is a useful structural relationship.';
+    portImpl = v > 0
+      ? 'Limited diversification. In a broad sell-off, both positions will likely be under pressure at the same time. Think carefully about your combined exposure and total position size.'
+      : 'Good hedge. Holding both reduces portfolio volatility meaningfully. The negative correlation provides a cushion during drawdowns on either side.';
+  } else if (abs >= 0.40) {
+    label = v > 0 ? 'Moderate positive' : 'Moderate negative';
+    what  = v > 0
+      ? 'These assets tend to move in the same direction more often than not, but not in lockstep. There are plenty of days when they diverge. Shared macro factors — like broad risk-on/risk-off moves — drive some of the overlap, but asset-specific news dominates on most days.'
+      : 'These assets tend to move in opposite directions more often than not. When one sells off, the other frequently holds up or benefits. The relationship is real but not perfectly reliable day-to-day.';
+    portImpl = v > 0
+      ? 'Partial diversification. You get some protection from holding both, but note: correlations tend to rise sharply in severe market downturns. Assets that look moderately independent in calm markets often start moving together during a crisis.'
+      : 'Useful diversifier. Holding both reduces your portfolio\'s day-to-day swings and helps smooth returns over time. Good combination for a balanced portfolio.';
+  } else if (abs >= 0.10) {
+    label = v > 0 ? 'Weak positive' : 'Weak negative';
+    what  = v > 0
+      ? 'There is a very slight tendency for these assets to move together, but most of the time their daily moves are completely independent. The relationship is too weak to be relied upon or to meaningfully impact your portfolio.'
+      : 'There is a very slight tendency for these assets to move in opposite directions, but it is too weak to rely on as a hedge. Most daily moves are unrelated.';
+    portImpl = 'Good diversification. These assets are largely independent — a bad day for one tells you very little about the other. This is close to the ideal relationship in a diversified portfolio.';
+  } else {
+    label = 'No meaningful relationship';
+    what  = 'These assets move completely independently of each other. Knowing what one did today tells you essentially nothing about what the other did. Their returns are driven by entirely different factors.';
+    portImpl = 'Excellent diversification. These are genuinely uncorrelated assets — the ideal combination for reducing portfolio risk without sacrificing expected return. When one falls, the other is unaffected.';
+  }
+  var scaleRows = [
+    {r:'≥ 0.90', c:'#00C98D', lbl:'Very strong positive — almost no diversification benefit'},
+    {r:'0.70–0.90', c:'#44B88A', lbl:'Strong positive — limited diversification'},
+    {r:'0.40–0.70', c:'#6AAA8A', lbl:'Moderate positive — partial diversification'},
+    {r:'0.10–0.40', c:'#888', lbl:'Weak positive — largely independent'},
+    {r:'~0.00', c:'#666', lbl:'No relationship — fully independent'},
+    {r:'−0.10–−0.40', c:'#B08080', lbl:'Weak negative — slight tendency to diverge'},
+    {r:'−0.40–−0.70', c:'#D06060', lbl:'Moderate negative — useful diversifier'},
+    {r:'≤ −0.70', c:'#FF4459', lbl:'Strong/very strong negative — natural hedge'},
+  ].map(s => '<div style="display:flex;gap:8px;align-items:center;margin-bottom:3px;">'
+    + '<span style="font-family:var(--mono);font-size:9px;color:' + s.c + ';min-width:96px;">' + s.r + '</span>'
+    + '<span style="font-size:9px;color:var(--muted2);">' + s.lbl + '</span>'
+    + '</div>').join('');
+  var panel = document.getElementById('corrDetailPanel');
+  if (!panel) return;
+  panel.style.display = 'block';
+  panel.innerHTML = ''
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">'
+    +   '<div>'
+    +     '<div style="font-size:10px;color:var(--muted2);font-family:var(--mono);letter-spacing:.04em;margin-bottom:4px;">' + (isOne ? a : a + ' &nbsp;↔&nbsp; ' + b) + '</div>'
+    +     '<div style="font-size:30px;font-weight:700;color:' + clr + ';font-family:var(--mono);line-height:1;">' + v.toFixed(2) + '</div>'
+    +     '<div style="font-size:12px;font-weight:600;color:' + clr + ';margin-top:4px;">' + label + '</div>'
+    +   '</div>'
+    +   '<button onclick="document.getElementById(\'corrDetailPanel\').style.display=\'none\'" style="background:none;border:1px solid rgba(255,255,255,.15);color:var(--muted2);font-size:11px;padding:4px 10px;border-radius:3px;cursor:pointer;font-family:var(--mono);">✕ close</button>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">'
+    +   '<div style="padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:4px;">'
+    +     '<div style="font-size:9px;color:var(--text);font-weight:700;font-family:var(--mono);letter-spacing:.06em;margin-bottom:6px;">WHAT THIS MEANS</div>'
+    +     '<div style="font-size:10px;color:var(--muted2);line-height:1.75;">' + what + '</div>'
+    +   '</div>'
+    +   '<div style="padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:4px;">'
+    +     '<div style="font-size:9px;color:var(--text);font-weight:700;font-family:var(--mono);letter-spacing:.06em;margin-bottom:6px;">PORTFOLIO IMPLICATION</div>'
+    +     '<div style="font-size:10px;color:var(--muted2);line-height:1.75;">' + portImpl + '</div>'
+    +   '</div>'
+    + '</div>'
+    + '<div style="padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:4px;">'
+    +   '<div style="font-size:9px;color:var(--text);font-weight:700;font-family:var(--mono);letter-spacing:.06em;margin-bottom:8px;">WHERE THIS SITS ON THE SCALE</div>'
+    +   scaleRows
+    + '</div>';
+}
 function _corrLabel(v, a, b) {
   if (a === b) return a + ' — Same asset. Always 1.00 by definition.';
   var abs = Math.abs(v), dir = v >= 0 ? 'positive' : 'negative', desc;
@@ -11805,6 +11891,7 @@ function pfRunCorr() {
     if (!el) return;
     if (d.error) { el.innerHTML = `<span style="color:var(--red);font-family:var(--mono);font-size:12px;">${d.error}</span>`; return; }
     var labels = d.labels, matrix = d.matrix;
+    window._corrMatrix = {labels: labels, matrix: matrix};
     var header = '<th style="padding:6px 8px;color:var(--muted2);font-family:var(--mono);font-size:10px;"></th>' +
       labels.map(l => `<th style="padding:6px 8px;color:var(--amber);font-family:var(--mono);font-size:10px;">${l}</th>`).join('');
     var bodyRows = matrix.map((row, i) =>
@@ -11817,8 +11904,7 @@ function pfRunCorr() {
                     v > 0  ? `rgba(0,201,141,${absV * 0.5})` :
                               `rgba(220,38,38,${absV * 0.5})`;
         var clr   = isOne ? 'var(--amber)' : v > 0 ? 'var(--green)' : 'var(--red)';
-        var tip = _corrLabel(v, labels[i], labels[j]).replace(/"/g, '&quot;');
-        return `<td title="${tip}" style="padding:6px 8px;text-align:center;background:${bg};color:${clr};font-family:var(--mono);font-size:11px;font-weight:${absV > 0.7 ? '700' : '400'};cursor:help;">${_pfFmt(v, 2)}</td>`;
+        return `<td onclick="_corrShowDetail(${i},${j})" style="padding:6px 8px;text-align:center;background:${bg};color:${clr};font-family:var(--mono);font-size:11px;font-weight:${absV > 0.7 ? '700' : '400'};cursor:pointer;">${_pfFmt(v, 2)}</td>`;
       }).join('') +
       '</tr>'
     ).join('');
@@ -11854,13 +11940,14 @@ function pfRunCorr() {
           <span style="font-size:10px;font-family:var(--mono);"><span style="color:var(--muted2);">0.00–0.40</span> <span style="color:var(--muted2);">Weak / independent</span></span>
           <span style="font-size:10px;font-family:var(--mono);"><span style="color:var(--red);">≤ −0.40</span> <span style="color:var(--muted2);">Negative · hedge</span></span>
         </div>
-        <div style="font-size:10px;color:var(--muted2);font-family:var(--mono);margin-top:6px;">Hover any cell for a plain-English explanation of that pair.</div>
+        <div style="font-size:10px;color:var(--amber);font-family:var(--mono);margin-top:6px;">↓ Click any cell to expand the full explanation for that pair.</div>
       </div>
       <table style="border-collapse:collapse;min-width:100%;">
         <thead><tr>${header}</tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
-      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:8px;margin-bottom:10px;"><span style="color:var(--green);">■</span> Positive correlation &nbsp;·&nbsp; <span style="color:var(--red);">■</span> Negative correlation &nbsp;·&nbsp; Colour intensity = magnitude · Hover cells for details</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:8px;margin-bottom:10px;"><span style="color:var(--green);">■</span> Positive correlation &nbsp;·&nbsp; <span style="color:var(--red);">■</span> Negative correlation &nbsp;·&nbsp; Colour intensity = magnitude &nbsp;·&nbsp; <span style="color:var(--amber);">Click any cell for full detail</span></div>
+      <div id="corrDetailPanel" style="display:none;padding:14px 16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.12);border-radius:4px;margin-bottom:12px;"></div>
       <div style="padding:12px 14px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:4px;">
         <div style="font-size:13px;color:var(--text);line-height:1.6;">${diversVerdict}</div>
         ${pairsMsg}
