@@ -2591,6 +2591,10 @@ body::before{
 
       <!-- Add Position Form (hidden by default) -->
       <div id="pfAddForm" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:16px;margin-bottom:16px;">
+        <div id="pfSignalBanner" style="display:none;padding:8px 12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:3px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+          <span id="pfSignalBannerText" style="font-family:var(--mono);font-size:11px;color:var(--amber);"></span>
+          <button onclick="pfClearForm()" style="background:none;border:none;color:var(--muted2);font-family:var(--mono);font-size:10px;cursor:pointer;text-decoration:underline;">clear form</button>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:12px;">
           <div><label style="font-family:var(--mono);font-size:10px;color:var(--muted2);display:block;margin-bottom:4px;">TICKER</label>
             <input id="pfTicker" placeholder="AAPL" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 8px;border-radius:3px;"></div>
@@ -11633,7 +11637,73 @@ function pfLoadPositions() {
 
 function pfShowAddForm() {
   var f = document.getElementById('pfAddForm');
-  if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  if (!f) return;
+  var isHidden = f.style.display === 'none' || f.style.display === '';
+  f.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) pfPreFillFromSignal();
+}
+
+function pfClearForm() {
+  ['pfTicker','pfEntry','pfStop','pfTp1','pfSize'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  var banner = document.getElementById('pfSignalBanner');
+  if (banner) banner.style.display = 'none';
+  _pfLastPrefillSig = null;
+}
+
+function pfPreFillFromSignal() {
+  if (!currentData || !currentData.ticker) return;
+  var sig = (currentData.signal || '').toUpperCase();
+  if (sig !== 'BUY' && sig !== 'SELL') return;        // HOLD = no trade to log
+
+  var key = currentData.ticker + '|' + sig;
+  if (_pfLastPrefillSig === key) return;               // already pre-filled this signal, user may have edited
+
+  // ── Set form field values ──────────────────────────────────
+  var set = function(id, val) {
+    var el = document.getElementById(id);
+    if (el && val != null && val !== '' && val !== undefined) el.value = val;
+  };
+
+  // Normalise asset_type to match select option values
+  var atMap = {stock:'stock', crypto:'crypto', forex:'forex', index:'index',
+               indices:'index', commodity:'commodity', commodities:'commodity'};
+  var at = atMap[(currentData.asset_type || '').toLowerCase()] || 'stock';
+
+  // Normalise timeframe to match select option values
+  var tfMap = {'15m':'15m','1h':'1h','4h':'4h','1d':'1d','1w':'1w',
+               '15':'15m','60':'1h','240':'4h','D':'1d','W':'1w'};
+  var tf = tfMap[currentData.timeframe] || '1d';
+
+  set('pfTicker',    currentData.ticker.toUpperCase());
+  set('pfEntry',     currentData.entry);
+  set('pfStop',      currentData.stop_loss);
+  set('pfTp1',       currentData.tp1);
+
+  var sigEl = document.getElementById('pfSignal');
+  if (sigEl) sigEl.value = sig;
+
+  var atEl = document.getElementById('pfAssetType');
+  if (atEl) atEl.value = at;
+
+  var tfEl = document.getElementById('pfTimeframe');
+  if (tfEl) tfEl.value = tf;
+
+  // pfSize intentionally left blank — position size is personal
+
+  // ── Show banner ────────────────────────────────────────────
+  var banner = document.getElementById('pfSignalBanner');
+  var bannerTxt = document.getElementById('pfSignalBannerText');
+  if (banner && bannerTxt) {
+    bannerTxt.textContent = '⚡ Pre-filled from signal: '
+      + currentData.ticker.toUpperCase() + ' · ' + sig
+      + ' · Entry ' + (currentData.entry || '—')
+      + ' · Stop ' + (currentData.stop_loss || '—');
+    banner.style.display = 'flex';
+  }
+
+  _pfLastPrefillSig = key;
 }
 
 function pfAddPosition() {
@@ -12129,11 +12199,18 @@ function pfPollOptimise() {
 
 // Load positions when Portfolio tab is opened
 var _pfLoaded = false;
+var _pfLastPrefillSig = null;
 var _origSwitch = typeof switchMainTab === 'function' ? switchMainTab : null;
-// Hook into tab switch to load positions on first visit
+// Hook into tab switch — load positions on first visit, pre-fill form on every visit
 document.addEventListener('click', function(e) {
   if (e.target && e.target.textContent === 'Portfolio' && e.target.classList.contains('nav-tab')) {
     if (!_pfLoaded) { pfLoadPositions(); _pfLoaded = true; }
+    // Auto-open form and pre-fill from signal if a fresh BUY/SELL signal exists
+    if (currentData && (currentData.signal === 'BUY' || currentData.signal === 'SELL')) {
+      var f = document.getElementById('pfAddForm');
+      if (f) f.style.display = 'block';
+      pfPreFillFromSignal();
+    }
   }
 });
 </script>
