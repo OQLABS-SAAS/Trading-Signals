@@ -11781,6 +11781,16 @@ function pfRunStress() {
 }
 
 // ── 5d: Correlation Heatmap ───────────────────────────────────
+function _corrLabel(v, a, b) {
+  if (a === b) return a + ' — Same asset. Always 1.00 by definition.';
+  var abs = Math.abs(v), dir = v >= 0 ? 'positive' : 'negative', desc;
+  if (abs >= 0.90) desc = v >= 0 ? 'Very strong positive — almost always move together. Holding both gives almost no diversification benefit.' : 'Very strong negative — near-perfect hedge. When one rises the other almost always falls.';
+  else if (abs >= 0.70) desc = v >= 0 ? 'Strong positive — tend to rise and fall together. Limited diversification benefit.' : 'Strong negative — usually move in opposite directions. Good hedge.';
+  else if (abs >= 0.40) desc = v >= 0 ? 'Moderate positive — tend to move in the same direction but not in lockstep.' : 'Moderate negative — tend to move in opposite directions. Useful diversifier.';
+  else if (abs >= 0.10) desc = v >= 0 ? 'Weak positive — slight tendency to move together. Mostly independent.' : 'Weak negative — slight tendency to move opposite. Mostly independent.';
+  else desc = 'No meaningful relationship — these assets move independently of each other.';
+  return a + ' vs ' + b + ' = ' + v.toFixed(2) + '\n' + desc + '\n\nScale: +1 = always same direction · 0 = no link · −1 = always opposite';
+}
 function pfRunCorr() {
   var raw     = (document.getElementById('corrTickers') || {}).value || '';
   var tickers = raw.split(',').map(t => t.trim()).filter(Boolean);
@@ -11807,7 +11817,8 @@ function pfRunCorr() {
                     v > 0  ? `rgba(0,201,141,${absV * 0.5})` :
                               `rgba(220,38,38,${absV * 0.5})`;
         var clr   = isOne ? 'var(--amber)' : v > 0 ? 'var(--green)' : 'var(--red)';
-        return `<td style="padding:6px 8px;text-align:center;background:${bg};color:${clr};font-family:var(--mono);font-size:11px;font-weight:${absV > 0.7 ? '700' : '400'};">${_pfFmt(v, 2)}</td>`;
+        var tip = _corrLabel(v, labels[i], labels[j]).replace(/"/g, '&quot;');
+        return `<td title="${tip}" style="padding:6px 8px;text-align:center;background:${bg};color:${clr};font-family:var(--mono);font-size:11px;font-weight:${absV > 0.7 ? '700' : '400'};cursor:help;">${_pfFmt(v, 2)}</td>`;
       }).join('') +
       '</tr>'
     ).join('');
@@ -11828,11 +11839,28 @@ function pfRunCorr() {
     var pairsMsg = highCorrPairs.length ? '<div style="font-size:11px;color:var(--muted2);margin-top:6px;">Highly correlated pairs (>0.7): <strong style="color:var(--text);">' + highCorrPairs.join(', ') + '</strong> — these move almost in sync.</div>' : '';
     el.innerHTML = `
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:8px;">${d.min_date} → ${d.max_date} · ${period}</div>
+      <div style="padding:10px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:4px;margin-bottom:12px;">
+        <div style="font-size:11px;color:var(--text);font-family:var(--mono);font-weight:600;margin-bottom:5px;">How to read this table</div>
+        <div style="font-size:11px;color:var(--muted2);line-height:1.8;">
+          Each number is a <strong style="color:var(--text);">correlation coefficient</strong> — it measures how closely two assets move together in daily returns.
+          Scale: <span style="color:var(--green);font-weight:600;">+1.00</span> = always move the same way &nbsp;·&nbsp;
+          <span style="color:var(--text);">0.00</span> = no relationship &nbsp;·&nbsp;
+          <span style="color:var(--red);font-weight:600;">−1.00</span> = always move opposite.
+          The diagonal is always <span style="color:var(--amber);">1.00</span> (every asset perfectly correlates with itself).
+        </div>
+        <div style="display:flex;gap:14px;margin-top:8px;flex-wrap:wrap;">
+          <span style="font-size:10px;font-family:var(--mono);"><span style="color:var(--green);font-weight:700;">≥ 0.70</span> <span style="color:var(--muted2);">Strong · move together</span></span>
+          <span style="font-size:10px;font-family:var(--mono);"><span style="color:var(--green);">0.40–0.70</span> <span style="color:var(--muted2);">Moderate positive</span></span>
+          <span style="font-size:10px;font-family:var(--mono);"><span style="color:var(--muted2);">0.00–0.40</span> <span style="color:var(--muted2);">Weak / independent</span></span>
+          <span style="font-size:10px;font-family:var(--mono);"><span style="color:var(--red);">≤ −0.40</span> <span style="color:var(--muted2);">Negative · hedge</span></span>
+        </div>
+        <div style="font-size:10px;color:var(--muted2);font-family:var(--mono);margin-top:6px;">Hover any cell for a plain-English explanation of that pair.</div>
+      </div>
       <table style="border-collapse:collapse;min-width:100%;">
         <thead><tr>${header}</tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
-      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:8px;margin-bottom:10px;">Green = positive correlation · Red = negative · Intensity = magnitude</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:8px;margin-bottom:10px;"><span style="color:var(--green);">■</span> Positive correlation &nbsp;·&nbsp; <span style="color:var(--red);">■</span> Negative correlation &nbsp;·&nbsp; Colour intensity = magnitude · Hover cells for details</div>
       <div style="padding:12px 14px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:4px;">
         <div style="font-size:13px;color:var(--text);line-height:1.6;">${diversVerdict}</div>
         ${pairsMsg}
