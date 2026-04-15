@@ -11888,6 +11888,14 @@ function pfRunOptimise() {
   }).catch(e => { if (el) el.innerHTML = '<span style="color:var(--red);">Network error</span>'; });
 }
 
+function _optToggle(id) {
+  var d    = document.getElementById(id);
+  var icon = document.getElementById(id + '_i');
+  if (!d) return;
+  var isOpen = d.style.display === 'block';
+  d.style.display = isOpen ? 'none' : 'block';
+  if (icon) icon.textContent = isOpen ? '▸' : '▾';
+}
 function pfPollOptimise() {
   var el  = document.getElementById('optResult');
   var ac  = _pfOptClass || (document.getElementById('optAssetClass') || {}).value || 'stock';
@@ -11901,29 +11909,121 @@ function pfPollOptimise() {
     if (d.status === 'failed')  { el.innerHTML = `<span style="color:var(--red);">Job failed: ${d.error || 'unknown'}</span>`; return; }
     if (d.status === 'not_found') { el.innerHTML = '<span style="color:var(--muted2);">No result yet. Enqueue a job first.</span>'; return; }
     var r = d.result || {};
-    el.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px;">
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
-          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">RSI PERIOD</div>
-          <div style="color:var(--amber);font-size:22px;font-weight:700;">${r.rsi_period || '—'}</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
-          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">ATR MULT</div>
-          <div style="color:var(--amber);font-size:22px;font-weight:700;">${_pfFmt(r.atr_mult, 1)}×</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
-          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">EMA PAIR</div>
-          <div style="color:var(--amber);font-size:22px;font-weight:700;">${r.ema_fast || '—'}/${r.ema_slow || '—'}</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
-          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">SHARPE</div>
-          <div style="color:var(--green);font-size:22px;font-weight:700;">${_pfFmt(r.sharpe, 3)}</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;">
-          <div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">WIN RATE</div>
-          <div style="color:var(--green);font-size:22px;font-weight:700;">${r.win_rate != null ? _pfFmt(r.win_rate * 100, 1) + '%' : '—'}</div>
-        </div>
-      </div>
+    // ── Contextual descriptions for expandable cards ──────────
+    var rsiNote = (r.rsi_period||14) <= 10
+      ? 'A short lookback makes RSI more sensitive — it reacts quickly to price momentum and generates more frequent signals. Works best for volatile markets where trends move fast.'
+      : (r.rsi_period||14) >= 21
+      ? 'A long lookback smooths out noise — only strong, sustained momentum triggers a signal. Fewer signals but higher conviction. Best for calmer or ranging markets.'
+      : 'The standard lookback, widely used across all asset classes. Balanced between sensitivity and noise filtering.';
+    var atrNote = (r.atr_mult||2) <= 2
+      ? 'A tight stop keeps per-trade risk small. The trade-off: normal market noise can sometimes trigger your exit prematurely. Works best for lower-volatility instruments.'
+      : (r.atr_mult||2) >= 4
+      ? 'A wide stop gives price room to breathe through larger swings without knocking you out. You absorb more movement per trade — best suited to high-volatility assets.'
+      : 'A balanced stop — wide enough to survive typical fluctuations, tight enough to limit damage if the trade moves against you.';
+    var emaNote = (r.ema_fast||9) <= 7
+      ? 'A fast, aggressive pair. Catches trend changes early but can generate false crossover signals in choppy, sideways markets.'
+      : ((r.ema_slow||21) >= 50)
+      ? 'A slow, filtered pair. Enters trends later but with much higher conviction. Fewer signals, fewer false alarms.'
+      : 'The standard medium-timeframe momentum pair — used in professional systems across equities, forex, and crypto.';
+    var sharpeRating = (r.sharpe||0) >= 4 ? 'Exceptional' : (r.sharpe||0) >= 2 ? 'Excellent' : (r.sharpe||0) >= 1 ? 'Good' : 'Below average';
+    var sharpeClr    = (r.sharpe||0) >= 2 ? '#00C98D'     : (r.sharpe||0) >= 1 ? '#F5A623'   : '#FF4459';
+    var wrPct        = (r.win_rate||0) * 100;
+    var lossesIn10   = Math.round((1 - (r.win_rate||0)) * 10);
+    var wrNote = wrPct >= 60
+      ? 'High win rate — most trades close profitable. Keep an eye on the size of your winners versus losers: a high win rate can still lose money if losses are much larger than wins.'
+      : wrPct >= 45
+      ? 'Healthy win rate — just under half the trades lose, but the system stays profitable because winners are larger than losers overall.'
+      : 'Low win rate — this is normal and expected for trend-following systems. The profitability comes from cutting losses quickly and letting winners run far. Stop-loss discipline is critical.';
+    var ds = 'display:none;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);font-size:10px;color:var(--muted2);line-height:1.8;';
+    var cs = 'background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:12px;cursor:pointer;user-select:none;transition:border-color .15s;';
+    var cardHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:8px;">'
+      // ── RSI card ──
+      + '<div onclick="_optToggle(\'opt_rsi\')" style="' + cs + '">'
+      +   '<div style="display:flex;justify-content:space-between;align-items:center;">'
+      +     '<div style="color:var(--muted2);font-size:10px;letter-spacing:.05em;">RSI PERIOD</div>'
+      +     '<span id="opt_rsi_i" style="color:var(--muted2);font-size:11px;">▸</span>'
+      +   '</div>'
+      +   '<div style="color:var(--amber);font-size:22px;font-weight:700;margin:4px 0;">' + (r.rsi_period || '—') + '</div>'
+      +   '<div style="font-size:9px;color:var(--muted2);font-family:var(--mono);letter-spacing:.04em;">tap to learn more</div>'
+      +   '<div id="opt_rsi" style="' + ds + '">'
+      +     '<strong style="color:var(--text);">What is RSI Period?</strong><br>'
+      +     'RSI (Relative Strength Index) measures how overbought or oversold a market is, on a scale of 0–100. Above 70 = overbought, price may pull back. Below 30 = oversold, price may bounce. The <em>period</em> controls how many candles it looks back to compute this score.<br><br>'
+      +     '<strong style="color:var(--text);">Why ' + (r.rsi_period||'?') + '? &nbsp;<span style="color:var(--muted2);font-weight:400;">(tested: 10 · 14 · 21)</span></strong><br>'
+      +     rsiNote + '<br><br>'
+      +     '<span style="color:var(--amber);font-weight:600;">For you →</span> DotVerse automatically uses RSI ' + (r.rsi_period||'?') + ' when analysing ' + ac + ' assets on the ' + tf + ' timeframe.'
+      +   '</div>'
+      + '</div>'
+      // ── ATR card ──
+      + '<div onclick="_optToggle(\'opt_atr\')" style="' + cs + '">'
+      +   '<div style="display:flex;justify-content:space-between;align-items:center;">'
+      +     '<div style="color:var(--muted2);font-size:10px;letter-spacing:.05em;">ATR MULT</div>'
+      +     '<span id="opt_atr_i" style="color:var(--muted2);font-size:11px;">▸</span>'
+      +   '</div>'
+      +   '<div style="color:var(--amber);font-size:22px;font-weight:700;margin:4px 0;">' + _pfFmt(r.atr_mult, 1) + '×</div>'
+      +   '<div style="font-size:9px;color:var(--muted2);font-family:var(--mono);letter-spacing:.04em;">tap to learn more</div>'
+      +   '<div id="opt_atr" style="' + ds + '">'
+      +     '<strong style="color:var(--text);">What is ATR Multiplier?</strong><br>'
+      +     'ATR (Average True Range) measures how much a market typically moves per candle — its natural volatility. The multiplier sets your stop-loss distance: <em>stop = entry ± (ATR × multiplier)</em>. A larger multiplier means a wider stop and more room for price to breathe before you exit.<br><br>'
+      +     '<strong style="color:var(--text);">Why ' + _pfFmt(r.atr_mult,1) + '×? &nbsp;<span style="color:var(--muted2);font-weight:400;">(tested: 2× · 3× · 4×)</span></strong><br>'
+      +     atrNote + '<br><br>'
+      +     '<span style="color:var(--amber);font-weight:600;">For you →</span> Every DotVerse signal on ' + ac + ' sets the stop loss at exactly ' + _pfFmt(r.atr_mult,1) + '× ATR away from your entry price.'
+      +   '</div>'
+      + '</div>'
+      // ── EMA card ──
+      + '<div onclick="_optToggle(\'opt_ema\')" style="' + cs + '">'
+      +   '<div style="display:flex;justify-content:space-between;align-items:center;">'
+      +     '<div style="color:var(--muted2);font-size:10px;letter-spacing:.05em;">EMA PAIR</div>'
+      +     '<span id="opt_ema_i" style="color:var(--muted2);font-size:11px;">▸</span>'
+      +   '</div>'
+      +   '<div style="color:var(--amber);font-size:22px;font-weight:700;margin:4px 0;">' + (r.ema_fast||'—') + '/' + (r.ema_slow||'—') + '</div>'
+      +   '<div style="font-size:9px;color:var(--muted2);font-family:var(--mono);letter-spacing:.04em;">tap to learn more</div>'
+      +   '<div id="opt_ema" style="' + ds + '">'
+      +     '<strong style="color:var(--text);">What is an EMA Pair?</strong><br>'
+      +     'EMA = Exponential Moving Average. It tracks the average price over a period, weighting recent candles more heavily. A pair uses two: a <em>fast EMA</em> (short period, tracks recent momentum) and a <em>slow EMA</em> (longer period, tracks the overall trend). When fast crosses above slow = bullish. Below = bearish.<br><br>'
+      +     '<strong style="color:var(--text);">Why ' + (r.ema_fast||'?') + '/' + (r.ema_slow||'?') + '? &nbsp;<span style="color:var(--muted2);font-weight:400;">(tested: 7/14 · 9/21 · 20/50)</span></strong><br>'
+      +     emaNote + '<br><br>'
+      +     '<span style="color:var(--amber);font-weight:600;">For you →</span> Price above both the ' + (r.ema_fast||'?') + ' and ' + (r.ema_slow||'?') + ' EMA = uptrend. Price below both = downtrend. This pair drives trend confirmation in every ' + ac + ' signal.'
+      +   '</div>'
+      + '</div>'
+      // ── Sharpe card ──
+      + '<div onclick="_optToggle(\'opt_sharpe\')" style="' + cs + '">'
+      +   '<div style="display:flex;justify-content:space-between;align-items:center;">'
+      +     '<div style="color:var(--muted2);font-size:10px;letter-spacing:.05em;">SHARPE RATIO</div>'
+      +     '<span id="opt_sharpe_i" style="color:var(--muted2);font-size:11px;">▸</span>'
+      +   '</div>'
+      +   '<div style="color:var(--green);font-size:22px;font-weight:700;margin:4px 0;">' + _pfFmt(r.sharpe, 3) + '</div>'
+      +   '<div style="font-size:9px;color:var(--muted2);font-family:var(--mono);letter-spacing:.04em;">tap to learn more</div>'
+      +   '<div id="opt_sharpe" style="' + ds + '">'
+      +     '<strong style="color:var(--text);">What is Sharpe Ratio?</strong><br>'
+      +     'The Sharpe Ratio measures how much return you earn per unit of risk taken. Formula: <em>average return ÷ standard deviation of returns</em>. The higher the number, the more you are rewarded for the risk. It is the single best score to compare different strategies against each other.<br><br>'
+      +     '<strong style="color:var(--text);">Industry benchmarks</strong><br>'
+      +     '<span style="color:#FF4459;">0–1</span> = poor, risk not worth it &nbsp;·&nbsp; <span style="color:#F5A623;">1–2</span> = good &nbsp;·&nbsp; <span style="color:#00C98D;">2–4</span> = excellent &nbsp;·&nbsp; <span style="color:#00C98D;font-weight:700;">4+</span> = exceptional<br>'
+      +     'Most professional hedge funds target 1.0–2.0.<br><br>'
+      +     '<strong style="color:' + sharpeClr + ';">' + _pfFmt(r.sharpe,3) + ' = ' + sharpeRating + '</strong><br>'
+      +     (sharpeRating === 'Exceptional' ? 'This strategy generated ~' + Math.round(r.sharpe||0) + '× its own volatility in returns over the 2-year test period — exceptionally efficient.' : sharpeRating === 'Excellent' ? 'Well above the professional benchmark. These settings extract strong returns relative to risk.' : sharpeRating === 'Good' ? 'Above the minimum usable threshold. Returns justify the risk taken.' : 'Risk is not being rewarded adequately. These settings may need further tuning for this market.') + '<br><br>'
+      +     '<span style="color:var(--amber);font-weight:600;">Important →</span> Backtest Sharpe is always optimistic. Expect 30–50% lower in live trading due to spreads, slippage, and real execution conditions.'
+      +   '</div>'
+      + '</div>'
+      // ── Win Rate card ──
+      + '<div onclick="_optToggle(\'opt_wr\')" style="' + cs + '">'
+      +   '<div style="display:flex;justify-content:space-between;align-items:center;">'
+      +     '<div style="color:var(--muted2);font-size:10px;letter-spacing:.05em;">WIN RATE</div>'
+      +     '<span id="opt_wr_i" style="color:var(--muted2);font-size:11px;">▸</span>'
+      +   '</div>'
+      +   '<div style="color:var(--green);font-size:22px;font-weight:700;margin:4px 0;">' + (r.win_rate != null ? _pfFmt(r.win_rate * 100, 1) + '%' : '—') + '</div>'
+      +   '<div style="font-size:9px;color:var(--muted2);font-family:var(--mono);letter-spacing:.04em;">tap to learn more</div>'
+      +   '<div id="opt_wr" style="' + ds + '">'
+      +     '<strong style="color:var(--text);">What is Win Rate?</strong><br>'
+      +     'The percentage of trades that closed in profit over the 2-year backtest period. A higher win rate is not always better — what matters is the <em>combination</em> of win rate and how large your winners are versus your losers.<br><br>'
+      +     '<strong style="color:var(--text);">Key insight — win rate alone means nothing</strong><br>'
+      +     'A 35% win rate where winners are 3× the size of losers is <em>more profitable</em> than a 65% win rate with equal-size wins and losses. The Sharpe Ratio confirms whether the overall system is profitable regardless of win rate.<br><br>'
+      +     '<strong style="color:var(--text);">' + _pfFmt(wrPct,1) + '% win rate on ' + ac + ' / ' + tf + '</strong><br>'
+      +     wrNote + '<br><br>'
+      +     '<span style="color:var(--amber);font-weight:600;">For you →</span> Expect to lose on roughly ' + lossesIn10 + ' out of every 10 trades. That is normal. The edge is in cutting those losses small and letting the winners run.'
+      +   '</div>'
+      + '</div>'
+      + '</div>';
+    el.innerHTML = cardHtml + `
       <div style="margin-top:10px;font-size:10px;color:var(--muted2);margin-bottom:10px;">Computed: ${r.computed_at ? r.computed_at.substring(0,19).replace('T',' ') : '—'} UTC · ${ac} / ${tf}</div>
       <div style="padding:12px 14px;background:rgba(0,201,141,.07);border:1px solid rgba(0,201,141,.25);border-radius:4px;">
         ${(function(){
