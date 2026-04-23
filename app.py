@@ -93,6 +93,7 @@ APP_PASSWORD     = os.environ.get("APP_PASSWORD", "").strip()
 ADMIN_EMAIL           = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 GOOGLE_CLIENT_ID      = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET  = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI   = os.environ.get("GOOGLE_REDIRECT_URI", "https://dot-verse.up.railway.app/auth/google/callback")
 
 def login_required(f):
     """Decorator — blocks API calls unless the user has logged in this session."""
@@ -2707,7 +2708,7 @@ def google_auth():
     session['oauth_state'] = state
     params = urllib.parse.urlencode({
         'client_id':     GOOGLE_CLIENT_ID,
-        'redirect_uri':  url_for('google_callback', _external=True),
+        'redirect_uri':  GOOGLE_REDIRECT_URI,
         'response_type': 'code',
         'scope':         'openid email profile',
         'state':         state,
@@ -2727,7 +2728,7 @@ def google_callback():
         'code':          code,
         'client_id':     GOOGLE_CLIENT_ID,
         'client_secret': GOOGLE_CLIENT_SECRET,
-        'redirect_uri':  url_for('google_callback', _external=True),
+        'redirect_uri':  GOOGLE_REDIRECT_URI,
         'grant_type':    'authorization_code',
     })
     token_data = token_resp.json()
