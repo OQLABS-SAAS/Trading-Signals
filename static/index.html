@@ -1321,6 +1321,7 @@ body::before{
     <button class="nav-tab" onclick="switchMainTab('simulation',this)">Simulation</button>
     <button class="nav-tab" onclick="switchMainTab('news',this)">News</button>
     <button class="nav-tab" onclick="switchMainTab('portfolio',this)">Portfolio</button>
+    <button class="nav-tab" onclick="switchMainTab('trade',this)" id="tradeNavTab">Trade</button>
   </nav>
 
   <div class="hdr-right"><div id="hdrTicker" style="font-family:var(--mono); font-size:13px; font-weight:600; color:var(--amber); margin-right:12px; min-width:50px;">—</div>
@@ -1398,6 +1399,7 @@ body::before{
             <button class="btn-primary" onclick="switchMainTab('simulation',document.querySelector('.nav-tab:nth-child(5)'));if(currentData)runSimulation();">Simulate Trade</button>
             <button class="btn-ghost" onclick="copyPineScript();setTimeout(function(){var w=document.getElementById('pineCodeWrap');if(w&&w.style.display!=='none')w.scrollIntoView({behavior:'smooth',block:'start'});},350);" style="border-color:rgba(245,166,35,.5);color:var(--amber);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>Pine Script</button>
             <button class="btn-ghost" id="alertBtn" onclick="toggleWatch()" style="border-color:var(--amber);color:var(--amber);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Alert Me</button>
+            <button class="btn-ghost" id="mt5ExecuteBtn" onclick="mt5OpenModal()" style="display:none;border-color:var(--green);color:var(--green);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Execute Trade</button>
           </div>
         </div>
       </div>
@@ -8791,6 +8793,7 @@ function renderResultsV2(d) {
   try { renderChart(d); } catch(e) { console.warn('renderChart:', e); }
 
   console.log('[dotverse] renderResultsV2 complete for', d.ticker);
+  try { mt5SyncExecBtn(); } catch(e) {}
 
   // Render the guided "What To Do Next" journey panel
   try { renderNextSteps(d); } catch(e) { console.warn('renderNextSteps:', e); }
@@ -10156,6 +10159,7 @@ function switchMainTab(name, btn) {
   // Trigger tab-specific data loads
   if (name === 'news') { try { loadNewsTab(); } catch(e) { console.warn('loadNewsTab:', e); } }
   if (name === 'simulation' && currentData) { try { runSimulation(); } catch(e) {} }
+  if (name === 'trade') { try { mt5LoadTab(); } catch(e) {} }
 }
 
 // ─── CHART OVERLAYS ───
@@ -11627,6 +11631,102 @@ function closeSimulate() {
   </div>
 </div>
 
+<!-- ════════════ TRADE TAB ════════════ -->
+<div id="tab-trade" class="tab-panel">
+  <div style="max-width:1100px;margin:0 auto;padding:24px 16px;">
+    <h2 style="font-family:var(--disp);font-size:24px;font-weight:900;letter-spacing:-.5px;margin-bottom:4px;">MT5 Trade Execution</h2>
+    <p style="color:var(--muted2);font-size:12px;font-family:var(--mono);margin-bottom:20px;">Live account · Open positions · Order history · Execute from signals</p>
+
+    <!-- EA status bar -->
+    <div id="mt5StatusBar" style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--bg2);border:1px solid var(--border);border-radius:3px;margin-bottom:20px;">
+      <div id="mt5Dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;"></div>
+      <span id="mt5StatusLabel" style="font-family:var(--mono);font-size:12px;color:var(--muted2);">EA Offline — open MT5 and load the DotVerse EA</span>
+    </div>
+
+    <!-- Account summary -->
+    <div id="mt5AccountCards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:16px;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-bottom:6px;">Balance</div>
+        <div id="mt5Balance" style="font-family:var(--mono);font-size:20px;font-weight:700;color:var(--white);">—</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:16px;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-bottom:6px;">Equity</div>
+        <div id="mt5Equity" style="font-family:var(--mono);font-size:20px;font-weight:700;color:var(--white);">—</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:16px;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-bottom:6px;">Free Margin</div>
+        <div id="mt5FreeMargin" style="font-family:var(--mono);font-size:20px;font-weight:700;color:var(--white);">—</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:16px;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-bottom:6px;">Open P&L</div>
+        <div id="mt5PnL" style="font-family:var(--mono);font-size:20px;font-weight:700;color:var(--white);">—</div>
+      </div>
+    </div>
+
+    <!-- Open positions -->
+    <div style="margin-bottom:24px;">
+      <div style="font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:10px;">Open Positions</div>
+      <div id="mt5Positions" style="background:var(--bg2);border:1px solid var(--border);border-radius:3px;overflow:hidden;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Symbol</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Type</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">Lots</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">Open Price</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">P&L</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">SL / TP</th>
+            </tr>
+          </thead>
+          <tbody id="mt5PositionsTbody"><tr><td colspan="6" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Order history -->
+    <div>
+      <div style="font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:10px;">Order History</div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:3px;overflow:hidden;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Symbol</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Type</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">Lots</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">Fill Price</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Status</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Time</th>
+            </tr>
+          </thead>
+          <tbody id="mt5OrdersTbody"><tr><td colspan="6" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No orders yet</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ MT5 ORDER CONFIRMATION MODAL ════════ -->
+<div id="mt5Modal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(12,10,8,.92);z-index:700;display:none;align-items:center;justify-content:center;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:32px;width:100%;max-width:420px;margin:0 20px;">
+    <div style="font-family:var(--disp);font-size:20px;font-weight:900;letter-spacing:-.5px;margin-bottom:4px;">Confirm Trade</div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-bottom:24px;">This will send an order to your MT5 terminal</div>
+    <div id="mt5ModalDetails" style="background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:16px;margin-bottom:20px;font-family:var(--mono);font-size:12px;line-height:2;"></div>
+    <div style="margin-bottom:20px;">
+      <div style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted2);margin-bottom:6px;">Lot Size</div>
+      <input id="mt5ModalVolume" type="number" step="0.01" min="0.01" value="0.01"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:10px 14px;color:var(--white);font-family:var(--mono);font-size:14px;outline:none;">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;">Standard lot = 1.0 · Mini lot = 0.1 · Micro lot = 0.01</div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button id="mt5ModalConfirmBtn" onclick="mt5ConfirmOrder()"
+        style="flex:1;padding:12px;background:var(--amber);color:#0C0A08;border:none;border-radius:3px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;cursor:pointer;">Execute Trade</button>
+      <button onclick="document.getElementById('mt5Modal').style.display='none'"
+        style="padding:12px 20px;background:transparent;color:var(--muted2);border:1px solid var(--border2);border-radius:3px;font-family:var(--mono);font-size:12px;cursor:pointer;">Cancel</button>
+    </div>
+    <div id="mt5ModalMsg" style="font-family:var(--mono);font-size:11px;margin-top:12px;display:none;"></div>
+  </div>
+</div>
+
 <script>
 /* ═══════════════════════════════════════════════════════════════
    PHASE 5 — PORTFOLIO RISK MANAGER JAVASCRIPT
@@ -12514,6 +12614,277 @@ document.addEventListener('click', function(e) {
     corrAddSignalTicker();
   }
 });
+</script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   MT5 TRADE EXECUTION — JavaScript
+   Polls /api/mt5/state every 5s when Trade tab is active.
+   mt5LoadTab()      — called by switchMainTab on 'trade'
+   mt5Poll()         — lightweight state refresh
+   mt5OpenModal()    — show confirmation modal with signal prefill
+   mt5ConfirmOrder() — POST to /api/mt5/order then refresh history
+═══════════════════════════════════════════════════════════════ */
+
+var _mt5PollTimer   = null;   // setInterval handle
+var _mt5Connected   = false;  // last known EA connection status
+var _mt5PendingData = null;   // signal data staged for the modal
+
+// ─── Helpers ──────────────────────────────────────────────────
+function _mt5Fmt(n) {
+  if (n == null || n === undefined) return '—';
+  return parseFloat(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function _mt5Color(n) {
+  if (n == null) return 'var(--white)';
+  return parseFloat(n) >= 0 ? 'var(--green)' : 'var(--red)';
+}
+
+// ─── Update status bar ────────────────────────────────────────
+function _mt5SetStatus(connected, lastSeen) {
+  var dot   = document.getElementById('mt5Dot');
+  var label = document.getElementById('mt5StatusLabel');
+  if (!dot || !label) return;
+  _mt5Connected = connected;
+  if (connected) {
+    dot.style.background = 'var(--green)';
+    dot.style.boxShadow  = '0 0 6px var(--green)';
+    label.style.color    = 'var(--green)';
+    label.textContent    = 'EA Online — MT5 terminal connected';
+  } else {
+    dot.style.background = 'var(--muted)';
+    dot.style.boxShadow  = 'none';
+    label.style.color    = 'var(--muted2)';
+    label.textContent    = lastSeen
+      ? 'EA Offline — last seen ' + lastSeen
+      : 'EA Offline — open MT5 and load the DotVerse EA';
+  }
+  // Show/hide Execute Trade button on signal card
+  var execBtn = document.getElementById('mt5ExecuteBtn');
+  if (execBtn) {
+    var hasSig = currentData && (currentData.signal === 'BUY' || currentData.signal === 'SELL');
+    execBtn.style.display = (connected && hasSig) ? 'inline-flex' : 'none';
+  }
+}
+
+// ─── Render account cards ─────────────────────────────────────
+function _mt5RenderAccount(acct) {
+  var bal = document.getElementById('mt5Balance');
+  var eq  = document.getElementById('mt5Equity');
+  var fm  = document.getElementById('mt5FreeMargin');
+  var pnl = document.getElementById('mt5PnL');
+  if (!bal) return;
+  var cur = acct.currency || 'USD';
+  bal.textContent   = cur + ' ' + _mt5Fmt(acct.balance);
+  eq.textContent    = cur + ' ' + _mt5Fmt(acct.equity);
+  fm.textContent    = cur + ' ' + _mt5Fmt(acct.free_margin);
+  pnl.textContent   = (acct.profit >= 0 ? '+' : '') + _mt5Fmt(acct.profit);
+  pnl.style.color   = _mt5Color(acct.profit);
+}
+
+// ─── Render open positions ────────────────────────────────────
+function _mt5RenderPositions(positions) {
+  var tbody = document.getElementById('mt5PositionsTbody');
+  if (!tbody) return;
+  if (!positions || positions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr>';
+    return;
+  }
+  tbody.innerHTML = positions.map(function(p) {
+    var pnlCol  = _mt5Color(p.profit);
+    var typeCol = p.type === 'BUY' ? 'var(--green)' : 'var(--red)';
+    return '<tr style="border-bottom:1px solid var(--border);">'
+      + '<td style="font-family:var(--mono);font-size:12px;color:var(--white);padding:10px 14px;">' + (p.symbol||'—') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + typeCol + ';padding:10px 14px;">' + (p.type||'—') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + (p.volume||'—') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + _mt5Fmt(p.open_price) + '</td>'
+      + '<td style="font-family:var(--mono);font-size:12px;font-weight:700;color:' + pnlCol + ';padding:10px 14px;text-align:right;">' + (p.profit >= 0 ? '+' : '') + _mt5Fmt(p.profit) + '</td>'
+      + '<td style="font-family:var(--mono);font-size:11px;color:var(--muted2);padding:10px 14px;text-align:right;">' + _mt5Fmt(p.sl) + ' / ' + _mt5Fmt(p.tp) + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+// ─── Render order history ─────────────────────────────────────
+function _mt5RenderOrders(orders) {
+  var tbody = document.getElementById('mt5OrdersTbody');
+  if (!tbody) return;
+  if (!orders || orders.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No orders yet</td></tr>';
+    return;
+  }
+  var statusColor = {filled:'var(--green)',failed:'var(--red)',cancelled:'var(--muted)',pending:'var(--amber)',executing:'var(--amber)'};
+  tbody.innerHTML = orders.map(function(o) {
+    var sc      = statusColor[o.status] || 'var(--white2)';
+    var typeCol = o.order_type === 'BUY' ? 'var(--green)' : 'var(--red)';
+    var cancelBtn = (o.status === 'pending')
+      ? ' <button onclick="mt5CancelOrder(' + o.id + ')" style="margin-left:6px;background:none;border:1px solid var(--border2);border-radius:2px;color:var(--muted2);font-family:var(--mono);font-size:9px;padding:1px 5px;cursor:pointer;letter-spacing:.3px;">cancel</button>'
+      : '';
+    return '<tr style="border-bottom:1px solid var(--border);">'
+      + '<td style="font-family:var(--mono);font-size:12px;color:var(--white);padding:10px 14px;">' + (o.symbol||'—') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + typeCol + ';padding:10px 14px;">' + (o.order_type||'—') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + (o.volume||'—') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + (o.fill_price ? _mt5Fmt(o.fill_price) : _mt5Fmt(o.price)) + '</td>'
+      + '<td style="padding:10px 14px;"><span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + sc + ';text-transform:uppercase;letter-spacing:.5px;">' + (o.status||'—') + '</span>' + cancelBtn + '</td>'
+      + '<td style="font-family:var(--mono);font-size:10px;color:var(--muted);padding:10px 14px;">' + (o.filled_at || o.created_at || '—') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+// ─── Poll state from server (every 5s while tab is open) ──────
+function mt5Poll() {
+  fetch('/api/mt5/state').then(function(r){ return r.json(); }).then(function(d) {
+    _mt5SetStatus(d.connected, null);
+    if (d.connected) {
+      _mt5RenderAccount(d.account   || {});
+      _mt5RenderPositions(d.positions || []);
+    }
+  }).catch(function(){});
+}
+
+// ─── Load full tab (state + orders) ───────────────────────────
+function mt5LoadTab() {
+  if (_mt5PollTimer) clearInterval(_mt5PollTimer);
+  _mt5PollTimer = setInterval(mt5Poll, 5000);
+
+  fetch('/api/mt5/state').then(function(r){ return r.json(); }).then(function(d) {
+    _mt5SetStatus(d.connected, null);
+    _mt5RenderAccount(d.account    || {});
+    _mt5RenderPositions(d.positions || []);
+  }).catch(function(){});
+
+  fetch('/api/mt5/orders').then(function(r){ return r.json(); }).then(function(d) {
+    _mt5RenderOrders(d.orders || []);
+  }).catch(function(){});
+}
+
+// Stop polling when user navigates away from Trade tab
+(function() {
+  var _origSwitchForMt5 = typeof switchMainTab === 'function' ? switchMainTab : null;
+  if (_origSwitchForMt5) {
+    switchMainTab = function(name, btn) {
+      if (name !== 'trade' && _mt5PollTimer) {
+        clearInterval(_mt5PollTimer);
+        _mt5PollTimer = null;
+      }
+      _origSwitchForMt5(name, btn);
+    };
+  }
+})();
+
+// ─── Open order confirmation modal ────────────────────────────
+function mt5OpenModal() {
+  if (!currentData || (currentData.signal !== 'BUY' && currentData.signal !== 'SELL')) {
+    alert('Run a BUY or SELL analysis first.');
+    return;
+  }
+  _mt5PendingData = currentData;
+  var d      = currentData;
+  var dirCol = d.signal === 'BUY' ? 'var(--green)' : 'var(--red)';
+
+  document.getElementById('mt5ModalDetails').innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;">'
+    + '<span style="color:var(--muted2);">Symbol</span><span style="color:var(--white);font-weight:700;">' + (d.ticker||'—') + '</span>'
+    + '<span style="color:var(--muted2);">Direction</span><span style="color:' + dirCol + ';font-weight:700;">' + d.signal + '</span>'
+    + '<span style="color:var(--muted2);">Entry</span><span style="color:var(--white);">' + (d.entry||'—') + '</span>'
+    + '<span style="color:var(--muted2);">Stop Loss</span><span style="color:var(--red);">' + (d.stop_loss||'—') + '</span>'
+    + '<span style="color:var(--muted2);">TP 1</span><span style="color:var(--green);">' + (d.tp1||'—') + '</span>'
+    + '<span style="color:var(--muted2);">TP 2</span><span style="color:var(--green);">' + (d.tp2||'—') + '</span>'
+    + '</div>';
+
+  document.getElementById('mt5ModalVolume').value = '0.01';
+  var msg = document.getElementById('mt5ModalMsg');
+  msg.style.display = 'none';
+  msg.textContent   = '';
+  var btn = document.getElementById('mt5ModalConfirmBtn');
+  btn.disabled      = false;
+  btn.textContent   = 'Execute Trade';
+
+  document.getElementById('mt5Modal').style.display = 'flex';
+}
+
+// ─── Submit confirmed order ───────────────────────────────────
+function mt5ConfirmOrder() {
+  var d = _mt5PendingData;
+  if (!d) return;
+
+  var volume = parseFloat(document.getElementById('mt5ModalVolume').value);
+  if (isNaN(volume) || volume <= 0) {
+    _mt5ModalMsg('Lot size must be greater than 0.', 'var(--red)');
+    return;
+  }
+
+  var btn = document.getElementById('mt5ModalConfirmBtn');
+  btn.disabled    = true;
+  btn.textContent = 'Sending…';
+
+  fetch('/api/mt5/order', {
+    method:  'POST',
+    headers: {'Content-Type':'application/json'},
+    body:    JSON.stringify({
+      ticker:     d.ticker,
+      asset_type: d.asset_type || '',
+      direction:  d.signal,
+      volume:     volume,
+      price:      d.entry    || 0,
+      sl:         d.stop_loss || null,
+      tp:         d.tp1      || null,
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res) {
+    if (res.error) {
+      _mt5ModalMsg('Error: ' + res.error, 'var(--red)');
+      btn.disabled    = false;
+      btn.textContent = 'Execute Trade';
+    } else {
+      _mt5ModalMsg('Order #' + res.order_id + ' queued — MT5 EA will execute it within 5 seconds.', 'var(--green)');
+      btn.textContent = '✓ Sent';
+      setTimeout(function() {
+        fetch('/api/mt5/orders').then(function(r){ return r.json(); }).then(function(od) {
+          _mt5RenderOrders(od.orders || []);
+        });
+      }, 1000);
+      setTimeout(function() {
+        document.getElementById('mt5Modal').style.display = 'none';
+        var tradeBtn = document.getElementById('tradeNavTab');
+        if (tradeBtn) tradeBtn.click();
+      }, 3000);
+    }
+  })
+  .catch(function() {
+    _mt5ModalMsg('Network error — check your connection.', 'var(--red)');
+    btn.disabled    = false;
+    btn.textContent = 'Execute Trade';
+  });
+}
+
+// ─── Cancel a pending order from order history ────────────────
+function mt5CancelOrder(orderId) {
+  if (!confirm('Cancel order #' + orderId + '?')) return;
+  fetch('/api/mt5/cancel/' + orderId, {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function() {
+      fetch('/api/mt5/orders').then(function(r){ return r.json(); }).then(function(d) {
+        _mt5RenderOrders(d.orders || []);
+      });
+    });
+}
+
+// ─── Modal message helper ─────────────────────────────────────
+function _mt5ModalMsg(text, color) {
+  var msg = document.getElementById('mt5ModalMsg');
+  msg.textContent   = text;
+  msg.style.color   = color || 'var(--white2)';
+  msg.style.display = 'block';
+}
+
+// ─── Called after every analysis — sync Execute Trade button ──
+function mt5SyncExecBtn() {
+  var btn = document.getElementById('mt5ExecuteBtn');
+  if (!btn) return;
+  var hasSig = currentData && (currentData.signal === 'BUY' || currentData.signal === 'SELL');
+  btn.style.display = (_mt5Connected && hasSig) ? 'inline-flex' : 'none';
+}
 </script>
 
 </body>
