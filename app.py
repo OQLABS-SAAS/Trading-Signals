@@ -91,6 +91,7 @@ def handle_404(e):
 app.secret_key   = os.environ.get("SECRET_KEY", "change-me-set-SECRET_KEY-in-railway")
 APP_PASSWORD     = os.environ.get("APP_PASSWORD", "").strip()
 ADMIN_EMAIL           = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+MT5_EA_SECRET         = os.environ.get("MT5_EA_SECRET", "").strip()
 GOOGLE_CLIENT_ID      = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET  = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI   = os.environ.get("GOOGLE_REDIRECT_URI", "https://dot-verse.up.railway.app/auth/google/callback")
@@ -165,6 +166,19 @@ ALERT_INTERVALS = {
 # value = {ticker, asset_type, timeframe, last_signal, last_check, last_reason}
 watch_registry = {}
 watch_lock     = threading.Lock()
+
+# ── MT5 EA state (pushed by EA every 5s) ──────────────────────
+mt5_state      = {}   # { user_id: {account:{}, positions:[], last_seen:datetime} }
+mt5_state_lock = threading.Lock()
+
+def _mt5_symbol(ticker, asset_type):
+    """Convert DotVerse ticker to MT5 symbol format."""
+    s = ticker.upper()
+    s = s.replace("-USD","USD").replace("/","").replace("=X","").replace("=F","")
+    _map = {"BTCUSD":"BTCUSD","ETHUSD":"ETHUSD","XRPUSD":"XRPUSD",
+            "GC":"XAUUSD","SI":"XAGUSD","CL":"USOIL","NG":"NGAS",
+            "XAUUSD":"XAUUSD","XAGUSD":"XAGUSD"}
+    return _map.get(s, s)
 
 # ─── INDICATOR HELPERS ────────────────────────────────────────
 def rma(series, length):
@@ -3045,6 +3059,199 @@ def admin_set_tier():
     finally:
         db.close()
 
+# ─── MT5 INTEGRATION ─────────────────────────────────────────
+
+def _require_ea(f):
+    """Decorator — validates X-EA-Secret header from the MT5 EA."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        secret = request.headers.get("X-EA-Secret", "")
+        if not MT5_EA_SECRET or secret != MT5_EA_SECRET:
+            return jsonify({"error": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route("/api/mt5/order", methods=["POST"])
+@login_required
+def mt5_submit_order():
+    """User submits a trade order — saved as pending, EA picks it up."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body       = request.json or {}
+    user_id    = str(session.get("user_id"))
+    ticker     = body.get("ticker", "").upper().strip()
+    asset_type = body.get("asset_type", "forex")
+    direction  = body.get("direction", "").upper()
+    volume     = float(body.get("volume", 0.01))
+    price      = float(body.get("price", 0))
+    sl         = body.get("sl")
+    tp         = body.get("tp")
+    if not ticker or direction not in ("BUY", "SELL") or volume <= 0:
+        return jsonify({"error": "ticker, direction (BUY/SELL), and volume required"}), 400
+    symbol = _mt5_symbol(ticker, asset_type)
+    db = _DBSession()
+    try:
+        order = MT5Order(
+            user_id    = user_id,
+            symbol     = symbol,
+            order_type = direction,
+            volume     = volume,
+            price      = price,
+            sl         = float(sl) if sl else None,
+            tp         = float(tp) if tp else None,
+            status     = "pending",
+            comment    = f"DotVerse {ticker} {direction}",
+        )
+        db.add(order)
+        db.commit()
+        return jsonify({"status": "pending", "order_id": order.id, "symbol": symbol})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/mt5/pending", methods=["GET"])
+@_require_ea
+def mt5_get_pending():
+    """EA polls this every 5s — returns pending orders and marks them as executing."""
+    if not _DBSession:
+        return jsonify({"orders": []})
+    db = _DBSession()
+    try:
+        orders = db.query(MT5Order).filter_by(status="pending").all()
+        result = []
+        for o in orders:
+            result.append({
+                "id":         o.id,
+                "symbol":     o.symbol,
+                "order_type": o.order_type,
+                "volume":     o.volume,
+                "price":      o.price,
+                "sl":         o.sl,
+                "tp":         o.tp,
+            })
+            o.status = "executing"
+        db.commit()
+        return jsonify({"orders": result})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"orders": []})
+    finally:
+        db.close()
+
+@app.route("/api/mt5/confirm", methods=["POST"])
+@_require_ea
+def mt5_confirm_order():
+    """EA reports execution result back to DotVerse."""
+    if not _DBSession:
+        return jsonify({"status": "ok"})
+    body      = request.json or {}
+    order_id  = body.get("order_id")
+    status    = body.get("status")   # filled | failed
+    ticket    = body.get("ticket")
+    fill_price= body.get("fill_price")
+    comment   = body.get("comment", "")
+    db = _DBSession()
+    try:
+        order = db.query(MT5Order).filter_by(id=order_id).first()
+        if order:
+            order.status     = status
+            order.mt5_ticket = ticket
+            order.fill_price = fill_price
+            order.comment    = comment
+            if status == "filled":
+                order.filled_at = datetime.utcnow()
+        db.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"status": "error", "error": str(e)})
+    finally:
+        db.close()
+
+@app.route("/api/mt5/push", methods=["POST"])
+@_require_ea
+def mt5_push_state():
+    """EA pushes account info and open positions every 5s."""
+    body      = request.json or {}
+    user_id   = body.get("user_id", "default")
+    account   = body.get("account", {})
+    positions = body.get("positions", [])
+    with mt5_state_lock:
+        mt5_state[user_id] = {
+            "account":   account,
+            "positions": positions,
+            "last_seen": datetime.utcnow().isoformat(),
+        }
+    return jsonify({"status": "ok"})
+
+@app.route("/api/mt5/state", methods=["GET"])
+@login_required
+def mt5_get_state():
+    """Frontend reads account info and positions."""
+    user_id = str(session.get("user_id"))
+    with mt5_state_lock:
+        state = mt5_state.get(user_id) or mt5_state.get("default")
+    if not state:
+        return jsonify({"connected": False, "account": {}, "positions": []})
+    last_seen = datetime.fromisoformat(state["last_seen"])
+    connected = (datetime.utcnow() - last_seen).total_seconds() < 15
+    return jsonify({"connected": connected, "account": state["account"], "positions": state["positions"]})
+
+@app.route("/api/mt5/orders", methods=["GET"])
+@login_required
+def mt5_get_orders():
+    """Frontend reads order history for current user."""
+    if not _DBSession:
+        return jsonify({"orders": []})
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        orders = db.query(MT5Order).filter_by(user_id=user_id)\
+                   .order_by(MT5Order.created_at.desc()).limit(50).all()
+        return jsonify({"orders": [{
+            "id":         o.id,
+            "symbol":     o.symbol,
+            "order_type": o.order_type,
+            "volume":     o.volume,
+            "price":      o.price,
+            "sl":         o.sl,
+            "tp":         o.tp,
+            "status":     o.status,
+            "mt5_ticket": o.mt5_ticket,
+            "fill_price": o.fill_price,
+            "comment":    o.comment,
+            "created_at": o.created_at.strftime("%Y-%m-%d %H:%M UTC"),
+            "filled_at":  o.filled_at.strftime("%H:%M UTC") if o.filled_at else None,
+        } for o in orders]})
+    except Exception as e:
+        return jsonify({"orders": []})
+    finally:
+        db.close()
+
+@app.route("/api/mt5/cancel/<int:order_id>", methods=["POST"])
+@login_required
+def mt5_cancel_order(order_id):
+    """User cancels a pending order before EA picks it up."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        order = db.query(MT5Order).filter_by(id=order_id, user_id=user_id, status="pending").first()
+        if not order:
+            return jsonify({"error": "Order not found or already processing"}), 404
+        order.status = "cancelled"
+        db.commit()
+        return jsonify({"status": "cancelled"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
 # ─── SETTINGS — PROFILE ──────────────────────────────────────
 
 @app.route("/api/profile", methods=["POST"])
@@ -4889,6 +5096,24 @@ class AdminInvite(_Base):
     email      = Column(String(120), nullable=False, unique=True)
     invited_by = Column(Integer,    nullable=True)
     created_at = Column(DateTime,   nullable=False, default=datetime.utcnow)
+
+class MT5Order(_Base):
+    """Orders submitted from DotVerse to be executed by the MT5 EA."""
+    __tablename__ = "mt5_orders"
+    id          = Column(Integer,  primary_key=True, autoincrement=True)
+    user_id     = Column(String(64), nullable=False)
+    symbol      = Column(String(32), nullable=False)
+    order_type  = Column(String(8),  nullable=False)   # BUY | SELL
+    volume      = Column(Float,      nullable=False)   # lots
+    price       = Column(Float,      nullable=False)   # requested entry
+    sl          = Column(Float,      nullable=True)
+    tp          = Column(Float,      nullable=True)
+    status      = Column(String(16), nullable=False, default="pending")  # pending|executing|filled|failed|cancelled
+    mt5_ticket  = Column(Integer,    nullable=True)
+    fill_price  = Column(Float,      nullable=True)
+    comment     = Column(String(128),nullable=True)
+    created_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    filled_at   = Column(DateTime,   nullable=True)
 
 class Watch(_Base):
     """Persistent alert watches — survive server restarts, removed only after confirmed delivery."""
