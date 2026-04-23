@@ -2695,6 +2695,12 @@ def normalise_ticker(ticker, asset_type):
     return ticker
 
 # ─── ROUTES ──────────────────────────────────────────────────
+@app.route("/pricing")
+def pricing_page():
+    resp = send_from_directory("static", "pricing.html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
 @app.route("/")
 def index():
     resp = send_from_directory("static", "index.html")
