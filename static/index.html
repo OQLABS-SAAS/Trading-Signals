@@ -11682,7 +11682,7 @@ function closeSimulate() {
               <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">Open Price</th>
               <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">P&L</th>
               <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">SL / TP</th>
-              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">Actions</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;"></th>
             </tr>
           </thead>
           <tbody id="mt5PositionsTbody"><tr><td colspan="7" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr></tbody>
@@ -12709,7 +12709,7 @@ function _mt5RenderPositions(positions) {
   var tbody = document.getElementById('mt5PositionsTbody');
   if (!tbody) return;
   if (!positions || positions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr>';
     _mt5PrevPnl = {};
     return;
   }
@@ -12772,154 +12772,171 @@ function _mt5RenderPositions(positions) {
     var distToTP2 = tp2 > 0 ? Math.abs(tp2 - cur).toFixed(2) : null;
     var distToTP3 = tp3 > 0 ? Math.abs(tp3 - cur).toFixed(2) : null;
 
-    var statusEmoji, statusText, statusCol, whatHappening, whatNext, nextTarget;
+    var statusText, statusCol, whatHappening, whatNext, nextTarget;
 
     var hitLevel = _mt5LevelHits[String(ticket)] || '';
     if (hitLevel) {
-      // A level was just hit
-      statusEmoji = hitLevel === 'SL' ? '🛑' : '🎯';
-      statusText  = hitLevel + ' HIT — ACTION REQUIRED';
-      statusCol   = hitLevel === 'SL' ? 'var(--red)' : 'var(--amber)';
+      statusText    = hitLevel + ' HIT — TAP TO CLOSE';
+      statusCol     = hitLevel === 'SL' ? 'var(--red)' : 'var(--amber)';
       whatHappening = hitLevel === 'SL'
-        ? 'Your stop loss has been hit. DotVerse is waiting for you to confirm the close.'
-        : 'Price has reached ' + hitLevel + '. Tap the flashing button below to close the position.';
-      whatNext = 'Tap the amber "' + hitLevel + '" button. DotVerse will send the close order to MT5 and confirm via Telegram.';
-      nextTarget = hitLevel;
+        ? 'Your exit point has been reached. Tap the button below to close the trade.'
+        : 'Price reached your ' + (hitLevel === 'TP1' ? 'first' : hitLevel === 'TP2' ? 'second' : 'third') + ' profit target. Tap the button below to take profits.';
+      whatNext      = 'Tap the button below. DotVerse will send the close order to MT5 and confirm via Telegram within 5 seconds.';
+      nextTarget    = hitLevel;
     } else if (profit > 0) {
       var pctToTP1 = tp > 0 && openPrice > 0 ? Math.min(100, Math.abs(cur - openPrice) / Math.abs(tp - openPrice) * 100) : 0;
       if (pctToTP1 >= 85) {
-        statusEmoji = '🎯'; statusText = 'TP1 APPROACHING'; statusCol = 'var(--green)';
-        whatHappening = 'Price is very close to TP1. Your first profit target is almost reached.';
-        whatNext = 'Get ready. When the TP1 button flashes, tap it immediately to lock in 50% of your profits. Leave the rest running to TP2.';
+        statusText = 'GETTING CLOSE TO TARGET 1'; statusCol = 'var(--green)';
+        whatHappening = 'Price is almost at your first profit target. Get ready — DotVerse will alert you the moment it arrives.';
+        whatNext = 'Nothing yet. Wait for DotVerse to alert you on Telegram. When it does, the button will appear here.';
         nextTarget = 'TP1';
       } else if (pctToTP1 >= 40) {
-        statusEmoji = '📈'; statusText = 'IN PROFIT — MOVING WELL'; statusCol = 'var(--green)';
-        whatHappening = 'The trade is in profit and heading toward TP1. Good progress.';
-        whatNext = 'Hold. Do not close early. Wait for DotVerse to alert you when TP1 is hit — then tap the TP1 button to take 50%.';
+        statusText = 'YOUR TRADE IS GOING WELL'; statusCol = 'var(--green)';
+        whatHappening = 'Price is moving in the right direction. More than halfway to your first profit target.';
+        whatNext = 'Hold. Do not close early. Wait for DotVerse to alert you when Target 1 is hit.';
         nextTarget = 'TP1';
       } else {
-        statusEmoji = '📈'; statusText = 'EARLY PROFIT'; statusCol = 'var(--green)';
-        whatHappening = 'The trade just moved into profit. Price is moving in the right direction.';
-        whatNext = 'Hold and be patient. Let price travel to TP1 before doing anything.';
+        statusText = 'TRADE MOVING YOUR WAY'; statusCol = 'var(--green)';
+        whatHappening = 'The trade is in profit and heading the right way. Early stages — give it time.';
+        whatNext = 'Hold and be patient. Let price travel to Target 1 before doing anything.';
         nextTarget = 'TP1';
       }
     } else if (profit < 0) {
       var pctToSL = (sl > 0 && openPrice > 0) ? Math.min(100, Math.abs(cur - openPrice) / Math.abs(sl - openPrice) * 100) : 0;
       if (pctToSL >= 80) {
-        statusEmoji = '⚠️'; statusText = 'NEAR STOP LOSS'; statusCol = 'var(--red)';
-        whatHappening = 'Price is getting close to your stop loss at ' + _mt5Fmt(sl) + '.';
-        whatNext = 'Decide now: if you want to exit early, tap STOP LOSS. If you trust DotVerse\'s level, hold — the stop is there to protect you automatically.';
+        statusText = 'APPROACHING YOUR EXIT POINT'; statusCol = 'var(--red)';
+        whatHappening = 'Price is getting close to ' + _mt5Fmt(sl) + ' — the level where DotVerse says to stop the loss.';
+        whatNext = 'You have two options: Hold and let the exit point trigger automatically if hit. Or tap Exit Trade below to close now and accept the current loss.';
         nextTarget = 'SL';
       } else {
-        statusEmoji = '📉'; statusText = 'IN DRAWDOWN'; statusCol = 'var(--red)';
-        whatHappening = 'The trade is in a temporary loss. This is normal — almost every trade dips before reaching target.';
-        whatNext = 'Hold. Your stop loss at ' + _mt5Fmt(sl) + ' is your safety net. DotVerse sized the risk so maximum loss is controlled. Do not move the stop.';
+        statusText = 'PRICE DIPPED — THIS IS NORMAL'; statusCol = 'var(--muted2)';
+        whatHappening = 'The trade is in a temporary loss. Almost every trade dips before reaching its target.';
+        whatNext = 'Hold. Your exit point at ' + _mt5Fmt(sl) + ' is your safety net. DotVerse sized the risk so maximum loss is controlled. Do not move the stop.';
         nextTarget = 'SL';
       }
     } else {
-      statusEmoji = '⏸'; statusText = 'AT ENTRY — WAITING'; statusCol = 'var(--amber)';
+      statusText    = 'WAITING FOR PRICE TO MOVE'; statusCol = 'var(--amber)';
       whatHappening = 'Price is near your entry. The trade has not moved significantly yet.';
-      whatNext = 'Hold. Give the trade time to develop. The market needs time to move.';
-      nextTarget = 'TP1';
+      whatNext      = 'Hold. Give the trade time to develop. The market needs time to move.';
+      nextTarget    = 'TP1';
     }
 
-    // ── Level ladder ─────────────────────────────────────────────
-    function _ladderCard(label, price, col, isActive) {
-      if (!price || price <= 0) return '';
-      var dist = Math.abs(cur - price).toFixed(2);
-      var bg   = isActive ? 'background:' + col + '22;border-color:' + col + ';' : 'background:var(--bg3);border-color:var(--border2);';
-      return '<div style="flex:1;min-width:0;border:1px solid;border-radius:4px;padding:8px 10px;text-align:center;' + bg + '">'
-           + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.8px;color:' + col + ';margin-bottom:4px;">' + label + '</div>'
-           + '<div style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--white);">' + _mt5Fmt(price) + '</div>'
-           + '<div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;">' + (isActive ? '← NOW' : '±' + dist) + '</div>'
-           + '</div>';
+    // ── Simple 3-point progress track ────────────────────────────
+    var trackPct = 50;
+    if (sl > 0 && tp > 0) {
+      var fullRange = Math.abs(tp - sl);
+      trackPct = fullRange > 0
+        ? Math.min(100, Math.max(0, (isBuy ? (cur - sl) : (sl - cur)) / fullRange * 100))
+        : 50;
     }
-    var ladderHtml = '<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">'
-      + _ladderCard('STOP LOSS', sl,  'var(--red)',   nextTarget === 'SL')
-      + _ladderCard('ENTRY',     openPrice, 'var(--muted2)', false)
-      + '<div style="flex:1;min-width:0;border:1px solid var(--amber);border-radius:4px;padding:8px 10px;text-align:center;background:rgba(255,176,0,.08);">'
-      +   '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.8px;color:var(--amber);margin-bottom:4px;">NOW</div>'
-      +   '<div style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--amber);">' + _mt5Fmt(cur) + '</div>'
-      +   '<div style="font-family:var(--mono);font-size:9px;color:var(--amber);margin-top:2px;">' + (profit >= 0 ? '+' : '') + _mt5Fmt(profit) + '</div>'
+    var trackCol  = profit > 0 ? 'var(--green)' : profit < 0 ? 'var(--red)' : '#555';
+    var trackHtml = '<div style="margin-bottom:20px;">'
+      + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.5px;margin-bottom:6px;">'
+      +   '<span>Exit point</span><span>Target 1</span>'
       + '</div>'
-      + _ladderCard('TP1 · 50%', tp,  'var(--green)', nextTarget === 'TP1')
-      + _ladderCard('TP2 · 30%', tp2, 'var(--green)', nextTarget === 'TP2')
-      + _ladderCard('TP3 · ALL', tp3, 'var(--green)', nextTarget === 'TP3')
+      + '<div style="position:relative;height:4px;background:var(--border);border-radius:2px;">'
+      +   '<div style="position:absolute;left:0;top:0;height:100%;width:' + trackPct.toFixed(1) + '%;background:' + trackCol + ';border-radius:2px;transition:width .5s;"></div>'
+      +   '<div style="position:absolute;top:50%;left:' + trackPct.toFixed(1) + '%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:' + trackCol + ';border:2px solid var(--bg3);transition:left .5s;"></div>'
+      + '</div>'
+      + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:5px;">'
+      +   '<span>' + _mt5Fmt(sl) + '</span>'
+      +   '<span style="color:' + trackCol + ';">' + _mt5Fmt(cur) + ' <span style="color:var(--muted);">now</span></span>'
+      +   '<span>' + _mt5Fmt(tp) + '</span>'
+      + '</div>'
       + '</div>';
 
-    // ── Action buttons (in expand panel) ─────────────────────────
-    function _bigBtn(level, label, desc, baseStyle) {
-      var isHit   = hitLevel === level;
-      var hitAnim = isHit ? 'animation:wbPop .4s ease;' : '';
-      var hitBg   = isHit ? 'background:var(--amber);color:#000;border-color:var(--amber);' : baseStyle;
-      return '<div>'
-           + '<button id="mt5Btn_' + ticket + '_' + level + '"'
-           + ' onclick="mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'' + level + '\')"'
-           + ' style="width:100%;padding:8px 10px;font-family:var(--mono);font-size:10px;font-weight:700;'
-           + 'letter-spacing:.5px;border-radius:4px;cursor:pointer;border:1px solid;margin-bottom:4px;'
-           + 'transition:all .2s;' + hitBg + hitAnim + '">'
-           + label + (isHit ? ' ●' : '')
-           + '</button>'
-           + '<div style="font-family:var(--mono);font-size:9px;color:var(--muted);line-height:1.4;">' + desc + '</div>'
-           + '</div>';
+    // ── Primary action button (only shown when level hit or near exit) ─
+    var primaryBtnHtml = '';
+    if (hitLevel) {
+      var hitLabel = hitLevel === 'SL'  ? '▼  EXIT TRADE — STOP LOSS'
+                   : hitLevel === 'TP1' ? '▲  TAKE PROFIT — TARGET 1  (50%)'
+                   : hitLevel === 'TP2' ? '▲  TAKE PROFIT — TARGET 2  (30%)'
+                   :                      '▲  CLOSE ALL — TARGET 3';
+      var hitBg  = hitLevel === 'SL' ? 'rgba(239,68,68,.15)' : 'rgba(0,201,141,.15)';
+      var hitBd  = hitLevel === 'SL' ? 'rgba(239,68,68,.5)'  : 'rgba(0,201,141,.5)';
+      var hitClr = hitLevel === 'SL' ? 'var(--red)' : 'var(--green)';
+      primaryBtnHtml = '<button id="mt5Btn_' + ticket + '_' + hitLevel + '"'
+        + ' onclick="mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'' + hitLevel + '\')"'
+        + ' style="width:100%;padding:11px 16px;font-family:var(--mono);font-size:11px;font-weight:700;'
+        + 'letter-spacing:.8px;border-radius:4px;cursor:pointer;border:1px solid ' + hitBd + ';'
+        + 'background:' + hitBg + ';color:' + hitClr + ';animation:wbPop .4s ease;margin-bottom:8px;">'
+        + hitLabel + ' ●'
+        + '</button>';
+    } else if (nextTarget === 'SL' && profit < 0) {
+      // Near stop loss — show exit button but styled quietly
+      primaryBtnHtml = '<button id="mt5Btn_' + ticket + '_SL"'
+        + ' onclick="mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'SL\')"'
+        + ' style="width:100%;padding:11px 16px;font-family:var(--mono);font-size:11px;font-weight:700;'
+        + 'letter-spacing:.8px;border-radius:4px;cursor:pointer;border:1px solid rgba(239,68,68,.35);'
+        + 'background:rgba(239,68,68,.08);color:var(--red);margin-bottom:8px;">'
+        + '▼  EXIT TRADE NOW'
+        + '</button>';
     }
-    var bigActionHtml = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-top:4px;">'
-      + _bigBtn('SL',  'STOP LOSS',  'Exit now. Cuts losses immediately. Use if trade is clearly wrong.',
-                'background:rgba(239,68,68,.12);color:var(--red);border-color:rgba(239,68,68,.4);')
-      + _bigBtn('TP1', 'TP1 — 50%', 'Close half the position. Lock in first profit. Let the rest run.',
-                'background:rgba(0,201,141,.1);color:var(--green);border-color:rgba(0,201,141,.35);')
-      + _bigBtn('TP2', 'TP2 — 30%', 'Close another 30%. Take more profit. 20% still open for TP3.',
-                'background:rgba(0,201,141,.08);color:var(--green);border-color:rgba(0,201,141,.25);')
-      + _bigBtn('TP3', 'TP3 — ALL', 'Close everything. Full target reached. Trade complete.',
-                'background:rgba(0,201,141,.06);color:var(--green);border-color:rgba(0,201,141,.2);')
-      + '</div>';
 
-    // ── Small summary buttons (in row) ────────────────────────────
-    function _smallBtn(level, label, baseStyle) {
+    // ── Manual controls (hidden by default) ──────────────────────
+    var manId = 'mt5Manual_' + ticket;
+    function _manBtn(level, label, st) {
       var isHit = hitLevel === level;
-      var hitBg = isHit ? 'background:var(--amber);color:#000;border-color:var(--amber);animation:wbPop .4s ease;' : baseStyle;
-      return '<button id="mt5BtnS_' + ticket + '_' + level + '"'
-           + ' onclick="event.stopPropagation();mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'' + level + '\')"'
-           + ' style="display:block;width:100%;margin-bottom:3px;padding:3px 6px;font-family:var(--mono);font-size:9px;'
-           + 'font-weight:700;letter-spacing:.4px;border-radius:3px;cursor:pointer;border:1px solid;transition:background .2s;' + hitBg + '">'
-           + label + (isHit ? ' ●' : '')
-           + '</button>';
+      var bg = isHit ? 'background:var(--amber);color:#000;border-color:var(--amber);' : st;
+      return '<button id="mt5Btn_' + ticket + '_' + level + '"'
+           + ' onclick="mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'' + level + '\')"'
+           + ' style="padding:6px 8px;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.4px;'
+           + 'border-radius:3px;cursor:pointer;border:1px solid;' + bg + '">'
+           + label + (isHit ? ' ●' : '') + '</button>';
     }
-    var smallActions = _smallBtn('SL',  'STOP LOSS', 'background:rgba(239,68,68,.12);color:var(--red);border-color:rgba(239,68,68,.4);')
-                     + _smallBtn('TP1', 'TP1 — 50%', 'background:rgba(0,201,141,.1);color:var(--green);border-color:rgba(0,201,141,.35);')
-                     + _smallBtn('TP2', 'TP2 — 30%', 'background:rgba(0,201,141,.08);color:var(--green);border-color:rgba(0,201,141,.25);')
-                     + _smallBtn('TP3', 'TP3 — ALL', 'background:rgba(0,201,141,.06);color:var(--green);border-color:rgba(0,201,141,.2);');
+    var manualHtml = '<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">'
+      + '<button onclick="var g=document.getElementById(\'' + manId + '\');g.style.display=g.style.display===\'none\'?\'block\':\'none\';"'
+      + ' style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.5px;border:none;background:none;cursor:pointer;padding:0;">▸ Manual controls</button>'
+      + '<div id="' + manId + '" style="display:none;margin-top:10px;">'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;">'
+      + _manBtn('SL',  '▼ Exit trade',     'background:rgba(239,68,68,.08);color:var(--red);border-color:rgba(239,68,68,.3);')
+      + _manBtn('TP1', '● Target 1 — 50%', 'background:rgba(0,201,141,.07);color:var(--green);border-color:rgba(0,201,141,.25);')
+      + _manBtn('TP2', '● Target 2 — 30%', 'background:rgba(0,201,141,.05);color:var(--green);border-color:rgba(0,201,141,.2);')
+      + _manBtn('TP3', '● Target 3 — all', 'background:rgba(0,201,141,.04);color:var(--green);border-color:rgba(0,201,141,.15);')
+      + '</div>'
+      + '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5;">Only use these if you have a specific reason. DotVerse will prompt you automatically when each level is hit.</div>'
+      + '</div></div>';
 
     var rowBg    = flashCol ? 'background:' + flashCol + ';' : '';
     var isOpen   = !!_mt5Expanded[ticket];
     var arrowChr = isOpen ? '▲' : '▼';
 
-    // ── Expand detail panel ───────────────────────────────────────
+    // ── Expand detail panel (approved beginner design) ────────────
+    // Status: ▲/▼/● dot + coloured text, no emoji
+    var dotCol   = statusCol;
+    var dotArrow = profit > 0 ? '▲' : profit < 0 ? '▼' : '●';
+    if (hitLevel) dotArrow = '●';
+
     var detailHtml = '<tr id="mt5Detail_' + ticket + '" style="display:' + (isOpen ? 'table-row' : 'none') + ';border-bottom:2px solid var(--border);">'
-      + '<td colspan="8" style="padding:0;">'
+      + '<td colspan="7" style="padding:0;">'
       + '<div style="padding:20px 22px;background:var(--bg3);border-top:1px solid var(--border);">'
 
-      // Status bar
-      + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">'
-      +   '<span style="font-size:18px;">' + statusEmoji + '</span>'
+      // Status header — dot + arrow branding, no emoji
+      + '<div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:20px;">'
+      +   '<div style="display:flex;flex-direction:column;align-items:center;gap:5px;padding-top:2px;flex-shrink:0;">'
+      +     '<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:' + dotCol + ';">' + dotArrow + '</span>'
+      +     '<div style="width:7px;height:7px;border-radius:50%;background:' + dotCol + ';animation:pulseDot 1.8s ease-in-out infinite;"></div>'
+      +   '</div>'
       +   '<div>'
-      +     '<div style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + statusCol + ';letter-spacing:1px;">' + statusText + '</div>'
-      +     '<div style="font-family:var(--mono);font-size:12px;color:var(--white2);margin-top:3px;">' + whatHappening + '</div>'
+      +     '<div style="font-family:var(--mono);font-size:12px;font-weight:700;color:' + statusCol + ';letter-spacing:.5px;margin-bottom:5px;">' + statusText + '</div>'
+      +     '<div style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.6;">' + whatHappening + '</div>'
       +   '</div>'
       + '</div>'
 
-      // Price ladder
-      + ladderHtml
+      // Simple 3-point progress track
+      + trackHtml
 
-      // What to do next box
-      + '<div style="background:rgba(255,176,0,.05);border:1px solid rgba(255,176,0,.2);border-radius:4px;padding:12px 16px;margin-bottom:18px;">'
-      +   '<div style="font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--amber);margin-bottom:6px;">WHAT TO DO NEXT</div>'
+      // What to do now box
+      + '<div style="background:rgba(255,176,0,.04);border:1px solid rgba(255,176,0,.15);border-radius:4px;padding:14px 16px;margin-bottom:14px;">'
+      +   '<div style="font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--amber);margin-bottom:8px;">WHAT TO DO NOW</div>'
       +   '<div style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.6;">' + whatNext + '</div>'
       + '</div>'
 
-      // Action buttons with descriptions
-      + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--muted2);margin-bottom:10px;">CLOSE ACTIONS — TAP WHEN LEVEL IS HIT</div>'
-      + bigActionHtml
+      // Primary action button — only appears when there is something to do
+      + primaryBtnHtml
+
+      // Manual controls — hidden by default
+      + manualHtml
 
       + '</div></td></tr>';
 
@@ -12946,8 +12963,7 @@ function _mt5RenderPositions(positions) {
       +   '<div style="font-size:9px;color:var(--muted);margin-top:2px;">SL -' + slDist + ' · TP +' + tpDist + '</div>'
       +   barHtml
       + '</td>'
-      + '<td style="padding:8px 12px;min-width:100px;" onclick="event.stopPropagation();">' + smallActions + '</td>'
-      + '<td style="padding:10px 12px;text-align:center;"><span id="mt5Arrow_' + ticket + '" style="font-family:var(--mono);font-size:9px;color:var(--muted);">' + arrowChr + '</span></td>'
+      + '<td style="padding:10px 14px;text-align:right;"><span id="mt5Arrow_' + ticket + '" style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.5px;">' + arrowChr + ' DETAILS</span></td>'
       + '</tr>';
 
     return summaryRow + detailHtml;
