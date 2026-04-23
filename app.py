@@ -5,7 +5,7 @@ Features: Multi-timeframe analysis, MTF trend, historical win rate,
           server-side watch scheduler with SMS + email alerts.
 """
 
-from flask import Flask, request, jsonify, send_from_directory, session, Response
+from flask import Flask, request, jsonify, send_from_directory, session, Response, redirect, url_for
 from flask_cors import CORS
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -90,7 +90,9 @@ def handle_404(e):
 #   APP_PASSWORD → the password you want to protect the app with
 app.secret_key   = os.environ.get("SECRET_KEY", "change-me-set-SECRET_KEY-in-railway")
 APP_PASSWORD     = os.environ.get("APP_PASSWORD", "").strip()
-ADMIN_EMAIL      = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+ADMIN_EMAIL           = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+GOOGLE_CLIENT_ID      = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET  = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
 def login_required(f):
     """Decorator — blocks API calls unless the user has logged in this session."""
@@ -2693,6 +2695,78 @@ def normalise_ticker(ticker, asset_type):
         }
         ticker = m.get(ticker, ticker)
     return ticker
+
+# ─── GOOGLE OAUTH ─────────────────────────────────────────────
+
+@app.route("/auth/google")
+def google_auth():
+    import secrets, urllib.parse
+    if not GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Google login not configured"}), 503
+    state = secrets.token_urlsafe(16)
+    session['oauth_state'] = state
+    params = urllib.parse.urlencode({
+        'client_id':     GOOGLE_CLIENT_ID,
+        'redirect_uri':  url_for('google_callback', _external=True),
+        'response_type': 'code',
+        'scope':         'openid email profile',
+        'state':         state,
+        'prompt':        'select_account',
+    })
+    return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
+
+@app.route("/auth/google/callback")
+def google_callback():
+    import urllib.parse
+    code  = request.args.get('code')
+    state = request.args.get('state')
+    if not code or state != session.get('oauth_state'):
+        return redirect('/?auth_error=state_mismatch')
+    # Exchange code for access token
+    token_resp = requests.post("https://oauth2.googleapis.com/token", data={
+        'code':          code,
+        'client_id':     GOOGLE_CLIENT_ID,
+        'client_secret': GOOGLE_CLIENT_SECRET,
+        'redirect_uri':  url_for('google_callback', _external=True),
+        'grant_type':    'authorization_code',
+    })
+    token_data = token_resp.json()
+    access_token = token_data.get('access_token')
+    if not access_token:
+        return redirect('/?auth_error=no_token')
+    # Get user info from Google
+    userinfo = requests.get(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        headers={'Authorization': f'Bearer {access_token}'}
+    ).json()
+    email = userinfo.get('email', '').lower()
+    name  = userinfo.get('name', '')
+    if not email:
+        return redirect('/?auth_error=no_email')
+    # Find or create user
+    if _DBSession:
+        db = _DBSession()
+        try:
+            user = db.query(User).filter_by(email=email).first()
+            if not user:
+                role = "admin" if (ADMIN_EMAIL and email == ADMIN_EMAIL) else "user"
+                tier = "elite" if role == "admin" else "free"
+                user = User(email=email, name=name, role=role, tier=tier)
+                db.add(user)
+                db.commit()
+            elif ADMIN_EMAIL and email == ADMIN_EMAIL and user.role != "admin":
+                user.role = "admin"
+                user.tier = "elite"
+                db.commit()
+            session['user_id']   = user.id
+            session['user_role'] = user.role
+            session['user_tier'] = user.tier
+            session.permanent    = True
+        finally:
+            db.close()
+    else:
+        session['authenticated'] = True
+    return redirect('/')
 
 # ─── ROUTES ──────────────────────────────────────────────────
 @app.route("/pricing")
