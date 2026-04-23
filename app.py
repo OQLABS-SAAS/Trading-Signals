@@ -2615,9 +2615,10 @@ def run_watch_job():
                                        w.get("alert_channels", ["sms"]))
                 if delivered:
                     # Confirmed sent — remove watch (only disappears after delivery)
+                    _uid = w.get("user_id", "legacy")
                     with watch_lock:
                         watch_registry.pop(key, None)
-                    _remove_watch_from_db(ticker, timeframe)
+                    _remove_watch_from_db(ticker, timeframe, _uid)
                     print(f"[Watch] Delivered + removed: {key}")
                 else:
                     # Delivery failed — keep last_signal unchanged so next tick retries
@@ -3688,8 +3689,9 @@ def add_watch():
         if timeframe not in TIMEFRAME_CONFIG:
             timeframe = "1d"
 
-        ticker = normalise_ticker(ticker, asset_type)
-        key    = f"{ticker}_{timeframe}"
+        ticker  = normalise_ticker(ticker, asset_type)
+        user_id = str(session.get('user_id', 'anon'))
+        key     = f"{user_id}_{ticker}_{timeframe}"
 
         ch_labels = {"sms": "SMS", "whatsapp": "WhatsApp", "telegram": "Telegram"}
         ch_str    = " + ".join(ch_labels.get(c, c) for c in alert_channels)
@@ -3701,6 +3703,7 @@ def add_watch():
                 _is_update = True
             else:
                 watch_registry[key] = {
+                    "user_id":        user_id,
                     "ticker":         ticker,
                     "asset_type":     asset_type,
                     "timeframe":      timeframe,
@@ -3712,7 +3715,7 @@ def add_watch():
                     "added_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
                 }
 
-        _save_watch_to_db(ticker, asset_type, timeframe, alert_channels)
+        _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id)
 
         if _is_update:
             return jsonify({"status": "updated", "key": key,
@@ -3730,14 +3733,15 @@ def remove_watch():
         body      = request.json or {}
         ticker    = body.get("ticker", "").upper().strip()
         timeframe = body.get("timeframe", "1d").lower()
-        ticker    = normalise_ticker(ticker, body.get("asset_type", "stock"))
-        key       = f"{ticker}_{timeframe}"
+        ticker  = normalise_ticker(ticker, body.get("asset_type", "stock"))
+        user_id = str(session.get('user_id', 'anon'))
+        key     = f"{user_id}_{ticker}_{timeframe}"
 
         with watch_lock:
             removed = watch_registry.pop(key, None)
 
         if removed:
-            _remove_watch_from_db(ticker, timeframe)
+            _remove_watch_from_db(ticker, timeframe, user_id)
             return jsonify({"status": "removed", "key": key})
         return jsonify({"status": "not_found", "key": key}), 404
     except Exception as e:
@@ -3746,7 +3750,8 @@ def remove_watch():
 @app.route("/api/watches", methods=["GET"])
 @login_required
 def list_watches():
-    """List all currently watched tickers with their status."""
+    """List current user's watched tickers with their status."""
+    user_id = str(session.get('user_id', 'anon'))
     with watch_lock:
         watches = [
             {
@@ -3764,6 +3769,7 @@ def list_watches():
                 "live_commentary": v.get("live_commentary"),  # Feature D
             }
             for k, v in watch_registry.items()
+            if v.get("user_id") == user_id
         ]
     return jsonify({"watches": watches, "count": len(watches)})
 
@@ -4819,6 +4825,7 @@ class Watch(_Base):
     """Persistent alert watches — survive server restarts, removed only after confirmed delivery."""
     __tablename__ = "watches"
     id             = Column(Integer,     primary_key=True, autoincrement=True)
+    user_id        = Column(String(64),  nullable=False, default="legacy")
     ticker         = Column(String(32),  nullable=False)
     asset_type     = Column(String(16),  nullable=False, default="stock")
     timeframe      = Column(String(8),   nullable=False)
@@ -4827,16 +4834,16 @@ class Watch(_Base):
 
 # ─── WATCH DB HELPERS ─────────────────────────────────────────
 
-def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels):
+def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="legacy"):
     """Upsert a watch into the database."""
     if not _DBSession: return
     db = _DBSession()
     try:
-        existing = db.query(Watch).filter_by(ticker=ticker, timeframe=timeframe).first()
+        existing = db.query(Watch).filter_by(user_id=user_id, ticker=ticker, timeframe=timeframe).first()
         if existing:
             existing.alert_channels = json.dumps(alert_channels)
         else:
-            db.add(Watch(ticker=ticker, asset_type=asset_type, timeframe=timeframe,
+            db.add(Watch(user_id=user_id, ticker=ticker, asset_type=asset_type, timeframe=timeframe,
                          alert_channels=json.dumps(alert_channels)))
         db.commit()
     except Exception as _e:
@@ -4845,12 +4852,12 @@ def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels):
     finally:
         db.close()
 
-def _remove_watch_from_db(ticker, timeframe):
+def _remove_watch_from_db(ticker, timeframe, user_id="legacy"):
     """Delete a watch from the database."""
     if not _DBSession: return
     db = _DBSession()
     try:
-        db.query(Watch).filter_by(ticker=ticker, timeframe=timeframe).delete()
+        db.query(Watch).filter_by(user_id=user_id, ticker=ticker, timeframe=timeframe).delete()
         db.commit()
     except Exception as _e:
         db.rollback()
@@ -4867,13 +4874,15 @@ def _load_watches_from_db():
         loaded = 0
         with watch_lock:
             for r in rows:
-                key = f"{r.ticker}_{r.timeframe}"
+                uid = getattr(r, 'user_id', 'legacy') or 'legacy'
+                key = f"{uid}_{r.ticker}_{r.timeframe}"
                 if key not in watch_registry:
                     try:
                         channels = json.loads(r.alert_channels)
                     except Exception:
                         channels = [r.alert_channels]
                     watch_registry[key] = {
+                        "user_id":        uid,
                         "ticker":         r.ticker,
                         "asset_type":     r.asset_type,
                         "timeframe":      r.timeframe,
@@ -4899,6 +4908,13 @@ def _init_db():
             print("[db] Tables created / verified")
         except Exception as _e:
             print(f"[db] create_all failed: {_e}")
+        # Migration: add user_id column if it doesn't exist yet
+        try:
+            with _db_engine.connect() as _conn:
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'legacy'"))
+                _conn.commit()
+        except Exception as _e:
+            print(f"[db] watches migration: {_e}")
     _load_watches_from_db()
 
 with app.app_context():
