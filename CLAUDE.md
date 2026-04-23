@@ -2,270 +2,17 @@
 
 ---
 
-## THE SIX STOP GATES
-### Answer every gate before touching anything. One NO = full stop.
-
-| Gate | Question | If NO |
-|---|---|---|
-| 1 | Was I explicitly asked to do this? | Stop. Report. Ask. |
-| 2 | Can I state the symptom, root cause, and mechanism? | Investigate first. No fix yet. |
-| 3 | Have I written a valid plan and got explicit confirmation? | Write plan. Wait. |
-| 4 | Am I certain or assuming? | Label it. Tell user. Ask to proceed. |
-| 5 | Have I stated what could go wrong? | State risks now. |
-| 6 | Is this verified at runtime or only code reading? | State Level 4. Do not claim verified. |
-
----
-
-## WORKING AGREEMENT
-
-**Before every session:** User says "Protocol active." Claude reads the six gates before responding to anything.
-
-**Gate check — VISIBLE IN EVERY RESPONSE before any tool call:**
-Before every single action, write this line in the response:
-Gate 1 — asked? Gate 2 — root cause known? Gate 3 — plan confirmed? Gate 4 — certain or assuming? Gate 5 — risks stated? Gate 6 — verification level?
-If this line is missing before a tool call, the gate was skipped. This makes thinking visible and auditable without the user needing to read code.
-
-**Before every fix — Claude must state all five or the gate does not open:**
-1. The problem
-2. The root cause
-3. The exact change and why
-4. What could break
-5. How it will be verified
-
-**Task discipline:** One task at a time. Fully closed before the next opens.
-
-**Runtime verification protocol — MANDATORY FOR EVERY FIX — THREE PATHS:**
-
-Before touching any code, identify what type of fix it is. Follow the correct path.
-
----
-
-**PATH A — Backend fix (Python, Flask, app.py)**
-
-Install all dependencies first: `pip install -r requirements.txt --break-system-packages --quiet`
-
-Write a small Python test in the bash sandbox that imports the real functions directly from app.py. Never simulate or rewrite the logic:
-```python
-import sys, os
-sys.path.insert(0, '/path/to/trading-signals-saas')
-os.environ.setdefault('SECRET_KEY', 'test')
-os.environ.setdefault('DATABASE_URL', '')
-os.environ.setdefault('REDIS_URL', '')
-from app import [the functions relevant to the bug]
-```
-Reproduce the exact bug first using the exact asset type, ticker, timeframe, and input values the user described. Use the boundary value that triggers the bug — not an obvious value that always passes. The output must show the failure. If it does not fail the bug is not reproduced — stop, do not proceed, find out why first.
-
-Apply the fix in the same script and run it again. The output must change from failing to passing:
-```
-BEFORE FIX: [output showing the bug]   match=False
-AFTER FIX:  [output showing it fixed]  match=True
-```
-If both show match=True the bug was never reproduced. Start over.
-
-After the test passes, end with:
-```
-SANDBOX VERIFIED: [functions tested, exact inputs, scenarios, boundary values]
-NOT VERIFIED:     [mocked services — live API, Redis, database, Railway env]
-RESIDUAL RISK:    [what could still fail in production and why]
-```
-
----
-
-**PATH B — Frontend fix (JavaScript, CSS, HTML)**
-
-Sandbox verification is not possible for frontend fixes.
-
-Before touching any code: state every element ID and function name being changed. Grep to confirm each one exists in both the HTML and the JS. Confirm no other component shares the same class or ID. Confirm no CSS change affects adjacent components.
-
-End with:
-```
-SANDBOX VERIFIED: not possible — frontend fix
-CODE REVIEW DONE: [IDs checked, JS references checked, CSS side effects checked]
-RESIDUAL RISK:    [what could break — adjacent components, shared classes, layout]
-```
-
----
-
-**PATH C — Configuration fix (Procfile, requirements.txt, Railway env vars)**
-
-Sandbox verification is not possible for configuration fixes.
-
-Before touching any config: state exactly which line is changing, what the current value is, what the new value is, and what breaks in production if the change is wrong. If changing requirements.txt confirm no package conflicts. If changing Railway env vars confirm the variable name matches exactly what the code reads.
-
-After deployment confirm the Railway service started cleanly and is showing healthy status before doing anything else.
-
-End with:
-```
-SANDBOX VERIFIED: not possible — configuration fix
-CONFIG REVIEW DONE: [exact line changed, old value, new value, conflict check]
-RESIDUAL RISK:    [what fails if wrong, how quickly visible after deploy]
-```
-
----
-
-**All three paths then follow these steps without exception:**
-
-Ask the user before committing. Ask again before pushing. Two separate gates. State what was verified and the residual risk, then ask: "Shall I commit?" Wait for yes. Then ask: "Shall I push?" Wait for yes. Never do either without explicit confirmation.
-
-After deployment, give the user plain browser steps to confirm the fix. No logs. No terminal. No code. Only what a non-technical person can do on screen. Only after the user confirms in the browser, mark the fix RESOLVED in CLAUDE.md with today's date.
-
----
-
-**Strict definitions — these never change:**
-
-SANDBOX VERIFIED — Python test using real app functions showed fail then pass with exact scenario and boundary values.
-CODE REVIEW DONE — frontend or config change traced through every reference, no sandbox test possible.
-FULLY VERIFIED — either of the above plus user confirmed in live browser.
-RESOLVED — fully verified only, never before.
-RUNTIME VERIFIED — never means the code looks right. That is Level 4 code reading. Always state which level was reached.
-
----
-
-**What can never be sandbox verified — state this on every fix touching these:**
-
-Live API responses, Redis cross-process caching, database queries, and Railway networking cannot be replicated locally. For any fix touching these write: "This path cannot be sandbox verified. Logic tested only. Residual risk: [specific risk]. Browser test that catches it: [exact step]."
-
----
-
-**Mid-task message rule — NON-NEGOTIABLE:**
-
-When the user sends a message while work is in progress, stop all tool calls immediately, read the message fully, respond to it, then ask whether to continue. Never keep executing after a user message arrives.
-
-**You hold the gate:** If any element is missing, the gate does not open.
-
-**The Clarifying Question Rule — NON-NEGOTIABLE:**
-A plan that contains any unanswered behaviour question is NOT a confirmed plan. Gate 3 is not open.
-Before writing any plan, identify every behaviour question — *"when X happens, should it do A or B?"* — and ask them explicitly, one at a time, before proposing the plan. User saying "you already stated the plan" or "proceed" without answering a specific behaviour question is NOT confirmation of that behaviour. Stop and ask the specific question. Speed is not a virtue here. One wrong assumption costs more time than the question would have.
-
----
-
-## MANDATORY MINDSET
-- Think before acting — not act then explain
-- Break complex tasks into substeps
-- Show plan before executing
-- Anticipate edge cases and dependencies
-- Document as you go
-- Provide status updates
-- Verify against the original requirement
-
-**Approach: Thorough → Systematic → Planned → Executed → Verified**
-
----
-
-## CORE RULES — NON-NEGOTIABLE
-
-### UI Integrity — NON-NEGOTIABLE
-- **The UI must never be broken, damaged, or visually degraded by any change.**
-- Before every commit: grep for all new/changed element IDs and confirm each one exists in BOTH the HTML and the JS that writes to it.
-- Before every commit: grep for any IDs removed from HTML and confirm no JS still references them.
-- CSS changes must be checked for unintended side-effects on adjacent components.
-- If a change touches shared CSS classes, explicitly confirm all components using that class still render correctly.
-- "I only changed X" is never sufficient — always verify downstream.
-
-### Bug Reports
-- Do NOT open files immediately
-- Do NOT start grepping
-- First: reason out loud about the full user flow affected
-- Then: identify what you need to verify before forming a conclusion
-- Then: look at code to verify, not to fix
-
-### Scope Discipline
-- State precisely which files will be changed and why
-- State precisely what will NOT be changed
-- If a new issue is discovered mid-task: STOP — report it, ask whether to include it
-- Never expand scope mid-task without explicit user approval
-- One confirmation = one scope
-
-### Feature Preservation — NON-NEGOTIABLE
-- **Never remove any existing feature unless the user explicitly asks for it by name.**
-- Before every commit, run a mental checklist of all known features and verify none have been accidentally removed.
-- Known DotVerse features to check before every commit:
-  - Auto-refresh (OFF / 15s / 30s / 1m / 5m / 15m buttons + spin indicator)
-  - Signals tab: analyze, chart, indicators, MTF, RSI divergence trendlines
-  - Scanner tab: scan all, scanner table, click-to-analyze
-  - Backtest tab: run backtest, Pine Script (ATR research script)
-  - Simulation tab: scenario cards, trade plan
-  - Calculator: account, my trade, leverage, entry/SL/TP fields, RR bar, guidance coach
-  - Journey panel: 5-step What To Do Next
-  - Portfolio: positions table, VaR, stress test, correlation heatmap, optimisation
-  - Watch/alert: toggleWatch, DotVerse alert
-  - Fear & Greed, Latest News, Scenarios sidebar panels
-- If a change touches a section of the page near any of the above, explicitly confirm the feature still renders after the edit.
-- "I only changed X" is not sufficient — side-effects in shared CSS, JS scope, or HTML structure can silently break adjacent features.
-
-### Understanding Before Acting
-- Never assume intent — restate the requirement in your own words before starting
-- If the instruction is ambiguous, ask one clarifying question before proceeding
-- Do not infer scope from similar past tasks — treat every task as new
-
-### Verification Hierarchy
-"Verified" has a strict definition. In descending order of reliability:
-1. **Runtime proof** — observed behaviour in a running browser/server
-2. **Console/log evidence** — instrumentation confirming value or code path at execution time
-3. **Execution trace** — manually stepping through every branch with real data values
-4. **Code reading only** — weakest form; must be labelled "unverified assumption" when used
-
-Static code analysis (grep, read, eyeball) is Level 4. Never sufficient alone for a bug fix. Always state which level of verification was used.
-
-### Confidence Labelling
-Every conclusion must carry an explicit label:
-- **CONFIRMED** — verified at runtime or with instrumentation
-- **LIKELY** — full execution trace completed, no contradicting evidence
-- **HYPOTHESIS** — reasoning from code reading, not yet traced
-- **UNCERTAIN** — incomplete information, state what is missing
-
-Never present a hypothesis with the same tone as a confirmed fact.
-
-### Completion Criteria
-A task is only "done" when:
-1. The fix is in the file (not just stated)
-2. A verification method was stated and executed
-3. The original requirement was re-read and matched
-4. The user was told which verification level was reached
-
-### Session Resume Rule
-- Treat any context summary as a starting point, not ground truth
-- Re-read relevant source files before forming any opinion
-- Never state a conclusion about code behaviour based on summary alone
-- If summary says something was fixed, verify it is actually in the file
-
-### The "I Already Know This" Rule
-Prior context, similar bugs, or pattern recognition never substitutes for tracing the current problem fresh. Every bug gets a full trace from scratch. Assumptions built on memory are the most common source of wrong fixes.
-
-### Investigation Gate
-For any task requiring more than 3 tool calls to investigate:
-1. State the investigation plan upfront
-2. List what questions need answering and how
-3. Get user go-ahead before starting
-4. Report findings before proposing fixes
-
-Do not silently investigate then present conclusions and fixes together as if the investigation was obvious.
-
----
-
-## QUICK REFERENCE — KEY RULES BY SITUATION
-
-| Situation | Rule |
-|---|---|
-| Bug reported | Don't open files. Reason out loud first. |
-| Session resumed | Re-read source files. Summary is not ground truth. |
-| Ambiguous instruction | Ask one clarifying question. Do not infer. |
-| Investigation needed | State plan. Get go-ahead. Report findings first. |
-| Fix fails | Do not silently try another fix. Stop and report. |
-| Architectural change | State all downstream effects before touching anything. |
-| Long task | Break into substeps. Confirm scope at each stage. |
-| Code copying | State what the code does before pasting it. Verify it fits. |
-| Risk dismissal | Never skip risk statement. "Low risk" must be argued, not assumed. |
-| Fix proposal | Five elements required: problem, root cause, change, risk, verification. |
-| Before every commit | Run feature checklist. Confirm nothing was accidentally removed. |
-| Feature removal | Only if user explicitly names the feature. Never as a side-effect. |
-
----
-
-## SELF-AUDIT RULE
-After writing any fix, re-read the original user requirement and ask:
-**"Have I verified this works at runtime, or only that the code looks correct?"**
-Static code analysis is not verification.
+# [PROJECT CONTEXT]
+
+## Project Overview
+- **App:** DotVerse — trading signals SaaS
+- **Backend:** Flask / Python on Railway
+- **Frontend:** Single-file `static/index.html` (~12,000+ lines), vanilla JS + inline CSS
+- **Database:** PostgreSQL (metro.proxy.rlwy.net:46116, sslmode=disable)
+- **Cache / Queue:** Redis (metro.proxy.rlwy.net:20577)
+- **Worker:** RQ Worker — second Railway service, same codebase, `rq worker` start command
+- **Deploy:** `git push origin main` → Railway auto-deploys web service
+- **Quantverse PWA:** Netlify — drag `quantverse-pwa/` folder into Netlify deploy section
 
 ---
 
@@ -887,3 +634,352 @@ Claude must never wait for the user to ask "how sure are you?" before reassessin
 - After committing: state the commit hash and one line summary. Stop. Do not add deploy instructions, feature checklists, or next steps unless asked.
 
 **Next session:** No pending bugs. Run Six Stop Gates before starting any new work.
+
+---
+
+### SESSION HANDOFF NOTES — 2026-04-23 (Protocol hybrid refactor)
+
+**CLAUDE.md refactored into hybrid system — not a code change, protocol only.**
+
+Structure: [PROJECT CONTEXT] → [KARPATHY MINDSET] → [EXECUTION & SAFETY GATES]
+
+Changes from prior version:
+- MANDATORY MINDSET section removed and replaced by [KARPATHY MINDSET] (4 Karpathy principles verbatim)
+- Gate 3 enhanced: every plan must now include Success Criteria + Tradeoff Assessment before user can confirm
+- Quick Reference table: two new rows added (After task complete / Simplicity check)
+- Self-Audit Rule: second paragraph added (simplicity check)
+- Project Overview section added at top of [PROJECT CONTEXT]
+- All existing rules, paths, bugs, and handoff notes preserved verbatim
+
+---
+
+# [KARPATHY MINDSET]
+
+Behavioral guidelines to reduce common LLM coding mistakes.
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+---
+
+# [EXECUTION & SAFETY GATES]
+
+---
+
+## THE SIX STOP GATES
+### Answer every gate before touching anything. One NO = full stop.
+
+| Gate | Question | If NO |
+|---|---|---|
+| 1 | Was I explicitly asked to do this? | Stop. Report. Ask. |
+| 2 | Can I state the symptom, root cause, and mechanism? | Investigate first. No fix yet. |
+| 3 | Have I written a valid plan and got explicit confirmation? | Write plan. Wait. |
+| 4 | Am I certain or assuming? | Label it. Tell user. Ask to proceed. |
+| 5 | Have I stated what could go wrong? | State risks now. |
+| 6 | Is this verified at runtime or only code reading? | State Level 4. Do not claim verified. |
+
+---
+
+## WORKING AGREEMENT
+
+**Before every session:** User says "Protocol active." Claude reads the six gates before responding to anything.
+
+**Gate check — VISIBLE IN EVERY RESPONSE before any tool call:**
+Before every single action, write this line in the response:
+Gate 1 — asked? Gate 2 — root cause known? Gate 3 — plan confirmed? Gate 4 — certain or assuming? Gate 5 — risks stated? Gate 6 — verification level?
+If this line is missing before a tool call, the gate was skipped. This makes thinking visible and auditable without the user needing to read code.
+
+**Gate 3 — Plan Confirmation — requires ALL FOUR before the gate opens:**
+1. **The change** — exactly what will be modified and why
+2. **Success Criteria** — what does DONE look like? How will it be verified?
+3. **Tradeoff Assessment** — why is this the simplest path? What alternatives were considered and rejected?
+4. **Risk Statement** — what could break, and how will that be caught?
+
+A plan missing any of these four elements is not a confirmed plan. Gate 3 is not open.
+
+**Before every fix — Claude must state all five or the gate does not open:**
+1. The problem
+2. The root cause
+3. The exact change and why
+4. What could break
+5. How it will be verified
+
+**Task discipline:** One task at a time. Fully closed before the next opens.
+
+**Runtime verification protocol — MANDATORY FOR EVERY FIX — THREE PATHS:**
+
+Before touching any code, identify what type of fix it is. Follow the correct path.
+
+---
+
+**PATH A — Backend fix (Python, Flask, app.py)**
+
+Install all dependencies first: `pip install -r requirements.txt --break-system-packages --quiet`
+
+Write a small Python test in the bash sandbox that imports the real functions directly from app.py. Never simulate or rewrite the logic:
+```python
+import sys, os
+sys.path.insert(0, '/path/to/trading-signals-saas')
+os.environ.setdefault('SECRET_KEY', 'test')
+os.environ.setdefault('DATABASE_URL', '')
+os.environ.setdefault('REDIS_URL', '')
+from app import [the functions relevant to the bug]
+```
+Reproduce the exact bug first using the exact asset type, ticker, timeframe, and input values the user described. Use the boundary value that triggers the bug — not an obvious value that always passes. The output must show the failure. If it does not fail the bug is not reproduced — stop, do not proceed, find out why first.
+
+Apply the fix in the same script and run it again. The output must change from failing to passing:
+```
+BEFORE FIX: [output showing the bug]   match=False
+AFTER FIX:  [output showing it fixed]  match=True
+```
+If both show match=True the bug was never reproduced. Start over.
+
+After the test passes, end with:
+```
+SANDBOX VERIFIED: [functions tested, exact inputs, scenarios, boundary values]
+NOT VERIFIED:     [mocked services — live API, Redis, database, Railway env]
+RESIDUAL RISK:    [what could still fail in production and why]
+```
+
+---
+
+**PATH B — Frontend fix (JavaScript, CSS, HTML)**
+
+Sandbox verification is not possible for frontend fixes.
+
+Before touching any code: state every element ID and function name being changed. Grep to confirm each one exists in both the HTML and the JS. Confirm no other component shares the same class or ID. Confirm no CSS change affects adjacent components.
+
+End with:
+```
+SANDBOX VERIFIED: not possible — frontend fix
+CODE REVIEW DONE: [IDs checked, JS references checked, CSS side effects checked]
+RESIDUAL RISK:    [what could break — adjacent components, shared classes, layout]
+```
+
+---
+
+**PATH C — Configuration fix (Procfile, requirements.txt, Railway env vars)**
+
+Sandbox verification is not possible for configuration fixes.
+
+Before touching any config: state exactly which line is changing, what the current value is, what the new value is, and what breaks in production if the change is wrong. If changing requirements.txt confirm no package conflicts. If changing Railway env vars confirm the variable name matches exactly what the code reads.
+
+After deployment confirm the Railway service started cleanly and is showing healthy status before doing anything else.
+
+End with:
+```
+SANDBOX VERIFIED: not possible — configuration fix
+CONFIG REVIEW DONE: [exact line changed, old value, new value, conflict check]
+RESIDUAL RISK:    [what fails if wrong, how quickly visible after deploy]
+```
+
+---
+
+**All three paths then follow these steps without exception:**
+
+Ask the user before committing. Ask again before pushing. Two separate gates. State what was verified and the residual risk, then ask: "Shall I commit?" Wait for yes. Then ask: "Shall I push?" Wait for yes. Never do either without explicit confirmation.
+
+After deployment, give the user plain browser steps to confirm the fix. No logs. No terminal. No code. Only what a non-technical person can do on screen. Only after the user confirms in the browser, mark the fix RESOLVED in CLAUDE.md with today's date.
+
+---
+
+**Strict definitions — these never change:**
+
+SANDBOX VERIFIED — Python test using real app functions showed fail then pass with exact scenario and boundary values.
+CODE REVIEW DONE — frontend or config change traced through every reference, no sandbox test possible.
+FULLY VERIFIED — either of the above plus user confirmed in live browser.
+RESOLVED — fully verified only, never before.
+RUNTIME VERIFIED — never means the code looks right. That is Level 4 code reading. Always state which level was reached.
+
+---
+
+**What can never be sandbox verified — state this on every fix touching these:**
+
+Live API responses, Redis cross-process caching, database queries, and Railway networking cannot be replicated locally. For any fix touching these write: "This path cannot be sandbox verified. Logic tested only. Residual risk: [specific risk]. Browser test that catches it: [exact step]."
+
+---
+
+**Mid-task message rule — NON-NEGOTIABLE:**
+
+When the user sends a message while work is in progress, stop all tool calls immediately, read the message fully, respond to it, then ask whether to continue. Never keep executing after a user message arrives.
+
+**You hold the gate:** If any element is missing, the gate does not open.
+
+**The Clarifying Question Rule — NON-NEGOTIABLE:**
+A plan that contains any unanswered behaviour question is NOT a confirmed plan. Gate 3 is not open.
+Before writing any plan, identify every behaviour question — *"when X happens, should it do A or B?"* — and ask them explicitly, one at a time, before proposing the plan. User saying "you already stated the plan" or "proceed" without answering a specific behaviour question is NOT confirmation of that behaviour. Stop and ask the specific question. Speed is not a virtue here. One wrong assumption costs more time than the question would have.
+
+---
+
+## CORE RULES — NON-NEGOTIABLE
+
+### UI Integrity — NON-NEGOTIABLE
+- **The UI must never be broken, damaged, or visually degraded by any change.**
+- Before every commit: grep for all new/changed element IDs and confirm each one exists in BOTH the HTML and the JS that writes to it.
+- Before every commit: grep for any IDs removed from HTML and confirm no JS still references them.
+- CSS changes must be checked for unintended side-effects on adjacent components.
+- If a change touches shared CSS classes, explicitly confirm all components using that class still render correctly.
+- "I only changed X" is never sufficient — always verify downstream.
+
+### Bug Reports
+- Do NOT open files immediately
+- Do NOT start grepping
+- First: reason out loud about the full user flow affected
+- Then: identify what you need to verify before forming a conclusion
+- Then: look at code to verify, not to fix
+
+### Scope Discipline
+- State precisely which files will be changed and why
+- State precisely what will NOT be changed
+- If a new issue is discovered mid-task: STOP — report it, ask whether to include it
+- Never expand scope mid-task without explicit user approval
+- One confirmation = one scope
+
+### Feature Preservation — NON-NEGOTIABLE
+- **Never remove any existing feature unless the user explicitly asks for it by name.**
+- Before every commit, run a mental checklist of all known features and verify none have been accidentally removed.
+- Known DotVerse features to check before every commit:
+  - Auto-refresh (OFF / 15s / 30s / 1m / 5m / 15m buttons + spin indicator)
+  - Signals tab: analyze, chart, indicators, MTF, RSI divergence trendlines
+  - Scanner tab: scan all, scanner table, click-to-analyze
+  - Backtest tab: run backtest, Pine Script (ATR research script)
+  - Simulation tab: scenario cards, trade plan
+  - Calculator: account, my trade, leverage, entry/SL/TP fields, RR bar, guidance coach
+  - Journey panel: 5-step What To Do Next
+  - Portfolio: positions table, VaR, stress test, correlation heatmap, optimisation
+  - Watch/alert: toggleWatch, DotVerse alert
+  - Fear & Greed, Latest News, Scenarios sidebar panels
+- If a change touches a section of the page near any of the above, explicitly confirm the feature still renders after the edit.
+- "I only changed X" is not sufficient — side-effects in shared CSS, JS scope, or HTML structure can silently break adjacent features.
+
+### Understanding Before Acting
+- Never assume intent — restate the requirement in your own words before starting
+- If the instruction is ambiguous, ask one clarifying question before proceeding
+- Do not infer scope from similar past tasks — treat every task as new
+
+### Verification Hierarchy
+"Verified" has a strict definition. In descending order of reliability:
+1. **Runtime proof** — observed behaviour in a running browser/server
+2. **Console/log evidence** — instrumentation confirming value or code path at execution time
+3. **Execution trace** — manually stepping through every branch with real data values
+4. **Code reading only** — weakest form; must be labelled "unverified assumption" when used
+
+Static code analysis (grep, read, eyeball) is Level 4. Never sufficient alone for a bug fix. Always state which level of verification was used.
+
+### Confidence Labelling
+Every conclusion must carry an explicit label:
+- **CONFIRMED** — verified at runtime or with instrumentation
+- **LIKELY** — full execution trace completed, no contradicting evidence
+- **HYPOTHESIS** — reasoning from code reading, not yet traced
+- **UNCERTAIN** — incomplete information, state what is missing
+
+Never present a hypothesis with the same tone as a confirmed fact.
+
+### Completion Criteria
+A task is only "done" when:
+1. The fix is in the file (not just stated)
+2. A verification method was stated and executed
+3. The original requirement was re-read and matched
+4. The user was told which verification level was reached
+
+### Session Resume Rule
+- Treat any context summary as a starting point, not ground truth
+- Re-read relevant source files before forming any opinion
+- Never state a conclusion about code behaviour based on summary alone
+- If summary says something was fixed, verify it is actually in the file
+
+### The "I Already Know This" Rule
+Prior context, similar bugs, or pattern recognition never substitutes for tracing the current problem fresh. Every bug gets a full trace from scratch. Assumptions built on memory are the most common source of wrong fixes.
+
+### Investigation Gate
+For any task requiring more than 3 tool calls to investigate:
+1. State the investigation plan upfront
+2. List what questions need answering and how
+3. Get user go-ahead before starting
+4. Report findings before proposing fixes
+
+Do not silently investigate then present conclusions and fixes together as if the investigation was obvious.
+
+---
+
+## QUICK REFERENCE — KEY RULES BY SITUATION
+
+| Situation | Rule |
+|---|---|
+| Bug reported | Don't open files. Reason out loud first. |
+| Session resumed | Re-read source files. Summary is not ground truth. |
+| Ambiguous instruction | Ask one clarifying question. Do not infer. |
+| Investigation needed | State plan. Get go-ahead. Report findings first. |
+| Fix fails | Do not silently try another fix. Stop and report. |
+| Architectural change | State all downstream effects before touching anything. |
+| Long task | Break into substeps. Confirm scope at each stage. |
+| Code copying | State what the code does before pasting it. Verify it fits. |
+| Risk dismissal | Never skip risk statement. "Low risk" must be argued, not assumed. |
+| Fix proposal | Five elements required: problem, root cause, change, risk, verification. |
+| Before every commit | Run feature checklist. Confirm nothing was accidentally removed. |
+| Feature removal | Only if user explicitly names the feature. Never as a side-effect. |
+| After task complete | State what was done. Stop. No unsolicited commentary. |
+| Simplicity check | Could 200 lines be 50? Could a new function reuse an existing one? |
+
+---
+
+## SELF-AUDIT RULE
+After writing any fix, re-read the original user requirement and ask:
+**"Have I verified this works at runtime, or only that the code looks correct?"**
+Static code analysis is not verification.
+
+Also ask: **"Is this the simplest correct solution? Could it be meaningfully shorter without losing correctness?"** Complexity that cannot be justified is a bug.
