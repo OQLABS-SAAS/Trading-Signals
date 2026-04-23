@@ -3128,15 +3128,17 @@ def mt5_get_pending():
         result = []
         for o in orders:
             result.append({
-                "id":         o.id,
-                "symbol":     o.symbol,
-                "order_type": o.order_type,
-                "volume":     o.volume,
-                "price":      o.price,
-                "sl":         o.sl,
-                "tp":         o.tp,
-                "tp2":        o.tp2,
-                "tp3":        o.tp3,
+                "id":           o.id,
+                "symbol":       o.symbol,
+                "order_type":   o.order_type,
+                "volume":       o.volume,
+                "price":        o.price,
+                "sl":           o.sl,
+                "tp":           o.tp,
+                "tp2":          o.tp2,
+                "tp3":          o.tp3,
+                "action":       o.action or "open",
+                "close_ticket": o.close_ticket,
             })
             o.status = "executing"
         db.commit()
@@ -3225,6 +3227,13 @@ def mt5_level_alert():
         send_telegram(tg_msg)
     except Exception:
         pass
+    # Store hit in mt5_state so frontend can flash the action button
+    with mt5_state_lock:
+        state = mt5_state.get("default", {})
+        if "level_hits" not in state:
+            state["level_hits"] = {}
+        state["level_hits"][str(ticket)] = level
+        mt5_state["default"] = state
     return jsonify({"status": "ok"})
 
 @app.route("/api/mt5/push", methods=["POST"])
@@ -3254,7 +3263,12 @@ def mt5_get_state():
         return jsonify({"connected": False, "account": {}, "positions": []})
     last_seen = datetime.fromisoformat(state["last_seen"])
     connected = (datetime.utcnow() - last_seen).total_seconds() < 45
-    return jsonify({"connected": connected, "account": state["account"], "positions": state["positions"]})
+    return jsonify({
+        "connected":   connected,
+        "account":     state["account"],
+        "positions":   state["positions"],
+        "level_hits":  state.get("level_hits", {}),
+    })
 
 @app.route("/api/mt5/orders", methods=["GET"])
 @login_required
@@ -3302,6 +3316,42 @@ def mt5_cancel_order(order_id):
         order.status = "cancelled"
         db.commit()
         return jsonify({"status": "cancelled"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/mt5/close", methods=["POST"])
+@login_required
+def mt5_close_position():
+    """User taps Trade Manager button — queues a close order for the EA to execute."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body   = request.json or {}
+    ticket = body.get("ticket")
+    symbol = body.get("symbol", "")
+    level  = body.get("level", "")    # SL | TP1 | TP2 | TP3
+    user_id = str(session.get("user_id"))
+    if not ticket:
+        return jsonify({"error": "ticket required"}), 400
+    db = _DBSession()
+    try:
+        order = MT5Order(
+            user_id      = user_id,
+            symbol       = symbol,
+            order_type   = "CLOSE",
+            volume       = 0,
+            price        = 0,
+            action       = "close",
+            close_ticket = int(ticket),
+            status       = "pending",
+            comment      = f"User close {level}",
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        return jsonify({"status": "ok", "id": order.id})
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
@@ -5166,6 +5216,8 @@ class MT5Order(_Base):
     tp          = Column(Float,      nullable=True)
     tp2         = Column(Float,      nullable=True)
     tp3         = Column(Float,      nullable=True)
+    action       = Column(String(8),  nullable=False, default="open")    # open | close
+    close_ticket = Column(Integer,    nullable=True)                       # MT5 ticket to close
     status      = Column(String(16), nullable=False, default="pending")  # pending|executing|filled|failed|cancelled
     mt5_ticket  = Column(Integer,    nullable=True)
     fill_price  = Column(Float,      nullable=True)
@@ -5266,6 +5318,8 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'legacy'"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp2 FLOAT"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp3 FLOAT"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS action VARCHAR(8) DEFAULT 'open'"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS close_ticket INTEGER"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")

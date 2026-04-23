@@ -12635,6 +12635,7 @@ document.addEventListener('click', function(e) {
 var _mt5PollTimer   = null;   // setInterval handle
 var _mt5Connected   = false;  // last known EA connection status
 var _mt5PendingData = null;   // signal data staged for the modal
+var _mt5LevelHits   = {};     // {ticket: "TP1"|"TP2"|"TP3"|"SL"} — level hits reported by EA
 
 // ─── Helpers ──────────────────────────────────────────────────
 function _mt5Fmt(n) {
@@ -12697,7 +12698,7 @@ function _mt5RenderPositions(positions) {
   var tbody = document.getElementById('mt5PositionsTbody');
   if (!tbody) return;
   if (!positions || positions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr>';
     _mt5PrevPnl = {};
     return;
   }
@@ -12741,6 +12742,30 @@ function _mt5RenderPositions(positions) {
               + '</div>';
     }
 
+    // Trade Manager action buttons
+    // A button flashes amber when its level was hit by the EA
+    var hitLevel = _mt5LevelHits[String(ticket)] || '';
+    function _actionBtn(id, label, level, baseStyle) {
+      var isHit   = hitLevel === level;
+      var hitAnim = isHit ? 'animation:wbPop .4s ease;' : '';
+      var hitBg   = isHit ? 'background:var(--amber);color:#000;border-color:var(--amber);' : baseStyle;
+      return '<button id="mt5Btn_' + ticket + '_' + level + '"'
+           + ' onclick="mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'' + level + '\')"'
+           + ' style="display:block;width:100%;margin-bottom:3px;padding:3px 6px;font-family:var(--mono);font-size:9px;'
+           + 'font-weight:700;letter-spacing:.4px;border-radius:3px;cursor:pointer;border:1px solid;'
+           + 'transition:background .2s;' + hitBg + hitAnim + '">'
+           + label + (isHit ? ' ●' : '')
+           + '</button>';
+    }
+    var slStyle   = 'background:rgba(239,68,68,.12);color:var(--red);border-color:rgba(239,68,68,.4);';
+    var tp1Style  = 'background:rgba(0,201,141,.1);color:var(--green);border-color:rgba(0,201,141,.35);';
+    var tp2Style  = 'background:rgba(0,201,141,.08);color:var(--green);border-color:rgba(0,201,141,.25);';
+    var tp3Style  = 'background:rgba(0,201,141,.06);color:var(--green);border-color:rgba(0,201,141,.2);';
+    var actionHtml = _actionBtn('SL',  'STOP LOSS',    'SL',  slStyle)
+                   + _actionBtn('TP1', 'TP1 — 50%',   'TP1', tp1Style)
+                   + _actionBtn('TP2', 'TP2 — 30%',   'TP2', tp2Style)
+                   + _actionBtn('TP3', 'TP3 — ALL',   'TP3', tp3Style);
+
     var rowBg = flashCol ? 'background:' + flashCol + ';' : '';
     return '<tr style="border-bottom:1px solid var(--border);' + rowBg + 'transition:background .5s;">'
       + '<td style="font-family:var(--mono);font-size:12px;color:var(--white);padding:10px 14px;">'
@@ -12759,8 +12784,28 @@ function _mt5RenderPositions(positions) {
       +   '<div style="font-size:9px;color:var(--muted);margin-top:2px;">SL -' + slDist + ' · TP +' + tpDist + '</div>'
       +   barHtml
       + '</td>'
+      + '<td style="padding:8px 12px;min-width:100px;">' + actionHtml + '</td>'
       + '</tr>';
   }).join('');
+}
+
+// ─── Send close order to EA via DotVerse ─────────────────────
+function mt5ClosePosition(ticket, symbol, level) {
+  fetch('/api/mt5/close', {
+    method:  'POST',
+    headers: {'Content-Type': 'application/json'},
+    body:    JSON.stringify({ticket: ticket, symbol: symbol, level: level})
+  }).then(function(r){ return r.json(); }).then(function(d) {
+    if (d.status === 'ok') {
+      // Disable the button immediately so user can't double-tap
+      var btn = document.getElementById('mt5Btn_' + ticket + '_' + level);
+      if (btn) {
+        btn.textContent = 'SENDING…';
+        btn.disabled    = true;
+        btn.style.opacity = '0.5';
+      }
+    }
+  }).catch(function(){});
 }
 
 // ─── Render order history ─────────────────────────────────────
@@ -12793,8 +12838,9 @@ function _mt5RenderOrders(orders) {
 function mt5Poll() {
   fetch('/api/mt5/state').then(function(r){ return r.json(); }).then(function(d) {
     _mt5SetStatus(d.connected, null);
+    _mt5LevelHits = d.level_hits || {};
     if (d.connected) {
-      _mt5RenderAccount(d.account   || {});
+      _mt5RenderAccount(d.account    || {});
       _mt5RenderPositions(d.positions || []);
     }
   }).catch(function(){});
@@ -12807,6 +12853,7 @@ function mt5LoadTab() {
 
   fetch('/api/mt5/state').then(function(r){ return r.json(); }).then(function(d) {
     _mt5SetStatus(d.connected, null);
+    _mt5LevelHits = d.level_hits || {};
     _mt5RenderAccount(d.account    || {});
     _mt5RenderPositions(d.positions || []);
   }).catch(function(){});

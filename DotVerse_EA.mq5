@@ -338,12 +338,62 @@ void ExecuteOrder(string obj)
 {
    long   orderId   = JsonInt(obj, "id");
    string symbol    = JsonStr(obj, "symbol");
-   string orderType = JsonStr(obj, "order_type");  // BUY | SELL
+   string orderType = JsonStr(obj, "order_type");  // BUY | SELL | CLOSE
+   string action    = JsonStr(obj, "action");       // open | close
+   long   closeTk   = JsonInt(obj, "close_ticket"); // MT5 ticket to close (when action=close)
    double volume    = JsonDbl(obj, "volume");
    double sl        = JsonDbl(obj, "sl");
    double tp        = JsonDbl(obj, "tp");
    double tp2       = JsonDbl(obj, "tp2");
    double tp3       = JsonDbl(obj, "tp3");
+
+   // ── CLOSE order: user tapped a Trade Manager button ───────────
+   if (action == "close" && closeTk > 0) {
+      Print("DotVerse EA: closing position ticket=", closeTk);
+      bool closed = false;
+      // Check the position still exists
+      if (PositionSelectByTicket((ulong)closeTk)) {
+         string  posSym  = PositionGetString(POSITION_SYMBOL);
+         double  posVol  = PositionGetDouble(POSITION_VOLUME);
+         long    posType = PositionGetInteger(POSITION_TYPE); // 0=BUY, 1=SELL
+         ENUM_ORDER_TYPE closeType = (posType == 0) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+         ENUM_ORDER_TYPE_FILLING filling = ORDER_FILLING_RETURN;
+         int fillFlags = (int)SymbolInfoInteger(posSym, SYMBOL_FILLING_MODE);
+         if (fillFlags & SYMBOL_FILLING_IOC) filling = ORDER_FILLING_IOC;
+
+         MqlTradeRequest req = {};
+         MqlTradeResult  res = {};
+         ZeroMemory(req); ZeroMemory(res);
+         req.action      = TRADE_ACTION_DEAL;
+         req.symbol      = posSym;
+         req.volume      = posVol;
+         req.type        = closeType;
+         req.type_filling= filling;
+         req.deviation   = (ulong)InpSlippage;
+         req.position    = (ulong)closeTk;
+         req.comment     = "DotVerse close #" + IntegerToString(orderId);
+         if (closeType == ORDER_TYPE_BUY)
+            req.price = SymbolInfoDouble(posSym, SYMBOL_ASK);
+         else
+            req.price = SymbolInfoDouble(posSym, SYMBOL_BID);
+         closed = OrderSend(req, res);
+         if (closed && (res.retcode == TRADE_RETCODE_DONE || res.retcode == TRADE_RETCODE_PLACED))
+            Print("DotVerse EA: close OK ticket=", closeTk, " retcode=", res.retcode);
+         else
+            Print("DotVerse EA: close FAILED ticket=", closeTk, " retcode=", res.retcode, " ", res.comment);
+      } else {
+         Print("DotVerse EA: position ", closeTk, " not found (already closed?)");
+         closed = true; // treat as success so the order doesn't repeat
+      }
+      // Report back
+      string status = closed ? "filled" : "failed";
+      string body   = StringFormat(
+         "{\"order_id\":%I64d,\"status\":\"%s\",\"ticket\":%I64d,\"fill_price\":0,\"comment\":\"close\"}",
+         orderId, status, closeTk
+      );
+      HttpPost("/api/mt5/confirm", body);
+      return;
+   }
 
    // Store tp2/tp3 for this order_id so we can look them up after fill
    if (g_pending_count < MAX_PENDING) {
