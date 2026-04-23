@@ -87,11 +87,12 @@ string HttpPost(string path, string body)
    string resHeaders;
    StringToCharArray(body, reqData, 0, StringLen(body));
 
+   Print("DotVerse EA: POST ", url, " body=", StringSubstr(body,0,80));
    int result = WebRequest("POST", url, headers, 5000, reqData, resData, resHeaders);
+   int err    = GetLastError();
+   Print("DotVerse EA: POST result=", result, " err=", err, " resp=", CharArrayToString(resData));
    if (result == -1) {
-      int err = GetLastError();
-      Print("DotVerse EA: POST ", path, " failed. WinInet err=", err,
-            ". Ensure ", InpBaseUrl, " is in Tools→Options→Expert Advisors→WebRequest list.");
+      Print("DotVerse EA: POST FAILED. Add ", InpBaseUrl, " to Tools→Options→Expert Advisors→WebRequest list.");
       return "";
    }
    return CharArrayToString(resData);
@@ -145,10 +146,14 @@ void PushState()
       string ptype_s = (ptype == POSITION_TYPE_BUY) ? "BUY" : "SELL";
 
       if (i > 0) posJson += ",";
+      double curPrice = (ptype == POSITION_TYPE_BUY)
+                      ? SymbolInfoDouble(sym, SYMBOL_BID)
+                      : SymbolInfoDouble(sym, SYMBOL_ASK);
       posJson += StringFormat(
          "{\"ticket\":%I64u,\"symbol\":\"%s\",\"type\":\"%s\","
-         "\"volume\":%.2f,\"open_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f}",
-         ticket, sym, ptype_s, vol, oprice, sl, tp, ppnl
+         "\"volume\":%.2f,\"open_price\":%.5f,\"current_price\":%.5f,"
+         "\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f}",
+         ticket, sym, ptype_s, vol, oprice, curPrice, sl, tp, ppnl
       );
    }
    posJson += "]";
@@ -269,13 +274,21 @@ void ExecuteOrder(string obj)
    ZeroMemory(req);
    ZeroMemory(res);
 
+   // Auto-detect supported filling mode for this symbol
+   ENUM_ORDER_TYPE_FILLING filling = ORDER_FILLING_FOK;
+   int fillFlags = (int)SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
+   if      (fillFlags & SYMBOL_FILLING_IOC)    filling = ORDER_FILLING_IOC;
+   else if (fillFlags & SYMBOL_FILLING_BOC)    filling = ORDER_FILLING_BOC;
+   else                                         filling = ORDER_FILLING_RETURN;
+
    req.action      = TRADE_ACTION_DEAL;
    req.symbol      = symbol;
    req.volume      = volume;
    req.type        = otype;
-   req.type_filling= ORDER_FILLING_FOK;
+   req.type_filling= filling;
    req.deviation   = (ulong)InpSlippage;
    req.comment     = "DotVerse #" + IntegerToString(orderId);
+   Print("DotVerse EA: filling mode=", EnumToString(filling), " fillFlags=", fillFlags);
 
    // Price — market order uses Ask for BUY, Bid for SELL
    if (otype == ORDER_TYPE_BUY)

@@ -11684,7 +11684,7 @@ function closeSimulate() {
               <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">SL / TP</th>
             </tr>
           </thead>
-          <tbody id="mt5PositionsTbody"><tr><td colspan="6" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr></tbody>
+          <tbody id="mt5PositionsTbody"><tr><td colspan="7" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -12691,23 +12691,74 @@ function _mt5RenderAccount(acct) {
 }
 
 // ─── Render open positions ────────────────────────────────────
+var _mt5PrevPnl = {};  // track previous P&L per ticket for flash animation
+
 function _mt5RenderPositions(positions) {
   var tbody = document.getElementById('mt5PositionsTbody');
   if (!tbody) return;
   if (!positions || positions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</td></tr>';
+    _mt5PrevPnl = {};
     return;
   }
   tbody.innerHTML = positions.map(function(p) {
-    var pnlCol  = _mt5Color(p.profit);
+    var profit  = parseFloat(p.profit) || 0;
+    var pnlCol  = profit >= 0 ? 'var(--green)' : 'var(--red)';
     var typeCol = p.type === 'BUY' ? 'var(--green)' : 'var(--red)';
-    return '<tr style="border-bottom:1px solid var(--border);">'
-      + '<td style="font-family:var(--mono);font-size:12px;color:var(--white);padding:10px 14px;">' + (p.symbol||'—') + '</td>'
+    var ticket  = p.ticket || p.symbol;
+
+    // Flash green/red when P&L changes
+    var prev     = _mt5PrevPnl[ticket];
+    var flashCol = '';
+    if (prev !== undefined && profit !== prev) {
+      flashCol = profit > prev ? 'rgba(0,201,141,.15)' : 'rgba(239,68,68,.15)';
+    }
+    _mt5PrevPnl[ticket] = profit;
+
+    // P&L change arrow
+    var arrow = '';
+    if (prev !== undefined) {
+      arrow = profit > prev ? ' <span style="color:var(--green);font-size:10px;">▲</span>'
+            : profit < prev ? ' <span style="color:var(--red);font-size:10px;">▼</span>' : '';
+    }
+
+    // Distance to SL and TP1
+    var sl = parseFloat(p.sl) || 0;
+    var tp = parseFloat(p.tp) || 0;
+    var cur = parseFloat(p.current_price || p.open_price) || 0;
+    var slDist = sl > 0 ? Math.abs(cur - sl).toFixed(2) : '—';
+    var tpDist = tp > 0 ? Math.abs(tp - cur).toFixed(2) : '—';
+
+    // Progress bar: how far from open to TP
+    var barHtml = '';
+    if (sl > 0 && tp > 0 && cur > 0) {
+      var total = Math.abs(tp - parseFloat(p.open_price));
+      var done  = Math.abs(cur - parseFloat(p.open_price));
+      var pct   = total > 0 ? Math.min(100, Math.max(0, (done / total) * 100)) : 0;
+      var barCol = profit >= 0 ? 'var(--green)' : 'var(--red)';
+      barHtml = '<div style="height:3px;background:var(--border);border-radius:2px;margin-top:4px;overflow:hidden;">'
+              + '<div style="width:' + pct.toFixed(1) + '%;height:100%;background:' + barCol + ';transition:width .5s;border-radius:2px;"></div>'
+              + '</div>';
+    }
+
+    var rowBg = flashCol ? 'background:' + flashCol + ';' : '';
+    return '<tr style="border-bottom:1px solid var(--border);' + rowBg + 'transition:background .5s;">'
+      + '<td style="font-family:var(--mono);font-size:12px;color:var(--white);padding:10px 14px;">'
+      +   (p.symbol||'—')
+      +   '<div style="font-size:9px;color:var(--muted);margin-top:2px;">#' + (p.ticket||'—') + '</div>'
+      + '</td>'
       + '<td style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + typeCol + ';padding:10px 14px;">' + (p.type||'—') + '</td>'
       + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + (p.volume||'—') + '</td>'
       + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + _mt5Fmt(p.open_price) + '</td>'
-      + '<td style="font-family:var(--mono);font-size:12px;font-weight:700;color:' + pnlCol + ';padding:10px 14px;text-align:right;">' + (p.profit >= 0 ? '+' : '') + _mt5Fmt(p.profit) + '</td>'
-      + '<td style="font-family:var(--mono);font-size:11px;color:var(--muted2);padding:10px 14px;text-align:right;">' + _mt5Fmt(p.sl) + ' / ' + _mt5Fmt(p.tp) + '</td>'
+      + '<td style="font-family:var(--mono);font-size:12px;font-weight:700;color:' + pnlCol + ';padding:10px 14px;text-align:right;">'
+      +   (profit >= 0 ? '+' : '') + _mt5Fmt(profit) + arrow
+      + '</td>'
+      + '<td style="font-family:var(--mono);font-size:11px;color:var(--muted2);padding:10px 14px;text-align:right;">'
+      +   '<span style="color:var(--red);">' + _mt5Fmt(p.sl) + '</span>'
+      +   ' / <span style="color:var(--green);">' + _mt5Fmt(p.tp) + '</span>'
+      +   '<div style="font-size:9px;color:var(--muted);margin-top:2px;">SL -' + slDist + ' · TP +' + tpDist + '</div>'
+      +   barHtml
+      + '</td>'
       + '</tr>';
   }).join('');
 }
