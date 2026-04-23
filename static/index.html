@@ -11715,7 +11715,7 @@ function closeSimulate() {
       <div style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted2);margin-bottom:6px;">Lot Size</div>
       <input id="mt5ModalVolume" type="number" step="0.01" min="0.01" value="0.01"
         style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:10px 14px;color:var(--white);font-family:var(--mono);font-size:14px;outline:none;">
-      <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;">Standard lot = 1.0 · Mini lot = 0.1 · Micro lot = 0.01</div>
+      <div id="mt5LotGuide" style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-top:10px;line-height:1.6;padding:10px 12px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.2);border-radius:3px;"></div>
     </div>
     <div style="display:flex;gap:10px;">
       <button id="mt5ModalConfirmBtn" onclick="mt5ConfirmOrder()"
@@ -12680,6 +12680,8 @@ function _mt5RenderAccount(acct) {
   fm.textContent    = cur + ' ' + _mt5Fmt(acct.free_margin);
   pnl.textContent   = (acct.profit >= 0 ? '+' : '') + _mt5Fmt(acct.profit);
   pnl.style.color   = _mt5Color(acct.profit);
+  window._mt5AccountBalance  = acct.balance  || 0;
+  window._mt5AccountCurrency = cur;
 }
 
 // ─── Render open positions ────────────────────────────────────
@@ -12791,7 +12793,51 @@ function mt5OpenModal() {
     + '<span style="color:var(--muted2);">TP 2</span><span style="color:var(--green);">' + (d.tp2||'—') + '</span>'
     + '</div>';
 
-  document.getElementById('mt5ModalVolume').value = '0.01';
+  // ── Lot size suggestion based on 1% account risk ──────────────
+  var balance   = window._mt5AccountBalance || 0;
+  var currency  = window._mt5AccountCurrency || 'USD';
+  var entry     = parseFloat(d.entry)     || 0;
+  var sl        = parseFloat(d.stop_loss) || 0;
+  var slDist    = Math.abs(entry - sl);
+  var suggested = 0.01;
+  var riskUsd   = 0;
+
+  if (balance > 0 && slDist > 0) {
+    var riskAmt = balance * 0.01;   // 1% of account
+    var at      = (d.asset_type || '').toLowerCase();
+    if (at === 'forex') {
+      // pip size: 0.0001 for most pairs, 0.01 for JPY
+      var pipSize  = (d.ticker || '').indexOf('JPY') >= 0 ? 0.01 : 0.0001;
+      var slPips   = slDist / pipSize;
+      var pipVal   = 10;  // USD per pip per standard lot (USD-quoted pairs)
+      suggested    = riskAmt / (slPips * pipVal);
+    } else {
+      // Stocks, crypto, indices: simple price-based sizing
+      suggested = riskAmt / (slDist * 1);  // 1 unit per lot for simplicity
+    }
+    suggested = Math.max(0.01, Math.round(suggested * 100) / 100);
+    riskUsd   = suggested * slDist * (at === 'forex' ? 100000 : 1);
+  }
+
+  document.getElementById('mt5ModalVolume').value = suggested.toFixed(2);
+
+  // ── Add guidance below lot size input ─────────────────────────
+  var guide = document.getElementById('mt5LotGuide');
+  if (guide) {
+    var balLine  = balance > 0 ? currency + ' ' + _mt5Fmt(balance) + ' account · ' : '';
+    var riskLine = riskUsd > 0 ? 'Max loss at this size ≈ ' + currency + ' ' + _mt5Fmt(riskUsd) + ' · ' : '';
+    guide.innerHTML =
+      '<div style="margin-bottom:6px;">'
+      + '<span style="color:var(--amber);font-weight:700;">Suggested: ' + suggested.toFixed(2) + ' lots</span>'
+      + ' (1% risk rule · ' + balLine + riskLine.replace(' · ','') + ')'
+      + '</div>'
+      + '<div style="color:var(--muted2);line-height:1.7;">'
+      + '0.01 = micro lot — risks ~$0.10/pip · safest for beginners<br>'
+      + '0.10 = mini lot — risks ~$1/pip · standard practice<br>'
+      + '1.00 = standard lot — risks ~$10/pip · experienced traders only'
+      + '</div>';
+  }
+
   var msg = document.getElementById('mt5ModalMsg');
   msg.style.display = 'none';
   msg.textContent   = '';
