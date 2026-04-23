@@ -2406,8 +2406,8 @@ def fire_alert(signal, ticker, price, timeframe, analysis, counter, channels=Non
     if "telegram" in channels:
         r = send_telegram(msg)
         if r is not None: results.append(r)
-    # If no channels were configured, treat as delivered (nothing to confirm)
-    delivered = any(results) if results else True
+    # Only mark delivered if at least one channel confirmed send
+    delivered = any(results) if results else False
     print(f"[Alert] Fired {signal} for {ticker} ({timeframe}) @ {price} via {channels} — delivered={delivered}")
     return delivered
 
@@ -3689,9 +3689,10 @@ def add_watch():
         if timeframe not in TIMEFRAME_CONFIG:
             timeframe = "1d"
 
-        ticker  = normalise_ticker(ticker, asset_type)
-        user_id = str(session.get('user_id', 'anon'))
-        key     = f"{user_id}_{ticker}_{timeframe}"
+        ticker         = normalise_ticker(ticker, asset_type)
+        user_id        = str(session.get('user_id', 'anon'))
+        key            = f"{user_id}_{ticker}_{timeframe}"
+        current_signal = body.get("current_signal", "HOLD") or "HOLD"
 
         ch_labels = {"sms": "SMS", "whatsapp": "WhatsApp", "telegram": "Telegram"}
         ch_str    = " + ".join(ch_labels.get(c, c) for c in alert_channels)
@@ -3708,7 +3709,7 @@ def add_watch():
                     "asset_type":     asset_type,
                     "timeframe":      timeframe,
                     "alert_channels": alert_channels,
-                    "last_signal":    None,
+                    "last_signal":    current_signal,
                     "last_check":     None,
                     "last_reason":    "Not checked yet",
                     "last_price":     None,
@@ -3750,27 +3751,41 @@ def remove_watch():
 @app.route("/api/watches", methods=["GET"])
 @login_required
 def list_watches():
-    """List current user's watched tickers with their status."""
+    """List current user's watches — reads from DB (source of truth) merged with in-memory runtime fields."""
     user_id = str(session.get('user_id', 'anon'))
-    with watch_lock:
-        watches = [
-            {
-                "key":             k,
-                "ticker":          v["ticker"],
-                "asset_type":      v["asset_type"],
-                "timeframe":       v["timeframe"],
-                "alert_channels":  v.get("alert_channels", ["sms"]),
-                "last_signal":     v.get("last_signal") or "Waiting…",
-                "last_reason":     v.get("last_reason") or "Not checked yet",
-                "last_price":      v.get("last_price"),
-                "last_check":      v["last_check"].strftime("%H:%M UTC") if v.get("last_check") else "Pending",
-                "added_at":        v.get("added_at", ""),
-                "interval_min":    ALERT_INTERVALS.get(v["timeframe"], 300) // 60,
-                "live_commentary": v.get("live_commentary"),  # Feature D
-            }
-            for k, v in watch_registry.items()
-            if v.get("user_id") == user_id
-        ]
+    watches = []
+    if _DBSession:
+        db = _DBSession()
+        try:
+            rows = db.query(Watch).filter_by(user_id=user_id).all()
+            for r in rows:
+                try:
+                    channels = json.loads(r.alert_channels)
+                except Exception:
+                    channels = [r.alert_channels]
+                # Merge runtime fields from in-memory registry if available
+                key = f"{user_id}_{r.ticker}_{r.timeframe}"
+                with watch_lock:
+                    mem = watch_registry.get(key, {})
+                lc = mem.get("last_check")
+                watches.append({
+                    "key":             key,
+                    "ticker":          r.ticker,
+                    "asset_type":      r.asset_type,
+                    "timeframe":       r.timeframe,
+                    "alert_channels":  channels,
+                    "last_signal":     mem.get("last_signal") or "Waiting…",
+                    "last_reason":     mem.get("last_reason") or "Not checked yet",
+                    "last_price":      mem.get("last_price"),
+                    "last_check":      lc.strftime("%H:%M UTC") if lc else "Pending",
+                    "added_at":        r.created_at.strftime("%Y-%m-%d %H:%M UTC"),
+                    "interval_min":    ALERT_INTERVALS.get(r.timeframe, 300) // 60,
+                    "live_commentary": mem.get("live_commentary"),
+                })
+        except Exception as _e:
+            print(f"[list_watches] DB error: {_e}")
+        finally:
+            db.close()
     return jsonify({"watches": watches, "count": len(watches)})
 
 

@@ -5739,7 +5739,7 @@ function getModalChannels() {
 async function confirmAlertModal() {
   closeAlertModal();
   if (!currentData) return;
-  const {ticker, asset_type, timeframe} = currentData;
+  const {ticker, asset_type, timeframe, signal} = currentData;
   const alert_channels = getModalChannels();
   // Also sync the sidebar picker checkboxes
   if (document.getElementById('chkSms')) document.getElementById('chkSms').checked = alert_channels.includes('sms');
@@ -5749,7 +5749,7 @@ async function confirmAlertModal() {
   const r = await fetch('/api/watch',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ticker, asset_type, timeframe, alert_channels})
+    body: JSON.stringify({ticker, asset_type, timeframe, alert_channels, current_signal: signal})
   });
   const d = await r.json();
   isWatching = true;
@@ -5772,8 +5772,8 @@ async function toggleWatch() {
     openAlertModal();
   }
 }
-async function removeWatch(ticker, timeframe) {
-  await fetch('/api/watch',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker,asset_type:'',timeframe})});
+async function removeWatch(ticker, timeframe, asset_type) {
+  await fetch('/api/watch',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker,asset_type:asset_type||'',timeframe})});
   refreshWatchPanel();
 }
 async function refreshWatchPanel() {
@@ -5814,13 +5814,14 @@ async function refreshWatchPanel() {
     if (!watches.length) { panel.innerHTML = '<div class="no-watches">No active watches. Click Alert Me to start.</div>'; return; }
     panel.innerHTML = watches.map(w => {
       var sigColor = (w.last_signal||'').includes('BUY') ? 'var(--green)' : (w.last_signal||'').includes('SELL') ? 'var(--red)' : 'var(--amber)';
+      var sigLabel = w.last_signal && w.last_signal !== 'Waiting…' ? w.last_signal : 'Waiting for signal change…';
       return `<div class="watch-item">
         <div class="watch-header">
           <div><span class="watch-ticker">${w.ticker}</span><span class="watch-tf"> · ${w.timeframe.toUpperCase()}</span></div>
-          <button class="remove-watch-btn" onclick="removeWatch('${w.ticker}','${w.timeframe}')">✕</button>
+          <button class="remove-watch-btn" onclick="removeWatch('${w.ticker}','${w.timeframe}','${w.asset_type}')" title="Cancel alert">✕ Cancel</button>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:3px;">
-          <span class="watch-status" style="color:${sigColor};font-weight:600;">${w.last_signal||'Waiting…'}</span>
+          <span class="watch-status" style="color:${sigColor};font-weight:600;">${sigLabel}</span>
           <span class="watch-check"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${w.last_check}</span>
         </div>
         <div class="watch-channels">${(w.alert_channels||['sms']).map(c => c === 'sms' ? 'SMS' : c === 'whatsapp' ? 'WA' : 'TG').join(' ')} ${(w.alert_channels||['sms']).map(c=>c.charAt(0).toUpperCase()+c.slice(1)).join(' · ')}</div>
