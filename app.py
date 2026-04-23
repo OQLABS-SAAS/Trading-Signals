@@ -2836,7 +2836,8 @@ def register():
     try:
         if db.query(User).filter_by(email=email).first():
             return jsonify({"status": "error", "message": "Email already registered"}), 409
-        role = "admin" if (ADMIN_EMAIL and email == ADMIN_EMAIL) else "user"
+        is_admin = bool(ADMIN_EMAIL and email == ADMIN_EMAIL) or bool(db.query(AdminInvite).filter_by(email=email).first())
+        role = "admin" if is_admin else "user"
         tier = "elite" if role == "admin" else "free"
         user = User(
             email         = email,
@@ -2846,6 +2847,8 @@ def register():
             tier          = tier,
         )
         db.add(user)
+        # Remove invite once used
+        db.query(AdminInvite).filter_by(email=email).delete()
         db.commit()
         session["user_id"]   = user.id
         session["user_role"] = user.role
@@ -2971,6 +2974,49 @@ def admin_set_role():
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/admin/invite", methods=["POST", "DELETE"])
+@require_admin
+def admin_invite():
+    """Pre-approve an email for admin role on signup, or remove the invite."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body  = request.json or {}
+    email = body.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+    db = _DBSession()
+    try:
+        if request.method == "DELETE":
+            db.query(AdminInvite).filter_by(email=email).delete()
+            db.commit()
+            return jsonify({"status": "removed"})
+        # POST — add invite
+        if db.query(AdminInvite).filter_by(email=email).first():
+            return jsonify({"status": "already_invited"})
+        db.add(AdminInvite(email=email, invited_by=session.get("user_id")))
+        db.commit()
+        return jsonify({"status": "invited"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/admin/invites", methods=["GET"])
+@require_admin
+def admin_list_invites():
+    """List all pending admin invites."""
+    if not _DBSession:
+        return jsonify({"invites": []})
+    db = _DBSession()
+    try:
+        rows = db.query(AdminInvite).order_by(AdminInvite.created_at.desc()).all()
+        return jsonify({"invites": [{"email": r.email, "created_at": r.created_at.strftime("%Y-%m-%d")} for r in rows]})
+    except Exception as e:
+        return jsonify({"invites": []})
     finally:
         db.close()
 
@@ -4835,6 +4881,14 @@ class ExchangeKey(_Base):
     api_key_enc    = Column(String(512), nullable=False)
     api_secret_enc = Column(String(512), nullable=False)
     created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
+
+class AdminInvite(_Base):
+    """Pre-approved admin emails — grants admin role automatically on signup."""
+    __tablename__ = "admin_invites"
+    id         = Column(Integer,    primary_key=True, autoincrement=True)
+    email      = Column(String(120), nullable=False, unique=True)
+    invited_by = Column(Integer,    nullable=True)
+    created_at = Column(DateTime,   nullable=False, default=datetime.utcnow)
 
 class Watch(_Base):
     """Persistent alert watches — survive server restarts, removed only after confirmed delivery."""

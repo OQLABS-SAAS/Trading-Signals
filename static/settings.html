@@ -351,44 +351,70 @@ async function init() {
 // ── ADMIN TEAM ────────────────────────────────────────────────
 var _currentUserEmail = '';
 async function loadAdmins() {
+  const el = document.getElementById('adminList');
   try {
-    const r = await fetch('/api/admin/users', {credentials:'include'});
-    const d = await r.json();
     _currentUserEmail = document.getElementById('pEmail').value;
-    const admins = (d.users || []).filter(u => u.role === 'admin');
-    const el = document.getElementById('adminList');
-    if (!admins.length) { el.innerHTML = '<div class="no-admins">No other admins yet.</div>'; return; }
-    el.innerHTML = admins.map(u => `
+    const [ru, ri] = await Promise.all([
+      fetch('/api/admin/users',   {credentials:'include'}),
+      fetch('/api/admin/invites', {credentials:'include'})
+    ]);
+    const du = await ru.json();
+    const di = await ri.json();
+    const admins  = (du.users   || []).filter(u => u.role === 'admin');
+    const invites = di.invites  || [];
+    if (!admins.length && !invites.length) { el.innerHTML = '<div class="no-admins">No admins yet.</div>'; return; }
+    let html = admins.map(u => `
       <div class="admin-row">
         <div>
           <span class="admin-email">${u.email}</span>
-          ${u.email === _currentUserEmail ? '<span class="admin-you">You</span>' : ''}
+          ${u.email === _currentUserEmail ? '<span class="admin-you">You</span>' : '<span style="font-family:var(--mono);font-size:10px;color:var(--green);margin-left:8px;">Active</span>'}
         </div>
         ${u.email !== _currentUserEmail ? `<button class="btn-danger" onclick="revokeAdmin(${u.id},'${u.email}')">Revoke</button>` : ''}
       </div>`).join('');
-  } catch(e) { document.getElementById('adminList').innerHTML = '<div class="no-admins">Failed to load.</div>'; }
+    if (invites.length) {
+      html += `<div style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin:14px 0 8px;">Pending — will get access on signup</div>`;
+      html += invites.map(i => `
+        <div class="admin-row">
+          <div>
+            <span class="admin-email">${i.email}</span>
+            <span style="font-family:var(--mono);font-size:10px;color:var(--amber);margin-left:8px;">Pending</span>
+          </div>
+          <button class="btn-danger" onclick="cancelInvite('${i.email}')">Cancel</button>
+        </div>`).join('');
+    }
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div class="no-admins">Failed to load.</div>'; }
 }
 
 async function addAdmin() {
-  const email = document.getElementById('adminEmailInput').value.trim();
-  const msg = document.getElementById('adminMsg');
+  const email = document.getElementById('adminEmailInput').value.trim().toLowerCase();
   if (!email) { showAdminMsg('Enter an email address.', false); return; }
   try {
-    // Find user by listing all users and matching email
-    const r = await fetch('/api/admin/users', {credentials:'include'});
-    const d = await r.json();
-    const user = (d.users || []).find(u => u.email === email);
-    if (!user) { showAdminMsg('No account found for that email. They need to sign up first.', false); return; }
-    if (user.role === 'admin') { showAdminMsg('That user is already an admin.', false); return; }
-    const r2 = await fetch('/api/admin/set-role', {
-      method:'POST', credentials:'include',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({user_id: user.id, role: 'admin'})
-    });
-    const d2 = await r2.json();
-    if (d2.error) { showAdminMsg(d2.error, false); return; }
+    const ru = await fetch('/api/admin/users', {credentials:'include'});
+    const du = await ru.json();
+    const user = (du.users || []).find(u => u.email === email);
+    if (user) {
+      if (user.role === 'admin') { showAdminMsg('That user is already an admin.', false); return; }
+      const r2 = await fetch('/api/admin/set-role', {
+        method:'POST', credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({user_id: user.id, role: 'admin'})
+      });
+      const d2 = await r2.json();
+      if (d2.error) { showAdminMsg(d2.error, false); return; }
+      showAdminMsg(`${email} is now an admin.`, true);
+    } else {
+      // User hasn't signed up yet — pre-approve
+      const r2 = await fetch('/api/admin/invite', {
+        method:'POST', credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({email})
+      });
+      const d2 = await r2.json();
+      if (d2.error) { showAdminMsg(d2.error, false); return; }
+      showAdminMsg(`${email} pre-approved. They'll get admin access when they sign up.`, true);
+    }
     document.getElementById('adminEmailInput').value = '';
-    showAdminMsg(`${email} is now an admin.`, true);
     loadAdmins();
   } catch(e) { showAdminMsg('Something went wrong.', false); }
 }
@@ -402,6 +428,18 @@ async function revokeAdmin(userId, email) {
       body: JSON.stringify({user_id: userId, role: 'user'})
     });
     showAdminMsg(`${email} admin access removed.`, true);
+    loadAdmins();
+  } catch(e) { showAdminMsg('Something went wrong.', false); }
+}
+
+async function cancelInvite(email) {
+  try {
+    await fetch('/api/admin/invite', {
+      method:'DELETE', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email})
+    });
+    showAdminMsg(`Invite for ${email} cancelled.`, true);
     loadAdmins();
   } catch(e) { showAdminMsg('Something went wrong.', false); }
 }
