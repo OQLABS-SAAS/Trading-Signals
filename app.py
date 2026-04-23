@@ -3197,7 +3197,7 @@ def mt5_get_state():
     if not state:
         return jsonify({"connected": False, "account": {}, "positions": []})
     last_seen = datetime.fromisoformat(state["last_seen"])
-    connected = (datetime.utcnow() - last_seen).total_seconds() < 15
+    connected = (datetime.utcnow() - last_seen).total_seconds() < 45
     return jsonify({"connected": connected, "account": state["account"], "positions": state["positions"]})
 
 @app.route("/api/mt5/orders", methods=["GET"])

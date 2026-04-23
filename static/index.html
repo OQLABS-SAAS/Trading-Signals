@@ -3695,6 +3695,10 @@ function quickLoad(ticker, assetType, timeframe) {
 var _analysisAbortCtrl = null;
 
 async function doAnalyze(ticker, assetType, timeframe) {
+  // Hide Execute Trade button immediately — will reappear once new analysis completes
+  var _execBtn = document.getElementById('mt5ExecuteBtn');
+  if (_execBtn) _execBtn.style.display = 'none';
+
   // ── Cancel any previous in-flight request ──────────────────────────────
   if (_analysisAbortCtrl) {
     _analysisAbortCtrl.abort();
@@ -12942,12 +12946,20 @@ function mt5SyncExecBtn() {
   }
 }
 
-// ─── Background EA connection check on page load ──────────────
-(function() {
+// ─── Background EA connection check — runs every 10s always ───
+function _mt5BackgroundCheck() {
   fetch('/api/mt5/state').then(function(r){ return r.json(); }).then(function(d) {
     _mt5Connected = d.connected;
+    // Update Execute Trade button if a signal is already loaded
+    var btn = document.getElementById('mt5ExecuteBtn');
+    if (btn) {
+      var hasSig = currentData && (currentData.signal === 'BUY' || currentData.signal === 'SELL');
+      btn.style.display = (d.connected && hasSig) ? 'inline-flex' : 'none';
+    }
   }).catch(function(){});
-})();
+}
+_mt5BackgroundCheck();
+setInterval(_mt5BackgroundCheck, 10000);
 </script>
 
 </body>
