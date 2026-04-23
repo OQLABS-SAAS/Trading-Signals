@@ -219,13 +219,14 @@ void PushState()
    for (int i = 0; i < total; i++) {
       ulong ticket = PositionGetTicket(i);
       if (ticket == 0) continue;
-      string sym    = PositionGetString(POSITION_SYMBOL);
-      double vol    = PositionGetDouble(POSITION_VOLUME);
-      double oprice = PositionGetDouble(POSITION_PRICE_OPEN);
-      double sl     = PositionGetDouble(POSITION_SL);
-      double tp     = PositionGetDouble(POSITION_TP);
-      double ppnl   = PositionGetDouble(POSITION_PROFIT);
-      int    ptype  = (int)PositionGetInteger(POSITION_TYPE);
+      string sym     = PositionGetString(POSITION_SYMBOL);
+      string cmt     = PositionGetString(POSITION_COMMENT);
+      double vol     = PositionGetDouble(POSITION_VOLUME);
+      double oprice  = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl      = PositionGetDouble(POSITION_SL);
+      double tp      = PositionGetDouble(POSITION_TP);
+      double ppnl    = PositionGetDouble(POSITION_PROFIT);
+      int    ptype   = (int)PositionGetInteger(POSITION_TYPE);
       string ptype_s = (ptype == POSITION_TYPE_BUY) ? "BUY" : "SELL";
 
       if (i > 0) posJson += ",";
@@ -235,8 +236,8 @@ void PushState()
       posJson += StringFormat(
          "{\"ticket\":%I64u,\"symbol\":\"%s\",\"type\":\"%s\","
          "\"volume\":%.2f,\"open_price\":%.5f,\"current_price\":%.5f,"
-         "\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f}",
-         ticket, sym, ptype_s, vol, oprice, curPrice, sl, tp, ppnl
+         "\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f,\"comment\":\"%s\"}",
+         ticket, sym, ptype_s, vol, oprice, curPrice, sl, tp, ppnl, cmt
       );
    }
    posJson += "]";

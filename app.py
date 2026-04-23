@@ -3120,6 +3120,7 @@ def mt5_submit_order():
     tp         = body.get("tp")
     tp2        = body.get("tp2")
     tp3        = body.get("tp3")
+    timeframe  = body.get("timeframe", "")
     if not ticker or direction not in ("BUY", "SELL") or volume <= 0:
         return jsonify({"error": "ticker, direction (BUY/SELL), and volume required"}), 400
     symbol = _mt5_symbol(ticker, asset_type)
@@ -3135,6 +3136,7 @@ def mt5_submit_order():
             tp         = float(tp)  if tp  else None,
             tp2        = float(tp2) if tp2 else None,
             tp3        = float(tp3) if tp3 else None,
+            timeframe  = timeframe or None,
             status     = "pending",
             comment    = f"DotVerse {ticker} {direction}",
         )
@@ -3301,10 +3303,26 @@ def mt5_get_state():
         return jsonify({"connected": False, "account": {}, "positions": []})
     last_seen = datetime.fromisoformat(state["last_seen"])
     connected = (datetime.utcnow() - last_seen).total_seconds() < 45
+    positions = list(state["positions"])
+    # Enrich positions with timeframe from mt5_orders (matched by mt5_ticket = position ticket)
+    if _DBSession and positions:
+        try:
+            db = _DBSession()
+            tickets = [int(p.get("ticket", 0)) for p in positions if p.get("ticket")]
+            if tickets:
+                orders = db.query(MT5Order).filter(MT5Order.mt5_ticket.in_(tickets)).all()
+                ticket_tf = {int(o.mt5_ticket): o.timeframe for o in orders if o.mt5_ticket and o.timeframe}
+                for p in positions:
+                    tf = ticket_tf.get(int(p.get("ticket", 0)))
+                    if tf:
+                        p["timeframe"] = tf
+            db.close()
+        except Exception:
+            pass
     return jsonify({
         "connected":   connected,
         "account":     state["account"],
-        "positions":   state["positions"],
+        "positions":   positions,
         "level_hits":  state.get("level_hits", {}),
     })
 
@@ -5346,6 +5364,7 @@ class MT5Order(_Base):
     tp          = Column(Float,      nullable=True)
     tp2         = Column(Float,      nullable=True)
     tp3         = Column(Float,      nullable=True)
+    timeframe    = Column(String(8),   nullable=True)                       # 15m | 1h | 4h | 1d | 1w | 1mo
     action       = Column(String(8),  nullable=False, default="open")    # open | close
     close_ticket = Column(Integer,    nullable=True)                       # MT5 ticket to close
     status      = Column(String(16), nullable=False, default="pending")  # pending|executing|filled|failed|cancelled
@@ -5450,6 +5469,7 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp3 FLOAT"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS action VARCHAR(8) DEFAULT 'open'"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS close_ticket INTEGER"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")
