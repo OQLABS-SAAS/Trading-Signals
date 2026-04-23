@@ -2343,12 +2343,11 @@ def send_whatsapp(message):
 
 
 def send_telegram(message):
-    """Send message via Telegram Bot API."""
+    """Send plain text message via Telegram Bot API."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id   = os.environ.get("TELEGRAM_CHAT_ID",   "").strip()
     if not all([bot_token, chat_id]):
         return None  # not configured — not a failure
-    # Convert plain-text message to HTML-safe Telegram format
     tg_msg = (message
         .replace("&", "&amp;")
         .replace("<", "&lt;")
@@ -2367,6 +2366,38 @@ def send_telegram(message):
     except Exception as e:
         print(f"[Telegram] Error: {e}")
         return False
+
+
+def send_telegram_keyboard(message, keyboard_rows):
+    """Send Telegram message with inline keyboard buttons. Returns message_id or None."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id   = os.environ.get("TELEGRAM_CHAT_ID",   "").strip()
+    if not all([bot_token, chat_id]):
+        return None
+    tg_msg = (message
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;"))
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={
+                "chat_id":      chat_id,
+                "text":         tg_msg,
+                "parse_mode":   "HTML",
+                "reply_markup": {"inline_keyboard": keyboard_rows},
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200 and resp.json().get("ok"):
+            msg_id = resp.json()["result"]["message_id"]
+            print(f"[Telegram] Sent with keyboard — message_id={msg_id}")
+            return msg_id
+        print(f"[Telegram] Keyboard error {resp.status_code}: {resp.text[:200]}")
+        return None
+    except Exception as e:
+        print(f"[Telegram] Keyboard error: {e}")
+        return None
 
 
 def fire_alert(signal, ticker, price, timeframe, analysis, counter, channels=None):
@@ -3219,12 +3250,19 @@ def mt5_level_alert():
     tg_msg = (
         f"{emoji} {level} Hit — {symbol}\n"
         f"{direction} position #{ticket}\n"
-        f"Price: {price}\n"
-        f"{action}\n"
-        f"🔗 https://dot-verse.up.railway.app"
+        f"Price: {price}\n\n"
+        f"{action}"
     )
+    # callback_data format: close|ticket|symbol|level  (max 64 chars)
+    btn_label = {
+        "TP1": "✅ Close 50% — TP1",
+        "TP2": "✅ Close 30% — TP2",
+        "TP3": "✅ Close All — TP3",
+        "SL":  "🛑 Close Position — SL",
+    }.get(level, f"Close — {level}")
+    keyboard = [[{"text": btn_label, "callback_data": f"close|{ticket}|{symbol}|{level}"}]]
     try:
-        send_telegram(tg_msg)
+        send_telegram_keyboard(tg_msg, keyboard)
     except Exception:
         pass
     # Store hit in mt5_state so frontend can flash the action button
@@ -3469,6 +3507,98 @@ def telegram_status():
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat  = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     return jsonify({"configured": bool(token and chat)})
+
+
+@app.route("/api/telegram/webhook", methods=["POST"])
+def telegram_webhook():
+    """Telegram calls this when user taps an inline keyboard button."""
+    body = request.json or {}
+    cq   = body.get("callback_query")
+    if not cq:
+        return jsonify({"ok": True})
+
+    callback_id = cq.get("id", "")
+    data        = cq.get("data", "")
+    msg         = cq.get("message", {})
+    chat_id     = str(msg.get("chat", {}).get("id", ""))
+    message_id  = msg.get("message_id")
+    bot_token   = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+
+    # Parse: close|{ticket}|{symbol}|{level}
+    parts = data.split("|")
+    if len(parts) == 4 and parts[0] == "close":
+        _, ticket_str, symbol, level = parts
+        try:
+            ticket = int(ticket_str)
+        except ValueError:
+            ticket = 0
+
+        queued = False
+        if ticket > 0 and _DBSession:
+            db = _DBSession()
+            try:
+                order = MT5Order(
+                    user_id      = "default",
+                    symbol       = symbol,
+                    order_type   = "CLOSE",
+                    volume       = 0,
+                    price        = 0,
+                    action       = "close",
+                    close_ticket = ticket,
+                    status       = "pending",
+                    comment      = f"Telegram close {level}",
+                )
+                db.add(order)
+                db.commit()
+                queued = True
+            except Exception as e:
+                db.rollback()
+                print(f"[Telegram webhook] DB error: {e}")
+            finally:
+                db.close()
+
+        if bot_token:
+            answer_text = "✅ Close order sent — EA will execute within 5s" if queued else "⚠️ Could not queue order"
+            try:
+                # Dismiss the loading spinner on the button
+                requests.post(
+                    f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
+                    json={"callback_query_id": callback_id, "text": answer_text, "show_alert": False},
+                    timeout=5,
+                )
+                # Remove the keyboard from the original message so it can't be tapped twice
+                if chat_id and message_id:
+                    requests.post(
+                        f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup",
+                        json={"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
+                        timeout=5,
+                    )
+            except Exception:
+                pass
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/telegram/setup-webhook", methods=["GET"])
+@login_required
+def telegram_setup_webhook():
+    """One-time call to register the DotVerse webhook URL with Telegram."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if not bot_token:
+        return jsonify({"error": "TELEGRAM_BOT_TOKEN not set in Railway"}), 400
+    webhook_url = "https://dot-verse.up.railway.app/api/telegram/webhook"
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/setWebhook",
+            json={"url": webhook_url, "allowed_updates": ["callback_query"]},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("ok"):
+            return jsonify({"status": "ok", "description": data.get("description", "Webhook set")})
+        return jsonify({"status": "error", "description": data.get("description", "Unknown error")}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/keys/<int:key_id>", methods=["DELETE"])
 @login_required
