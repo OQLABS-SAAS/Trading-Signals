@@ -27,7 +27,26 @@ input double InpSlippage  = 3;                                    // Slippage po
 
 //--- Globals
 int    g_timerSeconds = 0;
-string g_userId       = "default";   // server matches push/pull by user_id; default is fine for demo
+string g_userId       = "default";
+
+// ── Level monitoring — track up to 50 open positions ─────────
+#define MAX_TRACKED 50
+ulong  g_tk[MAX_TRACKED];        // MT5 ticket
+string g_tk_sym[MAX_TRACKED];    // symbol
+string g_tk_dir[MAX_TRACKED];    // BUY | SELL
+double g_tk_sl[MAX_TRACKED];
+double g_tk_tp1[MAX_TRACKED];
+double g_tk_tp2[MAX_TRACKED];
+double g_tk_tp3[MAX_TRACKED];
+int    g_tk_hit[MAX_TRACKED];    // bitmask: 1=SL 2=TP1 4=TP2 8=TP3
+int    g_tk_count = 0;
+
+// ── Pending order TP2/TP3 lookup (by order_id before fill) ───
+#define MAX_PENDING 20
+long   g_pending_id[MAX_PENDING];
+double g_pending_tp2[MAX_PENDING];
+double g_pending_tp3[MAX_PENDING];
+int    g_pending_count = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialisation                                             |
@@ -65,6 +84,70 @@ void OnTimer()
 {
    PushState();
    PollAndExecute();
+   CheckLevels();
+}
+
+//+------------------------------------------------------------------+
+//| Check tracked positions against TP/SL levels                     |
+//+------------------------------------------------------------------+
+void CheckLevels()
+{
+   for (int i = 0; i < g_tk_count; i++) {
+      ulong ticket = g_tk[i];
+      string sym   = g_tk_sym[i];
+      string dir   = g_tk_dir[i];
+      bool isBuy   = (dir == "BUY");
+
+      // Check if position still open
+      if (!PositionSelectByTicket(ticket)) {
+         // Position closed — remove from tracking
+         g_tk_count--;
+         g_tk[i]     = g_tk[g_tk_count];
+         g_tk_sym[i] = g_tk_sym[g_tk_count];
+         g_tk_dir[i] = g_tk_dir[g_tk_count];
+         g_tk_sl[i]  = g_tk_sl[g_tk_count];
+         g_tk_tp1[i] = g_tk_tp1[g_tk_count];
+         g_tk_tp2[i] = g_tk_tp2[g_tk_count];
+         g_tk_tp3[i] = g_tk_tp3[g_tk_count];
+         g_tk_hit[i] = g_tk_hit[g_tk_count];
+         i--;
+         continue;
+      }
+
+      double cur = isBuy ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK);
+      int    hit = g_tk_hit[i];
+
+      // SL check
+      if (g_tk_sl[i] > 0 && !(hit & 1)) {
+         bool slHit = isBuy ? (cur <= g_tk_sl[i]) : (cur >= g_tk_sl[i]);
+         if (slHit) { SendLevelAlert(ticket, sym, dir, "SL", cur); g_tk_hit[i] |= 1; }
+      }
+      // TP1 check
+      if (g_tk_tp1[i] > 0 && !(hit & 2)) {
+         bool tp1Hit = isBuy ? (cur >= g_tk_tp1[i]) : (cur <= g_tk_tp1[i]);
+         if (tp1Hit) { SendLevelAlert(ticket, sym, dir, "TP1", cur); g_tk_hit[i] |= 2; }
+      }
+      // TP2 check
+      if (g_tk_tp2[i] > 0 && !(hit & 4)) {
+         bool tp2Hit = isBuy ? (cur >= g_tk_tp2[i]) : (cur <= g_tk_tp2[i]);
+         if (tp2Hit) { SendLevelAlert(ticket, sym, dir, "TP2", cur); g_tk_hit[i] |= 4; }
+      }
+      // TP3 check
+      if (g_tk_tp3[i] > 0 && !(hit & 8)) {
+         bool tp3Hit = isBuy ? (cur >= g_tk_tp3[i]) : (cur <= g_tk_tp3[i]);
+         if (tp3Hit) { SendLevelAlert(ticket, sym, dir, "TP3", cur); g_tk_hit[i] |= 8; }
+      }
+   }
+}
+
+void SendLevelAlert(ulong ticket, string symbol, string direction, string level, double price)
+{
+   Print("DotVerse EA: LEVEL HIT — ", level, " ticket=", ticket, " price=", price);
+   string body = StringFormat(
+      "{\"ticket\":%I64u,\"symbol\":\"%s\",\"direction\":\"%s\",\"level\":\"%s\",\"price\":%.5f}",
+      ticket, symbol, direction, level, price
+   );
+   HttpPost("/api/mt5/alert", body);
 }
 
 //+------------------------------------------------------------------+
@@ -259,6 +342,16 @@ void ExecuteOrder(string obj)
    double volume    = JsonDbl(obj, "volume");
    double sl        = JsonDbl(obj, "sl");
    double tp        = JsonDbl(obj, "tp");
+   double tp2       = JsonDbl(obj, "tp2");
+   double tp3       = JsonDbl(obj, "tp3");
+
+   // Store tp2/tp3 for this order_id so we can look them up after fill
+   if (g_pending_count < MAX_PENDING) {
+      g_pending_id[g_pending_count]  = orderId;
+      g_pending_tp2[g_pending_count] = tp2;
+      g_pending_tp3[g_pending_count] = tp3;
+      g_pending_count++;
+   }
 
    if (orderId == 0 || StringLen(symbol) == 0) {
       Print("DotVerse EA: skipping malformed order: ", obj);
@@ -311,6 +404,24 @@ void ExecuteOrder(string obj)
       fillPrice = res.price;
       comment   = "Filled at " + DoubleToString(fillPrice, 5);
       Print("DotVerse EA: order #", orderId, " filled. deal=", ticket, " price=", fillPrice);
+
+      // Look up tp2/tp3 for this order_id and register for level monitoring
+      double o_tp2 = 0, o_tp3 = 0;
+      for (int pi = 0; pi < g_pending_count; pi++) {
+         if (g_pending_id[pi] == orderId) { o_tp2 = g_pending_tp2[pi]; o_tp3 = g_pending_tp3[pi]; break; }
+      }
+      if (g_tk_count < MAX_TRACKED) {
+         int idx = g_tk_count++;
+         g_tk[idx]     = (ulong)ticket;
+         g_tk_sym[idx] = symbol;
+         g_tk_dir[idx] = orderType;
+         g_tk_sl[idx]  = sl;
+         g_tk_tp1[idx] = tp;
+         g_tk_tp2[idx] = o_tp2;
+         g_tk_tp3[idx] = o_tp3;
+         g_tk_hit[idx] = 0;
+         Print("DotVerse EA: tracking ticket ", ticket, " SL=", sl, " TP1=", tp, " TP2=", o_tp2, " TP3=", o_tp3);
+      }
    } else {
       status  = "failed";
       comment = "retcode=" + IntegerToString(res.retcode) + " " + res.comment;

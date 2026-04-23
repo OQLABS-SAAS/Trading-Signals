@@ -3087,6 +3087,8 @@ def mt5_submit_order():
     price      = float(body.get("price", 0))
     sl         = body.get("sl")
     tp         = body.get("tp")
+    tp2        = body.get("tp2")
+    tp3        = body.get("tp3")
     if not ticker or direction not in ("BUY", "SELL") or volume <= 0:
         return jsonify({"error": "ticker, direction (BUY/SELL), and volume required"}), 400
     symbol = _mt5_symbol(ticker, asset_type)
@@ -3098,8 +3100,10 @@ def mt5_submit_order():
             order_type = direction,
             volume     = volume,
             price      = price,
-            sl         = float(sl) if sl else None,
-            tp         = float(tp) if tp else None,
+            sl         = float(sl)  if sl  else None,
+            tp         = float(tp)  if tp  else None,
+            tp2        = float(tp2) if tp2 else None,
+            tp3        = float(tp3) if tp3 else None,
             status     = "pending",
             comment    = f"DotVerse {ticker} {direction}",
         )
@@ -3131,6 +3135,8 @@ def mt5_get_pending():
                 "price":      o.price,
                 "sl":         o.sl,
                 "tp":         o.tp,
+                "tp2":        o.tp2,
+                "tp3":        o.tp3,
             })
             o.status = "executing"
         db.commit()
@@ -3163,13 +3169,63 @@ def mt5_confirm_order():
             order.comment    = comment
             if status == "filled":
                 order.filled_at = datetime.utcnow()
+                # Send Telegram notification on fill
+                try:
+                    emoji = "🟢" if order.order_type == "BUY" else "🔴"
+                    tg_msg = (
+                        f"{emoji} Trade Executed\n"
+                        f"{order.symbol} {order.order_type} {order.volume} lots\n"
+                        f"Entry:  {fill_price}\n"
+                        f"SL:     {order.sl or '—'}\n"
+                        f"TP1:    {order.tp  or '—'}\n"
+                        f"TP2:    {order.tp2 or '—'}\n"
+                        f"TP3:    {order.tp3 or '—'}\n"
+                        f"Ticket: #{ticket}\n"
+                        f"🔗 https://dot-verse.up.railway.app"
+                    )
+                    send_telegram(tg_msg)
+                except Exception:
+                    pass
         db.commit()
-        return jsonify({"status": "ok"})
+        return jsonify({"status": "ok", "tp2": order.tp2, "tp3": order.tp3})
     except Exception as e:
         db.rollback()
         return jsonify({"status": "error", "error": str(e)})
     finally:
         db.close()
+
+@app.route("/api/mt5/alert", methods=["POST"])
+@_require_ea
+def mt5_level_alert():
+    """EA reports when a TP or SL level is hit — sends Telegram notification."""
+    body   = request.json or {}
+    ticket = body.get("ticket")
+    symbol = body.get("symbol", "")
+    level  = body.get("level", "")    # TP1 | TP2 | TP3 | SL
+    price  = body.get("price", 0)
+    direction = body.get("direction", "")
+
+    emoji_map = {"TP1": "🎯", "TP2": "🎯", "TP3": "✅", "SL": "🛑"}
+    action_map = {
+        "TP1": "Consider closing 50% of position",
+        "TP2": "Consider closing 30% — let rest run to TP3",
+        "TP3": "Close remaining position — full target reached",
+        "SL":  "Stop loss hit — position closed",
+    }
+    emoji  = emoji_map.get(level, "⚡")
+    action = action_map.get(level, "")
+    tg_msg = (
+        f"{emoji} {level} Hit — {symbol}\n"
+        f"{direction} position #{ticket}\n"
+        f"Price: {price}\n"
+        f"{action}\n"
+        f"🔗 https://dot-verse.up.railway.app"
+    )
+    try:
+        send_telegram(tg_msg)
+    except Exception:
+        pass
+    return jsonify({"status": "ok"})
 
 @app.route("/api/mt5/push", methods=["POST"])
 @_require_ea
@@ -5108,6 +5164,8 @@ class MT5Order(_Base):
     price       = Column(Float,      nullable=False)   # requested entry
     sl          = Column(Float,      nullable=True)
     tp          = Column(Float,      nullable=True)
+    tp2         = Column(Float,      nullable=True)
+    tp3         = Column(Float,      nullable=True)
     status      = Column(String(16), nullable=False, default="pending")  # pending|executing|filled|failed|cancelled
     mt5_ticket  = Column(Integer,    nullable=True)
     fill_price  = Column(Float,      nullable=True)
@@ -5206,9 +5264,11 @@ def _init_db():
         try:
             with _db_engine.connect() as _conn:
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'legacy'"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp2 FLOAT"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp3 FLOAT"))
                 _conn.commit()
         except Exception as _e:
-            print(f"[db] watches migration: {_e}")
+            print(f"[db] migration: {_e}")
     _load_watches_from_db()
 
 with app.app_context():
