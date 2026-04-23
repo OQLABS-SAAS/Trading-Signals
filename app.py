@@ -8,6 +8,7 @@ Features: Multi-timeframe analysis, MTF trend, historical win rate,
 from flask import Flask, request, jsonify, send_from_directory, session, Response
 from flask_cors import CORS
 from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -89,15 +90,41 @@ def handle_404(e):
 #   APP_PASSWORD → the password you want to protect the app with
 app.secret_key   = os.environ.get("SECRET_KEY", "change-me-set-SECRET_KEY-in-railway")
 APP_PASSWORD     = os.environ.get("APP_PASSWORD", "").strip()
+ADMIN_EMAIL      = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 
 def login_required(f):
     """Decorator — blocks API calls unless the user has logged in this session."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if APP_PASSWORD and not session.get("authenticated"):
+        if not session.get("user_id") and not session.get("authenticated"):
             return jsonify({"error": "Unauthorized", "login_required": True}), 401
         return f(*args, **kwargs)
     return decorated
+
+def require_admin(f):
+    """Decorator — blocks API calls unless the current user is admin."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("user_id"):
+            return jsonify({"error": "Unauthorized"}), 401
+        user = _get_current_user()
+        if not user or user.role != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+def _get_current_user():
+    """Return the current User ORM object from session, or None."""
+    user_id = session.get("user_id")
+    if not user_id or not _DBSession:
+        return None
+    try:
+        db = _DBSession()
+        user = db.query(User).filter_by(id=user_id).first()
+        db.close()
+        return user
+    except Exception:
+        return None
 
 # ─── TIMEFRAME CONFIG ─────────────────────────────────────────
 TIMEFRAME_CONFIG = {
@@ -2677,15 +2704,79 @@ def index():
     return resp
 
 # ─── AUTH ROUTES (no login_required) ─────────────────────────
+
+@app.route("/api/register", methods=["POST"])
+def register():
+    """Create a new user account."""
+    if not _DBSession:
+        return jsonify({"status": "error", "message": "Database not available"}), 503
+    body     = request.json or {}
+    email    = body.get("email", "").strip().lower()
+    name     = body.get("name", "").strip()
+    password = body.get("password", "").strip()
+    if not email or not password:
+        return jsonify({"status": "error", "message": "Email and password required"}), 400
+    if len(password) < 6:
+        return jsonify({"status": "error", "message": "Password must be at least 6 characters"}), 400
+    db = _DBSession()
+    try:
+        if db.query(User).filter_by(email=email).first():
+            return jsonify({"status": "error", "message": "Email already registered"}), 409
+        role = "admin" if (ADMIN_EMAIL and email == ADMIN_EMAIL) else "user"
+        tier = "elite" if role == "admin" else "free"
+        user = User(
+            email         = email,
+            name          = name or email.split("@")[0],
+            password_hash = generate_password_hash(password),
+            role          = role,
+            tier          = tier,
+        )
+        db.add(user)
+        db.commit()
+        session["user_id"]   = user.id
+        session["user_role"] = user.role
+        session["user_tier"] = user.tier
+        session.permanent    = True
+        return jsonify({"status": "ok", "role": user.role, "tier": user.tier, "name": user.name})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db.close()
+
 @app.route("/api/login", methods=["POST"])
 def login():
-    """Check password and create session."""
+    """Email + password login. Falls back to legacy APP_PASSWORD if no DB."""
+    body     = request.json or {}
+    email    = body.get("email", "").strip().lower()
+    password = body.get("password", "").strip()
+
+    # ── New email/password flow ──
+    if email and _DBSession:
+        db = _DBSession()
+        try:
+            user = db.query(User).filter_by(email=email).first()
+            if not user or not check_password_hash(user.password_hash or "", password):
+                return jsonify({"status": "error", "message": "Incorrect email or password"}), 401
+            # If ADMIN_EMAIL matches, ensure role is admin
+            if ADMIN_EMAIL and email == ADMIN_EMAIL and user.role != "admin":
+                user.role = "admin"
+                user.tier = "elite"
+                db.commit()
+            session["user_id"]   = user.id
+            session["user_role"] = user.role
+            session["user_tier"] = user.tier
+            session.permanent    = True
+            return jsonify({"status": "ok", "role": user.role, "tier": user.tier, "name": user.name})
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+        finally:
+            db.close()
+
+    # ── Legacy single-password fallback ──
     if not APP_PASSWORD:
-        # No password configured — allow all
         session["authenticated"] = True
         return jsonify({"status": "ok", "message": "No password required"})
-    body     = request.json or {}
-    password = body.get("password", "").strip()
     if password == APP_PASSWORD:
         session["authenticated"] = True
         session.permanent = True
@@ -2700,12 +2791,99 @@ def logout():
 @app.route("/api/auth-check", methods=["GET"])
 def auth_check():
     """Frontend calls this on load to see if the user is already logged in."""
-    if not APP_PASSWORD:
+    # New user-based session
+    if session.get("user_id") and _DBSession:
+        user = _get_current_user()
+        if user:
+            return jsonify({
+                "authenticated":    True,
+                "user_id":          user.id,
+                "email":            user.email,
+                "name":             user.name,
+                "tier":             user.tier,
+                "role":             user.role,
+                "password_required": False,
+            })
+    # Legacy session
+    if session.get("authenticated"):
+        return jsonify({"authenticated": True, "password_required": False, "role": "admin", "tier": "elite"})
+    if not APP_PASSWORD and not _DBSession:
         return jsonify({"authenticated": True, "password_required": False})
-    return jsonify({
-        "authenticated":    session.get("authenticated", False),
-        "password_required": True,
-    })
+    return jsonify({"authenticated": False, "password_required": True})
+
+# ─── ADMIN ROUTES ──────────────────────────────────────────────
+
+@app.route("/api/admin/users", methods=["GET"])
+@require_admin
+def admin_list_users():
+    """Return all registered users."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    db = _DBSession()
+    try:
+        users = db.query(User).order_by(User.created_at.desc()).all()
+        return jsonify({"users": [{
+            "id":         u.id,
+            "email":      u.email,
+            "name":       u.name,
+            "tier":       u.tier,
+            "role":       u.role,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        } for u in users]})
+    finally:
+        db.close()
+
+@app.route("/api/admin/set-role", methods=["POST"])
+@require_admin
+def admin_set_role():
+    """Grant or revoke admin role for a user."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body    = request.json or {}
+    user_id = body.get("user_id")
+    role    = body.get("role")   # "admin" or "user"
+    if not user_id or role not in ("admin", "user"):
+        return jsonify({"error": "user_id and role (admin/user) required"}), 400
+    db = _DBSession()
+    try:
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        user.role = role
+        if role == "admin":
+            user.tier = "elite"
+        db.commit()
+        return jsonify({"status": "ok", "email": user.email, "role": user.role, "tier": user.tier})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/admin/set-tier", methods=["POST"])
+@require_admin
+def admin_set_tier():
+    """Manually set a user's tier (free / pro / elite)."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body    = request.json or {}
+    user_id = body.get("user_id")
+    tier    = body.get("tier")
+    if not user_id or tier not in ("free", "pro", "elite"):
+        return jsonify({"error": "user_id and tier (free/pro/elite) required"}), 400
+    db = _DBSession()
+    try:
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        user.tier = tier
+        db.commit()
+        return jsonify({"status": "ok", "email": user.email, "tier": user.tier})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
 
 @app.route("/api/analyze", methods=["POST"])
 @login_required
@@ -4296,6 +4474,20 @@ if _redis_client:
         print(f"[rq] Queue init failed: {_e}")
 
 # ─── SQLALCHEMY MODELS ────────────────────────────────────────
+
+class User(_Base):
+    """Registered users — email/password accounts with tier and role."""
+    __tablename__ = "users"
+    id                 = Column(Integer,     primary_key=True, autoincrement=True)
+    email              = Column(String(255), unique=True, nullable=False)
+    name               = Column(String(128), nullable=True)
+    password_hash      = Column(String(256), nullable=True)   # nullable for Google OAuth later
+    tier               = Column(String(16),  nullable=False, default="free")   # free / pro / elite
+    role               = Column(String(16),  nullable=False, default="user")   # user / admin
+    stripe_customer_id = Column(String(64),  nullable=True)
+    daily_analyses     = Column(Integer,     nullable=False, default=0)
+    last_analysis_date = Column(String(10),  nullable=True)   # YYYY-MM-DD string
+    created_at         = Column(DateTime,    nullable=False, default=datetime.utcnow)
 
 class Position(_Base):
     """Open trade positions logged by the user."""

@@ -1333,6 +1333,7 @@ body::before{
       <span class="ac-price" id="acPrice">—</span>
       <span class="ac-chg" id="acChg">—</span>
     </div>
+    <a href="pricing.html" target="_blank" style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;padding:7px 16px;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;cursor:pointer;text-transform:uppercase;text-decoration:none;white-space:nowrap;transition:background .15s;" onmouseover="this.style.background='var(--amber2)'" onmouseout="this.style.background='var(--amber)'">⬆ Upgrade</a>
   </div>
 </header>
 
@@ -3024,21 +3025,66 @@ window.fetch = function(url, opts={}) {
 };
 
 /* ════════════════════════════════════════════
-   AUTH — PASSWORD GATE
+   AUTH — GATE
 ════════════════════════════════════════════ */
+let _gateMode = 'login';
+let _currentUser = null;
+
+function gateSetMode(mode) {
+  _gateMode = mode;
+  const isReg = mode === 'register';
+  document.getElementById('gateNameWrap').style.display = isReg ? 'block' : 'none';
+  document.getElementById('gateBtn').textContent = isReg ? 'CREATE ACCOUNT' : 'SIGN IN';
+  document.getElementById('gateTabLogin').style.background  = isReg ? 'transparent' : 'var(--amber)';
+  document.getElementById('gateTabLogin').style.color       = isReg ? 'var(--muted2)' : '#0C0A08';
+  document.getElementById('gateTabReg').style.background    = isReg ? 'var(--amber)' : 'transparent';
+  document.getElementById('gateTabReg').style.color         = isReg ? '#0C0A08' : 'var(--muted2)';
+  document.getElementById('gateError').textContent = '';
+}
+
+async function gateSubmit() {
+  const email    = (document.getElementById('gateEmail').value || '').trim();
+  const password = (document.getElementById('gateInput').value || '').trim();
+  const name     = (document.getElementById('gateName')  ? document.getElementById('gateName').value : '').trim();
+  const btn      = document.getElementById('gateBtn');
+  const errEl    = document.getElementById('gateError');
+  errEl.textContent = '';
+  if (!email || !password) { errEl.textContent = 'Email and password required.'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Please wait…';
+  try {
+    const endpoint = _gateMode === 'register' ? '/api/register' : '/api/login';
+    const body     = _gateMode === 'register' ? {email, password, name} : {email, password};
+    const r = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body:JSON.stringify(body)});
+    const d = await r.json();
+    if (r.ok) {
+      _currentUser = d;
+      unlockApp(d);
+    } else {
+      errEl.textContent = d.message || 'Something went wrong. Try again.';
+    }
+  } catch(e) {
+    errEl.textContent = 'Connection error. Please retry.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = _gateMode === 'register' ? 'CREATE ACCOUNT' : 'SIGN IN';
+  }
+}
+
+// Keep doLogin as legacy alias (used by old keyboard handler)
+async function doLogin() { gateSubmit(); }
+
 async function checkAuth() {
   try {
     const r = await fetch('/api/auth-check', {credentials:'include'});
     const d = await r.json();
     if (d.authenticated) {
-      // Already logged in (or no password set) — start app directly, no gate flash
-      startApp();
+      _currentUser = d;
+      startApp(d);
     } else {
-      // Password required and not logged in — show the gate
       showGate();
     }
   } catch(e) {
-    // Network error — show gate as safe default
     showGate();
   }
 }
@@ -3047,10 +3093,10 @@ function showGate() {
   const gate = document.getElementById('passwordGate');
   gate.style.display = 'flex';
   requestAnimationFrame(() => { gate.style.opacity = '1'; });
-  setTimeout(() => document.getElementById('gateInput').focus(), 350);
+  setTimeout(() => { try { document.getElementById('gateEmail').focus(); } catch(e){} }, 350);
 }
 
-function startApp() {
+function startApp(user) {
   try { buildTape(); } catch(e) { console.warn('buildTape:', e); }
   try { loadTape(); } catch(e) { console.warn('loadTape:', e); }
   try { renderWatchlist(); } catch(e) { console.warn('renderWatchlist:', e); }
@@ -3062,47 +3108,17 @@ function startApp() {
   try { setInterval(loadTape, 120000); } catch(e) {}
   try { setInterval(refreshWatchPanel, 60000); } catch(e) {}
   try { setInterval(loadMarketPulse, 30 * 60 * 1000); } catch(e) {}
-}
-
-async function doLogin() {
-  const password = document.getElementById('gateInput').value;
-  const btn      = document.getElementById('gateBtn');
-  const errEl    = document.getElementById('gateError');
-  if (!password) { errEl.textContent = 'Please enter the password.'; return; }
-
-  btn.disabled = true;
-  btn.textContent = 'Verifying…';
-  errEl.textContent = '';
-
-  try {
-    const r = await fetch('/api/login', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'include',
-      body: JSON.stringify({password})
-    });
-    if (r.ok) {
-      unlockApp();
-    } else {
-      const d = await r.json();
-      errEl.textContent = d.message || 'Incorrect password. Try again.';
-      document.getElementById('gateInput').value = '';
-      document.getElementById('gateInput').focus();
-    }
-  } catch(e) {
-    errEl.textContent = 'Connection error. Please retry.';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Get In';
+  // Show admin button if user is admin
+  if (user && user.role === 'admin') {
+    try { showAdminBtn(); } catch(e) {}
   }
 }
 
-function unlockApp() {
+function unlockApp(user) {
   const gate = document.getElementById('passwordGate');
   gate.style.transition = 'opacity .4s';
   gate.style.opacity = '0';
   setTimeout(() => gate.remove(), 400);
-  // Start app features now that we're logged in
   buildTape();
   loadTape();
   renderWatchlist();
@@ -3115,6 +3131,92 @@ function unlockApp() {
   setInterval(loadMarketPulse, 30 * 60 * 1000);
   setInterval(loadSidebarTickers, 60000);
   try { loadSigHistory(); } catch(e) {}
+  if (user && user.role === 'admin') {
+    try { showAdminBtn(); } catch(e) {}
+  }
+}
+
+/* ── Admin panel ── */
+function showAdminBtn() {
+  if (document.getElementById('adminNavBtn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'adminNavBtn';
+  btn.textContent = '⚙ Admin';
+  btn.onclick = openAdminPanel;
+  btn.style.cssText = 'font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;padding:7px 14px;background:transparent;color:var(--amber);border:1px solid var(--border2);border-radius:2px;cursor:pointer;text-transform:uppercase;white-space:nowrap;margin-right:8px;';
+  const upgradeBtn = document.querySelector('a[href="pricing.html"]');
+  if (upgradeBtn) upgradeBtn.parentNode.insertBefore(btn, upgradeBtn);
+}
+
+function openAdminPanel() {
+  document.getElementById('adminPanel').style.display = 'block';
+  adminLoadUsers();
+}
+
+async function adminLoadUsers() {
+  const tbody = document.getElementById('adminUsersTbody');
+  tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);">Loading…</td></tr>';
+  try {
+    const r = await fetch('/api/admin/users', {credentials:'include'});
+    const d = await r.json();
+    if (!r.ok) { tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--red);font-family:var(--mono);font-size:11px;">' + (d.error||'Error') + '</td></tr>'; return; }
+    if (!d.users.length) { tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);">No users yet.</td></tr>'; return; }
+    tbody.innerHTML = d.users.map(u => {
+      const tierColor = u.tier==='elite'?'var(--amber)':u.tier==='pro'?'var(--green)':'var(--muted2)';
+      const roleColor = u.role==='admin'?'var(--amber)':'var(--muted2)';
+      return `<tr style="border-top:1px solid var(--border);">
+        <td style="padding:10px 16px;font-family:var(--mono);font-size:12px;color:var(--white);">${u.email}</td>
+        <td style="padding:10px 16px;font-size:12px;color:var(--white2);">${u.name||'—'}</td>
+        <td style="padding:10px 16px;">
+          <select onchange="adminChangeTier(${u.id},this.value)" style="background:var(--bg3);border:1px solid var(--border);color:${tierColor};font-family:var(--mono);font-size:11px;padding:3px 6px;border-radius:2px;outline:none;">
+            <option value="free" ${u.tier==='free'?'selected':''}>Free</option>
+            <option value="pro" ${u.tier==='pro'?'selected':''}>Pro</option>
+            <option value="elite" ${u.tier==='elite'?'selected':''}>Elite</option>
+          </select>
+        </td>
+        <td style="padding:10px 16px;">
+          <select onchange="adminChangeRole(${u.id},this.value)" style="background:var(--bg3);border:1px solid var(--border);color:${roleColor};font-family:var(--mono);font-size:11px;padding:3px 6px;border-radius:2px;outline:none;">
+            <option value="user" ${u.role==='user'?'selected':''}>User</option>
+            <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+          </select>
+        </td>
+        <td style="padding:10px 16px;font-family:var(--mono);font-size:11px;color:var(--muted2);">${u.created_at?u.created_at.slice(0,10):'—'}</td>
+        <td style="padding:10px 16px;font-family:var(--mono);font-size:11px;color:var(--green);">Saved on change</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--red);font-family:var(--mono);font-size:11px;">Network error</td></tr>';
+  }
+}
+
+async function adminChangeRole(userId, role) {
+  await fetch('/api/admin/set-role', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body:JSON.stringify({user_id:userId, role})});
+}
+
+async function adminChangeTier(userId, tier) {
+  await fetch('/api/admin/set-tier', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body:JSON.stringify({user_id:userId, tier})});
+}
+
+async function adminGrantByEmail() {
+  const email = document.getElementById('adminGrantEmail').value.trim();
+  const role  = document.getElementById('adminGrantRole').value;
+  const tier  = document.getElementById('adminGrantTier').value;
+  const msg   = document.getElementById('adminGrantMsg');
+  if (!email) { msg.style.color='var(--red)'; msg.textContent='Enter an email address.'; return; }
+  try {
+    // Find user by loading full list, then set role+tier
+    const r = await fetch('/api/admin/users', {credentials:'include'});
+    const d = await r.json();
+    const user = (d.users||[]).find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!user) { msg.style.color='var(--red)'; msg.textContent='User not found. They must register first.'; return; }
+    await fetch('/api/admin/set-role', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body:JSON.stringify({user_id:user.id, role})});
+    await fetch('/api/admin/set-tier', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body:JSON.stringify({user_id:user.id, tier})});
+    msg.style.color = 'var(--green)';
+    msg.textContent = `✓ ${email} updated to ${role} / ${tier}`;
+    adminLoadUsers();
+  } catch(e) {
+    msg.style.color='var(--red)'; msg.textContent='Error — try again.';
+  }
 }
 
 async function loadSidebarTickers() {
@@ -11334,18 +11436,95 @@ function closeSimulate() {
 <div class="dv-tip" id="dvTip"></div>
 
 
-<!-- PASSWORD GATE OVERLAY -->
-<div id="passwordGate" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(12,10,8,.98); z-index:9999; align-items:center; justify-content:center;">
-  <div style="text-align:center; color:#ede6d6; max-width:350px;">
-    <h2 style="font-family:var(--disp); font-size:36px; margin-bottom:20px; color:#f5a623; letter-spacing:-1px;">dotverse</h2>
-    <p style="margin-bottom:30px; color:#9a8e7e; font-family:var(--mono); font-size:12px; letter-spacing:.8px; text-transform:uppercase;">Enter Password to Continue</p>
-    <input id="gateInput" type="password" placeholder="Password"
-      style="width:100%; padding:11px 12px; margin-bottom:12px; background:var(--bg2); border:1px solid var(--border2); color:#ede6d6; border-radius:3px; font-family:var(--mono); font-size:13px; box-sizing:border-box;">
-    <div style="display:flex; gap:8px; margin-bottom:16px;">
-      <button id="gateBtn" onclick="doLogin()" style="flex:1; padding:10px; background:#f5a623; color:#0C0A08; border:none; border-radius:3px; font-weight:700; cursor:pointer; font-family:var(--mono); font-size:12px;">GET IN</button>
-      <button onclick="toggleGateEye()" id="gateEye" style="padding:10px 14px; background:rgba(255,255,255,.05); color:#9a8e7e; border:1px solid var(--border); border-radius:3px; cursor:pointer; font-family:var(--mono); font-size:10px;letter-spacing:.5px;">SHOW</button>
+<!-- AUTH GATE OVERLAY -->
+<div id="passwordGate" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(12,10,8,.98); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
+  <div style="text-align:center; color:#ede6d6; max-width:380px; width:100%; padding:0 20px;">
+    <!-- Logo -->
+    <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px;">
+      <svg width="32" height="32" viewBox="0 0 34 34" fill="none"><circle cx="17" cy="17" r="16" stroke="rgba(245,166,35,.18)" stroke-width="1"/><circle cx="17" cy="17" r="12" stroke="rgba(245,166,35,.28)" stroke-width="1"/><circle cx="17" cy="17" r="8" stroke="rgba(245,166,35,.42)" stroke-width="1"/><circle cx="17" cy="17" r="4.5" stroke="rgba(245,166,35,.65)" stroke-width="1"/><circle cx="17" cy="17" r="2.5" fill="#f5a623"/></svg>
+      <span style="font-family:var(--mono);font-size:20px;font-weight:500;"><span style="color:#f5a623;">dot</span><span style="color:#f5a623;">•</span><span style="font-weight:300;">verse</span></span>
     </div>
-    <div id="gateError" style="color:#ff4459; font-size:11px; min-height:20px; font-family:var(--mono);"></div>
+    <!-- Mode toggle -->
+    <div style="display:flex;gap:0;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:3px;padding:3px;margin-bottom:24px;">
+      <button id="gateTabLogin" onclick="gateSetMode('login')" style="flex:1;padding:8px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;border:none;border-radius:2px;cursor:pointer;background:var(--amber);color:#0C0A08;transition:all .15s;">Sign In</button>
+      <button id="gateTabReg" onclick="gateSetMode('register')" style="flex:1;padding:8px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;border:none;border-radius:2px;cursor:pointer;background:transparent;color:var(--muted2);transition:all .15s;">Create Account</button>
+    </div>
+    <!-- Name field (register only) -->
+    <div id="gateNameWrap" style="display:none;margin-bottom:10px;">
+      <input id="gateName" type="text" placeholder="Your name"
+        style="width:100%;padding:11px 12px;background:var(--bg2);border:1px solid var(--border2);color:#ede6d6;border-radius:3px;font-family:var(--mono);font-size:13px;box-sizing:border-box;outline:none;"
+        onfocus="this.style.borderColor='var(--amber)'" onblur="this.style.borderColor='var(--border2)'">
+    </div>
+    <!-- Email -->
+    <input id="gateEmail" type="email" placeholder="Email address"
+      style="width:100%;padding:11px 12px;margin-bottom:10px;background:var(--bg2);border:1px solid var(--border2);color:#ede6d6;border-radius:3px;font-family:var(--mono);font-size:13px;box-sizing:border-box;outline:none;"
+      onfocus="this.style.borderColor='var(--amber)'" onblur="this.style.borderColor='var(--border2)'"
+      onkeydown="if(event.key==='Enter')document.getElementById('gateInput').focus()">
+    <!-- Password -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <input id="gateInput" type="password" placeholder="Password"
+        style="flex:1;padding:11px 12px;background:var(--bg2);border:1px solid var(--border2);color:#ede6d6;border-radius:3px;font-family:var(--mono);font-size:13px;box-sizing:border-box;outline:none;"
+        onfocus="this.style.borderColor='var(--amber)'" onblur="this.style.borderColor='var(--border2)'"
+        onkeydown="if(event.key==='Enter')gateSubmit()">
+      <button onclick="toggleGateEye()" id="gateEye" style="padding:10px 14px;background:rgba(255,255,255,.05);color:#9a8e7e;border:1px solid var(--border);border-radius:3px;cursor:pointer;font-family:var(--mono);font-size:10px;letter-spacing:.5px;white-space:nowrap;">SHOW</button>
+    </div>
+    <button id="gateBtn" onclick="gateSubmit()" style="width:100%;padding:12px;background:#f5a623;color:#0C0A08;border:none;border-radius:3px;font-weight:700;cursor:pointer;font-family:var(--mono);font-size:12px;letter-spacing:.5px;text-transform:uppercase;transition:background .15s;margin-bottom:16px;">Sign In</button>
+    <div id="gateError" style="color:#ff4459;font-size:11px;min-height:20px;font-family:var(--mono);text-align:center;"></div>
+  </div>
+</div>
+
+<!-- ADMIN PANEL OVERLAY -->
+<div id="adminPanel" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(12,10,8,.97);z-index:8888;overflow-y:auto;">
+  <div style="max-width:900px;margin:0 auto;padding:40px 24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;">
+      <div>
+        <div style="font-family:var(--disp);font-size:28px;font-weight:900;letter-spacing:-1px;color:var(--amber);">Admin Panel</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-top:4px;letter-spacing:1px;">USER MANAGEMENT</div>
+      </div>
+      <button onclick="document.getElementById('adminPanel').style.display='none'" style="font-family:var(--mono);font-size:11px;color:var(--muted2);background:transparent;border:1px solid var(--border);padding:8px 16px;border-radius:2px;cursor:pointer;">✕ Close</button>
+    </div>
+    <!-- Invite / add user -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:20px;margin-bottom:24px;">
+      <div style="font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--amber);margin-bottom:14px;">Grant Access by Email</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <input id="adminGrantEmail" type="email" placeholder="user@email.com" style="flex:1;min-width:200px;padding:9px 12px;background:var(--bg3);border:1px solid var(--border2);color:var(--white);border-radius:2px;font-family:var(--mono);font-size:12px;outline:none;">
+        <select id="adminGrantRole" style="padding:9px 12px;background:var(--bg3);border:1px solid var(--border2);color:var(--white);border-radius:2px;font-family:var(--mono);font-size:12px;outline:none;">
+          <option value="admin">Admin</option>
+          <option value="user">User</option>
+        </select>
+        <select id="adminGrantTier" style="padding:9px 12px;background:var(--bg3);border:1px solid var(--border2);color:var(--white);border-radius:2px;font-family:var(--mono);font-size:12px;outline:none;">
+          <option value="elite">Elite</option>
+          <option value="pro">Pro</option>
+          <option value="free">Free</option>
+        </select>
+        <button onclick="adminGrantByEmail()" style="padding:9px 20px;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;">Grant</button>
+      </div>
+      <div id="adminGrantMsg" style="font-family:var(--mono);font-size:11px;margin-top:8px;min-height:16px;"></div>
+    </div>
+    <!-- Users table -->
+    <div style="background:var(--bg1);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;">
+      <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--amber);">All Users</div>
+        <button onclick="adminLoadUsers()" style="font-family:var(--mono);font-size:10px;color:var(--muted2);background:transparent;border:1px solid var(--border);padding:5px 12px;border-radius:2px;cursor:pointer;letter-spacing:.5px;">↻ Refresh</button>
+      </div>
+      <div id="adminUsersTable" style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="background:var(--bg2);">
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);padding:10px 16px;text-align:left;">Email</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);padding:10px 16px;text-align:left;">Name</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);padding:10px 16px;text-align:left;">Tier</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);padding:10px 16px;text-align:left;">Role</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);padding:10px 16px;text-align:left;">Joined</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);padding:10px 16px;text-align:left;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="adminUsersTbody">
+            <tr><td colspan="6" style="padding:24px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);">Loading users…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 
