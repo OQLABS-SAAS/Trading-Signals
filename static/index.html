@@ -3726,6 +3726,11 @@ async function doAnalyze(ticker, assetType, timeframe) {
     if (d.error) { showError(d.error); return; }
     currentData = d;
     isWatching = false;
+    // Reset alert button immediately (sync) so it never stays stuck on "Stop Alert"
+    // refreshWatchPanel will update it to "Stop Alert" if this ticker is already watched
+    var _abReset = document.getElementById('alertBtn');
+    if (_abReset) _abReset.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Alert Me';
+    try { refreshWatchPanel(); } catch(e) {}
     pushRecentInstrument(d.ticker, d.asset_type, d.timeframe);
     // Always update the visible Concept 5 v2 UI first
     try { renderResultsV2(d); } catch(e) { console.error('[dotverse] renderResultsV2 CRASHED:', e, e.stack); }
@@ -5773,6 +5778,18 @@ async function refreshWatchPanel() {
     const r = await fetch('/api/watches');
     const d = await r.json();
     const watches = d.watches || [];
+    // Restore alert button state for currently loaded ticker
+    var _alertBtn = document.getElementById('alertBtn');
+    if (_alertBtn && currentData) {
+      var _isWatched = watches.some(function(w){ return w.ticker === currentData.ticker && w.timeframe === currentData.timeframe; });
+      if (_isWatched) {
+        isWatching = true;
+        _alertBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><line x1="1" y1="1" x2="23" y2="23"/></svg>Stop Alert';
+      } else {
+        isWatching = false;
+        _alertBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Alert Me';
+      }
+    }
     // Show/hide the alerts section in sidebar
     var sideAlerts = document.getElementById('sideAlerts');
     if (sideAlerts) sideAlerts.style.display = watches.length ? '' : 'none';

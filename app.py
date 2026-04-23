@@ -2280,7 +2280,7 @@ def send_sms(message):
     from_num = os.environ.get("SMS_FROM_NUMBER", "").strip()
     to_num   = os.environ.get("ALERT_PHONE", "").strip()
     if not all([sid, token, from_num, to_num]):
-        return
+        return None  # not configured — not a failure
     try:
         resp = requests.post(
             f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
@@ -2290,8 +2290,12 @@ def send_sms(message):
         )
         if resp.status_code not in (200, 201):
             print(f"[SMS] Twilio error {resp.status_code}: {resp.text[:200]}")
+            return False
+        print("[SMS] Sent OK")
+        return True
     except Exception as e:
         print(f"[SMS] Error: {e}")
+        return False
 
 
 def send_whatsapp(message):
@@ -2301,7 +2305,7 @@ def send_whatsapp(message):
     from_num = os.environ.get("WA_FROM_NUMBER", "whatsapp:+14155238886").strip()
     to_num   = os.environ.get("WA_TO_NUMBER", "").strip()
     if not all([sid, token, to_num]):
-        return
+        return None  # not configured — not a failure
     # Twilio WhatsApp requires the whatsapp: prefix
     if not from_num.startswith("whatsapp:"):
         from_num = f"whatsapp:{from_num}"
@@ -2316,10 +2320,12 @@ def send_whatsapp(message):
         )
         if resp.status_code not in (200, 201):
             print(f"[WhatsApp] Twilio error {resp.status_code}: {resp.text[:200]}")
-        else:
-            print(f"[WhatsApp] Sent OK")
+            return False
+        print("[WhatsApp] Sent OK")
+        return True
     except Exception as e:
         print(f"[WhatsApp] Error: {e}")
+        return False
 
 
 def send_telegram(message):
@@ -2327,7 +2333,7 @@ def send_telegram(message):
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id   = os.environ.get("TELEGRAM_CHAT_ID",   "").strip()
     if not all([bot_token, chat_id]):
-        return
+        return None  # not configured — not a failure
     # Convert plain-text message to HTML-safe Telegram format
     tg_msg = (message
         .replace("&", "&amp;")
@@ -2339,12 +2345,14 @@ def send_telegram(message):
             json={"chat_id": chat_id, "text": tg_msg, "parse_mode": "HTML"},
             timeout=15,
         )
-        if resp.status_code != 200:
-            print(f"[Telegram] Error {resp.status_code}: {resp.text[:200]}")
-        else:
-            print(f"[Telegram] Sent OK")
+        if resp.status_code == 200 and resp.json().get("ok"):
+            print("[Telegram] Sent OK — delivery confirmed")
+            return True
+        print(f"[Telegram] Error {resp.status_code}: {resp.text[:200]}")
+        return False
     except Exception as e:
         print(f"[Telegram] Error: {e}")
+        return False
 
 
 def fire_alert(signal, ticker, price, timeframe, analysis, counter, channels=None):
@@ -2388,13 +2396,20 @@ def fire_alert(signal, ticker, price, timeframe, analysis, counter, channels=Non
             f"Confidence: {conf} | {ts}"
         )
 
+    results = []
     if "sms" in channels:
-        send_sms(msg)
+        r = send_sms(msg)
+        if r is not None: results.append(r)
     if "whatsapp" in channels:
-        send_whatsapp(msg)
+        r = send_whatsapp(msg)
+        if r is not None: results.append(r)
     if "telegram" in channels:
-        send_telegram(msg)
-    print(f"[Alert] Fired {signal} for {ticker} ({timeframe}) @ {price} via {channels}")
+        r = send_telegram(msg)
+        if r is not None: results.append(r)
+    # If no channels were configured, treat as delivered (nothing to confirm)
+    delivered = any(results) if results else True
+    print(f"[Alert] Fired {signal} for {ticker} ({timeframe}) @ {price} via {channels} — delivered={delivered}")
+    return delivered
 
 # ─── LIGHTWEIGHT WATCH ANALYSIS (Haiku — ~20× cheaper than Sonnet) ───────────
 def get_watch_signal(ticker, asset_type, ind, timeframe):
@@ -2592,16 +2607,25 @@ def run_watch_job():
                 fired_sig = "COUNTER_BUY"
 
             with watch_lock:
-                watch_registry[key]["last_signal"]    = fired_sig or sig
                 watch_registry[key]["last_narrative"] = analysis.get("narrative", "")
                 watch_registry[key]["last_timing"]    = analysis.get("timing", "")
 
             if fired_sig:
-                fire_alert(fired_sig, ticker, ind["price"], timeframe, analysis, counter,
-                           w.get("alert_channels", ["sms"]))
+                delivered = fire_alert(fired_sig, ticker, ind["price"], timeframe, analysis, counter,
+                                       w.get("alert_channels", ["sms"]))
+                if delivered:
+                    # Confirmed sent — remove watch (only disappears after delivery)
+                    with watch_lock:
+                        watch_registry.pop(key, None)
+                    _remove_watch_from_db(ticker, timeframe)
+                    print(f"[Watch] Delivered + removed: {key}")
+                else:
+                    # Delivery failed — keep last_signal unchanged so next tick retries
+                    print(f"[Watch] Delivery failed for {key}, will retry next tick")
             else:
+                with watch_lock:
+                    watch_registry[key]["last_signal"] = sig
                 # Feature D: Live narrative update even when no new signal fires
-                # Store the latest market commentary for this watch
                 narrative = analysis.get("narrative", "")
                 timing    = analysis.get("timing", "")
                 if narrative:
@@ -3670,24 +3694,29 @@ def add_watch():
         ch_labels = {"sms": "SMS", "whatsapp": "WhatsApp", "telegram": "Telegram"}
         ch_str    = " + ".join(ch_labels.get(c, c) for c in alert_channels)
 
+        _is_update = False
         with watch_lock:
             if key in watch_registry:
-                # Update channels if already watching
                 watch_registry[key]["alert_channels"] = alert_channels
-                return jsonify({"status": "updated", "key": key,
-                                "message": f"Updated {ticker} ({timeframe.upper()}) — alerts via {ch_str}"}), 200
-            watch_registry[key] = {
-                "ticker":         ticker,
-                "asset_type":     asset_type,
-                "timeframe":      timeframe,
-                "alert_channels": alert_channels,
-                "last_signal":    None,
-                "last_check":     None,
-                "last_reason":    "Not checked yet",
-                "last_price":     None,
-                "added_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-            }
+                _is_update = True
+            else:
+                watch_registry[key] = {
+                    "ticker":         ticker,
+                    "asset_type":     asset_type,
+                    "timeframe":      timeframe,
+                    "alert_channels": alert_channels,
+                    "last_signal":    None,
+                    "last_check":     None,
+                    "last_reason":    "Not checked yet",
+                    "last_price":     None,
+                    "added_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+                }
 
+        _save_watch_to_db(ticker, asset_type, timeframe, alert_channels)
+
+        if _is_update:
+            return jsonify({"status": "updated", "key": key,
+                            "message": f"Updated {ticker} ({timeframe.upper()}) — alerts via {ch_str}"}), 200
         return jsonify({"status": "watching", "key": key,
                         "message": f"Now watching {ticker} ({timeframe.upper()}) — alerts via {ch_str}"})
     except Exception as e:
@@ -3708,6 +3737,7 @@ def remove_watch():
             removed = watch_registry.pop(key, None)
 
         if removed:
+            _remove_watch_from_db(ticker, timeframe)
             return jsonify({"status": "removed", "key": key})
         return jsonify({"status": "not_found", "key": key}), 404
     except Exception as e:
@@ -4785,6 +4815,82 @@ class ExchangeKey(_Base):
     api_secret_enc = Column(String(512), nullable=False)
     created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
 
+class Watch(_Base):
+    """Persistent alert watches — survive server restarts, removed only after confirmed delivery."""
+    __tablename__ = "watches"
+    id             = Column(Integer,     primary_key=True, autoincrement=True)
+    ticker         = Column(String(32),  nullable=False)
+    asset_type     = Column(String(16),  nullable=False, default="stock")
+    timeframe      = Column(String(8),   nullable=False)
+    alert_channels = Column(String(128), nullable=False, default="telegram")
+    created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
+
+# ─── WATCH DB HELPERS ─────────────────────────────────────────
+
+def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels):
+    """Upsert a watch into the database."""
+    if not _DBSession: return
+    db = _DBSession()
+    try:
+        existing = db.query(Watch).filter_by(ticker=ticker, timeframe=timeframe).first()
+        if existing:
+            existing.alert_channels = json.dumps(alert_channels)
+        else:
+            db.add(Watch(ticker=ticker, asset_type=asset_type, timeframe=timeframe,
+                         alert_channels=json.dumps(alert_channels)))
+        db.commit()
+    except Exception as _e:
+        db.rollback()
+        print(f"[watch] DB save failed: {_e}")
+    finally:
+        db.close()
+
+def _remove_watch_from_db(ticker, timeframe):
+    """Delete a watch from the database."""
+    if not _DBSession: return
+    db = _DBSession()
+    try:
+        db.query(Watch).filter_by(ticker=ticker, timeframe=timeframe).delete()
+        db.commit()
+    except Exception as _e:
+        db.rollback()
+        print(f"[watch] DB remove failed: {_e}")
+    finally:
+        db.close()
+
+def _load_watches_from_db():
+    """On startup: reload all saved watches into the in-memory registry."""
+    if not _DBSession: return
+    db = _DBSession()
+    try:
+        rows = db.query(Watch).all()
+        loaded = 0
+        with watch_lock:
+            for r in rows:
+                key = f"{r.ticker}_{r.timeframe}"
+                if key not in watch_registry:
+                    try:
+                        channels = json.loads(r.alert_channels)
+                    except Exception:
+                        channels = [r.alert_channels]
+                    watch_registry[key] = {
+                        "ticker":         r.ticker,
+                        "asset_type":     r.asset_type,
+                        "timeframe":      r.timeframe,
+                        "alert_channels": channels,
+                        "last_signal":    None,
+                        "last_check":     None,
+                        "last_reason":    "Not checked yet",
+                        "last_price":     None,
+                        "added_at":       r.created_at.strftime("%Y-%m-%d %H:%M UTC"),
+                    }
+                    loaded += 1
+        print(f"[watch] Loaded {loaded} watches from DB")
+    except Exception as _e:
+        print(f"[watch] DB load failed: {_e}")
+    finally:
+        db.close()
+
 # Create tables on startup (idempotent — skips existing tables)
 def _init_db():
     if _db_engine:
@@ -4793,6 +4899,7 @@ def _init_db():
             print("[db] Tables created / verified")
         except Exception as _e:
             print(f"[db] create_all failed: {_e}")
+    _load_watches_from_db()
 
 with app.app_context():
     _init_db()
