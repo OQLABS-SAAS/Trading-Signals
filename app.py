@@ -2776,6 +2776,14 @@ def pricing_page():
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
 
+@app.route("/settings")
+def settings_page():
+    if not session.get("user_id") and not session.get("authenticated"):
+        return redirect("/")
+    resp = send_from_directory("static", "settings.html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
 @app.route("/")
 def index():
     resp = send_from_directory("static", "index.html")
@@ -2963,6 +2971,141 @@ def admin_set_tier():
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+# ─── SETTINGS — PROFILE ──────────────────────────────────────
+
+@app.route("/api/profile", methods=["POST"])
+@login_required
+def update_profile():
+    """Update display name and/or password for the logged-in user."""
+    if not _DBSession:
+        return jsonify({"status": "error", "message": "Database not available"}), 503
+    user = _get_current_user()
+    if not user:
+        return jsonify({"status": "error", "message": "User not found"}), 404
+    body     = request.json or {}
+    new_name = body.get("name", "").strip()
+    old_pw   = body.get("old_password", "").strip()
+    new_pw   = body.get("new_password", "").strip()
+    db = _DBSession()
+    try:
+        u = db.query(User).filter_by(id=user.id).first()
+        if new_name:
+            u.name = new_name
+        if new_pw:
+            if not old_pw:
+                return jsonify({"status": "error", "message": "Current password required to set a new one"}), 400
+            if not check_password_hash(u.password_hash or "", old_pw):
+                return jsonify({"status": "error", "message": "Current password is incorrect"}), 400
+            if len(new_pw) < 6:
+                return jsonify({"status": "error", "message": "New password must be at least 6 characters"}), 400
+            u.password_hash = generate_password_hash(new_pw)
+        db.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db.close()
+
+# ─── SETTINGS — EXCHANGE API KEYS ────────────────────────────
+
+@app.route("/api/keys", methods=["GET"])
+@login_required
+def keys_list():
+    """List exchange API keys for the current user (masked, never raw)."""
+    if not _DBSession:
+        return jsonify([])
+    user = _get_current_user()
+    if not user:
+        return jsonify([])
+    db = _DBSession()
+    try:
+        rows = db.query(ExchangeKey).filter_by(user_id=user.id).order_by(ExchangeKey.created_at.desc()).all()
+        result = []
+        for r in rows:
+            try:
+                raw_key = _dec(r.api_key_enc)
+                masked  = raw_key[:4] + "••••••••" + raw_key[-4:] if len(raw_key) > 8 else "••••••••"
+            except Exception:
+                masked = "••••••••"
+            result.append({
+                "id":         r.id,
+                "exchange":   r.exchange,
+                "label":      r.label or "",
+                "key_masked": masked,
+                "created_at": r.created_at.strftime("%Y-%m-%d") if r.created_at else "",
+            })
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/keys", methods=["POST"])
+@login_required
+def keys_add():
+    """Save a new exchange API key (encrypted)."""
+    if not _DBSession:
+        return jsonify({"status": "error", "message": "Database not available"}), 503
+    user = _get_current_user()
+    if not user:
+        return jsonify({"status": "error", "message": "User not found"}), 404
+    body       = request.json or {}
+    exchange   = body.get("exchange", "").strip().lower()
+    label      = body.get("label", "").strip()
+    api_key    = body.get("api_key", "").strip()
+    api_secret = body.get("api_secret", "").strip()
+    if not exchange or not api_key or not api_secret:
+        return jsonify({"status": "error", "message": "Exchange, API key, and secret are required"}), 400
+    db = _DBSession()
+    try:
+        row = ExchangeKey(
+            user_id        = user.id,
+            exchange       = exchange,
+            label          = label or exchange.capitalize(),
+            api_key_enc    = _enc(api_key),
+            api_secret_enc = _enc(api_secret),
+        )
+        db.add(row)
+        db.commit()
+        return jsonify({"status": "ok", "id": row.id})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/telegram-status", methods=["GET"])
+@login_required
+def telegram_status():
+    """Return whether Telegram is configured (does not expose the token)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat  = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    return jsonify({"configured": bool(token and chat)})
+
+@app.route("/api/keys/<int:key_id>", methods=["DELETE"])
+@login_required
+def keys_delete(key_id):
+    """Delete an exchange key. Only the owning user can delete their own keys."""
+    if not _DBSession:
+        return jsonify({"status": "error", "message": "Database not available"}), 503
+    user = _get_current_user()
+    if not user:
+        return jsonify({"status": "error", "message": "User not found"}), 404
+    db = _DBSession()
+    try:
+        row = db.query(ExchangeKey).filter_by(id=key_id, user_id=user.id).first()
+        if not row:
+            return jsonify({"status": "error", "message": "Key not found"}), 404
+        db.delete(row)
+        db.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         db.close()
 
@@ -4484,6 +4627,21 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, 
 from sqlalchemy.orm import declarative_base, sessionmaker
 from scipy.stats import norm as _scipy_norm
 
+# ─── ENCRYPTION HELPER (exchange API keys) ────────────────────
+try:
+    from cryptography.fernet import Fernet as _Fernet
+    import base64 as _b64, hashlib as _hl
+    _enc_seed = os.environ.get("ENCRYPTION_KEY", "") or app.secret_key
+    _fernet   = _Fernet(_b64.urlsafe_b64encode(_hl.sha256(_enc_seed.encode()).digest()))
+    def _enc(s): return _fernet.encrypt(s.encode()).decode()
+    def _dec(s): return _fernet.decrypt(s.encode()).decode()
+    print("[enc] Fernet encryption ready")
+except Exception as _enc_e:
+    print(f"[enc] Fernet unavailable: {_enc_e}")
+    _fernet = None
+    def _enc(s): return s
+    def _dec(s): return s
+
 # ─── DATABASE SETUP ───────────────────────────────────────────
 _DATABASE_URL = os.environ.get("DATABASE_URL", "")
 _REDIS_URL    = os.environ.get("REDIS_URL", "")
@@ -4615,6 +4773,17 @@ class SignalHistory(_Base):
     confidence   = Column(Float,      nullable=True)    # 0–100
     confidence_label = Column(String(16), nullable=True)
     fired_at     = Column(DateTime,   nullable=False, default=datetime.utcnow)
+
+class ExchangeKey(_Base):
+    """Exchange API keys — Fernet-encrypted, one row per connected exchange per user."""
+    __tablename__ = "exchange_keys"
+    id             = Column(Integer,     primary_key=True, autoincrement=True)
+    user_id        = Column(Integer,     nullable=False)
+    exchange       = Column(String(32),  nullable=False)
+    label          = Column(String(64),  nullable=True)
+    api_key_enc    = Column(String(512), nullable=False)
+    api_secret_enc = Column(String(512), nullable=False)
+    created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
 
 # Create tables on startup (idempotent — skips existing tables)
 def _init_db():
