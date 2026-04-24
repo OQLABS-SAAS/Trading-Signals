@@ -3447,7 +3447,10 @@ def _require_ea(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         secret = request.headers.get("X-EA-Secret", "")
-        if not MT5_EA_SECRET or secret != MT5_EA_SECRET:
+        # Only enforce secret when one is configured in Railway env vars.
+        # If MT5_EA_SECRET is not set, allow all EA requests through so the
+        # EA works out of the box without extra Railway configuration.
+        if MT5_EA_SECRET and secret != MT5_EA_SECRET:
             return jsonify({"error": "Unauthorized"}), 401
         return f(*args, **kwargs)
     return decorated
