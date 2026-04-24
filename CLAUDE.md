@@ -878,6 +878,14 @@ Before writing any plan, identify every behaviour question — *"when X happens,
 - If a change touches shared CSS classes, explicitly confirm all components using that class still render correctly.
 - "I only changed X" is never sufficient — always verify downstream.
 
+### Branding Icons — NON-NEGOTIABLE
+- **Never use emoji as icons anywhere in the UI.** Emoji render inconsistently across platforms and break visual consistency.
+- All icons must be inline SVG only — stroke-based, no fill, matching the app's existing icon style.
+- Icon colours must follow the B-ORE palette: amber `#d4870a` for neutral/action icons, green `#3dbe6c` for positive/safe features, red `#e05555` for destructive/risk features.
+- Default stroke-width: `2.2` for body icons, `2.5` for small inline button icons.
+- Before every commit involving new UI elements: grep for any emoji characters (`🔍`, `🔔`, `📊`, `⚡`, `💰`, `📈`, `🔒`, or any Unicode emoji) and replace with SVG.
+- This rule applies to all locations: HTML template strings, JS-generated innerHTML, section headers, card labels, button text, and toast/coaching messages.
+
 ### Bug Reports
 - Do NOT open files immediately
 - Do NOT start grepping
