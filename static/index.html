@@ -1835,7 +1835,7 @@ body::before{
                   </div>
                   <div class="calc-field">
                     <label id="cRiskLabel">Risk %</label>
-                    <input class="calc-input" type="number" id="cRisk" placeholder="1" value="1" step="0.5" min="0.1" max="100" oninput="recalc()">
+                    <input class="calc-input" type="number" id="cRisk" placeholder="5" value="5" step="0.5" min="0.1" max="100" oninput="recalc()">
                   </div>
                 </div>
 
@@ -6941,7 +6941,7 @@ function fmt(v) {
   const n = parseFloat(v); if (isNaN(n)) return '—';
   if (n >= 10000) return n.toLocaleString(undefined,{maximumFractionDigits:2});
   if (n >= 100)   return n.toFixed(2);
-  if (n >= 1)     return n.toFixed(3);
+  if (n >= 1)     return n.toFixed(4);
   return n.toFixed(4);
 }
 function fmtBig(v) {
@@ -10409,7 +10409,14 @@ function recalc() {
   // ── Read inputs ──
   const acct       = parseFloat((document.getElementById('cAcct')      || {}).value) || 0;
   const riskPct    = parseFloat((document.getElementById('cRisk')      || {}).value) || 0;
-  const tradeSize  = parseFloat((document.getElementById('cTradeSize') || {}).value) || 0;
+  var _cTradeSizeEl = document.getElementById('cTradeSize');
+  let tradeSize     = parseFloat((_cTradeSizeEl || {}).value) || 0;
+  // Auto-fill trade size = account × risk% when field is empty (max drawdown = risk%)
+  if (tradeSize === 0 && acct > 0 && riskPct > 0) {
+    var _autoTS = parseFloat((acct * riskPct / 100).toFixed(2));
+    if (_cTradeSizeEl) { _cTradeSizeEl.value = _autoTS; }
+    tradeSize = _autoTS;
+  }
   const levOrContr = parseFloat((document.getElementById('cLev')       || {}).value) || 1;
   // ── Show % of account immediately next to Trade Size input ──
   var tsNote = document.getElementById('tradeSizePctNote');
