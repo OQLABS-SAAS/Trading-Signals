@@ -3707,7 +3707,7 @@ function updateInlineInst(assetType) {
   const key  = _AT_TAB_MAP[assetType] || 'crypto';
   const list = INST_TABS[key] || [];
   row.innerHTML = list.map(({sym, tf, at}) =>
-    `<button class="inst-chip" onclick="quickLoad('${sym}','${at}','${tf.toLowerCase()}')">${sym} <span>${tf}</span></button>`
+    `<button class="inst-chip" onclick="quickLoad('${sym}','${at}',(document.getElementById('timeframe')||{}).value||'${tf.toLowerCase()}')">${sym} <span>${tf}</span></button>`
   ).join('');
 }
 
@@ -3721,6 +3721,14 @@ function setPill(btn) {
   if (sel === 'assetType') {
     updateInlineInst(btn.dataset.val);
     try { updateLevField(btn.dataset.val); } catch(e) {}
+  }
+  // Re-run analysis when timeframe changes (same as setTF)
+  if (sel === 'timeframe') {
+    var _ticker = (document.getElementById('tickerInput') || {}).value;
+    var _at     = (document.getElementById('assetType')   || {}).value;
+    if (_ticker && _ticker.trim()) {
+      scannerLoadTicker(_ticker.trim().toUpperCase(), _at, btn.dataset.val);
+    }
   }
 }
 /* Keep hidden selects in sync when set programmatically */
