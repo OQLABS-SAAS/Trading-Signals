@@ -586,10 +586,22 @@ void ExecuteOrder(string obj)
    if (volMax  > 0 && volume > volMax) volume = volMax;
    volume = NormalizeDouble(volume, 2);
 
-   // Get current market price
-   double curPrice = (otype == ORDER_TYPE_BUY)
-                     ? SymbolInfoDouble(symbol, SYMBOL_ASK)
-                     : SymbolInfoDouble(symbol, SYMBOL_BID);
+   // Get current market price — wait up to 2s for a live quote after SymbolSelect
+   double curPrice = 0;
+   for (int _w = 0; _w < 4 && curPrice == 0; _w++) {
+      curPrice = (otype == ORDER_TYPE_BUY)
+                 ? SymbolInfoDouble(symbol, SYMBOL_ASK)
+                 : SymbolInfoDouble(symbol, SYMBOL_BID);
+      if (curPrice == 0) Sleep(500);
+   }
+   if (curPrice == 0) {
+      Print("DotVerse EA: no live price for ", symbol, " — order aborted");
+      string noPrice = StringFormat(
+         "{\"order_id\":%d,\"status\":\"failed\",\"ticket\":0,\"fill_price\":0,"
+         "\"comment\":\"No live price for %s — market may be closed\"}", orderId, symbol);
+      HttpPost("/api/mt5/confirm", noPrice);
+      return;
+   }
 
    // Enforce broker's minimum stop distance for SL / TP
    int    digits  = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
