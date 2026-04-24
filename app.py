@@ -2831,16 +2831,22 @@ def _is_duplicate_scan_alert(ticker, signal, timeframe, trade_type):
         return False
 
 def _record_scan_alert(ticker, signal, timeframe, trade_type, entry, sl, tp1, lot_size):
+    """Save scan alert and return its ID (used in Telegram callback_data)."""
     if not _DBSession:
-        return
+        return None
     try:
         db = _DBSession()
-        db.add(ScanAlert(ticker=ticker, signal=signal, timeframe=timeframe,
-                         trade_type=trade_type, entry=entry, sl=sl, tp1=tp1,
-                         lot_size=lot_size))
-        db.commit(); db.close()
+        rec = ScanAlert(ticker=ticker, signal=signal, timeframe=timeframe,
+                        trade_type=trade_type, entry=entry, sl=sl, tp1=tp1,
+                        lot_size=lot_size)
+        db.add(rec)
+        db.commit()
+        db.refresh(rec)
+        rid = rec.id
+        db.close()
+        return rid
     except Exception:
-        pass
+        return None
 
 def _job_auto_scan():
     """Scan 18 instruments across scalp (15m) + swing (4H) timeframes every 15 min.
@@ -2905,7 +2911,7 @@ def _job_auto_scan():
                 continue
 
             # ── Send alert ──────────────────────────────────────────────
-            type_tag = "SCALP" if trade_type == "scalping" else "SWING"
+            type_tag  = "SCALP" if trade_type == "scalping" else "SWING"
             sig_emoji = "🟢" if sig == "BUY" else "🔴"
             tg_msg = (
                 f"{sig_emoji} {type_tag} SIGNAL — {ticker}\n"
@@ -2917,19 +2923,27 @@ def _job_auto_scan():
                 f"Lot size: {lot:.2f} lots\n"
                 f"Confidence: HIGH ✅"
             )
+            # Save scan alert first to get its ID for the callback button
+            scan_id = _record_scan_alert(ticker, sig, tf, trade_type, entry, sl, tp1, lot)
+            # callback_data: execute|{scan_id}  (well within 64-char Telegram limit)
+            exec_label = f"{'✅ Execute BUY' if sig=='BUY' else '🔴 Execute SELL'} {lot:.2f} lots"
+            keyboard = [[{"text": exec_label, "callback_data": f"execute|{scan_id}"}]]
             try:
-                send_telegram(tg_msg)
+                send_telegram_keyboard(tg_msg, keyboard)
             except Exception:
-                pass
+                try:
+                    send_telegram(tg_msg)
+                except Exception:
+                    pass
 
             notif_data = {"ticker": ticker, "signal": sig, "timeframe": tf,
                           "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
-                          "lot": lot, "trade_type": trade_type, "rr": rr}
+                          "lot": lot, "trade_type": trade_type, "rr": rr,
+                          "asset_type": asset_type}
             _push_notification("default", "scan",
                                 f"{sig_emoji} {type_tag}: {ticker} {sig}",
                                 f"Entry {entry:.5g} · SL {sl:.5g} · TP1 {tp1:.5g} · {lot:.2f} lots · R:R 1:{rr:.1f}",
                                 data=notif_data)
-            _record_scan_alert(ticker, sig, tf, trade_type, entry, sl, tp1, lot)
             found += 1
             _time.sleep(1.0)   # rate-limit between instruments
         except Exception as e:
@@ -4038,8 +4052,67 @@ def telegram_webhook():
     message_id  = msg.get("message_id")
     bot_token   = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 
-    # Parse: close|{ticket}|{symbol}|{level}
+    # Parse: execute|{scan_alert_id}  — one-tap trade execution from scan alert
     parts = data.split("|")
+    if len(parts) == 2 and parts[0] == "execute":
+        scan_id = int(parts[1]) if parts[1].isdigit() else 0
+        queued  = False
+        answer_text = "⚠️ Could not queue trade"
+        if scan_id and _DBSession:
+            db = _DBSession()
+            try:
+                rec = db.query(ScanAlert).filter_by(id=scan_id).first()
+                if rec:
+                    # Determine asset_type from ticker pattern
+                    t = rec.ticker
+                    at = "crypto" if t.endswith("-USD") and not t.startswith("^") \
+                         else ("forex" if t.endswith("=X") or t in ("EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X") \
+                         else ("index" if t.startswith("^") \
+                         else ("commodity" if t in ("GC=F","SI=F","CL=F") \
+                         else "stock")))
+                    symbol = _mt5_symbol(t, at)
+                    order = MT5Order(
+                        user_id    = "default",
+                        symbol     = symbol,
+                        order_type = rec.signal,
+                        volume     = rec.lot_size or 0.01,
+                        price      = rec.entry or 0,
+                        sl         = rec.sl,
+                        tp         = rec.tp1,
+                        timeframe  = rec.timeframe,
+                        action     = "open",
+                        status     = "pending",
+                        comment    = f"Telegram execute #{scan_id}",
+                    )
+                    db.add(order)
+                    db.commit()
+                    queued = True
+                    answer_text = (f"✅ {rec.signal} {rec.lot_size:.2f} lots {symbol} queued — "
+                                   f"EA executes within 5s")
+            except Exception as e:
+                db.rollback()
+                print(f"[Telegram webhook] execute error: {e}")
+            finally:
+                db.close()
+        if bot_token:
+            try:
+                requests.post(
+                    f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
+                    json={"callback_query_id": callback_id, "text": answer_text, "show_alert": True},
+                    timeout=5,
+                )
+                if queued and chat_id and message_id:
+                    requests.post(
+                        f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup",
+                        json={"chat_id": chat_id, "message_id": message_id,
+                              "reply_markup": {"inline_keyboard": []}},
+                        timeout=5,
+                    )
+            except Exception:
+                pass
+        return jsonify({"ok": True})
+
+    # Parse: close|{ticket}|{symbol}|{level}
     if len(parts) == 4 and parts[0] == "close":
         _, ticket_str, symbol, level = parts
         try:
@@ -5677,7 +5750,7 @@ def backtest_route():
 
 import redis as _redis_module
 from rq import Queue as RQQueue
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from scipy.stats import norm as _scipy_norm
 
