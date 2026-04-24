@@ -3314,29 +3314,36 @@ def mt5_get_state():
     last_seen = datetime.fromisoformat(state["last_seen"])
     connected = (datetime.utcnow() - last_seen).total_seconds() < 45
     positions = list(state["positions"])
-    # Enrich positions with tp2/tp3/timeframe — in-memory cache first, then DB fallback
-    tp_enrich = mt5_state.get("tp_enrichment", {})
-    for p in positions:
-        key = str(p.get("ticket", ""))
-        if key in tp_enrich:
-            e = tp_enrich[key]
-            if e.get("tp2")       and not p.get("tp2"):       p["tp2"]       = e["tp2"]
-            if e.get("tp3")       and not p.get("tp3"):       p["tp3"]       = e["tp3"]
-            if e.get("timeframe") and not p.get("timeframe"): p["timeframe"] = e["timeframe"]
-    # DB fallback — catches cases where server restarted after confirm
+    # Enrich positions with tp2/tp3/timeframe from mt5_orders.
+    # Primary match: comment field contains "DotVerse #<order_id>" — reliable because
+    # res.deal (stored as mt5_ticket) != PositionGetTicket() in MT5.
     if _DBSession and positions:
         try:
+            import re as _re
             db = _DBSession()
-            tickets = [int(p.get("ticket", 0)) for p in positions if p.get("ticket") and (not p.get("tp2") or not p.get("timeframe"))]
-            if tickets:
-                orders = db.query(MT5Order).filter(MT5Order.mt5_ticket.in_(tickets)).all()
-                ticket_data = {int(o.mt5_ticket): o for o in orders if o.mt5_ticket}
+            user_id_str = str(session.get("user_id"))
+            # Parse order_id from position comment e.g. "DotVerse #42"
+            order_ids = []
+            for p in positions:
+                m = _re.search(r'DotVerse #(\d+)', p.get("comment", ""))
+                if m:
+                    order_ids.append(int(m.group(1)))
+            if order_ids:
+                orders = db.query(MT5Order).filter(
+                    MT5Order.id.in_(order_ids),
+                    MT5Order.user_id == user_id_str
+                ).all()
+                order_map = {o.id: o for o in orders}
                 for p in positions:
-                    o = ticket_data.get(int(p.get("ticket", 0)))
-                    if o:
-                        if o.timeframe and not p.get("timeframe"): p["timeframe"] = o.timeframe
-                        if o.tp2       and not p.get("tp2"):       p["tp2"]       = o.tp2
-                        if o.tp3       and not p.get("tp3"):       p["tp3"]       = o.tp3
+                    m = _re.search(r'DotVerse #(\d+)', p.get("comment", ""))
+                    if not m:
+                        continue
+                    o = order_map.get(int(m.group(1)))
+                    if not o:
+                        continue
+                    if o.timeframe and not p.get("timeframe"): p["timeframe"] = o.timeframe
+                    if o.tp2       and not p.get("tp2"):       p["tp2"]       = o.tp2
+                    if o.tp3       and not p.get("tp3"):       p["tp3"]       = o.tp3
             db.close()
         except Exception:
             pass
@@ -3369,6 +3376,7 @@ def mt5_get_orders():
             "status":     o.status,
             "mt5_ticket": o.mt5_ticket,
             "fill_price": o.fill_price,
+            "timeframe":  o.timeframe,
             "comment":    o.comment,
             "created_at": o.created_at.strftime("%Y-%m-%d %H:%M UTC"),
             "filled_at":  o.filled_at.strftime("%H:%M UTC") if o.filled_at else None,
