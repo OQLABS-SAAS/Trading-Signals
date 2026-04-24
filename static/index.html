@@ -13106,20 +13106,32 @@ function _mt5RenderPositions(positions) {
     else                          { riskStripBg='#140606'; riskStripBorder='#4a1414'; riskStripColor='#8a2a2a'; riskValColor='#f87171'; }
 
     // ── Action button styles — B-ORE: neutral dark, subtle breathing glow only at threshold ──
-    var _btnBase = 'flex:1;padding:14px 8px;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:13px;font-weight:600;text-align:center;cursor:pointer;';
-    var btnNeutral = _btnBase + 'background:#1c1815;border:1px solid rgba(255,220,160,.07);color:#8a7f72;';
-    // Take 50% profit — subtle green breathing glow when near TP or TP hit
-    var btnTakeStyle, btnTakeText;
-    if (hitLevel === 'TP1' || hitLevel === 'TP2' || hitLevel === 'TP3') {
-      btnTakeStyle = _btnBase + 'animation:mt5BtnGlowG 2s ease-in-out infinite;border:1px solid rgba(61,190,108,.48);color:#3dbe6c;background:#0f2215;';
-      btnTakeText  = 'Take 50% profit';
+    var _btnBase   = 'flex:1;padding:14px 8px;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:13px;font-weight:600;text-align:center;cursor:pointer;';
+    var _btnBaseTP = 'flex:1;padding:10px 6px;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:12px;font-weight:600;text-align:center;cursor:pointer;';
+    var btnNeutral   = _btnBase   + 'background:#1c1815;border:1px solid rgba(255,220,160,.07);color:#8a7f72;';
+    var btnNeutralTP = _btnBaseTP + 'background:#1c1815;border:1px solid rgba(255,220,160,.07);color:#8a7f72;';
+    var btnDisabledTP= _btnBaseTP + 'background:#161210;border:1px solid rgba(255,220,160,.04);color:#333;cursor:default;';
+    // Take T1 — green breathing glow when near TP or TP1 hit
+    var btnT1Style;
+    if (hitLevel === 'TP1') {
+      btnT1Style = _btnBaseTP + 'animation:mt5BtnGlowG 2s ease-in-out infinite;border:1px solid rgba(61,190,108,.48);color:#3dbe6c;background:#0f2215;';
     } else if (cardState === 'ntp') {
-      btnTakeStyle = _btnBase + 'animation:mt5BtnGlowG 2s ease-in-out infinite;border:1px solid rgba(61,190,108,.3);color:rgba(61,190,108,.8);background:#0e1e12;';
-      btnTakeText  = 'Take 50% profit';
+      btnT1Style = _btnBaseTP + 'animation:mt5BtnGlowG 2.5s ease-in-out infinite;border:1px solid rgba(61,190,108,.3);color:rgba(61,190,108,.8);background:#0e1e12;';
     } else {
-      btnTakeStyle = btnNeutral;
-      btnTakeText  = 'Take 50% profit';
+      btnT1Style = btnNeutralTP;
     }
+    // Take T2 — green breathing glow only when TP2 hit
+    var btnT2Style = (tp2 > 0)
+      ? (hitLevel === 'TP2'
+          ? _btnBaseTP + 'animation:mt5BtnGlowG 2s ease-in-out infinite;border:1px solid rgba(61,190,108,.48);color:#3dbe6c;background:#0f2215;'
+          : btnNeutralTP)
+      : btnDisabledTP;
+    // Take T3 — green breathing glow only when TP3 hit
+    var btnT3Style = (tp3 > 0)
+      ? (hitLevel === 'TP3'
+          ? _btnBaseTP + 'animation:mt5BtnGlowG 2s ease-in-out infinite;border:1px solid rgba(61,190,108,.48);color:#3dbe6c;background:#0f2215;'
+          : btnNeutralTP)
+      : btnDisabledTP;
     // Move stop to entry — subtle amber breathing glow when near TP
     var btnMoveStyle, btnMoveText;
     if (cardState === 'ntp' && !hitLevel) {
@@ -13158,6 +13170,25 @@ function _mt5RenderPositions(positions) {
       ? 'background:rgba(61,190,108,.12);color:#3dbe6c;border:1px solid rgba(61,190,108,.25);'
       : 'background:rgba(224,85,85,.12);color:#e05555;border:1px solid rgba(224,85,85,.25);';
 
+    // P&L sub-line — USD amount · account% · profit label
+    var pnlPctAcct = window._mt5AccountBalance > 0
+      ? (profit / window._mt5AccountBalance * 100).toFixed(2)
+      : (openPrice > 0 ? (profit / openPrice * 100).toFixed(2) : '0.00');
+    var pnlSubLine = profit === 0
+      ? 'USD 0.00 · 0.00%'
+      : pnlSign + 'USD ' + _mt5Fmt(Math.abs(profit)) + ' · ' + pnlSign + pnlPctAcct + '%' + (profit > 0 ? ' · profit' : '');
+
+    // Targets row — T1/T2/T3 chips below track bar
+    var _tChip = 'font-family:\'DM Mono\',monospace;font-size:10px;padding:2px 8px;border-radius:3px;';
+    var targetsRow = tp > 0
+      ? '<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;">'
+        + '<span style="font-family:\'DM Mono\',monospace;font-size:9px;color:#6a6058;letter-spacing:.4px;padding-right:2px;">targets</span>'
+        + '<span style="' + _tChip + 'background:rgba(61,190,108,.1);border:1px solid rgba(61,190,108,.22);color:#3dbe6c;">T1 · ' + _mt5Fmt(tp) + '</span>'
+        + (tp2 > 0 ? '<span style="' + _tChip + 'background:rgba(61,190,108,.06);border:1px solid rgba(61,190,108,.14);color:rgba(61,190,108,.6);">T2 · ' + _mt5Fmt(tp2) + '</span>' : '')
+        + (tp3 > 0 ? '<span style="' + _tChip + 'background:rgba(61,190,108,.03);border:1px solid rgba(61,190,108,.09);color:rgba(61,190,108,.4);">T3 · ' + _mt5Fmt(tp3) + '</span>' : '')
+        + '</div>'
+      : '';
+
     var cardHtml = '<div style="border-radius:10px;overflow:hidden;margin-bottom:10px;background:#161210;border:1px solid ' + cardBorder + ';">'
 
       // state tab row
@@ -13178,13 +13209,13 @@ function _mt5RenderPositions(positions) {
         +   '<div style="font-family:\'DM Mono\',monospace;font-size:10px;font-weight:800;padding:3px 9px;border-radius:4px;letter-spacing:.08em;margin-left:8px;' + typeBadgeStyle + '">' + (p.type||'—') + '</div>'
         +   '<div style="margin-left:auto;text-align:right;">'
         +     '<div style="font-family:\'DM Mono\',monospace;font-size:22px;font-weight:900;font-variant-numeric:tabular-nums;color:' + pnlColor + ';">' + pnlSign + _mt5Fmt(profit) + '</div>'
-        +     '<div style="font-family:\'DM Mono\',monospace;font-size:10px;margin-top:1px;color:' + pnlColor + ';opacity:.7;">' + pnlSign + (openPrice > 0 ? (profit / openPrice * 100).toFixed(2) : '0.00') + '%' + (profit > 0 ? ' · profit' : '') + '</div>'
+        +     '<div style="font-family:\'DM Mono\',monospace;font-size:10px;margin-top:1px;color:' + pnlColor + ';opacity:.7;">' + pnlSubLine + '</div>'
         +   '</div>'
         + '</div>'
 
         // track bar — thin line + round dot with hover tooltip
         + '<div style="margin-bottom:14px;">'
-        +   '<div style="display:flex;justify-content:space-between;font-family:\'DM Mono\',monospace;font-size:9px;color:#6a6058;letter-spacing:.4px;margin-bottom:5px;"><span>Exit point</span><span>Target 1</span></div>'
+        +   '<div style="display:flex;justify-content:space-between;font-family:\'DM Mono\',monospace;font-size:9px;color:#6a6058;letter-spacing:.4px;margin-bottom:5px;"><span>Exit point</span><span>' + (tp3 > 0 ? 'Target 3' : tp2 > 0 ? 'Target 2' : 'Target 1') + '</span></div>'
         +   '<div style="position:relative;height:4px;background:rgba(255,220,160,.06);border-radius:2px;overflow:visible;">'
         +     '<div style="position:absolute;left:0;top:0;height:100%;width:' + trackPct.toFixed(1) + '%;border-radius:2px;background:' + trackFillCol + ';transition:width .5s;"></div>'
         +     '<div style="position:absolute;top:50%;left:' + trackPct.toFixed(1) + '%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:' + trackFillCol + ';border:2px solid #161210;transition:left .5s;cursor:pointer;"'
@@ -13196,8 +13227,9 @@ function _mt5RenderPositions(positions) {
         +   '<div style="display:flex;justify-content:space-between;font-family:\'DM Mono\',monospace;font-size:9px;color:#6a6058;margin-top:5px;">'
         +     '<span>' + _mt5Fmt(sl) + '</span>'
         +     '<span style="color:' + trackFillCol + ';">' + _mt5Fmt(cur) + ' <span style="color:#6a6058;">now</span></span>'
-        +     '<span>' + _mt5Fmt(tp) + '</span>'
+        +     '<span>' + (tp3 > 0 ? _mt5Fmt(tp3) : tp2 > 0 ? _mt5Fmt(tp2) : _mt5Fmt(tp)) + '</span>'
         +   '</div>'
+        +   targetsRow
         + '</div>'
 
         // risk strip
@@ -13206,9 +13238,14 @@ function _mt5RenderPositions(positions) {
         +   '<span id="mt5RiskVal_' + ticket + '" style="margin-left:auto;font-family:\'DM Mono\',monospace;font-size:13px;font-weight:700;color:#c8960a;">$' + (window._mt5RiskAmt || '—') + ' max loss</span>'
         + '</div>'
 
-        // 3 action buttons
+        // action buttons — row 1: take profit at T1 / T2 / T3
+        + '<div style="display:flex;gap:8px;margin-bottom:8px;">'
+        +   '<button onclick="event.stopPropagation();mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'TP1\')" style="' + btnT1Style + '">Take T1</button>'
+        +   '<button onclick="event.stopPropagation();' + (tp2 > 0 ? 'mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'TP2\')' : '') + '" style="' + btnT2Style + '">Take T2</button>'
+        +   '<button onclick="event.stopPropagation();' + (tp3 > 0 ? 'mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'TP3\')' : '') + '" style="' + btnT3Style + '">Take T3</button>'
+        + '</div>'
+        // row 2: move stop + exit
         + '<div style="display:flex;gap:8px;">'
-        +   '<button id="mt5BtnTake_' + ticket + '" onclick="event.stopPropagation();mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'TP1\')" style="' + btnTakeStyle + '">' + btnTakeText + '</button>'
         +   '<button onclick="event.stopPropagation();" style="' + btnMoveStyle + '">' + btnMoveText + '</button>'
         +   '<button id="mt5BtnExit_' + ticket + '" onclick="event.stopPropagation();mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'SL\')" style="' + btnExitStyle + '">' + btnExitText + '</button>'
         + '</div>'
@@ -13230,9 +13267,9 @@ function _mt5RenderPositions(positions) {
         +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">entered at</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#c8b89a;">' + _mt5Fmt(openPrice) + '</div></div>'
         +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">stop loss</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#e05555;">' + _mt5Fmt(sl) + '</div></div>'
         +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">target 1</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#3dbe6c;">' + _mt5Fmt(tp) + '</div></div>'
+        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">target 2</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:' + (tp2 > 0 ? '#3dbe6c' : '#555') + ';">' + (tp2 > 0 ? _mt5Fmt(tp2) : '—') + '</div></div>'
+        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">target 3</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:' + (tp3 > 0 ? '#3dbe6c' : '#555') + ';">' + (tp3 > 0 ? _mt5Fmt(tp3) : '—') + '</div></div>'
         +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">lot size</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#c8b89a;">' + (p.volume||'—') + '</div></div>'
-        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">SL distance</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#c8b89a;">' + slDist + '</div></div>'
-        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">TP distance</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#c8b89a;">' + tpDist + '</div></div>'
         + '</div>'
 
         + manualHtml
