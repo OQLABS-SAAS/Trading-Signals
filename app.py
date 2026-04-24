@@ -1444,9 +1444,9 @@ def detect_counter_trade(ind):
     if risk <= 0:
         return {"counter_trade": False}
 
-    tp1 = prnd_c(entry + risk * 1.5)
-    tp2 = prnd_c(entry + risk * 2.5)
-    tp3 = prnd_c(entry + risk * 4.0)
+    tp1 = prnd_c(entry + risk * 2.0)   # 2:1 R:R minimum
+    tp2 = prnd_c(entry + risk * 3.0)   # 3:1 R:R
+    tp3 = prnd_c(entry + risk * 4.0)   # 4:1 R:R
     # ── 2d: Net RR after fees — 0.2% round-trip ──────────────────────────
     fee_adj = entry * 0.002
     tp1 = prnd_c(tp1 - fee_adj)
@@ -2121,14 +2121,14 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
 
         if signal == "BUY":
             stop_loss = prnd(price - (4.0 * atr))
-            tp1 = prnd(price + (2 * atr))
-            tp2 = prnd(price + (3.5 * atr))
-            tp3 = prnd(price + (5.5 * atr))
+            tp1 = prnd(price + (10.0 * atr))  # TP always > SL dist; ≥2:1 after fees
+            tp2 = prnd(price + (14.0 * atr))  # ≥3:1 after fees
+            tp3 = prnd(price + (18.0 * atr))  # ≥4:1 after fees
         else:  # SELL
             stop_loss = prnd(price + (4.0 * atr))
-            tp1 = prnd(price - (2 * atr))
-            tp2 = prnd(price - (3.5 * atr))
-            tp3 = prnd(price - (5.5 * atr))
+            tp1 = prnd(price - (10.0 * atr))
+            tp2 = prnd(price - (14.0 * atr))
+            tp3 = prnd(price - (18.0 * atr))
 
         # ── 2d: Net RR after fees — 0.2% round-trip (0.1% entry + 0.1% exit) ──
         fee_adj = entry * 0.002
@@ -2147,10 +2147,16 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
             rr1 = round((abs(tp1 - entry) / risk), 1)
             rr2 = round((abs(tp2 - entry) / risk), 1)
             rr3 = round((abs(tp3 - entry) / risk), 1)
-            # ── 3c: Position size for 1% account risk ──────────────────────
-            # positionPct = 1% / (SL_distance / entry) = entry / SL_distance
-            # Capped at 100% — very tight stops on cheap assets could exceed it.
-            position_pct = round(min(entry / risk, 100.0), 1)
+            # ── Minimum R:R gate — reject trades below 1:2 ──────────────────
+            if rr1 < 2.0:
+                print(f"[rr-gate] {ticker} rr1={rr1} < 2.0 — downgrading {signal} to HOLD")
+                signal = "HOLD"
+                entry = stop_loss = tp1 = tp2 = tp3 = None
+                rr1 = rr2 = rr3 = None
+                position_pct = None
+            else:
+                # ── 3c: Position size for 1% account risk ──────────────────────
+                position_pct = round(min(entry / risk, 100.0), 1)
         else:
             rr1 = rr2 = rr3 = None
             position_pct = None
@@ -2510,14 +2516,14 @@ def get_watch_signal(ticker, asset_type, ind, timeframe):
         entry = prnd2(price)
         if signal == "BUY":
             stop_loss = prnd2(price - (4.0 * atr))
-            tp1 = prnd2(price + (2 * atr))
-            tp2 = prnd2(price + (3.5 * atr))
-            tp3 = prnd2(price + (5.5 * atr))
+            tp1 = prnd2(price + (10.0 * atr))
+            tp2 = prnd2(price + (14.0 * atr))
+            tp3 = prnd2(price + (18.0 * atr))
         else:  # SELL
             stop_loss = prnd2(price + (4.0 * atr))
-            tp1 = prnd2(price - (2 * atr))
-            tp2 = prnd2(price - (3.5 * atr))
-            tp3 = prnd2(price - (5.5 * atr))
+            tp1 = prnd2(price - (10.0 * atr))
+            tp2 = prnd2(price - (14.0 * atr))
+            tp3 = prnd2(price - (18.0 * atr))
 
         # ── 2d: Net RR after fees — 0.2% round-trip ──────────────────────────
         fee_adj = entry * 0.002
