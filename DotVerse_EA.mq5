@@ -38,8 +38,13 @@ double g_tk_sl[MAX_TRACKED];
 double g_tk_tp1[MAX_TRACKED];
 double g_tk_tp2[MAX_TRACKED];
 double g_tk_tp3[MAX_TRACKED];
+double g_tk_hwm[MAX_TRACKED];    // high-water-mark price for trailing stop
 int    g_tk_hit[MAX_TRACKED];    // bitmask: 1=SL 2=TP1 4=TP2 8=TP3
 int    g_tk_count = 0;
+
+// ── Trailing stop settings (refreshed from DotVerse every 5s) ────
+bool   g_trail_on   = false;
+double g_trail_pips = 50.0;
 
 // ── Pending order TP2/TP3 lookup (by order_id before fill) ───
 #define MAX_PENDING 20
@@ -62,6 +67,8 @@ int OnInit()
       return INIT_FAILED;
    }
    Print("DotVerse EA started. Polling every ", InpPollSecs, "s → ", InpBaseUrl);
+   // Register any positions already open before the EA loaded
+   ScanExistingPositions();
    // Immediate first cycle
    PushState();
    PollAndExecute();
@@ -88,10 +95,115 @@ void OnTimer()
 }
 
 //+------------------------------------------------------------------+
+//| Return pip size for any symbol                                    |
+//| 3/5-digit pairs (EURUSD, XAUUSD, crypto): 1 pip = 10 points     |
+//| 2/4-digit pairs (USDJPY): 1 pip = 10 points (same rule applies) |
+//+------------------------------------------------------------------+
+double PipSize(string sym)
+{
+   int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+   // Odd digit counts (3, 5) = fractional pip broker — 1 pip = 10 points
+   if (digits == 3 || digits == 5) return point * 10.0;
+   return point;
+}
+
+//+------------------------------------------------------------------+
+//| Add any currently-open MT5 positions to the tracking array       |
+//| Called from OnInit so trailing applies to pre-existing trades    |
+//+------------------------------------------------------------------+
+void ScanExistingPositions()
+{
+   int total = PositionsTotal();
+   for (int i = 0; i < total; i++) {
+      ulong ticket = PositionGetTicket(i);
+      if (ticket == 0) continue;
+      // Skip if already tracked
+      bool found = false;
+      for (int j = 0; j < g_tk_count; j++) { if (g_tk[j] == ticket) { found = true; break; } }
+      if (found) continue;
+      if (g_tk_count >= MAX_TRACKED) break;
+      string sym    = PositionGetString(POSITION_SYMBOL);
+      long   ptype  = PositionGetInteger(POSITION_TYPE);
+      double sl     = PositionGetDouble(POSITION_SL);
+      double tp     = PositionGetDouble(POSITION_TP);
+      double cur    = (ptype == POSITION_TYPE_BUY)
+                    ? SymbolInfoDouble(sym, SYMBOL_BID)
+                    : SymbolInfoDouble(sym, SYMBOL_ASK);
+      int idx = g_tk_count++;
+      g_tk[idx]     = ticket;
+      g_tk_sym[idx] = sym;
+      g_tk_dir[idx] = (ptype == POSITION_TYPE_BUY) ? "BUY" : "SELL";
+      g_tk_sl[idx]  = sl;
+      g_tk_tp1[idx] = tp;
+      g_tk_tp2[idx] = 0;
+      g_tk_tp3[idx] = 0;
+      g_tk_hwm[idx] = cur;   // start HWM at current price
+      g_tk_hit[idx] = 0;
+      Print("DotVerse EA: registered existing position ticket=", ticket, " ", sym, " ", g_tk_dir[idx],
+            " SL=", sl, " HWM=", cur);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Apply trailing stop to one tracked position                       |
+//+------------------------------------------------------------------+
+void ApplyTrailing(int idx)
+{
+   if (!g_trail_on) return;
+   ulong  ticket = g_tk[idx];
+   string sym    = g_tk_sym[idx];
+   bool   isBuy  = (g_tk_dir[idx] == "BUY");
+   double pip    = PipSize(sym);
+   double dist   = g_trail_pips * pip;   // trail distance in price units
+
+   if (!PositionSelectByTicket(ticket)) return;
+   double cur    = isBuy ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK);
+   double curSL  = PositionGetDouble(POSITION_SL);
+   double openP  = PositionGetDouble(POSITION_PRICE_OPEN);
+
+   // Only start trailing once position is at least 1× trail distance in profit
+   double profitDist = isBuy ? (cur - openP) : (openP - cur);
+   if (profitDist < dist) return;
+
+   // Update high water mark
+   if (isBuy)  { if (cur > g_tk_hwm[idx]) g_tk_hwm[idx] = cur; }
+   else        { if (cur < g_tk_hwm[idx]) g_tk_hwm[idx] = cur; }
+
+   double newSL = isBuy ? (g_tk_hwm[idx] - dist) : (g_tk_hwm[idx] + dist);
+
+   // Only move SL in the favorable direction, and only if improvement is ≥ 1 pip
+   bool shouldMove = isBuy
+      ? (newSL > curSL + pip)
+      : (curSL == 0 || newSL < curSL - pip);
+
+   if (!shouldMove) return;
+
+   MqlTradeRequest req = {};
+   MqlTradeResult  res = {};
+   ZeroMemory(req); ZeroMemory(res);
+   req.action   = TRADE_ACTION_SLTP;
+   req.symbol   = sym;
+   req.position = ticket;
+   req.sl       = newSL;
+   req.tp       = PositionGetDouble(POSITION_TP);   // preserve existing TP
+
+   if (OrderSend(req, res) && (res.retcode == TRADE_RETCODE_DONE || res.retcode == TRADE_RETCODE_PLACED)) {
+      g_tk_sl[idx] = newSL;
+      Print("DotVerse EA: trailing SL moved ticket=", ticket, " ", sym,
+            " HWM=", DoubleToString(g_tk_hwm[idx], 5),
+            " newSL=", DoubleToString(newSL, 5));
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Check tracked positions against TP/SL levels                     |
 //+------------------------------------------------------------------+
 void CheckLevels()
 {
+   // Pick up any positions that were opened manually (outside DotVerse)
+   ScanExistingPositions();
+
    for (int i = 0; i < g_tk_count; i++) {
       ulong ticket = g_tk[i];
       string sym   = g_tk_sym[i];
@@ -109,10 +221,14 @@ void CheckLevels()
          g_tk_tp1[i] = g_tk_tp1[g_tk_count];
          g_tk_tp2[i] = g_tk_tp2[g_tk_count];
          g_tk_tp3[i] = g_tk_tp3[g_tk_count];
+         g_tk_hwm[i] = g_tk_hwm[g_tk_count];
          g_tk_hit[i] = g_tk_hit[g_tk_count];
          i--;
          continue;
       }
+
+      // Apply trailing stop before checking hit levels
+      ApplyTrailing(i);
 
       double cur = isBuy ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK);
       int    hit = g_tk_hit[i];
@@ -261,8 +377,21 @@ void PollAndExecute()
    string resp = HttpGet("/api/mt5/pending");
    if (StringLen(resp) == 0) return;
 
+   // Parse automation settings embedded in response
+   int setStart = StringFind(resp, "\"settings\":{");
+   if (setStart >= 0) {
+      int setEnd = StringFind(resp, "}", setStart);
+      if (setEnd > setStart) {
+         string setBlock = StringSubstr(resp, setStart, setEnd - setStart + 1);
+         string trailStr = JsonStr(setBlock, "trailing_on");
+         g_trail_on   = (trailStr == "true");
+         double tp    = JsonDbl(setBlock, "trailing_pips");
+         if (tp > 0) g_trail_pips = tp;
+      }
+   }
+
    // Simple JSON parsing — extract each order block
-   // DotVerse returns: {"orders":[{"id":1,"symbol":"EURUSD","order_type":"BUY","volume":0.01,...},...]}
+   // DotVerse returns: {"orders":[...],"settings":{...}}
    // We parse the array manually to stay dependency-free.
 
    // Find "orders":[ ... ]
@@ -501,6 +630,7 @@ void ExecuteOrder(string obj)
          g_tk_tp1[idx] = tp;
          g_tk_tp2[idx] = o_tp2;
          g_tk_tp3[idx] = o_tp3;
+         g_tk_hwm[idx] = fillPrice;  // HWM starts at fill price
          g_tk_hit[idx] = 0;
          Print("DotVerse EA: tracking ticket ", ticket, " SL=", sl, " TP1=", tp, " TP2=", o_tp2, " TP3=", o_tp3);
       }

@@ -3524,7 +3524,13 @@ def mt5_get_pending():
             })
             o.status = "executing"
         db.commit()
-        return jsonify({"orders": result})
+        # Embed automation settings so the EA can apply trailing stop without an extra request
+        cfg = _get_automation_settings("default")
+        settings = {
+            "trailing_on":   cfg.get("trailing_on", False),
+            "trailing_pips": float(cfg.get("trailing_pips", 50.0)),
+        }
+        return jsonify({"orders": result, "settings": settings})
     except Exception as e:
         db.rollback()
         return jsonify({"orders": []})
