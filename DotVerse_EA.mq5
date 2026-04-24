@@ -565,9 +565,53 @@ void ExecuteOrder(string obj)
       return;
    }
 
-   Print("DotVerse EA: executing order #", orderId, " ", orderType, " ", volume, " ", symbol);
+   // Ensure symbol is in Market Watch with fresh price data
+   if (!SymbolSelect(symbol, true)) {
+      Print("DotVerse EA: symbol not found in broker: ", symbol);
+      string failBody = StringFormat(
+         "{\"order_id\":%d,\"status\":\"failed\",\"ticket\":0,\"fill_price\":0,"
+         "\"comment\":\"Symbol not found: %s\"}", orderId, symbol);
+      HttpPost("/api/mt5/confirm", failBody);
+      return;
+   }
 
    ENUM_ORDER_TYPE otype = (orderType == "BUY") ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+
+   // Normalize volume to broker's allowed step / min / max
+   double volMin  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+   double volMax  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+   double volStep = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+   if (volStep > 0) volume = MathFloor(volume / volStep + 0.5) * volStep;
+   if (volMin  > 0 && volume < volMin) volume = volMin;
+   if (volMax  > 0 && volume > volMax) volume = volMax;
+   volume = NormalizeDouble(volume, 2);
+
+   // Get current market price
+   double curPrice = (otype == ORDER_TYPE_BUY)
+                     ? SymbolInfoDouble(symbol, SYMBOL_ASK)
+                     : SymbolInfoDouble(symbol, SYMBOL_BID);
+
+   // Enforce broker's minimum stop distance for SL / TP
+   int    digits  = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   double point   = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   long   stopsLvl = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double minDist = stopsLvl * point;
+
+   Print("DotVerse EA: sym=", symbol,
+         " vol=", volume, " (min=", volMin, " max=", volMax, " step=", volStep, ")",
+         " stopsLvl=", stopsLvl, " minDist=", minDist,
+         " cur=", curPrice, " sl_in=", sl, " tp_in=", tp);
+
+   if (sl > 0) {
+      if (otype == ORDER_TYPE_BUY  && curPrice - sl < minDist) sl = curPrice - minDist;
+      if (otype == ORDER_TYPE_SELL && sl - curPrice < minDist) sl = curPrice + minDist;
+      sl = NormalizeDouble(sl, digits);
+   }
+   if (tp > 0) {
+      if (otype == ORDER_TYPE_BUY  && tp - curPrice < minDist) tp = curPrice + minDist;
+      if (otype == ORDER_TYPE_SELL && curPrice - tp < minDist) tp = curPrice - minDist;
+      tp = NormalizeDouble(tp, digits);
+   }
 
    MqlTradeRequest  req = {};
    MqlTradeResult   res = {};
@@ -588,13 +632,10 @@ void ExecuteOrder(string obj)
    req.type_filling= filling;
    req.deviation   = (ulong)InpSlippage;
    req.comment     = "DotVerse #" + IntegerToString(orderId);
-   Print("DotVerse EA: filling mode=", EnumToString(filling), " fillFlags=", fillFlags);
+   req.price       = curPrice;
 
-   // Price — market order uses Ask for BUY, Bid for SELL
-   if (otype == ORDER_TYPE_BUY)
-      req.price = SymbolInfoDouble(symbol, SYMBOL_ASK);
-   else
-      req.price = SymbolInfoDouble(symbol, SYMBOL_BID);
+   Print("DotVerse EA: filling=", EnumToString(filling), " fillFlags=", fillFlags,
+         " price=", curPrice, " sl=", sl, " tp=", tp, " vol=", volume);
 
    if (sl > 0) req.sl = sl;
    if (tp > 0) req.tp = tp;
