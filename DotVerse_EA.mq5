@@ -348,6 +348,37 @@ void ExecuteOrder(string obj)
    double tp2       = JsonDbl(obj, "tp2");
    double tp3       = JsonDbl(obj, "tp3");
 
+   // ── MODIFY_SL order: breakeven or trailing stop automation ────
+   if (action == "modify_sl" && closeTk > 0 && sl > 0) {
+      Print("DotVerse EA: modifying SL ticket=", closeTk, " new_sl=", sl);
+      bool modified = false;
+      if (PositionSelectByTicket((ulong)closeTk)) {
+         MqlTradeRequest req = {};
+         MqlTradeResult  res = {};
+         ZeroMemory(req); ZeroMemory(res);
+         req.action   = TRADE_ACTION_SLTP;
+         req.symbol   = PositionGetString(POSITION_SYMBOL);
+         req.position = (ulong)closeTk;
+         req.sl       = sl;
+         req.tp       = PositionGetDouble(POSITION_TP); // preserve existing TP
+         modified = OrderSend(req, res);
+         if (modified && (res.retcode == TRADE_RETCODE_DONE || res.retcode == TRADE_RETCODE_PLACED))
+            Print("DotVerse EA: SL modified OK ticket=", closeTk, " new_sl=", sl);
+         else
+            Print("DotVerse EA: SL modify FAILED ticket=", closeTk, " retcode=", res.retcode);
+      } else {
+         Print("DotVerse EA: position ", closeTk, " not found for SL modify");
+         modified = true;
+      }
+      string mstatus = modified ? "filled" : "failed";
+      string mbody = StringFormat(
+         "{\"order_id\":%I64d,\"status\":\"%s\",\"ticket\":%I64d,\"fill_price\":%.5f,\"comment\":\"modify_sl\"}",
+         orderId, mstatus, closeTk, sl
+      );
+      HttpPost("/api/mt5/confirm", mbody);
+      return;
+   }
+
    // ── CLOSE order: user tapped a Trade Manager button ───────────
    if (action == "close" && closeTk > 0) {
       Print("DotVerse EA: closing position ticket=", closeTk);

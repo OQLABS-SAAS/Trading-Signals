@@ -2686,10 +2686,345 @@ def run_watch_job():
         except Exception as e:
             print(f"[Watch] Error for {key}: {e}")
 
+# ─── AUTOMATION HELPERS ────────────────────────────────────────
+
+def _push_notification(user_id, ntype, title, body, data=None):
+    """Save an in-app notification to DB so the frontend bell can fetch it."""
+    if not _DBSession:
+        return
+    try:
+        db = _DBSession()
+        notif = Notification(
+            user_id=str(user_id), ntype=ntype,
+            title=title, body=body,
+            data=json.dumps(data) if data else None,
+        )
+        db.add(notif)
+        db.commit()
+        db.close()
+    except Exception as e:
+        print(f"[notify] DB error: {e}")
+
+def _get_automation_settings(user_id):
+    """Return AutomationSettings for user, creating defaults if absent."""
+    if not _DBSession:
+        return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
+                "trailing_on": False, "trailing_pips": 50.0, "market_alerts_on": True}
+    try:
+        db = _DBSession()
+        s = db.query(AutomationSettings).filter_by(user_id=str(user_id)).first()
+        if not s:
+            s = AutomationSettings(user_id=str(user_id))
+            db.add(s); db.commit()
+        result = {
+            "scan_enabled": s.scan_enabled, "scan_risk_pct": s.scan_risk_pct,
+            "breakeven_on": s.breakeven_on, "trailing_on": s.trailing_on,
+            "trailing_pips": s.trailing_pips, "market_alerts_on": s.market_alerts_on,
+        }
+        db.close()
+        return result
+    except Exception:
+        return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
+                "trailing_on": False, "trailing_pips": 50.0, "market_alerts_on": True}
+
+def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0):
+    """Calculate appropriate lot size for an auto-scan signal."""
+    if not entry or not sl or entry == sl or account_balance <= 0:
+        return 0.0
+    risk_amt = account_balance * (risk_pct / 100.0)
+    sl_dist  = abs(entry - sl)
+    if sl_dist == 0:
+        return 0.0
+    if asset_type == "forex":
+        # 1 std lot = 100,000 units; pip value ~$10/lot for USD-quoted pairs
+        pip_size = 0.01 if "JPY" in str(entry).upper() else 0.0001
+        pips = sl_dist / pip_size
+        lots = risk_amt / max(pips * 10, 0.01)
+    else:
+        # Crypto, indices, commodities, stocks — direct
+        lots = risk_amt / sl_dist
+    return round(max(lots, 0.0), 2)
+
+# ─── WATCHLIST ────────────────────────────────────────────────
+# Balance: volatile (crypto) + non-volatile (forex/indices), scalp + swing
+AUTO_WATCHLIST = [
+    # Crypto — high volatility, 24/7, strong R:R
+    {"ticker": "BTC-USD",  "asset_type": "crypto",    "scalp": True,  "swing": True,  "min_lot": 0.01},
+    {"ticker": "ETH-USD",  "asset_type": "crypto",    "scalp": True,  "swing": True,  "min_lot": 0.01},
+    {"ticker": "XRP-USD",  "asset_type": "crypto",    "scalp": True,  "swing": True,  "min_lot": 0.01},
+    {"ticker": "SOL-USD",  "asset_type": "crypto",    "scalp": True,  "swing": True,  "min_lot": 0.01},
+    # Forex majors — liquid, session-driven, precise pip value
+    {"ticker": "EURUSD=X", "asset_type": "forex",     "scalp": True,  "swing": True,  "min_lot": 0.05},
+    {"ticker": "GBPUSD=X", "asset_type": "forex",     "scalp": True,  "swing": True,  "min_lot": 0.05},
+    {"ticker": "USDJPY=X", "asset_type": "forex",     "scalp": True,  "swing": True,  "min_lot": 0.05},
+    {"ticker": "AUDUSD=X", "asset_type": "forex",     "scalp": True,  "swing": True,  "min_lot": 0.05},
+    # Precious metals — safe haven + volatile
+    {"ticker": "GC=F",     "asset_type": "commodity", "scalp": True,  "swing": True,  "min_lot": 0.01},
+    {"ticker": "SI=F",     "asset_type": "commodity", "scalp": True,  "swing": True,  "min_lot": 0.01},
+    # Indices — macro trend, non-volatile base
+    {"ticker": "^GSPC",    "asset_type": "index",     "scalp": False, "swing": True,  "min_lot": 0.01},
+    {"ticker": "^NDX",     "asset_type": "index",     "scalp": False, "swing": True,  "min_lot": 0.01},
+    {"ticker": "^DJI",     "asset_type": "index",     "scalp": False, "swing": True,  "min_lot": 0.01},
+    # Energy — volatile commodity
+    {"ticker": "CL=F",     "asset_type": "commodity", "scalp": True,  "swing": True,  "min_lot": 0.01},
+    # High-beta stocks — US session, swing only
+    {"ticker": "NVDA",     "asset_type": "stock",     "scalp": False, "swing": True,  "min_lot": 1.0},
+    {"ticker": "TSLA",     "asset_type": "stock",     "scalp": False, "swing": True,  "min_lot": 1.0},
+    {"ticker": "AAPL",     "asset_type": "stock",     "scalp": False, "swing": True,  "min_lot": 1.0},
+    {"ticker": "MSFT",     "asset_type": "stock",     "scalp": False, "swing": True,  "min_lot": 1.0},
+]
+
+# Market sessions (UTC)
+_MARKET_SESSIONS = [
+    ("Sydney Open",   22,  0, "🦘", "Forex AUD/NZD pairs most active. Asian session begins."),
+    ("Tokyo Open",     0,  0, "🗼", "JPY pairs most active. Asian session in full swing."),
+    ("London Open",    8,  0, "🏦", "Highest liquidity window opens. EUR/GBP in focus."),
+    ("New York Open", 13, 30, "🗽", "USD pairs + stocks + gold surge. Best scalping window."),
+    ("NYSE Close",    21,  0, "🔔", "US stocks close. Volatility drops. Review open trades."),
+    ("Crypto Daily",   0,  0, "₿",  "New daily candle. Key level for BTC/ETH/XRP setups."),
+]
+
+def _job_market_alert(session_name, emoji, note):
+    """Fire a market open/close notification to all active users."""
+    try:
+        # Notify all users who have market_alerts_on
+        all_users = []
+        if _DBSession:
+            try:
+                db = _DBSession()
+                settings = db.query(AutomationSettings).filter_by(market_alerts_on=True).all()
+                all_users = [s.user_id for s in settings]
+                db.close()
+            except Exception:
+                pass
+        # Always send to 'default' user (single-user mode)
+        if not all_users:
+            all_users = ["default"]
+        tg_msg = f"{emoji} {session_name}\n{note}"
+        try:
+            send_telegram(tg_msg)
+        except Exception:
+            pass
+        for uid in set(all_users + ["default"]):
+            _push_notification(uid, "market", f"{emoji} {session_name}", note)
+    except Exception as e:
+        print(f"[market_alert] {session_name}: {e}")
+
+def _is_duplicate_scan_alert(ticker, signal, timeframe, trade_type):
+    """Return True if an identical alert was sent within the dedup window."""
+    if not _DBSession:
+        return False
+    dedup_hours = {"scalping": 2, "swing": 12}.get(trade_type, 4)
+    cutoff = datetime.utcnow() - timedelta(hours=dedup_hours)
+    try:
+        db = _DBSession()
+        exists = db.query(ScanAlert).filter(
+            ScanAlert.ticker    == ticker,
+            ScanAlert.signal    == signal,
+            ScanAlert.timeframe == timeframe,
+            ScanAlert.trade_type== trade_type,
+            ScanAlert.sent_at   >= cutoff,
+        ).first()
+        db.close()
+        return exists is not None
+    except Exception:
+        return False
+
+def _record_scan_alert(ticker, signal, timeframe, trade_type, entry, sl, tp1, lot_size):
+    if not _DBSession:
+        return
+    try:
+        db = _DBSession()
+        db.add(ScanAlert(ticker=ticker, signal=signal, timeframe=timeframe,
+                         trade_type=trade_type, entry=entry, sl=sl, tp1=tp1,
+                         lot_size=lot_size))
+        db.commit(); db.close()
+    except Exception:
+        pass
+
+def _job_auto_scan():
+    """Scan 18 instruments across scalp (15m) + swing (4H) timeframes every 15 min.
+    Sends Telegram + in-app alert for HIGH-confidence BUY/SELL signals above min lot."""
+    import time as _time
+    print("[auto_scan] Starting scan...")
+    # Get account balance from any active mt5_state
+    account_balance = 1000.0
+    with mt5_state_lock:
+        for uid, state in mt5_state.items():
+            if isinstance(state, dict) and state.get("account", {}).get("balance"):
+                account_balance = float(state["account"]["balance"])
+                break
+
+    scans = []
+    for inst in AUTO_WATCHLIST:
+        if inst["scalp"]:
+            scans.append((inst, "15m", "scalping"))
+        if inst["swing"]:
+            scans.append((inst, "4h", "swing"))
+
+    found = 0
+    for inst, tf, trade_type in scans:
+        ticker     = inst["ticker"]
+        asset_type = inst["asset_type"]
+        min_lot    = inst["min_lot"]
+        try:
+            cfg = TIMEFRAME_CONFIG.get(tf, TIMEFRAME_CONFIG["1d"])
+            df  = safe_download(ticker, period=cfg["period"], interval=cfg["interval"],
+                                progress=False, auto_adjust=True)
+            if "resample" in cfg:
+                df = df.resample(cfg["resample"]).agg(
+                    {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
+                ).dropna()
+            if df.empty or len(df) < 51:
+                _time.sleep(0.5)
+                continue
+            df  = _fill_date_grid(df, tf, asset_type)
+            ind = calculate_indicators(df, tf, asset_type)
+            res = get_analysis(ticker, asset_type, ind, tf)
+
+            sig  = res.get("signal", "HOLD")
+            conf = res.get("confidence", "LOW")
+            if sig not in ("BUY", "SELL") or conf != "HIGH":
+                _time.sleep(0.5)
+                continue
+
+            entry = res.get("entry", 0)
+            sl    = res.get("stop_loss", 0)
+            tp1   = res.get("tp1", 0)
+            tp2   = res.get("tp2", 0)
+            tp3   = res.get("tp3", 0)
+            rr    = res.get("rr1", 0)
+
+            lot   = _calc_auto_lot(account_balance, entry, sl, asset_type)
+            if lot < min_lot:
+                _time.sleep(0.5)
+                continue
+
+            if _is_duplicate_scan_alert(ticker, sig, tf, trade_type):
+                _time.sleep(0.5)
+                continue
+
+            # ── Send alert ──────────────────────────────────────────────
+            type_tag = "SCALP" if trade_type == "scalping" else "SWING"
+            sig_emoji = "🟢" if sig == "BUY" else "🔴"
+            tg_msg = (
+                f"{sig_emoji} {type_tag} SIGNAL — {ticker}\n"
+                f"Direction: {sig}  |  TF: {tf.upper()}\n"
+                f"Entry:  {entry:.5g}\n"
+                f"SL:     {sl:.5g}\n"
+                f"TP1:    {tp1:.5g}  |  TP2: {tp2:.5g}  |  TP3: {tp3:.5g}\n"
+                f"R:R     1:{rr:.1f}\n"
+                f"Lot size: {lot:.2f} lots\n"
+                f"Confidence: HIGH ✅"
+            )
+            try:
+                send_telegram(tg_msg)
+            except Exception:
+                pass
+
+            notif_data = {"ticker": ticker, "signal": sig, "timeframe": tf,
+                          "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
+                          "lot": lot, "trade_type": trade_type, "rr": rr}
+            _push_notification("default", "scan",
+                                f"{sig_emoji} {type_tag}: {ticker} {sig}",
+                                f"Entry {entry:.5g} · SL {sl:.5g} · TP1 {tp1:.5g} · {lot:.2f} lots · R:R 1:{rr:.1f}",
+                                data=notif_data)
+            _record_scan_alert(ticker, sig, tf, trade_type, entry, sl, tp1, lot)
+            found += 1
+            _time.sleep(1.0)   # rate-limit between instruments
+        except Exception as e:
+            print(f"[auto_scan] {ticker} {tf}: {e}")
+            _time.sleep(1.0)
+
+    print(f"[auto_scan] Done. {found} signals sent.")
+
+def _job_trade_suggestions():
+    """Daily job: analyse recent trade history and suggest risk adjustments."""
+    import time as _time
+    if not _DBSession:
+        return
+    try:
+        db = _DBSession()
+        # Look at last 20 signal history rows
+        history = db.query(SignalHistory).order_by(SignalHistory.fired_at.desc()).limit(20).all()
+        orders  = db.query(MT5Order).filter(MT5Order.status == "filled")\
+                    .order_by(MT5Order.created_at.desc()).limit(20).all()
+        db.close()
+
+        if len(orders) < 5:
+            return   # not enough data for meaningful suggestion
+
+        # Simple win rate proxy: count signals that generated TP fills vs SL fills
+        # (true win rate needs P&L tracking — this is advisory)
+        total  = len(orders)
+        # Calculate average lot sizes
+        lots   = [float(o.volume or 0) for o in orders if o.volume]
+        avg_lot = sum(lots) / len(lots) if lots else 0
+        max_lot = max(lots) if lots else 0
+
+        # Account balance
+        account_balance = 1000.0
+        with mt5_state_lock:
+            for uid, state in mt5_state.items():
+                if isinstance(state, dict) and state.get("account", {}).get("balance"):
+                    account_balance = float(state["account"]["balance"])
+                    break
+
+        suggestions = []
+
+        # If all trades are tiny lots relative to account
+        if avg_lot < 0.02 and account_balance >= 500:
+            suggestions.append(
+                f"📊 Your avg lot size is {avg_lot:.3f} — for a ${account_balance:.0f} account, "
+                f"consider 0.05 lots on high-confidence setups to capture meaningful profits."
+            )
+
+        # If account grew suggest scaling
+        # (placeholder — real version needs filled_at P&L from MT5 push)
+        if total >= 10:
+            suggestions.append(
+                f"✅ You've completed {total} trades. Review your win rate on DotVerse "
+                f"Backtest tab and consider adjusting risk from 1% → 1.5% if win rate > 60%."
+            )
+
+        if not suggestions:
+            suggestions.append(
+                f"📈 Daily summary: {total} trades on record. "
+                f"Avg lot: {avg_lot:.3f}. Keep following the signals."
+            )
+
+        msg = "🤖 DotVerse Daily Summary\n\n" + "\n\n".join(suggestions)
+        try:
+            send_telegram(msg)
+        except Exception:
+            pass
+        _push_notification("default", "suggestion", "🤖 Daily Trade Summary",
+                            "\n".join(suggestions))
+    except Exception as e:
+        print(f"[trade_suggestions] {e}")
+
 # ─── START BACKGROUND SCHEDULER ───────────────────────────────
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(run_watch_job, "interval", seconds=60, id="watch_job",
                   max_instances=1, coalesce=True)
+
+# Phase A — Market session alerts (UTC)
+for _sess_name, _sess_h, _sess_m, _sess_emoji, _sess_note in _MARKET_SESSIONS:
+    _sid = _sess_name.lower().replace(" ", "_")
+    scheduler.add_job(
+        lambda sn=_sess_name, em=_sess_emoji, nt=_sess_note: _job_market_alert(sn, em, nt),
+        "cron", hour=_sess_h, minute=_sess_m,
+        id=f"market_{_sid}", max_instances=1, coalesce=True,
+    )
+
+# Phase B — Auto-scan every 15 minutes
+scheduler.add_job(_job_auto_scan, "interval", minutes=15,
+                  id="auto_scan", max_instances=1, coalesce=True)
+
+# Phase D — Daily trade suggestions at 08:00 UTC
+scheduler.add_job(_job_trade_suggestions, "cron", hour=8, minute=0,
+                  id="trade_suggestions", max_instances=1, coalesce=True)
+
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown(wait=False))
 
@@ -3284,6 +3619,55 @@ def mt5_level_alert():
             state["level_hits"] = {}
         state["level_hits"][str(ticket)] = level
         mt5_state["default"] = state
+
+    # Phase C — breakeven automation: when TP1 hit, move SL to entry price
+    if level == "TP1" and _DBSession:
+        try:
+            auto_cfg = _get_automation_settings("default")
+            if auto_cfg.get("breakeven_on"):
+                # Find the original open_price from mt5_state positions
+                open_price = None
+                with mt5_state_lock:
+                    for uid, st in mt5_state.items():
+                        if isinstance(st, dict):
+                            for p in st.get("positions", []):
+                                if str(p.get("ticket")) == str(ticket):
+                                    open_price = p.get("open_price")
+                                    break
+                if open_price:
+                    db_be = _DBSession()
+                    try:
+                        be_order = MT5Order(
+                            user_id      = "default",
+                            symbol       = symbol,
+                            order_type   = "MODIFY",
+                            volume       = 0,
+                            price        = 0,
+                            sl           = float(open_price),
+                            action       = "modify_sl",
+                            close_ticket = int(ticket),
+                            status       = "pending",
+                            comment      = f"Breakeven after TP1 #{ticket}",
+                        )
+                        db_be.add(be_order)
+                        db_be.commit()
+                        be_tg = (f"🔒 Breakeven Set — {symbol}\n"
+                                 f"TP1 reached. SL moved to entry {open_price}\n"
+                                 f"Ticket #{ticket} — trade cannot lose now.")
+                        try:
+                            send_telegram(be_tg)
+                        except Exception:
+                            pass
+                        _push_notification("default", "level",
+                                           f"🔒 Breakeven — {symbol}",
+                                           f"SL moved to entry {open_price} after TP1 hit")
+                    except Exception as be_e:
+                        print(f"[breakeven] {be_e}")
+                    finally:
+                        db_be.close()
+        except Exception as e:
+            print(f"[breakeven] {e}")
+
     return jsonify({"status": "ok"})
 
 @app.route("/api/mt5/push", methods=["POST"])
@@ -3442,6 +3826,89 @@ def mt5_close_position():
         return jsonify({"error": str(e)}), 500
     finally:
         db.close()
+
+# ─── AUTOMATION SETTINGS ─────────────────────────────────────
+
+@app.route("/api/automation/settings", methods=["GET"])
+@login_required
+def automation_settings_get():
+    user_id = str(session.get("user_id"))
+    return jsonify(_get_automation_settings(user_id))
+
+@app.route("/api/automation/settings", methods=["POST"])
+@login_required
+def automation_settings_save():
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body    = request.json or {}
+    db      = _DBSession()
+    try:
+        s = db.query(AutomationSettings).filter_by(user_id=user_id).first()
+        if not s:
+            s = AutomationSettings(user_id=user_id)
+            db.add(s)
+        if "scan_enabled"     in body: s.scan_enabled     = bool(body["scan_enabled"])
+        if "scan_risk_pct"    in body: s.scan_risk_pct    = float(body["scan_risk_pct"])
+        if "breakeven_on"     in body: s.breakeven_on     = bool(body["breakeven_on"])
+        if "trailing_on"      in body: s.trailing_on      = bool(body["trailing_on"])
+        if "trailing_pips"    in body: s.trailing_pips    = float(body["trailing_pips"])
+        if "market_alerts_on" in body: s.market_alerts_on = bool(body["market_alerts_on"])
+        s.updated_at = datetime.utcnow()
+        db.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+# ─── NOTIFICATIONS ────────────────────────────────────────────
+
+@app.route("/api/notifications", methods=["GET"])
+@login_required
+def get_notifications():
+    if not _DBSession:
+        return jsonify({"notifications": []})
+    user_id = str(session.get("user_id"))
+    try:
+        db = _DBSession()
+        rows = db.query(Notification)\
+                 .filter(Notification.user_id.in_([user_id, "default"]))\
+                 .order_by(Notification.created_at.desc()).limit(50).all()
+        result = [{
+            "id":         n.id,
+            "type":       n.ntype,
+            "title":      n.title,
+            "body":       n.body,
+            "data":       json.loads(n.data) if n.data else None,
+            "read":       n.read,
+            "created_at": n.created_at.strftime("%Y-%m-%d %H:%M UTC"),
+        } for n in rows]
+        db.close()
+        return jsonify({"notifications": result,
+                        "unread": sum(1 for r in result if not r["read"])})
+    except Exception as e:
+        return jsonify({"notifications": [], "unread": 0})
+
+@app.route("/api/notifications/read", methods=["POST"])
+@login_required
+def mark_notifications_read():
+    if not _DBSession:
+        return jsonify({"status": "ok"})
+    user_id = str(session.get("user_id"))
+    body    = request.json or {}
+    nid     = body.get("id")   # if None → mark all read
+    try:
+        db = _DBSession()
+        q  = db.query(Notification).filter(Notification.user_id.in_([user_id, "default"]))
+        if nid:
+            q = q.filter(Notification.id == int(nid))
+        q.update({"read": True}, synchronize_session=False)
+        db.commit(); db.close()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ─── SETTINGS — PROFILE ──────────────────────────────────────
 
@@ -5414,6 +5881,45 @@ class Watch(_Base):
     alert_channels = Column(String(128), nullable=False, default="telegram")
     created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
 
+class Notification(_Base):
+    """In-app notifications: market alerts, scan alerts, level hits, suggestions."""
+    __tablename__ = "notifications"
+    id         = Column(Integer,  primary_key=True, autoincrement=True)
+    user_id    = Column(String(64), nullable=False, default="default")
+    ntype      = Column(String(32), nullable=False)   # market|scan|level|suggestion
+    title      = Column(String(128), nullable=False)
+    body       = Column(Text, nullable=False)
+    data       = Column(Text, nullable=True)           # JSON blob — entry/sl/tp etc.
+    read       = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class AutomationSettings(_Base):
+    """Per-user automation preferences stored in DB."""
+    __tablename__ = "automation_settings"
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    user_id          = Column(String(64), unique=True, nullable=False)
+    scan_enabled     = Column(Boolean, default=True)
+    scan_risk_pct    = Column(Float,   default=1.0)
+    breakeven_on     = Column(Boolean, default=True)
+    trailing_on      = Column(Boolean, default=False)
+    trailing_pips    = Column(Float,   default=50.0)
+    market_alerts_on = Column(Boolean, default=True)
+    updated_at       = Column(DateTime, default=datetime.utcnow)
+
+class ScanAlert(_Base):
+    """Tracks recently sent scan alerts for deduplication."""
+    __tablename__ = "scan_alerts"
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    ticker     = Column(String(32), nullable=False)
+    signal     = Column(String(8),  nullable=False)
+    timeframe  = Column(String(8),  nullable=False)
+    trade_type = Column(String(16), nullable=False)   # scalping | swing
+    entry      = Column(Float,  nullable=True)
+    sl         = Column(Float,  nullable=True)
+    tp1        = Column(Float,  nullable=True)
+    lot_size   = Column(Float,  nullable=True)
+    sent_at    = Column(DateTime, default=datetime.utcnow)
+
 # ─── WATCH DB HELPERS ─────────────────────────────────────────
 
 def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="legacy"):
@@ -5500,6 +6006,40 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS close_ticket INTEGER"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
+                # Phase A/B/C/D automation tables (idempotent)
+                _conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS notifications (
+                        id SERIAL PRIMARY KEY,
+                        user_id VARCHAR(64) NOT NULL DEFAULT 'default',
+                        ntype VARCHAR(32) NOT NULL,
+                        title VARCHAR(128) NOT NULL,
+                        body TEXT NOT NULL,
+                        data TEXT,
+                        read BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )"""))
+                _conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS automation_settings (
+                        id SERIAL PRIMARY KEY,
+                        user_id VARCHAR(64) UNIQUE NOT NULL,
+                        scan_enabled BOOLEAN DEFAULT TRUE,
+                        scan_risk_pct FLOAT DEFAULT 1.0,
+                        breakeven_on BOOLEAN DEFAULT TRUE,
+                        trailing_on BOOLEAN DEFAULT FALSE,
+                        trailing_pips FLOAT DEFAULT 50.0,
+                        market_alerts_on BOOLEAN DEFAULT TRUE,
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    )"""))
+                _conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS scan_alerts (
+                        id SERIAL PRIMARY KEY,
+                        ticker VARCHAR(32) NOT NULL,
+                        signal VARCHAR(8) NOT NULL,
+                        timeframe VARCHAR(8) NOT NULL,
+                        trade_type VARCHAR(16) NOT NULL,
+                        entry FLOAT, sl FLOAT, tp1 FLOAT, lot_size FLOAT,
+                        sent_at TIMESTAMP DEFAULT NOW()
+                    )"""))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")

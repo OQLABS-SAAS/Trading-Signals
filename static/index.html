@@ -1354,6 +1354,21 @@ body::before{
       <span class="ac-price" id="acPrice">—</span>
       <span class="ac-chg" id="acChg">—</span>
     </div>
+    <!-- Notification bell -->
+    <div style="position:relative;display:inline-block;margin-right:4px;">
+      <button id="notifBell" onclick="toggleNotifPanel()" style="background:none;border:1px solid rgba(245,166,35,.2);border-radius:4px;padding:6px 10px;cursor:pointer;color:var(--muted2);position:relative;transition:all .15s;" onmouseover="this.style.color='var(--amber)';this.style.borderColor='rgba(245,166,35,.5)'" onmouseout="this.style.color='var(--muted2)';this.style.borderColor='rgba(245,166,35,.2)'">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span id="notifBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#e05555;color:#fff;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;min-width:16px;text-align:center;">0</span>
+      </button>
+      <!-- Notification dropdown -->
+      <div id="notifPanel" style="display:none;position:absolute;right:0;top:calc(100% + 6px);width:340px;max-height:480px;overflow-y:auto;background:#161210;border:1px solid rgba(255,220,160,.12);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:9999;">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,220,160,.07);">
+          <span style="font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#c8b89a;flex:1;">Notifications</span>
+          <button onclick="markAllNotifsRead()" style="background:none;border:none;cursor:pointer;font-family:'DM Mono',monospace;font-size:10px;color:#6a6058;padding:0;" onmouseover="this.style.color='var(--amber)'" onmouseout="this.style.color='#6a6058'">Mark all read</button>
+        </div>
+        <div id="notifList" style="padding:4px 0;"><div style="font-family:'DM Mono',monospace;font-size:11px;color:#555;text-align:center;padding:24px;">No notifications</div></div>
+      </div>
+    </div>
     <a href="/settings" style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.5px;padding:7px 14px;background:transparent;color:var(--muted2);border:1px solid rgba(245,166,35,.2);border-radius:2px;cursor:pointer;text-transform:uppercase;text-decoration:none;white-space:nowrap;transition:all .15s;" onmouseover="this.style.color='var(--amber)';this.style.borderColor='rgba(245,166,35,.5)'" onmouseout="this.style.color='var(--muted2)';this.style.borderColor='rgba(245,166,35,.2)'">⚙ Settings</a>
     <a href="/pricing" target="_blank" style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;padding:7px 16px;background:var(--amber);color:#0C0A08;border:none;border-radius:2px;cursor:pointer;text-transform:uppercase;text-decoration:none;white-space:nowrap;transition:background .15s;" onmouseover="this.style.background='var(--amber2)'" onmouseout="this.style.background='var(--amber)'">⬆ Upgrade</a>
   </div>
@@ -3156,6 +3171,8 @@ function unlockApp(user) {
   setInterval(loadMarketPulse, 30 * 60 * 1000);
   setInterval(loadSidebarTickers, 60000);
   try { loadSigHistory(); } catch(e) {}
+  try { loadNotifications(); } catch(e) {}
+  try { loadAutomationSettings(); } catch(e) {}
   if (user && user.role === 'admin') {
     try { showAdminBtn(); } catch(e) {}
   }
@@ -11710,6 +11727,48 @@ function closeSimulate() {
       </div>
     </div>
 
+    <!-- Automation settings panel -->
+    <div style="border-radius:10px;padding:18px 20px;background:#161210;border:1px solid rgba(255,220,160,.07);margin-bottom:14px;">
+      <div style="display:flex;align-items:center;margin-bottom:14px;">
+        <span style="font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#c8b89a;flex:1;">⚡ Automation</span>
+        <button onclick="saveAutomationSettings()" style="font-family:'DM Mono',monospace;font-size:10px;font-weight:700;padding:5px 12px;background:#1c1400;border:1px solid rgba(212,135,10,.3);border-radius:5px;color:#d4870a;cursor:pointer;" onmouseover="this.style.background='#2a1f00'" onmouseout="this.style.background='#1c1400'">Save</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <!-- Scan toggle -->
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:#1c1815;border-radius:8px;border:1px solid rgba(255,220,160,.07);">
+          <input type="checkbox" id="autoScanToggle" checked style="accent-color:#d4870a;width:16px;height:16px;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:#c8b89a;">Auto-scan signals</span>
+        </label>
+        <!-- Market alerts toggle -->
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:#1c1815;border-radius:8px;border:1px solid rgba(255,220,160,.07);">
+          <input type="checkbox" id="mktAlertsToggle" checked style="accent-color:#d4870a;width:16px;height:16px;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:#c8b89a;">Market open/close alerts</span>
+        </label>
+        <!-- Breakeven toggle -->
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:#1c1815;border-radius:8px;border:1px solid rgba(255,220,160,.07);">
+          <input type="checkbox" id="breakevenToggle" checked style="accent-color:#3dbe6c;width:16px;height:16px;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:#c8b89a;">Move SL to entry after TP1</span>
+        </label>
+        <!-- Trailing toggle -->
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;background:#1c1815;border-radius:8px;border:1px solid rgba(255,220,160,.07);">
+          <input type="checkbox" id="trailingToggle" style="accent-color:#3dbe6c;width:16px;height:16px;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:#c8b89a;">Trailing stop loss</span>
+        </label>
+      </div>
+      <!-- Trailing pips + scan risk inputs -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+        <div style="padding:10px 12px;background:#1c1815;border-radius:8px;border:1px solid rgba(255,220,160,.07);">
+          <div style="font-family:'DM Mono',monospace;font-size:9px;color:#6a6058;letter-spacing:.8px;text-transform:uppercase;margin-bottom:6px;">Trailing distance (pips)</div>
+          <input id="trailingPipsInput" type="number" value="50" min="5" max="500" style="width:100%;background:none;border:none;outline:none;font-family:'DM Mono',monospace;font-size:16px;font-weight:700;color:#e8dcc8;">
+        </div>
+        <div style="padding:10px 12px;background:#1c1815;border-radius:8px;border:1px solid rgba(255,220,160,.07);">
+          <div style="font-family:'DM Mono',monospace;font-size:9px;color:#6a6058;letter-spacing:.8px;text-transform:uppercase;margin-bottom:6px;">Scan risk per trade (%)</div>
+          <input id="scanRiskInput" type="number" value="1" min="0.1" max="10" step="0.1" style="width:100%;background:none;border:none;outline:none;font-family:'DM Mono',monospace;font-size:16px;font-weight:700;color:#e8dcc8;">
+        </div>
+      </div>
+      <div id="autoSettingsMsg" style="font-family:'DM Mono',monospace;font-size:11px;color:#6a6058;margin-top:10px;display:none;"></div>
+    </div>
+
     <!-- Open positions -->
     <div style="margin-bottom:24px;">
       <div style="font-family:'DM Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#6a6058;margin-bottom:10px;">Open Positions</div>
@@ -12765,6 +12824,111 @@ function _mt5RenderAccount(acct) {
 
 // ─── Render open positions ────────────────────────────────────
 var _mt5PrevPnl = {};  // track previous P&L per ticket for flash animation
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────
+var _notifPanelOpen = false;
+function toggleNotifPanel() {
+  _notifPanelOpen = !_notifPanelOpen;
+  var panel = document.getElementById('notifPanel');
+  if (panel) panel.style.display = _notifPanelOpen ? 'block' : 'none';
+  if (_notifPanelOpen) loadNotifications();
+}
+document.addEventListener('click', function(e) {
+  if (_notifPanelOpen && !document.getElementById('notifBell').contains(e.target)) {
+    _notifPanelOpen = false;
+    var p = document.getElementById('notifPanel');
+    if (p) p.style.display = 'none';
+  }
+});
+function loadNotifications() {
+  fetch('/api/notifications').then(function(r){return r.json();}).then(function(d){
+    var badge  = document.getElementById('notifBadge');
+    var list   = document.getElementById('notifList');
+    if (badge) {
+      badge.textContent = d.unread || '';
+      badge.style.display = d.unread > 0 ? 'block' : 'none';
+    }
+    if (!list) return;
+    if (!d.notifications || d.notifications.length === 0) {
+      list.innerHTML = '<div style="font-family:\'DM Mono\',monospace;font-size:11px;color:#555;text-align:center;padding:24px;">No notifications yet</div>';
+      return;
+    }
+    var typeColors = {market:'#d4870a', scan:'#3dbe6c', level:'#fb923c', suggestion:'#c8960a'};
+    list.innerHTML = d.notifications.map(function(n){
+      var col  = typeColors[n.type] || '#8a7f72';
+      var bg   = n.read ? '#161210' : '#1c1815';
+      var dot  = n.read ? '' : '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+col+';margin-right:6px;flex-shrink:0;margin-top:3px;"></span>';
+      var dataBtn = '';
+      if (n.data && n.data.ticker && n.data.signal) {
+        dataBtn = '<button onclick="notifExecute(\''+n.data.ticker+'\',\''+n.data.signal+'\',\''+
+                  (n.data.timeframe||'4h')+'\')" style="margin-top:6px;font-family:\'DM Mono\',monospace;font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(61,190,108,.3);background:#0f2215;color:#3dbe6c;cursor:pointer;">View Signal</button>';
+      }
+      return '<div onclick="markNotifRead('+n.id+')" style="padding:12px 16px;border-bottom:1px solid rgba(255,220,160,.05);background:'+bg+';cursor:pointer;" onmouseover="this.style.background=\'#1e1c19\'" onmouseout="this.style.background=\''+bg+'\'">'
+        + '<div style="display:flex;align-items:flex-start;gap:6px;">'
+        + dot
+        + '<div style="flex:1;">'
+        + '<div style="font-family:\'DM Mono\',monospace;font-size:11px;font-weight:700;color:'+col+';">'+n.title+'</div>'
+        + '<div style="font-family:\'DM Sans\',sans-serif;font-size:11px;color:#8a7f72;margin-top:3px;line-height:1.4;">'+n.body+'</div>'
+        + dataBtn
+        + '<div style="font-family:\'DM Mono\',monospace;font-size:9px;color:#555;margin-top:4px;">'+n.created_at+'</div>'
+        + '</div></div></div>';
+    }).join('');
+  }).catch(function(){});
+}
+function markNotifRead(id) {
+  fetch('/api/notifications/read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+}
+function markAllNotifsRead() {
+  fetch('/api/notifications/read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})
+    .then(function(){ loadNotifications(); });
+}
+function notifExecute(ticker, signal, tf) {
+  var assetType = ticker.includes('-USD') ? 'crypto' : (ticker.includes('=X') ? 'forex' : 'stock');
+  document.getElementById('tickerInput') && (document.getElementById('tickerInput').value = ticker.replace('-USD','').replace('=X','').replace('^',''));
+  var tfEl = document.getElementById('timeframe');
+  if (tfEl) { tfEl.value = tf; syncPillsFromSelect && syncPillsFromSelect('timeframe'); }
+  switchMainTab('signals', document.querySelector('.nav-tab'));
+  setTimeout(function(){ document.getElementById('notifPanel').style.display='none'; _notifPanelOpen=false; }, 300);
+}
+// Poll notifications every 60s when logged in
+setInterval(function(){
+  var badge = document.getElementById('notifBadge');
+  if (badge) {
+    fetch('/api/notifications').then(function(r){return r.json();}).then(function(d){
+      badge.textContent = d.unread || '';
+      badge.style.display = d.unread > 0 ? 'block' : 'none';
+    }).catch(function(){});
+  }
+}, 60000);
+
+// ─── AUTOMATION SETTINGS ──────────────────────────────────────
+function loadAutomationSettings() {
+  fetch('/api/automation/settings').then(function(r){return r.json();}).then(function(s){
+    var el = function(id){ return document.getElementById(id); };
+    if (el('autoScanToggle'))    el('autoScanToggle').checked    = !!s.scan_enabled;
+    if (el('mktAlertsToggle'))   el('mktAlertsToggle').checked   = !!s.market_alerts_on;
+    if (el('breakevenToggle'))   el('breakevenToggle').checked   = !!s.breakeven_on;
+    if (el('trailingToggle'))    el('trailingToggle').checked    = !!s.trailing_on;
+    if (el('trailingPipsInput')) el('trailingPipsInput').value   = s.trailing_pips || 50;
+    if (el('scanRiskInput'))     el('scanRiskInput').value       = s.scan_risk_pct  || 1;
+  }).catch(function(){});
+}
+function saveAutomationSettings() {
+  var el = function(id){ return document.getElementById(id); };
+  var payload = {
+    scan_enabled:     el('autoScanToggle')    ? el('autoScanToggle').checked    : true,
+    market_alerts_on: el('mktAlertsToggle')   ? el('mktAlertsToggle').checked   : true,
+    breakeven_on:     el('breakevenToggle')   ? el('breakevenToggle').checked   : true,
+    trailing_on:      el('trailingToggle')    ? el('trailingToggle').checked    : false,
+    trailing_pips:    el('trailingPipsInput') ? parseFloat(el('trailingPipsInput').value)||50 : 50,
+    scan_risk_pct:    el('scanRiskInput')     ? parseFloat(el('scanRiskInput').value)||1  : 1,
+  };
+  var msg = document.getElementById('autoSettingsMsg');
+  fetch('/api/automation/settings', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){return r.json();}).then(function(d){
+      if (msg) { msg.textContent = d.status === 'ok' ? '✓ Saved' : 'Error saving'; msg.style.color = d.status==='ok'?'#3dbe6c':'#e05555'; msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 2000); }
+    });
+}
 
 // ─── Toggle expand row ────────────────────────────────────────
 var _mt5Expanded = {};  // {ticket: true/false}
