@@ -3719,7 +3719,8 @@ def mt5_get_state():
     if not state:
         return jsonify({"connected": False, "account": {}, "positions": []})
     last_seen = datetime.fromisoformat(state["last_seen"])
-    connected = (datetime.utcnow() - last_seen).total_seconds() < 45
+    secs_ago  = (datetime.utcnow() - last_seen).total_seconds()
+    connected = secs_ago < 45
     positions = list(state["positions"])
     # Enrich positions with tp2/tp3/timeframe from mt5_orders.
     # Primary match: comment field contains "DotVerse #<order_id>" — reliable because
@@ -3756,6 +3757,7 @@ def mt5_get_state():
             pass
     return jsonify({
         "connected":   connected,
+        "secs_ago":    int(secs_ago),
         "account":     state["account"],
         "positions":   positions,
         "level_hits":  state.get("level_hits", {}),

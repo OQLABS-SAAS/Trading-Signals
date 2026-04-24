@@ -13876,7 +13876,10 @@ function _mt5RenderOrders(orders) {
 // ─── Poll state from server (every 5s while tab is open) ──────
 function mt5Poll() {
   fetch('/api/mt5/state').then(function(r){ return r.json(); }).then(function(d) {
-    _mt5SetStatus(d.connected, null);
+    var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
+      ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago/60) + 'm ago')
+      : null;
+    _mt5SetStatus(d.connected, lastSeenStr);
     _mt5LevelHits = d.level_hits || {};
     if (d.connected) {
       window._mt5LastPositions = d.positions || [];
@@ -13892,7 +13895,10 @@ function mt5LoadTab() {
   _mt5PollTimer = setInterval(mt5Poll, 5000);
 
   fetch('/api/mt5/state').then(function(r){ return r.json(); }).then(function(d) {
-    _mt5SetStatus(d.connected, null);
+    var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
+      ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago/60) + 'm ago')
+      : null;
+    _mt5SetStatus(d.connected, lastSeenStr);
     _mt5LevelHits = d.level_hits || {};
     window._mt5LastPositions = d.positions || [];
     _mt5RenderPositions(d.positions || []);
