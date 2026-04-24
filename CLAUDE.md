@@ -651,6 +651,9 @@ Changes from prior version:
 - Project Overview section added at top of [PROJECT CONTEXT]
 - All existing rules, paths, bugs, and handoff notes preserved verbatim
 
+**Protocol addition — pushing CLAUDE.md to Railway is never required.**
+CLAUDE.md is a local working protocol file. It lives in the repo but controls Claude's behaviour only. Never push CLAUDE.md changes to Railway as a standalone deploy action — Railway deploys are for app code only.
+
 ---
 
 # [KARPATHY MINDSET]
