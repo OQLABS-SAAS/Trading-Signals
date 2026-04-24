@@ -3304,18 +3304,20 @@ def mt5_get_state():
     last_seen = datetime.fromisoformat(state["last_seen"])
     connected = (datetime.utcnow() - last_seen).total_seconds() < 45
     positions = list(state["positions"])
-    # Enrich positions with timeframe from mt5_orders (matched by mt5_ticket = position ticket)
+    # Enrich positions with timeframe, tp2, tp3 from mt5_orders (matched by mt5_ticket)
     if _DBSession and positions:
         try:
             db = _DBSession()
             tickets = [int(p.get("ticket", 0)) for p in positions if p.get("ticket")]
             if tickets:
                 orders = db.query(MT5Order).filter(MT5Order.mt5_ticket.in_(tickets)).all()
-                ticket_tf = {int(o.mt5_ticket): o.timeframe for o in orders if o.mt5_ticket and o.timeframe}
+                ticket_data = {int(o.mt5_ticket): o for o in orders if o.mt5_ticket}
                 for p in positions:
-                    tf = ticket_tf.get(int(p.get("ticket", 0)))
-                    if tf:
-                        p["timeframe"] = tf
+                    o = ticket_data.get(int(p.get("ticket", 0)))
+                    if o:
+                        if o.timeframe: p["timeframe"] = o.timeframe
+                        if o.tp2:       p["tp2"]       = o.tp2
+                        if o.tp3:       p["tp3"]       = o.tp3
             db.close()
         except Exception:
             pass
@@ -5470,6 +5472,7 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS action VARCHAR(8) DEFAULT 'open'"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS close_ticket INTEGER"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
+                _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")
