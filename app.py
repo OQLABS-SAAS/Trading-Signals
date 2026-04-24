@@ -3810,7 +3810,11 @@ def mt5_cancel_order(order_id):
     user_id = str(session.get("user_id"))
     db = _DBSession()
     try:
-        order = db.query(MT5Order).filter_by(id=order_id, user_id=user_id, status="pending").first()
+        order = db.query(MT5Order).filter(
+            MT5Order.id == order_id,
+            MT5Order.user_id == user_id,
+            MT5Order.status.in_(["pending", "executing"])
+        ).first()
         if not order:
             return jsonify({"error": "Order not found or already processing"}), 404
         order.status = "cancelled"
