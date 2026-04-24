@@ -58,10 +58,6 @@ int    g_pending_count = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if (StringLen(InpEaSecret) == 0) {
-      Alert("DotVerse EA: InpEaSecret is empty. Set it in EA inputs.");
-      return INIT_FAILED;
-   }
    if (!EventSetTimer(InpPollSecs)) {
       Alert("DotVerse EA: Could not start timer.");
       return INIT_FAILED;
