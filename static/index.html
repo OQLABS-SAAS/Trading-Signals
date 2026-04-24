@@ -11688,8 +11688,8 @@ function closeSimulate() {
         <div id="mt5TradeCountBadge" style="position:absolute;top:16px;right:16px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:20px;background:rgba(200,150,10,.12);border:1px solid rgba(200,150,10,.25);color:#c8960a;display:none;">● 0 TRADES OPEN</div>
       </div>
 
-      <!-- Risk panel -->
-      <div style="border-radius:10px;padding:18px 20px;background:#161210;border:1px solid rgba(255,220,160,.07);">
+      <!-- Risk panel — hidden when positions are open; per-card risk strip is shown instead -->
+      <div id="mt5RiskPanel" style="border-radius:10px;padding:18px 20px;background:#161210;border:1px solid rgba(255,220,160,.07);">
         <div style="font-family:'DM Sans',sans-serif;font-size:14px;color:#c8b89a;margin-bottom:14px;">How much are you OK losing per trade?</div>
         <div style="display:flex;gap:8px;margin-bottom:12px;">
           <div style="position:relative;flex:1;">
@@ -12844,12 +12844,15 @@ function _mt5UpdateStatePills(counts) {
 function _mt5RenderPositions(positions) {
   var tbody = document.getElementById('mt5PositionsTbody');
   if (!tbody) return;
+  var riskPanel = document.getElementById('mt5RiskPanel');
   if (!positions || positions.length === 0) {
     tbody.innerHTML = '<div style="font-family:\'DM Mono\',monospace;font-size:11px;color:#555;text-align:center;padding:24px;">No open positions</div>';
+    if (riskPanel) riskPanel.style.display = '';
     _mt5PrevPnl = {};
     _mt5UpdateStatePills({up:0, ntp:0, dip:0, nsl:0});
     return;
   }
+  if (riskPanel) riskPanel.style.display = 'none';
 
   // Count card states for state pills
   var _stateC = {up:0, ntp:0, dip:0, nsl:0};
