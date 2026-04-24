@@ -3515,18 +3515,6 @@ def mt5_get_pending():
         return jsonify({"orders": []})
     db = _DBSession()
     try:
-        # Reset orders stuck in "executing" for more than 60s (EA crashed or confirm lost)
-        from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(seconds=60)
-        stuck = db.query(MT5Order).filter(
-            MT5Order.status == "executing",
-            MT5Order.created_at < cutoff
-        ).all()
-        for o in stuck:
-            o.status = "failed"
-            o.comment = (o.comment or "") + " [timed out — EA did not confirm]"
-        if stuck:
-            db.commit()
         orders = db.query(MT5Order).filter_by(status="pending").all()
         result = []
         for o in orders:
