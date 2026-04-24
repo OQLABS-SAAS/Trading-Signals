@@ -1437,6 +1437,26 @@ body::before{
       </div>
       </div><!-- /sigHeroWrap -->
 
+<!-- ═══ FLOW-SCALED LOT SIZE BADGE ═══ -->
+      <div id="recSizeWrap" style="display:none;margin:0 20px 10px;padding:10px 14px;border-radius:3px;border:1px solid rgba(245,166,35,.25);background:rgba(245,166,35,.05);font-family:var(--mono);display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div>
+            <div style="font-size:8px;letter-spacing:1.5px;color:var(--amber);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Recommended Position Size · Order Flow Scaled</div>
+            <div style="display:flex;align-items:baseline;gap:10px;">
+              <span id="recSizeLots" style="font-size:20px;font-weight:700;color:var(--white);">—</span>
+              <span id="recSizeUnit" style="font-size:11px;color:var(--muted2);">lots</span>
+              <span style="font-size:10px;color:var(--muted2);">·</span>
+              <span id="recSizeRisk" style="font-size:11px;color:var(--amber);">—</span>
+            </div>
+          </div>
+          <div style="text-align:right;">
+            <div id="recSizeMultLabel" style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:2px;background:rgba(255,255,255,.07);">—</div>
+            <div id="recSizeBreakdown" style="font-size:9px;color:var(--muted2);margin-top:4px;line-height:1.5;">—</div>
+          </div>
+        </div>
+        <div id="recSizeNoAcct" style="display:none;font-size:9px;color:var(--muted2);margin-top:6px;">Enter account size in the calculator below to see lot recommendation.</div>
+      </div>
+
 <!-- ═══ WHAT TO DO NEXT — LINEAR JOURNEY PANEL ═══ -->
       <div id="nextStepsPanel" style="display:none;margin:0 20px 12px;border-radius:3px;overflow:hidden;border:1px solid var(--border);">
         <div style="background:var(--bg3);padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
@@ -1938,6 +1958,19 @@ body::before{
                   <div class="csr-cell">
                     <div class="csr-label">R : R (TP1)</div>
                     <div class="csr-val" id="csrRR">—</div>
+                  </div>
+                </div>
+                <!-- Row 3: Flow-scaled lot size -->
+                <div id="csrFlowRow" style="display:none;border-top:1px solid rgba(245,166,35,.2);background:rgba(245,166,35,.04);">
+                  <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;">
+                    <div>
+                      <div style="font-family:var(--mono);font-size:8px;letter-spacing:1.2px;color:var(--amber);font-weight:700;text-transform:uppercase;margin-bottom:2px;">Flow-Scaled Size</div>
+                      <div><span id="csrFlowLots" style="font-family:var(--mono);font-size:14px;font-weight:700;color:var(--white);">—</span> <span id="csrFlowUnit" style="font-family:var(--mono);font-size:10px;color:var(--muted2);">lots</span></div>
+                    </div>
+                    <div style="text-align:right;">
+                      <div id="csrFlowMultLabel" style="font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 6px;border-radius:2px;background:rgba(255,255,255,.07);margin-bottom:3px;">—</div>
+                      <div id="csrFlowBreakdown" style="font-family:var(--mono);font-size:8px;color:var(--muted2);line-height:1.4;">—</div>
+                    </div>
                   </div>
                 </div>
                 <!-- Trade Size section — appears when Trade Size is filled -->
@@ -6936,6 +6969,135 @@ async function loadMarketPulse() {
   }
 }
 
+// ─── ORDER-FLOW-SCALED LOT SIZING ────────────────────────────────────────────
+
+function computeFlowMultiplier() {
+  var d  = currentData;
+  if (!d || d.signal === 'HOLD' || !d.signal) return { mult: 0, label: 'NO TRADE', color: 'var(--muted2)', breakdown: 'No active signal' };
+  var fd  = window._flowData || {};
+
+  // 1. Base from DotVerse confidence
+  var conf = (d.confidence || '').toUpperCase();
+  var base = conf === 'HIGH' ? 1.0 : conf === 'MEDIUM' ? 0.5 : 0.25;
+
+  // 2. Volume confirmation bonus
+  var volR = parseFloat(d.vol_ratio) || 1.0;
+  var volBonus = volR >= 2.0 ? 0.25 : volR >= 1.5 ? 0.1 : 0;
+
+  // 3. CVD alignment with signal direction
+  var cvdTrend  = fd.cvdTrend || 'Flat';
+  var cvdBonus  = 0;
+  if (d.signal === 'BUY'  && cvdTrend.includes('Rising'))  cvdBonus =  0.15;
+  if (d.signal === 'SELL' && cvdTrend.includes('Falling')) cvdBonus =  0.15;
+  if (d.signal === 'BUY'  && cvdTrend.includes('Falling')) cvdBonus = -0.25;
+  if (d.signal === 'SELL' && cvdTrend.includes('Rising'))  cvdBonus = -0.25;
+
+  // 4. Stacked imbalances
+  var buyStack   = fd.buyStack  || 0;
+  var sellStack  = fd.sellStack || 0;
+  var stackBonus = 0;
+  if (d.signal === 'BUY'  && buyStack  >= 3) stackBonus =  0.1;
+  if (d.signal === 'SELL' && sellStack >= 3) stackBonus =  0.1;
+  if (d.signal === 'BUY'  && sellStack >= 4) stackBonus = -0.15;  // heavy sell stacking = reduce
+  if (d.signal === 'SELL' && buyStack  >= 4) stackBonus = -0.15;
+
+  var raw  = base + volBonus + cvdBonus + stackBonus;
+  var mult = Math.round(raw * 4) / 4;            // snap to 0.25 increments
+  mult = Math.min(Math.max(mult, 0.25), 1.0);
+
+  var label = mult >= 1.0 ? 'FULL SIZE' : mult >= 0.75 ? '×0.75 FLOW' : mult >= 0.5 ? 'HALF SIZE' : '×0.25 CAUTION';
+  var color = mult >= 1.0 ? 'var(--green)' : mult >= 0.75 ? '#90d870' : mult >= 0.5 ? 'var(--amber)' : 'var(--muted2)';
+
+  var factors = [];
+  factors.push('Conf: ' + conf);
+  if (volBonus  > 0)  factors.push('Vol ' + volR.toFixed(1) + '× ↑');
+  if (cvdBonus  > 0)  factors.push('CVD aligned ↑');
+  if (cvdBonus  < 0)  factors.push('CVD conflict ↓');
+  if (stackBonus > 0) factors.push('Stack imbal ↑');
+  if (stackBonus < 0) factors.push('Stack conflict ↓');
+
+  return { mult: mult, label: label, color: color, breakdown: factors.join(' · ') };
+}
+
+function getRecLots(d, mult) {
+  if (!d || !d.entry || !d.stop_loss) return null;
+  var acct    = parseFloat((document.getElementById('cAcct') || {}).value) || 0;
+  var riskPct = parseFloat((document.getElementById('cRisk') || {}).value) || 5;
+  if (acct <= 0) return null;
+  var moneyAtRisk = acct * (riskPct / 100);
+  var entry  = parseFloat(d.entry);
+  var sl     = parseFloat(d.stop_loss);
+  var slDist = Math.abs(entry - sl);
+  if (slDist <= 0) return null;
+  var at   = (d.asset_type || '').toLowerCase();
+  var lots;
+  if (at === 'forex') {
+    var pip    = (d.ticker || '').indexOf('JPY') >= 0 ? 0.01 : 0.0001;
+    var slPips = slDist / pip;
+    lots = moneyAtRisk / (slPips * 10);   // $10/pip per standard lot (USD-quoted)
+  } else {
+    lots = moneyAtRisk / slDist;
+  }
+  return Math.max(0.01, Math.round(lots * mult * 100) / 100);
+}
+
+function updateRecSizeBadge() {
+  var wrap = document.getElementById('recSizeWrap');
+  if (!wrap) return;
+  var d = currentData;
+  if (!d || !d.signal || d.signal === 'HOLD') { wrap.style.display = 'none'; return; }
+
+  var fm   = computeFlowMultiplier();
+  var acct = parseFloat((document.getElementById('cAcct') || {}).value) || 0;
+
+  wrap.style.display = '';
+
+  // Signal badge lot display
+  var noAcctEl = document.getElementById('recSizeNoAcct');
+  var lotsEl   = document.getElementById('recSizeLots');
+  var unitEl   = document.getElementById('recSizeUnit');
+  var riskEl   = document.getElementById('recSizeRisk');
+  var multLbl  = document.getElementById('recSizeMultLabel');
+  var breakdown= document.getElementById('recSizeBreakdown');
+
+  if (multLbl)  { multLbl.textContent  = fm.label; multLbl.style.color = fm.color; }
+  if (breakdown){ breakdown.textContent = fm.breakdown; }
+
+  if (acct <= 0) {
+    if (lotsEl)  lotsEl.textContent  = '—';
+    if (riskEl)  riskEl.textContent  = 'Enter account size ↓';
+    if (noAcctEl) noAcctEl.style.display = '';
+  } else {
+    if (noAcctEl) noAcctEl.style.display = 'none';
+    var riskPct = parseFloat((document.getElementById('cRisk') || {}).value) || 5;
+    var lots    = getRecLots(d, fm.mult);
+    if (lotsEl)  lotsEl.textContent  = lots != null ? lots.toFixed(2) : '—';
+    if (unitEl)  unitEl.textContent  = (d.asset_type||'').toLowerCase() === 'forex' ? 'lots' : 'units';
+    if (riskEl)  riskEl.textContent  = '$' + (acct * riskPct / 100 * fm.mult).toFixed(0) + ' max risk · ' + (riskPct * fm.mult).toFixed(1) + '% account';
+  }
+
+  // Calculator flow row
+  var flowRow  = document.getElementById('csrFlowRow');
+  var flowLots = document.getElementById('csrFlowLots');
+  var flowUnit = document.getElementById('csrFlowUnit');
+  var flowMult = document.getElementById('csrFlowMultLabel');
+  var flowBD   = document.getElementById('csrFlowBreakdown');
+  if (flowRow) {
+    if (acct > 0 && d.entry && d.stop_loss) {
+      flowRow.style.display = '';
+      var fl = getRecLots(d, fm.mult);
+      if (flowLots) flowLots.textContent = fl != null ? fl.toFixed(2) : '—';
+      if (flowUnit) flowUnit.textContent = (d.asset_type||'').toLowerCase() === 'forex' ? 'lots' : 'units';
+      if (flowMult) { flowMult.textContent = fm.label; flowMult.style.color = fm.color; }
+      if (flowBD)   flowBD.textContent = fm.breakdown;
+    } else {
+      flowRow.style.display = 'none';
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function fmt(v) {
   if (v==null) return '—';
   const n = parseFloat(v); if (isNaN(n)) return '—';
@@ -8005,6 +8167,10 @@ function renderFootprint(d) {
     }
   }
 
+  // Store order flow data globally for lot size scaling
+  window._flowData = { cvdTrend: cvdTrend, buyStack: buyStack, sellStack: sellStack };
+  try { updateRecSizeBadge(); } catch(e) {}
+
   // Determine dominance badge
   var dominance = buyPct >= 60 ? 'Buy Dominated' : sellPct >= 60 ? 'Sell Dominated' : 'Mixed';
   var badgeClass = buyPct >= 60 ? 'buy' : sellPct >= 60 ? 'sell' : 'mixed';
@@ -8835,6 +9001,9 @@ function renderResultsV2(d) {
 
   // Render the guided "What To Do Next" journey panel
   try { renderNextSteps(d); } catch(e) { console.warn('renderNextSteps:', e); }
+
+  // Flow-scaled lot size badge
+  try { updateRecSizeBadge(); } catch(e) {}
 }
 
 /* ════════════════════════════════════════════
@@ -10746,6 +10915,9 @@ function recalc() {
       TP3: function() { return tpDetail(2); }
     };
   })();
+
+  // Update flow-scaled lot size badge + calculator row
+  try { updateRecSizeBadge(); } catch(e) {}
 }
 
 function rrToggle(key) {
@@ -13874,7 +14046,8 @@ function _mt5RenderOrders(orders) {
       + '<td style="font-family:var(--mono);font-size:11px;color:#d4870a;padding:10px 14px;">' + (o.timeframe ? o.timeframe.toUpperCase() : '—') + '</td>'
       + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + (o.volume||'—') + '</td>'
       + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + (o.fill_price ? _mt5Fmt(o.fill_price) : _mt5Fmt(o.price)) + '</td>'
-      + '<td style="padding:10px 14px;"><span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + sc + ';text-transform:uppercase;letter-spacing:.5px;">' + (o.status||'—') + '</span>' + cancelBtn + '</td>'
+      + '<td style="padding:10px 14px;"><span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + sc + ';text-transform:uppercase;letter-spacing:.5px;">' + (o.status||'—') + '</span>' + cancelBtn
+        + (o.status === 'failed' && o.comment ? '<div style="font-family:var(--mono);font-size:9px;color:var(--red);margin-top:3px;opacity:.8;">' + o.comment + '</div>' : '') + '</td>'
       + '<td style="font-family:var(--mono);font-size:10px;color:var(--muted);padding:10px 14px;">' + (o.filled_at || o.created_at || '—') + '</td>'
       + '</tr>';
   }).join('');
@@ -13951,7 +14124,7 @@ function mt5OpenModal() {
     + '<span style="color:var(--muted2);">TP 2</span><span style="color:var(--green);">' + (d.tp2||'—') + '</span>'
     + '</div>';
 
-  // ── Lot size suggestion based on 1% account risk ──────────────
+  // ── Lot size suggestion — flow-scaled, 5% risk default ────────
   var balance   = window._mt5AccountBalance || 0;
   var currency  = window._mt5AccountCurrency || 'USD';
   var entry     = parseFloat(d.entry)     || 0;
@@ -13960,18 +14133,24 @@ function mt5OpenModal() {
   var suggested = 0.01;
   var riskUsd   = 0;
 
-  if (balance > 0 && slDist > 0) {
-    var riskAmt = balance * 0.01;   // 1% of account
+  // Flow multiplier from order flow analysis
+  var fm          = (typeof computeFlowMultiplier === 'function') ? computeFlowMultiplier() : { mult: 1.0, label: 'FULL SIZE', color: 'var(--green)', breakdown: '' };
+  // Use calculator account if MT5 balance not available
+  var calcAcct    = parseFloat((document.getElementById('cAcct') || {}).value) || 0;
+  var calcRisk    = parseFloat((document.getElementById('cRisk') || {}).value) || 5;
+  var effectiveBalance = balance > 0 ? balance : calcAcct;
+  var riskPct     = calcRisk;  // use calculator risk % (default 5%)
+
+  if (effectiveBalance > 0 && slDist > 0) {
+    var riskAmt = effectiveBalance * (riskPct / 100);
     var at      = (d.asset_type || '').toLowerCase();
     if (at === 'forex') {
-      // pip size: 0.0001 for most pairs, 0.01 for JPY
       var pipSize  = (d.ticker || '').indexOf('JPY') >= 0 ? 0.01 : 0.0001;
       var slPips   = slDist / pipSize;
-      var pipVal   = 10;  // USD per pip per standard lot (USD-quoted pairs)
-      suggested    = riskAmt / (slPips * pipVal);
+      var pipVal   = 10;
+      suggested    = (riskAmt / (slPips * pipVal)) * fm.mult;
     } else {
-      // Stocks, crypto, indices: simple price-based sizing
-      suggested = riskAmt / (slDist * 1);  // 1 unit per lot for simplicity
+      suggested    = (riskAmt / slDist) * fm.mult;
     }
     suggested = Math.max(0.01, Math.round(suggested * 100) / 100);
     riskUsd   = suggested * slDist * (at === 'forex' ? 100000 : 1);
@@ -13979,20 +14158,20 @@ function mt5OpenModal() {
 
   document.getElementById('mt5ModalVolume').value = suggested.toFixed(2);
 
-  // ── Add guidance below lot size input ─────────────────────────
+  // ── Guidance: show flow multiplier explanation ─────────────────
   var guide = document.getElementById('mt5LotGuide');
   if (guide) {
-    var balLine  = balance > 0 ? currency + ' ' + _mt5Fmt(balance) + ' account · ' : '';
-    var riskLine = riskUsd > 0 ? 'Max loss at this size ≈ ' + currency + ' ' + _mt5Fmt(riskUsd) + ' · ' : '';
+    var balLine  = effectiveBalance > 0 ? currency + ' ' + _mt5Fmt(effectiveBalance) + ' · ' + riskPct + '% risk · ' : '';
+    var riskLine = riskUsd > 0 ? 'Max loss ≈ ' + currency + ' ' + _mt5Fmt(riskUsd) : '';
     guide.innerHTML =
-      '<div style="margin-bottom:6px;">'
-      + '<span style="color:var(--amber);font-weight:700;">Suggested: ' + suggested.toFixed(2) + ' lots</span>'
-      + ' (1% risk rule · ' + balLine + riskLine.replace(' · ','') + ')'
+      '<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px;">'
+      + '<span style="color:var(--amber);font-weight:700;">' + suggested.toFixed(2) + ' lots</span>'
+      + '<span style="font-size:10px;padding:2px 6px;border-radius:2px;background:rgba(255,255,255,.07);color:' + fm.color + ';font-weight:700;">' + fm.label + '</span>'
+      + '<span style="color:var(--muted2);font-size:10px;">' + balLine + riskLine + '</span>'
       + '</div>'
+      + '<div style="color:var(--muted2);font-size:10px;margin-bottom:4px;">' + fm.breakdown + '</div>'
       + '<div style="color:var(--muted2);line-height:1.7;">'
-      + '0.01 = micro lot — risks ~$0.10/pip · safest for beginners<br>'
-      + '0.10 = mini lot — risks ~$1/pip · standard practice<br>'
-      + '1.00 = standard lot — risks ~$10/pip · experienced traders only'
+      + '0.01 = micro lot · 0.10 = mini lot · 1.00 = standard lot'
       + '</div>';
   }
 
