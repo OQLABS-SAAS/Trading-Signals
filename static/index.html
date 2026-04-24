@@ -11725,6 +11725,7 @@ function closeSimulate() {
             <tr style="border-bottom:1px solid rgba(255,220,160,.06);">
               <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:left;">Symbol</th>
               <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:left;">Type</th>
+              <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:left;">TF</th>
               <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:right;">Lots</th>
               <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:right;">Fill Price</th>
               <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:left;">Status</th>
@@ -13238,11 +13239,16 @@ function _mt5RenderPositions(positions) {
         +   targetsRow
         + '</div>'
 
-        // risk strip
-        + '<div style="display:flex;align-items:center;padding:8px 12px;border-radius:6px;margin-bottom:14px;background:#1c1815;border:1px solid rgba(255,220,160,.07);">'
-        +   '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:#6a6058;">Risk on this trade</span>'
-        +   '<span id="mt5RiskVal_' + ticket + '" style="margin-left:auto;font-family:\'DM Mono\',monospace;font-size:13px;font-weight:700;color:#c8960a;">$' + (window._mt5RiskAmt || '—') + ' max loss</span>'
-        + '</div>'
+        // risk strip — actual position risk calculated from volume × |entry − sl|
+        + (function(){
+            var vol = parseFloat(p.volume) || 0;
+            var actualRisk = (vol > 0 && sl > 0 && openPrice > 0) ? Math.abs(openPrice - sl) * vol : 0;
+            var riskLabel = actualRisk > 0 ? '$' + actualRisk.toFixed(2) + ' max loss' : '$' + (window._mt5RiskAmt || '—') + ' max loss';
+            return '<div style="display:flex;align-items:center;padding:8px 12px;border-radius:6px;margin-bottom:14px;background:#1c1815;border:1px solid rgba(255,220,160,.07);">'
+              + '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:#6a6058;">Risk on this trade</span>'
+              + '<span id="mt5RiskVal_' + ticket + '" style="margin-left:auto;font-family:\'DM Mono\',monospace;font-size:13px;font-weight:700;color:#c8960a;">' + riskLabel + '</span>'
+              + '</div>';
+          })()
 
         // action buttons — row 1: take profit at T1 / T2 / T3
         + '<div style="display:flex;gap:8px;margin-bottom:8px;">'
@@ -13314,7 +13320,7 @@ function _mt5RenderOrders(orders) {
   var tbody = document.getElementById('mt5OrdersTbody');
   if (!tbody) return;
   if (!orders || orders.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No orders yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No orders yet</td></tr>';
     return;
   }
   var statusColor = {filled:'var(--green)',failed:'var(--red)',cancelled:'var(--muted)',pending:'var(--amber)',executing:'var(--amber)'};
@@ -13327,6 +13333,7 @@ function _mt5RenderOrders(orders) {
     return '<tr style="border-bottom:1px solid var(--border);">'
       + '<td style="font-family:var(--mono);font-size:12px;color:var(--white);padding:10px 14px;">' + (o.symbol||'—') + '</td>'
       + '<td style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + typeCol + ';padding:10px 14px;">' + (o.order_type||'—') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:11px;color:#d4870a;padding:10px 14px;">' + (o.timeframe ? o.timeframe.toUpperCase() : '—') + '</td>'
       + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + (o.volume||'—') + '</td>'
       + '<td style="font-family:var(--mono);font-size:12px;color:var(--white2);padding:10px 14px;text-align:right;">' + (o.fill_price ? _mt5Fmt(o.fill_price) : _mt5Fmt(o.price)) + '</td>'
       + '<td style="padding:10px 14px;"><span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + sc + ';text-transform:uppercase;letter-spacing:.5px;">' + (o.status||'—') + '</span>' + cancelBtn + '</td>'

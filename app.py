@@ -3222,6 +3222,16 @@ def mt5_confirm_order():
                 except Exception:
                     pass
         db.commit()
+        # Cache tp2/tp3/timeframe in mt5_state so state endpoint can enrich instantly
+        if status == "filled" and ticket and order:
+            with mt5_state_lock:
+                if "tp_enrichment" not in mt5_state:
+                    mt5_state["tp_enrichment"] = {}
+                mt5_state["tp_enrichment"][str(ticket)] = {
+                    "tp2":       order.tp2,
+                    "tp3":       order.tp3,
+                    "timeframe": order.timeframe,
+                }
         return jsonify({"status": "ok", "tp2": order.tp2, "tp3": order.tp3})
     except Exception as e:
         db.rollback()
@@ -3304,20 +3314,29 @@ def mt5_get_state():
     last_seen = datetime.fromisoformat(state["last_seen"])
     connected = (datetime.utcnow() - last_seen).total_seconds() < 45
     positions = list(state["positions"])
-    # Enrich positions with timeframe, tp2, tp3 from mt5_orders (matched by mt5_ticket)
+    # Enrich positions with tp2/tp3/timeframe — in-memory cache first, then DB fallback
+    tp_enrich = mt5_state.get("tp_enrichment", {})
+    for p in positions:
+        key = str(p.get("ticket", ""))
+        if key in tp_enrich:
+            e = tp_enrich[key]
+            if e.get("tp2")       and not p.get("tp2"):       p["tp2"]       = e["tp2"]
+            if e.get("tp3")       and not p.get("tp3"):       p["tp3"]       = e["tp3"]
+            if e.get("timeframe") and not p.get("timeframe"): p["timeframe"] = e["timeframe"]
+    # DB fallback — catches cases where server restarted after confirm
     if _DBSession and positions:
         try:
             db = _DBSession()
-            tickets = [int(p.get("ticket", 0)) for p in positions if p.get("ticket")]
+            tickets = [int(p.get("ticket", 0)) for p in positions if p.get("ticket") and (not p.get("tp2") or not p.get("timeframe"))]
             if tickets:
                 orders = db.query(MT5Order).filter(MT5Order.mt5_ticket.in_(tickets)).all()
                 ticket_data = {int(o.mt5_ticket): o for o in orders if o.mt5_ticket}
                 for p in positions:
                     o = ticket_data.get(int(p.get("ticket", 0)))
                     if o:
-                        if o.timeframe: p["timeframe"] = o.timeframe
-                        if o.tp2:       p["tp2"]       = o.tp2
-                        if o.tp3:       p["tp3"]       = o.tp3
+                        if o.timeframe and not p.get("timeframe"): p["timeframe"] = o.timeframe
+                        if o.tp2       and not p.get("tp2"):       p["tp2"]       = o.tp2
+                        if o.tp3       and not p.get("tp3"):       p["tp3"]       = o.tp3
             db.close()
         except Exception:
             pass
