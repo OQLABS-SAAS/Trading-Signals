@@ -7045,6 +7045,10 @@ function getRecLots(d, mult) {
     lots = moneyAtRisk / (slPips * 10);   // $10/pip per standard lot (USD-quoted)
   } else {
     lots = moneyAtRisk / slDist;
+    // Cap: notional value (lots × entry) must not exceed moneyAtRisk
+    // Prevents absurdly large lot counts on low-price assets with tiny ATR
+    var maxLots = moneyAtRisk / entry;
+    if (lots > maxLots) lots = maxLots;
   }
   return Math.max(0.01, Math.round(lots * mult * 100) / 100);
 }
@@ -10716,11 +10720,14 @@ function recalc() {
 
   } else if (assetType === 'crypto') {
     // units = moneyAtRisk / slDist  → loss if SL hit = units × slDist = moneyAtRisk ✓
+    // Cap: notional (units × entry) must not exceed moneyAtRisk to prevent absurd sizes on low-price assets
     posSize     = moneyAtRisk / (slDist || 1);
+    var _maxUnits = moneyAtRisk / (entry || 1);
+    if (posSize > _maxUnits) posSize = _maxUnits;
     posVal      = posSize * (assetPrice || entry);
     margin      = posVal / lev;
     lotsDisplay = posSize >= 1 ? posSize.toFixed(4) + ' units' : posSize.toFixed(6) + ' units';
-    lots        = null;
+    lots        = posSize;
 
   } else {
     // stocks / indices / commodities: shares = moneyAtRisk / slDist
