@@ -398,6 +398,9 @@ body::before{
 @keyframes mt5TrackShimG{0%,100%{opacity:.7}50%{opacity:1;box-shadow:0 0 8px rgba(74,222,128,.6)}}
 @keyframes mt5TrackShimA{0%,100%{opacity:.7}50%{opacity:1;box-shadow:0 0 8px rgba(245,158,11,.6)}}
 @keyframes mt5TrackShimR{0%,100%{opacity:.7}50%{opacity:1;box-shadow:0 0 10px rgba(248,113,113,.9)}}
+@keyframes mt5BtnGlowG{0%,100%{border-color:rgba(61,190,108,.14);color:rgba(61,190,108,.65);box-shadow:none;background:#0e1e12;}50%{border-color:rgba(61,190,108,.48);color:#3dbe6c;box-shadow:0 0 14px rgba(61,190,108,.13),inset 0 0 10px rgba(61,190,108,.06);background:#0f2215;}}
+@keyframes mt5BtnGlowA{0%,100%{border-color:rgba(212,135,10,.14);color:rgba(212,135,10,.65);box-shadow:none;background:#181200;}50%{border-color:rgba(212,135,10,.48);color:#d4870a;box-shadow:0 0 14px rgba(212,135,10,.13),inset 0 0 10px rgba(212,135,10,.06);background:#1e1500;}}
+@keyframes mt5BtnGlowR{0%,100%{border-color:rgba(224,85,85,.14);color:rgba(224,85,85,.65);box-shadow:none;background:#1e0e0e;}50%{border-color:rgba(224,85,85,.5);color:#e05555;box-shadow:0 0 16px rgba(224,85,85,.15),inset 0 0 10px rgba(224,85,85,.07);background:#221010;}}
 
 /* ═══════════════════════════════════════════════
    AUTO-REFRESH BAR
@@ -11652,73 +11655,83 @@ function closeSimulate() {
 <!-- ════════════ TRADE TAB ════════════ -->
 <div id="tab-trade" class="tab-panel">
   <div style="max-width:1100px;margin:0 auto;padding:24px 16px;">
-    <h2 style="font-family:var(--disp);font-size:24px;font-weight:900;letter-spacing:-.5px;margin-bottom:4px;">MT5 Trade Execution</h2>
-    <p style="color:var(--muted2);font-size:12px;font-family:var(--mono);margin-bottom:20px;">Live account · Open positions · Order history · Execute from signals</p>
+
+    <!-- State pills -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+      <button id="mt5StatePill_up"  style="padding:7px 14px;border-radius:20px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;border:1px solid rgba(255,220,160,.07);background:#1c1815;color:#555;cursor:default;letter-spacing:.04em;transition:color .3s,background .3s,border-color .3s;">▲ Going up</button>
+      <button id="mt5StatePill_ntp" style="padding:7px 14px;border-radius:20px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;border:1px solid rgba(255,220,160,.07);background:#1c1815;color:#555;cursor:default;letter-spacing:.04em;transition:color .3s,background .3s,border-color .3s;">▲ Near target</button>
+      <button id="mt5StatePill_dip" style="padding:7px 14px;border-radius:20px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;border:1px solid rgba(255,220,160,.07);background:#1c1815;color:#555;cursor:default;letter-spacing:.04em;transition:color .3s,background .3s,border-color .3s;">▼ Dipped</button>
+      <button id="mt5StatePill_nsl" style="padding:7px 14px;border-radius:20px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;border:1px solid rgba(255,220,160,.07);background:#1c1815;color:#555;cursor:default;letter-spacing:.04em;transition:color .3s,background .3s,border-color .3s;">▼ Near exit</button>
+    </div>
 
     <!-- EA status bar -->
-    <div id="mt5StatusBar" style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--bg2);border:1px solid var(--border);border-radius:3px;margin-bottom:20px;">
-      <div id="mt5Dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;"></div>
-      <span id="mt5StatusLabel" style="font-family:var(--mono);font-size:12px;color:var(--muted2);">EA Offline — open MT5 and load the DotVerse EA</span>
+    <div id="mt5StatusBar" style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;margin-bottom:14px;">
+      <div id="mt5Dot" style="width:8px;height:8px;border-radius:50%;background:#555;flex-shrink:0;"></div>
+      <span id="mt5StatusLabel" style="font-family:'DM Mono',monospace;font-size:12px;color:#6a6058;">EA Offline — open MT5 and load the DotVerse EA</span>
     </div>
 
-    <!-- Account hero -->
-    <div id="mt5AccountHero" style="border-radius:10px;padding:20px 22px;margin-bottom:14px;background:var(--bg2);border:1px solid var(--border);position:relative;overflow:hidden;transition:background .4s,border-color .4s,box-shadow .4s;">
-      <div style="font-family:var(--mono);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted2);margin-bottom:6px;">Your Account</div>
-      <div style="display:flex;align-items:flex-end;gap:0;">
-        <div id="mt5Balance" style="font-family:var(--mono);font-size:36px;font-weight:900;color:var(--white);line-height:1;letter-spacing:-.02em;">—</div>
-        <svg id="mt5Sparkline" viewBox="0 0 120 40" preserveAspectRatio="none" style="width:90px;height:36px;margin-left:14px;margin-bottom:2px;opacity:.7;"><polyline id="mt5SparkLine" points="0,38 30,35 60,28 90,20 120,10" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polygon id="mt5SparkFill" points="0,38 30,35 60,28 90,20 120,10 120,40 0,40" fill="rgba(74,222,128,.12)"/></svg>
-      </div>
-      <div style="margin-top:4px;display:flex;gap:14px;">
-        <span id="mt5PnL" style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--muted2);">—</span>
-        <span id="mt5Equity" style="font-family:var(--mono);font-size:11px;color:var(--muted);display:none;"></span>
-        <span id="mt5FreeMargin" style="font-family:var(--mono);font-size:11px;color:var(--muted);display:none;"></span>
-      </div>
-      <div id="mt5TradeCountBadge" style="position:absolute;top:18px;right:18px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.04em;padding:5px 12px;border-radius:20px;background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);color:#4ade80;display:none;">● 0 TRADES OPEN</div>
-    </div>
+    <!-- 2-column: Account hero + Risk panel -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
 
-    <!-- Risk panel -->
-    <div style="border-radius:10px;padding:18px 20px;margin-bottom:14px;background:#0d0d0d;border:1px solid #1c1c1c;">
-      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#bbb;margin-bottom:14px;">How much are you OK losing per trade?</div>
-      <div style="display:flex;gap:10px;margin-bottom:12px;">
-        <div style="position:relative;flex:1;">
-          <button onclick="mt5SetRisk(50)" id="mt5Risk50" style="width:100%;padding:12px 6px;border-radius:8px;font-family:var(--mono);font-size:15px;font-weight:700;color:#ccc;background:#141414;border:1px solid #2a2a2a;cursor:pointer;text-align:center;">$50<div style="font-size:10px;font-weight:400;color:#555;margin-top:2px;">0.5%</div></button>
+      <!-- Account hero -->
+      <div id="mt5AccountHero" style="border-radius:10px;padding:20px 22px;background:#161210;border:1px solid rgba(255,220,160,.07);position:relative;overflow:hidden;transition:background .4s,border-color .4s,box-shadow .4s;">
+        <div style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#6a6058;margin-bottom:6px;">Your Account</div>
+        <div style="display:flex;align-items:flex-end;gap:0;">
+          <div id="mt5Balance" style="font-family:'DM Mono',monospace;font-size:32px;font-weight:900;color:#e8dcc8;line-height:1;letter-spacing:-.02em;">—</div>
+          <svg id="mt5Sparkline" viewBox="0 0 120 40" preserveAspectRatio="none" style="width:80px;height:32px;margin-left:14px;margin-bottom:2px;opacity:.6;"><polyline id="mt5SparkLine" points="0,38 30,35 60,28 90,20 120,10" fill="none" stroke="#3dbe6c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><polygon id="mt5SparkFill" points="0,38 30,35 60,28 90,20 120,10 120,40 0,40" fill="rgba(61,190,108,.10)"/></svg>
         </div>
-        <div style="position:relative;flex:1;">
-          <div style="position:absolute;top:-18px;left:50%;transform:translateX(-50%);white-space:nowrap;font-family:var(--mono);font-size:9px;font-weight:700;color:#f59e0b;letter-spacing:.04em;">◆ DotVerse pick</div>
-          <button onclick="mt5SetRisk(100)" id="mt5Risk100" style="width:100%;padding:12px 6px;border-radius:8px;font-family:var(--mono);font-size:15px;font-weight:700;color:#f59e0b;background:#141400;border:2px solid #3a2e00;cursor:pointer;text-align:center;">$100<div style="font-size:10px;font-weight:400;color:#8a7020;margin-top:2px;">1%</div></button>
+        <div style="margin-top:4px;display:flex;gap:14px;">
+          <span id="mt5PnL" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:#6a6058;">—</span>
+          <span id="mt5Equity" style="font-family:'DM Mono',monospace;font-size:11px;color:#555;display:none;"></span>
+          <span id="mt5FreeMargin" style="font-family:'DM Mono',monospace;font-size:11px;color:#555;display:none;"></span>
         </div>
-        <div style="position:relative;flex:1;">
-          <button onclick="mt5SetRisk(200)" id="mt5Risk200" style="width:100%;padding:12px 6px;border-radius:8px;font-family:var(--mono);font-size:15px;font-weight:700;color:#ccc;background:#141414;border:1px solid #2a2a2a;cursor:pointer;text-align:center;">$200<div style="font-size:10px;font-weight:400;color:#555;margin-top:2px;">2%</div></button>
-        </div>
-        <div style="position:relative;flex:1;">
-          <button onclick="mt5SetRisk(500)" id="mt5Risk500" style="width:100%;padding:12px 6px;border-radius:8px;font-family:var(--mono);font-size:15px;font-weight:700;color:#ccc;background:#141414;border:1px solid #2a2a2a;cursor:pointer;text-align:center;">$500<div style="font-size:10px;font-weight:400;color:#555;margin-top:2px;">5%</div></button>
-        </div>
+        <div id="mt5TradeCountBadge" style="position:absolute;top:16px;right:16px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.04em;padding:4px 10px;border-radius:20px;background:rgba(200,150,10,.12);border:1px solid rgba(200,150,10,.25);color:#c8960a;display:none;">● 0 TRADES OPEN</div>
       </div>
-      <div id="mt5RiskNote" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px;color:#555;line-height:1.5;">1% keeps losses small — lose 10 trades in a row and still have 90% of your money.</div>
+
+      <!-- Risk panel -->
+      <div style="border-radius:10px;padding:18px 20px;background:#161210;border:1px solid rgba(255,220,160,.07);">
+        <div style="font-family:'DM Sans',sans-serif;font-size:14px;color:#c8b89a;margin-bottom:14px;">How much are you OK losing per trade?</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <div style="position:relative;flex:1;">
+            <button onclick="mt5SetRisk(50)" id="mt5Risk50" style="width:100%;padding:10px 6px;border-radius:8px;font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:#8a7f72;background:#1c1815;border:1px solid rgba(255,220,160,.07);cursor:pointer;text-align:center;">$50<div style="font-size:10px;font-weight:400;color:#555;margin-top:2px;">0.5%</div></button>
+          </div>
+          <div style="position:relative;flex:1;">
+            <div style="position:absolute;top:-18px;left:50%;transform:translateX(-50%);white-space:nowrap;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:#d4870a;letter-spacing:.04em;">◆ DotVerse pick</div>
+            <button onclick="mt5SetRisk(100)" id="mt5Risk100" style="width:100%;padding:10px 6px;border-radius:8px;font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:#d4870a;background:#1c1400;border:2px solid rgba(212,135,10,.3);cursor:pointer;text-align:center;">$100<div style="font-size:10px;font-weight:400;color:#8a6020;margin-top:2px;">1%</div></button>
+          </div>
+          <div style="position:relative;flex:1;">
+            <button onclick="mt5SetRisk(200)" id="mt5Risk200" style="width:100%;padding:10px 6px;border-radius:8px;font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:#8a7f72;background:#1c1815;border:1px solid rgba(255,220,160,.07);cursor:pointer;text-align:center;">$200<div style="font-size:10px;font-weight:400;color:#555;margin-top:2px;">2%</div></button>
+          </div>
+          <div style="position:relative;flex:1;">
+            <button onclick="mt5SetRisk(500)" id="mt5Risk500" style="width:100%;padding:10px 6px;border-radius:8px;font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:#8a7f72;background:#1c1815;border:1px solid rgba(255,220,160,.07);cursor:pointer;text-align:center;">$500<div style="font-size:10px;font-weight:400;color:#555;margin-top:2px;">5%</div></button>
+          </div>
+        </div>
+        <div id="mt5RiskNote" style="font-family:'DM Sans',sans-serif;font-size:12px;color:#6a6058;line-height:1.5;">1% keeps losses small — lose 10 trades in a row and still have 90% of your money.</div>
+      </div>
     </div>
 
     <!-- Open positions -->
     <div style="margin-bottom:24px;">
-      <div style="font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:10px;">Open Positions</div>
-      <div id="mt5PositionsTbody"><div style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</div></div>
+      <div style="font-family:'DM Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#6a6058;margin-bottom:10px;">Open Positions</div>
+      <div id="mt5PositionsTbody"><div style="font-family:'DM Mono',monospace;font-size:11px;color:#555;text-align:center;padding:24px;">No open positions</div></div>
     </div>
 
     <!-- Order history -->
     <div>
-      <div style="font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2);margin-bottom:10px;">Order History</div>
-      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:3px;overflow:hidden;">
+      <div style="font-family:'DM Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#6a6058;margin-bottom:10px;">Order History</div>
+      <div style="background:#161210;border:1px solid rgba(255,220,160,.07);border-radius:6px;overflow:hidden;">
         <table style="width:100%;border-collapse:collapse;">
           <thead>
-            <tr style="border-bottom:1px solid var(--border);">
-              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Symbol</th>
-              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Type</th>
-              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">Lots</th>
-              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:right;">Fill Price</th>
-              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Status</th>
-              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px;text-align:left;">Time</th>
+            <tr style="border-bottom:1px solid rgba(255,220,160,.06);">
+              <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:left;">Symbol</th>
+              <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:left;">Type</th>
+              <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:right;">Lots</th>
+              <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:right;">Fill Price</th>
+              <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:left;">Status</th>
+              <th style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#555;padding:10px 14px;text-align:left;">Time</th>
             </tr>
           </thead>
-          <tbody id="mt5OrdersTbody"><tr><td colspan="6" style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No orders yet</td></tr></tbody>
+          <tbody id="mt5OrdersTbody"><tr><td colspan="6" style="font-family:'DM Mono',monospace;font-size:11px;color:#555;text-align:center;padding:24px;">No orders yet</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -12706,26 +12719,26 @@ function _mt5RenderAccount(acct) {
   pnl.textContent = pnlSign + cur + ' ' + _mt5Fmt(profit) + ' open P&L';
   pnl.style.color = _mt5Color(profit);
 
-  // hero card color
+  // hero card color — B-ORE: warm dark always, subtle glow tint only
   if (hero) {
     if (profit > 0) {
-      hero.style.background   = '#050f05';
-      hero.style.borderColor  = '#1a4a1a';
-      hero.style.boxShadow    = '0 0 18px rgba(74,222,128,.10)';
+      hero.style.background   = '#161210';
+      hero.style.borderColor  = 'rgba(255,220,160,.12)';
+      hero.style.boxShadow    = '0 0 14px rgba(61,190,108,.08)';
     } else if (profit < 0) {
-      hero.style.background   = '#0f0404';
-      hero.style.borderColor  = '#4a1414';
-      hero.style.boxShadow    = '0 0 18px rgba(248,113,113,.10)';
+      hero.style.background   = '#161210';
+      hero.style.borderColor  = 'rgba(255,220,160,.07)';
+      hero.style.boxShadow    = '0 0 14px rgba(224,85,85,.08)';
     } else {
-      hero.style.background   = 'var(--bg2)';
-      hero.style.borderColor  = 'var(--border)';
+      hero.style.background   = '#161210';
+      hero.style.borderColor  = 'rgba(255,220,160,.07)';
       hero.style.boxShadow    = 'none';
     }
   }
 
-  // sparkline color follows P&L
-  var sparkStroke = profit >= 0 ? '#4ade80' : '#f87171';
-  var sparkFillRgb = profit >= 0 ? '74,222,128' : '248,113,113';
+  // sparkline color follows P&L — B-ORE tones
+  var sparkStroke = profit >= 0 ? '#3dbe6c' : '#e05555';
+  var sparkFillRgb = profit >= 0 ? '61,190,108' : '224,85,85';
   var sl = document.getElementById('mt5SparkLine');
   var sf = document.getElementById('mt5SparkFill');
   if (sl) { sl.setAttribute('stroke', sparkStroke); }
@@ -12737,15 +12750,9 @@ function _mt5RenderAccount(acct) {
     if (openCount > 0) {
       badge.style.display = 'block';
       badge.textContent   = '● ' + openCount + ' TRADE' + (openCount === 1 ? '' : 'S') + ' OPEN';
-      if (profit >= 0) {
-        badge.style.background  = 'rgba(74,222,128,.12)';
-        badge.style.borderColor = 'rgba(74,222,128,.3)';
-        badge.style.color       = '#4ade80';
-      } else {
-        badge.style.background  = 'rgba(248,113,113,.12)';
-        badge.style.borderColor = 'rgba(248,113,113,.3)';
-        badge.style.color       = '#f87171';
-      }
+      badge.style.background  = 'rgba(200,150,10,.12)';
+      badge.style.borderColor = 'rgba(200,150,10,.28)';
+      badge.style.color       = '#c8960a';
     } else {
       badge.style.display = 'none';
     }
@@ -12771,17 +12778,17 @@ function mt5SetRisk(amt) {
     var btn = document.getElementById('mt5Risk' + v);
     if (!btn) return;
     if (v === amt) {
-      btn.style.color       = '#f59e0b';
-      btn.style.background  = '#141400';
-      btn.style.border      = '2px solid #3a2e00';
+      btn.style.color       = '#d4870a';
+      btn.style.background  = '#1c1400';
+      btn.style.border      = '2px solid rgba(212,135,10,.32)';
     } else {
-      btn.style.color       = '#ccc';
-      btn.style.background  = '#141414';
-      btn.style.border      = '1px solid #2a2a2a';
+      btn.style.color       = '#8a7f72';
+      btn.style.background  = '#1c1815';
+      btn.style.border      = '1px solid rgba(255,220,160,.07)';
     }
     // sub-label color
     var sub = btn.querySelector('div');
-    if (sub) sub.style.color = v === amt ? '#8a7020' : '#555';
+    if (sub) sub.style.color = v === amt ? '#a07020' : '#555';
   });
   // update risk strip on all open position cards immediately
   var cards = document.querySelectorAll('[id^="mt5RiskVal_"]');
@@ -12810,14 +12817,58 @@ function mt5ToggleExpand(ticket) {
   if (arrow) arrow.textContent   = _mt5Expanded[ticket] ? '▲ hide' : '▼ details';
 }
 
+function _mt5UpdateStatePills(counts) {
+  var cfg = {
+    up:  {ac:'#3dbe6c', ab:'#0e1e12', ab2:'rgba(61,190,108,.25)'},
+    ntp: {ac:'#d4870a', ab:'#1c1400', ab2:'rgba(212,135,10,.3)'},
+    dip: {ac:'#a09080', ab:'#1c1815', ab2:'rgba(160,144,128,.2)'},
+    nsl: {ac:'#e05555', ab:'#1e0e0e', ab2:'rgba(224,85,85,.3)'}
+  };
+  Object.keys(cfg).forEach(function(state) {
+    var pill = document.getElementById('mt5StatePill_' + state);
+    if (!pill) return;
+    var c = cfg[state];
+    if ((counts[state] || 0) > 0) {
+      pill.style.color = c.ac;
+      pill.style.background = c.ab;
+      pill.style.borderColor = c.ab2;
+    } else {
+      pill.style.color = '#555';
+      pill.style.background = '#1c1815';
+      pill.style.borderColor = 'rgba(255,220,160,.07)';
+    }
+  });
+}
+
 function _mt5RenderPositions(positions) {
   var tbody = document.getElementById('mt5PositionsTbody');
   if (!tbody) return;
   if (!positions || positions.length === 0) {
-    tbody.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:24px;">No open positions</div>';
+    tbody.innerHTML = '<div style="font-family:\'DM Mono\',monospace;font-size:11px;color:#555;text-align:center;padding:24px;">No open positions</div>';
     _mt5PrevPnl = {};
+    _mt5UpdateStatePills({up:0, ntp:0, dip:0, nsl:0});
     return;
   }
+
+  // Count card states for state pills
+  var _stateC = {up:0, ntp:0, dip:0, nsl:0};
+  positions.forEach(function(q) {
+    var _p  = parseFloat(q.profit) || 0;
+    var _sl = parseFloat(q.sl) || 0;
+    var _tp = parseFloat(q.tp) || 0;
+    var _op = parseFloat(q.open_price) || 0;
+    var _cu = parseFloat(q.current_price || q.open_price) || 0;
+    var _hl = _mt5LevelHits[String(q.ticket || q.symbol)] || '';
+    var _pToTP = (_tp>0&&_op>0) ? Math.min(100,Math.abs(_cu-_op)/Math.abs(_tp-_op)*100) : 0;
+    var _pToSL = (_sl>0&&_op>0) ? Math.min(100,Math.abs(_cu-_op)/Math.abs(_sl-_op)*100) : 0;
+    var _s;
+    if (_hl) _s = _hl==='SL'?'nsl':'ntp';
+    else if (_p>0) _s = (_pToTP>=85)?'ntp':'up';
+    else if (_p<0) _s = (_pToSL>=80)?'nsl':'dip';
+    else _s = 'up';
+    _stateC[_s]++;
+  });
+  _mt5UpdateStatePills(_stateC);
   tbody.innerHTML = positions.map(function(p) {
     var profit    = parseFloat(p.profit) || 0;
     var pnlCol    = profit >= 0 ? 'var(--green)' : 'var(--red)';
@@ -12978,28 +13029,28 @@ function _mt5RenderPositions(positions) {
         + '</button>';
     }
 
-    // ── Manual controls (hidden by default) ──────────────────────
+    // ── Manual controls (hidden by default) — B-ORE styling ──────
     var manId = 'mt5Manual_' + ticket;
     function _manBtn(level, label, st) {
       var isHit = hitLevel === level;
-      var bg = isHit ? 'background:var(--amber);color:#000;border-color:var(--amber);' : st;
+      var bg = isHit ? 'background:rgba(200,150,10,.18);color:#d4870a;border-color:rgba(212,135,10,.4);' : st;
       return '<button id="mt5Btn_' + ticket + '_' + level + '"'
            + ' onclick="mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'' + level + '\')"'
-           + ' style="padding:6px 8px;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.4px;'
-           + 'border-radius:3px;cursor:pointer;border:1px solid;' + bg + '">'
+           + ' style="padding:6px 8px;font-family:\'DM Mono\',monospace;font-size:9px;font-weight:700;letter-spacing:.4px;'
+           + 'border-radius:4px;cursor:pointer;border:1px solid;' + bg + '">'
            + label + (isHit ? ' ●' : '') + '</button>';
     }
-    var manualHtml = '<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">'
+    var manualHtml = '<div style="border-top:1px solid rgba(255,220,160,.06);padding-top:12px;margin-top:4px;">'
       + '<button onclick="var g=document.getElementById(\'' + manId + '\');g.style.display=g.style.display===\'none\'?\'block\':\'none\';"'
-      + ' style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.5px;border:none;background:none;cursor:pointer;padding:0;">▸ Manual controls</button>'
+      + ' style="font-family:\'DM Mono\',monospace;font-size:10px;color:#6a6058;letter-spacing:.5px;border:none;background:none;cursor:pointer;padding:0;">▸ Manual controls</button>'
       + '<div id="' + manId + '" style="display:none;margin-top:10px;">'
       + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;">'
-      + _manBtn('SL',  '▼ Exit trade',     'background:rgba(239,68,68,.08);color:var(--red);border-color:rgba(239,68,68,.3);')
-      + _manBtn('TP1', '● Target 1 — 50%', 'background:rgba(0,201,141,.07);color:var(--green);border-color:rgba(0,201,141,.25);')
-      + _manBtn('TP2', '● Target 2 — 30%', 'background:rgba(0,201,141,.05);color:var(--green);border-color:rgba(0,201,141,.2);')
-      + _manBtn('TP3', '● Target 3 — all', 'background:rgba(0,201,141,.04);color:var(--green);border-color:rgba(0,201,141,.15);')
+      + _manBtn('SL',  '▼ Exit trade',     'background:#1e0e0e;color:#e05555;border-color:rgba(224,85,85,.25);')
+      + _manBtn('TP1', '● Target 1 — 50%', 'background:#0e1e12;color:#3dbe6c;border-color:rgba(61,190,108,.22);')
+      + _manBtn('TP2', '● Target 2 — 30%', 'background:#0e1e12;color:rgba(61,190,108,.7);border-color:rgba(61,190,108,.18);')
+      + _manBtn('TP3', '● Target 3 — all', 'background:#0e1e12;color:rgba(61,190,108,.5);border-color:rgba(61,190,108,.14);')
       + '</div>'
-      + '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5;">Only use these if you have a specific reason. DotVerse will prompt you automatically when each level is hit.</div>'
+      + '<div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-top:8px;line-height:1.5;">Only use these if you have a specific reason. DotVerse will prompt you automatically when each level is hit.</div>'
       + '</div></div>';
 
     // ── Determine card state for colors + flash logic ────────────
@@ -13014,21 +13065,21 @@ function _mt5RenderPositions(positions) {
       cardState = 'up';
     }
 
-    // card border/bg colors
+    // card border/bg colors — B-ORE: uniform warm dark, only border tint changes per state
     var cardBg, cardBorder, cardGlow;
-    if      (cardState === 'up' ) { cardBg='#050f05'; cardBorder='#1a4a1a'; cardGlow='mt5GlowG 2.5s ease-in-out infinite'; }
-    else if (cardState === 'ntp') { cardBg='#0f0c00'; cardBorder='#3a2800'; cardGlow='mt5GlowA 2s ease-in-out infinite'; }
-    else if (cardState === 'dip') { cardBg='#0f0800'; cardBorder='#3a1e00'; cardGlow='mt5GlowO 2.5s ease-in-out infinite'; }
-    else                          { cardBg='#0f0404'; cardBorder='#4a1414'; cardGlow='mt5GlowR 1.5s ease-in-out infinite'; }
+    if      (cardState === 'up' ) { cardBg='#161210'; cardBorder='rgba(61,190,108,.18)';  cardGlow=''; }
+    else if (cardState === 'ntp') { cardBg='#161210'; cardBorder='rgba(212,135,10,.22)';  cardGlow=''; }
+    else if (cardState === 'dip') { cardBg='#161210'; cardBorder='rgba(255,220,160,.08)'; cardGlow=''; }
+    else                          { cardBg='#161210'; cardBorder='rgba(224,85,85,.22)';   cardGlow=''; }
 
     // blinking position dot
     var dotAnim = profit >= 0
       ? 'animation:mt5BlinkGreen 1.2s ease-in-out infinite;background:#4ade80;'
       : 'animation:mt5BlinkRed 1s ease-in-out infinite;background:#f87171;';
 
-    // P&L color
-    var pnlColor = profit > 0 ? '#4ade80' : profit < 0 ? '#f87171' : '#888';
-    var pnlGlow  = profit > 0 ? 'text-shadow:0 0 14px rgba(74,222,128,.5);' : profit < 0 ? 'text-shadow:0 0 14px rgba(248,113,113,.5);' : '';
+    // P&L color — B-ORE tones
+    var pnlColor = profit > 0 ? '#3dbe6c' : profit < 0 ? '#e05555' : '#8a7f72';
+    var pnlGlow  = '';
     var pnlSign  = profit >= 0 ? '+' : '';
 
     // coaching badge
@@ -13039,12 +13090,13 @@ function _mt5RenderPositions(positions) {
     else                          { coachBg='#2a0808'; coachBorder='#5a1a1a'; coachColor='#f87171'; }
 
     // track bar
-    var trackAnim;
-    if      (cardState === 'up' ) trackAnim = 'mt5TrackShimG 2s ease-in-out infinite';
-    else if (cardState === 'ntp') trackAnim = 'mt5TrackShimA 1.8s ease-in-out infinite';
-    else if (cardState === 'dip') trackAnim = 'mt5TrackShimG 2.5s ease-in-out infinite';
-    else                          trackAnim = 'mt5TrackShimR 1.2s ease-in-out infinite';
-    var trackFillCol = coachColor;
+    var trackAnim = '';
+    // B-ORE track fill: state-matched color
+    var trackFillCol;
+    if      (cardState === 'up' ) trackFillCol = '#3dbe6c';
+    else if (cardState === 'ntp') trackFillCol = '#d4870a';
+    else if (cardState === 'dip') trackFillCol = '#8a7f72';
+    else                          trackFillCol = '#e05555';
 
     // risk strip color
     var riskStripBg, riskStripBorder, riskStripColor, riskValColor;
@@ -13053,37 +13105,38 @@ function _mt5RenderPositions(positions) {
     else if (cardState === 'dip') { riskStripBg='#140a04'; riskStripBorder='#3a1e00'; riskStripColor='#8a5020'; riskValColor='#fb923c'; }
     else                          { riskStripBg='#140606'; riskStripBorder='#4a1414'; riskStripColor='#8a2a2a'; riskValColor='#f87171'; }
 
-    // ── Action button styles — neutral by default, color+flash only at threshold ──
-    var btnNeutral = 'background:#1a1a1a;border:1px solid #2e2e2e;color:#555;cursor:pointer;';
-    // Take 50% profit — flashes green only when near TP or TP hit
+    // ── Action button styles — B-ORE: neutral dark, subtle breathing glow only at threshold ──
+    var _btnBase = 'flex:1;padding:14px 8px;border-radius:8px;font-family:\'DM Sans\',sans-serif;font-size:13px;font-weight:600;text-align:center;cursor:pointer;';
+    var btnNeutral = _btnBase + 'background:#1c1815;border:1px solid rgba(255,220,160,.07);color:#8a7f72;';
+    // Take 50% profit — subtle green breathing glow when near TP or TP hit
     var btnTakeStyle, btnTakeText;
     if (hitLevel === 'TP1' || hitLevel === 'TP2' || hitLevel === 'TP3') {
-      btnTakeStyle = 'animation:mt5UrgentG .7s ease-in-out infinite;border:none;color:#fff;cursor:pointer;';
-      btnTakeText  = '✓ TAKE PROFIT NOW';
+      btnTakeStyle = _btnBase + 'animation:mt5BtnGlowG 2s ease-in-out infinite;border:1px solid rgba(61,190,108,.48);color:#3dbe6c;background:#0f2215;';
+      btnTakeText  = 'Take 50% profit';
     } else if (cardState === 'ntp') {
-      btnTakeStyle = 'animation:mt5UrgentG .75s ease-in-out infinite;border:none;color:#fff;cursor:pointer;';
-      btnTakeText  = '✓ TAKE 50% PROFIT';
+      btnTakeStyle = _btnBase + 'animation:mt5BtnGlowG 2s ease-in-out infinite;border:1px solid rgba(61,190,108,.3);color:rgba(61,190,108,.8);background:#0e1e12;';
+      btnTakeText  = 'Take 50% profit';
     } else {
       btnTakeStyle = btnNeutral;
       btnTakeText  = 'Take 50% profit';
     }
-    // Move stop to entry — flashes amber only when near TP
+    // Move stop to entry — subtle amber breathing glow when near TP
     var btnMoveStyle, btnMoveText;
     if (cardState === 'ntp' && !hitLevel) {
-      btnMoveStyle = 'animation:mt5UrgentA .75s ease-in-out infinite;border:none;color:#fff;cursor:pointer;';
-      btnMoveText  = '→ MOVE STOP NOW';
+      btnMoveStyle = _btnBase + 'animation:mt5BtnGlowA 2s ease-in-out infinite;border:1px solid rgba(212,135,10,.3);color:rgba(212,135,10,.8);background:#181200;';
+      btnMoveText  = 'Move stop to entry';
     } else {
       btnMoveStyle = btnNeutral;
       btnMoveText  = 'Move stop to entry';
     }
-    // Exit trade — flashes red only when near SL or SL hit
+    // Exit trade — subtle red breathing glow when near SL or SL hit
     var btnExitStyle, btnExitText;
     if (hitLevel === 'SL') {
-      btnExitStyle = 'animation:mt5UrgentR .55s ease-in-out infinite;border:none;color:#fff;cursor:pointer;';
-      btnExitText  = '⚠ EXIT — STOP LOSS HIT';
+      btnExitStyle = _btnBase + 'animation:mt5BtnGlowR 1.6s ease-in-out infinite;border:1px solid rgba(224,85,85,.5);color:#e05555;background:#221010;';
+      btnExitText  = 'Exit trade';
     } else if (cardState === 'nsl') {
-      btnExitStyle = 'animation:mt5UrgentR .55s ease-in-out infinite;border:none;color:#fff;cursor:pointer;';
-      btnExitText  = '⚠ EXIT TRADE NOW';
+      btnExitStyle = _btnBase + 'animation:mt5BtnGlowR 1.6s ease-in-out infinite;border:1px solid rgba(224,85,85,.35);color:rgba(224,85,85,.8);background:#1e0e0e;';
+      btnExitText  = 'Exit trade';
     } else {
       btnExitStyle = btnNeutral;
       btnExitText  = 'Exit trade';
@@ -13095,74 +13148,93 @@ function _mt5RenderPositions(positions) {
       ? '<span style="font-family:var(--mono);font-size:9px;font-weight:700;color:var(--amber);background:rgba(255,176,0,.1);border:1px solid rgba(255,176,0,.25);border-radius:2px;padding:1px 5px;margin-left:6px;letter-spacing:.4px;">' + p.timeframe.toUpperCase() + '</span>'
       : '';
 
-    var cardHtml = '<div style="border-radius:10px;overflow:hidden;margin-bottom:10px;background:' + cardBg + ';border:1px solid ' + cardBorder + ';animation:' + cardGlow + ';">'
+    // B-ORE state tab styles
+    var _tabB = 'padding:7px 10px;font-family:\'DM Mono\',monospace;font-size:9px;font-weight:700;letter-spacing:.06em;background:none;border:none;border-bottom:2px solid transparent;cursor:default;';
+    var tabUpS  = _tabB + (cardState==='up'  ? 'color:#3dbe6c;border-bottom-color:#3dbe6c;' : 'color:#555;');
+    var tabNtpS = _tabB + (cardState==='ntp' ? 'color:#d4870a;border-bottom-color:#d4870a;' : 'color:#555;');
+    var tabDipS = _tabB + (cardState==='dip' ? 'color:#a09080;border-bottom-color:#a09080;' : 'color:#555;');
+    var tabNslS = _tabB + (cardState==='nsl' ? 'color:#e05555;border-bottom-color:#e05555;' : 'color:#555;');
+    var typeBadgeStyle = p.type === 'BUY'
+      ? 'background:rgba(61,190,108,.12);color:#3dbe6c;border:1px solid rgba(61,190,108,.25);'
+      : 'background:rgba(224,85,85,.12);color:#e05555;border:1px solid rgba(224,85,85,.25);';
 
-      // ── Summary (always visible) ──
-      + '<div style="padding:14px;cursor:pointer;" onclick="mt5ToggleExpand(' + ticket + ')">'
+    var cardHtml = '<div style="border-radius:10px;overflow:hidden;margin-bottom:10px;background:#161210;border:1px solid ' + cardBorder + ';">'
 
-        // top row: dot · symbol · direction · P&L
-        + '<div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;">'
-        +   '<div style="width:11px;height:11px;border-radius:50%;flex-shrink:0;' + dotAnim + '"></div>'
-        +   '<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--white);">' + (p.symbol||'—') + '</div>'
+      // state tab row
+      + '<div style="display:flex;border-bottom:1px solid rgba(255,220,160,.05);padding:0 4px;">'
+      +   '<span style="' + tabUpS  + '">▲ Going up</span>'
+      +   '<span style="' + tabNtpS + '">▲ Near target</span>'
+      +   '<span style="' + tabDipS + '">▼ Dipped</span>'
+      +   '<span style="' + tabNslS + '">▼ Near exit</span>'
+      + '</div>'
+
+      // card body
+      + '<div style="padding:16px;cursor:pointer;" onclick="mt5ToggleExpand(' + ticket + ')">'
+
+        // ticker + type badge + P&L
+        + '<div style="display:flex;align-items:center;margin-bottom:14px;">'
+        +   '<div style="font-family:\'DM Mono\',monospace;font-size:17px;font-weight:700;color:#e8dcc8;">' + (p.symbol||'—') + '</div>'
         +   tfBadge
-        +   '<div style="font-family:var(--mono);font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;letter-spacing:.08em;background:#081408;color:#4ade80;border:1px solid #1e4a1e;">' + (p.type||'—') + '</div>'
+        +   '<div style="font-family:\'DM Mono\',monospace;font-size:10px;font-weight:800;padding:3px 9px;border-radius:4px;letter-spacing:.08em;margin-left:8px;' + typeBadgeStyle + '">' + (p.type||'—') + '</div>'
         +   '<div style="margin-left:auto;text-align:right;">'
-        +     '<div style="font-family:var(--mono);font-size:24px;font-weight:900;font-variant-numeric:tabular-nums;line-height:1;color:' + pnlColor + ';' + pnlGlow + '">' + pnlSign + _mt5Fmt(profit) + '</div>'
-        +     '<div style="font-family:var(--mono);font-size:11px;margin-top:2px;color:' + pnlColor + ';opacity:.8;">' + pnlSign + (openPrice > 0 ? (profit / openPrice * 100).toFixed(2) : '0.00') + '%</div>'
+        +     '<div style="font-family:\'DM Mono\',monospace;font-size:22px;font-weight:900;font-variant-numeric:tabular-nums;color:' + pnlColor + ';">' + pnlSign + _mt5Fmt(profit) + '</div>'
+        +     '<div style="font-family:\'DM Mono\',monospace;font-size:10px;margin-top:1px;color:' + pnlColor + ';opacity:.7;">' + pnlSign + (openPrice > 0 ? (profit / openPrice * 100).toFixed(2) : '0.00') + '%' + (profit > 0 ? ' · profit' : '') + '</div>'
         +   '</div>'
         + '</div>'
 
-        // coaching badge
-        + '<div style="display:inline-block;padding:5px 11px;border-radius:5px;font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.09em;margin-bottom:12px;background:' + coachBg + ';color:' + coachColor + ';border:1px solid ' + coachBorder + ';">' + statusText + '</div>'
-
-        // track bar
-        + '<div style="margin-bottom:12px;">'
-        +   '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:#555;margin-bottom:5px;"><span>Exit point</span><span>Target 1</span></div>'
-        +   '<div style="position:relative;height:6px;background:#111;border-radius:3px;">'
-        +     '<div style="position:absolute;left:0;top:0;height:100%;width:' + trackPct.toFixed(1) + '%;border-radius:3px;background:' + trackFillCol + ';animation:' + trackAnim + ';transition:width .5s;"></div>'
-        +     '<div style="position:absolute;top:50%;left:' + trackPct.toFixed(1) + '%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:' + trackFillCol + ';border:2px solid #080808;box-shadow:0 0 8px 2px ' + trackFillCol + '88;transition:left .5s;"></div>'
+        // track bar — thin line + round dot with hover tooltip
+        + '<div style="margin-bottom:14px;">'
+        +   '<div style="display:flex;justify-content:space-between;font-family:\'DM Mono\',monospace;font-size:9px;color:#6a6058;letter-spacing:.4px;margin-bottom:5px;"><span>Exit point</span><span>Target 1</span></div>'
+        +   '<div style="position:relative;height:4px;background:rgba(255,220,160,.06);border-radius:2px;overflow:visible;">'
+        +     '<div style="position:absolute;left:0;top:0;height:100%;width:' + trackPct.toFixed(1) + '%;border-radius:2px;background:' + trackFillCol + ';transition:width .5s;"></div>'
+        +     '<div style="position:absolute;top:50%;left:' + trackPct.toFixed(1) + '%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:' + trackFillCol + ';border:2px solid #161210;transition:left .5s;cursor:pointer;"'
+        +       ' onmouseover="var t=document.getElementById(\'trktip_' + ticket + '\');if(t)t.style.display=\'block\';"'
+        +       ' onmouseout="var t=document.getElementById(\'trktip_' + ticket + '\');if(t)t.style.display=\'none\';"'
+        +     '></div>'
+        +     '<div id="trktip_' + ticket + '" style="display:none;position:absolute;bottom:18px;left:' + trackPct.toFixed(1) + '%;transform:translateX(-50%);background:#1c1815;border:1px solid rgba(255,220,160,.22);border-radius:4px;padding:4px 9px;font-family:\'DM Mono\',monospace;font-size:11px;font-weight:700;color:#e8dcc8;white-space:nowrap;z-index:10;pointer-events:none;">' + _mt5Fmt(cur) + '</div>'
         +   '</div>'
-        +   '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:#444;margin-top:5px;"><span>' + _mt5Fmt(sl) + '</span><span style="color:' + trackFillCol + ';">' + _mt5Fmt(cur) + '</span><span>' + _mt5Fmt(tp) + '</span></div>'
+        +   '<div style="display:flex;justify-content:space-between;font-family:\'DM Mono\',monospace;font-size:9px;color:#6a6058;margin-top:5px;">'
+        +     '<span>' + _mt5Fmt(sl) + '</span>'
+        +     '<span style="color:' + trackFillCol + ';">' + _mt5Fmt(cur) + ' <span style="color:#6a6058;">now</span></span>'
+        +     '<span>' + _mt5Fmt(tp) + '</span>'
+        +   '</div>'
         + '</div>'
 
         // risk strip
-        + '<div style="display:flex;align-items:center;padding:8px 11px;border-radius:6px;margin-bottom:14px;font-family:var(--mono);font-size:11px;background:' + riskStripBg + ';border:1px solid ' + riskStripBorder + ';color:' + riskStripColor + ';">'
-        +   '<span>Risk on this trade</span>'
-        +   '<span id="mt5RiskVal_' + ticket + '" style="margin-left:auto;font-weight:700;font-size:13px;color:' + riskValColor + ';">$' + (window._mt5RiskAmt || '—') + ' max loss</span>'
+        + '<div style="display:flex;align-items:center;padding:8px 12px;border-radius:6px;margin-bottom:14px;background:#1c1815;border:1px solid rgba(255,220,160,.07);">'
+        +   '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:#6a6058;">Risk on this trade</span>'
+        +   '<span id="mt5RiskVal_' + ticket + '" style="margin-left:auto;font-family:\'DM Mono\',monospace;font-size:13px;font-weight:700;color:#c8960a;">$' + (window._mt5RiskAmt || '—') + ' max loss</span>'
         + '</div>'
 
-        // action buttons
+        // 3 action buttons
         + '<div style="display:flex;gap:8px;">'
-        +   '<button id="mt5BtnTake_' + ticket + '" onclick="event.stopPropagation();mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'TP1\')" style="flex:1;padding:12px 6px;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;font-size:12px;font-weight:700;text-align:center;letter-spacing:.01em;' + btnTakeStyle + '">' + btnTakeText + '</button>'
-        +   '<button onclick="event.stopPropagation();" style="flex:1;padding:12px 6px;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;font-size:12px;font-weight:700;text-align:center;letter-spacing:.01em;' + btnMoveStyle + '">' + btnMoveText + '</button>'
-        +   '<button id="mt5BtnExit_' + ticket + '" onclick="event.stopPropagation();mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'SL\')" style="flex:1;padding:12px 6px;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;font-size:12px;font-weight:700;text-align:center;letter-spacing:.01em;' + btnExitStyle + '">' + btnExitText + '</button>'
+        +   '<button id="mt5BtnTake_' + ticket + '" onclick="event.stopPropagation();mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'TP1\')" style="' + btnTakeStyle + '">' + btnTakeText + '</button>'
+        +   '<button onclick="event.stopPropagation();" style="' + btnMoveStyle + '">' + btnMoveText + '</button>'
+        +   '<button id="mt5BtnExit_' + ticket + '" onclick="event.stopPropagation();mt5ClosePosition(' + ticket + ',\'' + (p.symbol||'') + '\',\'SL\')" style="' + btnExitStyle + '">' + btnExitText + '</button>'
         + '</div>'
 
         // expand toggle
-        + '<div style="text-align:center;margin-top:10px;"><span id="mt5Arrow_' + ticket + '" style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.5px;cursor:pointer;">' + arrowTxt + '</span></div>'
+        + '<div style="text-align:center;margin-top:10px;"><span id="mt5Arrow_' + ticket + '" style="font-family:\'DM Mono\',monospace;font-size:9px;color:#555;letter-spacing:.5px;cursor:pointer;">' + arrowTxt + '</span></div>'
 
       + '</div>'
 
-      // ── Expand detail panel ──
-      + '<div id="mt5Detail_' + ticket + '" style="display:' + (isOpen ? 'block' : 'none') + ';border-top:1px solid ' + cardBorder + ';padding:16px 14px;background:rgba(0,0,0,.3);">'
+      // expand detail panel
+      + '<div id="mt5Detail_' + ticket + '" style="display:' + (isOpen ? 'block' : 'none') + ';border-top:1px solid rgba(255,220,160,.05);padding:16px;background:rgba(0,0,0,.2);">'
 
-        // what to do now
-        + '<div style="background:rgba(255,176,0,.04);border:1px solid rgba(255,176,0,.15);border-radius:4px;padding:12px 14px;margin-bottom:12px;">'
-        +   '<div style="font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--amber);margin-bottom:6px;">WHAT TO DO NOW</div>'
-        +   '<div style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.6;">' + whatNext + '</div>'
+        + '<div style="background:rgba(200,150,10,.04);border:1px solid rgba(200,150,10,.1);border-radius:6px;padding:12px 14px;margin-bottom:12px;">'
+        +   '<div style="font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.2px;color:#c8960a;margin-bottom:6px;">WHAT TO DO NOW</div>'
+        +   '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:#c8b89a;line-height:1.6;">' + whatNext + '</div>'
         + '</div>'
 
-        // details grid
         + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px;">'
-        +   '<div style="background:#0e0e0e;border:1px solid #1a1a1a;border-radius:6px;padding:7px 9px;"><div style="font-family:var(--mono);font-size:10px;color:#555;margin-bottom:2px;">entered at</div><div style="font-family:var(--mono);font-size:12px;font-weight:500;color:#ccc;">' + _mt5Fmt(openPrice) + '</div></div>'
-        +   '<div style="background:#0e0e0e;border:1px solid #1a1a1a;border-radius:6px;padding:7px 9px;"><div style="font-family:var(--mono);font-size:10px;color:#555;margin-bottom:2px;">stop loss</div><div style="font-family:var(--mono);font-size:12px;font-weight:500;color:#f87171;">' + _mt5Fmt(sl) + '</div></div>'
-        +   '<div style="background:#0e0e0e;border:1px solid #1a1a1a;border-radius:6px;padding:7px 9px;"><div style="font-family:var(--mono);font-size:10px;color:#555;margin-bottom:2px;">target 1</div><div style="font-family:var(--mono);font-size:12px;font-weight:500;color:#4ade80;">' + _mt5Fmt(tp) + '</div></div>'
-        +   '<div style="background:#0e0e0e;border:1px solid #1a1a1a;border-radius:6px;padding:7px 9px;"><div style="font-family:var(--mono);font-size:10px;color:#555;margin-bottom:2px;">lot size</div><div style="font-family:var(--mono);font-size:12px;font-weight:500;color:#ccc;">' + (p.volume||'—') + '</div></div>'
-        +   '<div style="background:#0e0e0e;border:1px solid #1a1a1a;border-radius:6px;padding:7px 9px;"><div style="font-family:var(--mono);font-size:10px;color:#555;margin-bottom:2px;">SL distance</div><div style="font-family:var(--mono);font-size:12px;font-weight:500;color:#ccc;">' + slDist + '</div></div>'
-        +   '<div style="background:#0e0e0e;border:1px solid #1a1a1a;border-radius:6px;padding:7px 9px;"><div style="font-family:var(--mono);font-size:10px;color:#555;margin-bottom:2px;">TP distance</div><div style="font-family:var(--mono);font-size:12px;font-weight:500;color:#ccc;">' + tpDist + '</div></div>'
+        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">entered at</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#c8b89a;">' + _mt5Fmt(openPrice) + '</div></div>'
+        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">stop loss</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#e05555;">' + _mt5Fmt(sl) + '</div></div>'
+        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">target 1</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#3dbe6c;">' + _mt5Fmt(tp) + '</div></div>'
+        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">lot size</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#c8b89a;">' + (p.volume||'—') + '</div></div>'
+        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">SL distance</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#c8b89a;">' + slDist + '</div></div>'
+        +   '<div style="background:#1c1815;border:1px solid rgba(255,220,160,.07);border-radius:6px;padding:7px 9px;"><div style="font-family:\'DM Mono\',monospace;font-size:10px;color:#555;margin-bottom:2px;">TP distance</div><div style="font-family:\'DM Mono\',monospace;font-size:12px;font-weight:500;color:#c8b89a;">' + tpDist + '</div></div>'
         + '</div>'
 
-        // manual controls
         + manualHtml
 
       + '</div>'
