@@ -5568,7 +5568,85 @@ def backtest_route():
             out[i] = 100 - 100 / (1 + ag/al) if al > 0 else 100
         return out
 
-    rsi_hist = _rsi(prices_hist)
+    # ── EMA series helper (TV-compatible multiplier) ──────────────────────────
+    def _ema_s(prices, period):
+        out = [None] * len(prices)
+        if len(prices) < period:
+            return out
+        out[period - 1] = sum(prices[:period]) / period
+        k = 2.0 / (period + 1)
+        for idx in range(period, len(prices)):
+            out[idx] = prices[idx] * k + out[idx - 1] * (1 - k)
+        return out
+
+    # ── Bollinger Band position series (0=at lower band, 1=at upper band) ─────
+    def _bb_pos_s(prices, period=20):
+        out = [None] * len(prices)
+        for idx in range(period - 1, len(prices)):
+            w   = prices[idx - period + 1:idx + 1]
+            sma = sum(w) / period
+            std = (sum((p - sma) ** 2 for p in w) / period) ** 0.5
+            upper = sma + 2 * std
+            lower = sma - 2 * std
+            denom = upper - lower
+            out[idx] = (prices[idx] - lower) / denom if denom > 0 else 0.5
+        return out
+
+    # ── Pre-compute confluence indicator series using asset-specific settings ──
+    _acfg_bt      = ASSET_CONFIG.get(asset_type, _DEFAULT_ASSET_CFG)
+    _rsi_p_bt     = _acfg_bt["rsi_period"]
+    _ema_fast_bt  = _acfg_bt["ema_fast"]
+    _ema_slow_bt  = _acfg_bt["ema_slow"]
+
+    rsi_hist   = _rsi(prices_hist, _rsi_p_bt)
+    _ef_hist   = _ema_s(prices_hist, _ema_fast_bt)
+    _es_hist   = _ema_s(prices_hist, _ema_slow_bt)
+    _mf_hist   = _ema_s(prices_hist, 12)
+    _ms_hist   = _ema_s(prices_hist, 26)
+    _ml_hist   = [(_mf_hist[idx] - _ms_hist[idx])
+                  if _mf_hist[idx] is not None and _ms_hist[idx] is not None else None
+                  for idx in range(len(prices_hist))]
+    _ml_vals   = [v if v is not None else 0.0 for v in _ml_hist]
+    _msig_hist = _ema_s(_ml_vals, 9)
+    _mh_hist   = [(_ml_hist[idx] - _msig_hist[idx])
+                  if _ml_hist[idx] is not None and _msig_hist[idx] is not None else None
+                  for idx in range(len(prices_hist))]
+    _bp_hist   = _bb_pos_s(prices_hist)
+
+    def _conf_sig(idx):
+        """65% confluence gate for bar idx — mirrors get_analysis() exactly."""
+        r  = rsi_hist[idx]
+        ef = _ef_hist[idx]
+        es = _es_hist[idx]
+        mh = _mh_hist[idx]
+        bp = _bp_hist[idx]
+        p  = prices_hist[idx]
+        if r is None or ef is None or es is None:
+            return "HOLD"
+        bc = 0; brc = 0          # bullish / bearish vote counts
+        # RSI (weight 1) — same bands as get_analysis()
+        if   r >= 75:             brc += 1
+        elif 55 <= r < 75:        bc  += 1
+        elif 25 < r < 45:         brc += 1
+        elif r <= 25:             bc  += 1
+        # else 45-55 is neutral, no vote
+        # EMA trend (weight 2) — only full stack counts
+        if   p > ef and ef > es:  bc  += 2
+        elif p < ef and ef < es:  brc += 2
+        # MACD histogram (weight 1)
+        if mh is not None:
+            if   mh > 0:          bc  += 1
+            elif mh < 0:          brc += 1
+        # Bollinger position (weight 1)
+        if bp is not None:
+            if   bp > 0.85:       brc += 1
+            elif bp < 0.15:       bc  += 1
+        total = bc + brc
+        if total == 0:
+            return "HOLD"
+        if bc  / total >= 0.65:   return "BUY"
+        if brc / total >= 0.65:   return "SELL"
+        return "HOLD"
 
     # ── Derive % distances from the current signal ────────────────────────────
     # TradingView's Strategy Tester runs the SAME Pine Script logic on every bar,
@@ -5589,32 +5667,33 @@ def backtest_route():
     tp2_pct  = abs(float(tp2) - _entry) / _entry if tp2 else None
     tp3_pct  = abs(float(tp3) - _entry) / _entry if tp3 else None
 
+    # Fee: 0.2% round-trip (0.1% entry + 0.1% exit) expressed in R-multiples.
+    # Matches Phase-2d fee adjustment applied to live signals in get_analysis().
+    # Deducted from every trade regardless of outcome.
+    _fee_r = round(0.002 / risk_pct, 4) if risk_pct > 0 else 0.0
+
     # R-multiples for display (win sizes relative to 1R loss)
     r1 = round(tp1_pct / risk_pct, 2) if risk_pct > 0 else 1.5
     r2 = round(tp2_pct / risk_pct, 2) if tp2_pct and risk_pct > 0 else None
     r3 = round(tp3_pct / risk_pct, 2) if tp3_pct and risk_pct > 0 else None
 
-    # Signal scan window: only the LAST 200 bars, matching the Pine Script's
-    # `inWindow = bar_index >= (last_bar_index - 200)`.
-    # The bars before scan_start exist purely to warm up RSI so values
-    # match TradingView's (which has thousands of prior bars for warmup).
-    scan_start = max(15, len(prices_hist) - 200)
+    # Signal scan window: last 500 bars.
+    # First 100 bars are reserved for indicator warm-up (EMA50, MACD26+9, RSI21).
+    # Scanning 500 bars gives enough trades for statistically meaningful results.
+    scan_start = max(100, len(prices_hist) - 500)
 
     trades = []
     i = scan_start
     while i < len(prices_hist) - 1:  # -1 because we need at least bar i+1 for forward scan
-        rsi_now  = rsi_hist[i]
-        rsi_prev = rsi_hist[i - 1]
-        if rsi_now is None or rsi_prev is None:
-            i += 1; continue
-
-        # Entry condition: RSI CROSSUNDER 40 (BUY) or CROSSOVER 60 (SELL)
-        # Matches ta.crossunder / ta.crossover in the Pine Script exactly.
-        is_entry = False
-        if is_long  and rsi_prev >= 40 and rsi_now < 40:
-            is_entry = True
-        if not is_long and rsi_prev <= 60 and rsi_now > 60:
-            is_entry = True
+        # Entry condition: DotVerse 65% confluence gate — identical to get_analysis().
+        # Fire only on the TRANSITION bar (signal changes from non-BUY/SELL to BUY/SELL)
+        # so we enter exactly once per signal period, not on every sustained-trend bar.
+        sig_now  = _conf_sig(i)
+        sig_prev = _conf_sig(i - 1) if i > 0 else "HOLD"
+        is_entry = (
+            (is_long     and sig_now == "BUY"  and sig_prev != "BUY")  or
+            (not is_long and sig_now == "SELL" and sig_prev != "SELL")
+        )
         if not is_entry:
             i += 1; continue
 
@@ -5677,13 +5756,14 @@ def backtest_route():
         # TV closes an unresolved trade and checks for a new entry on the very next bar.
         if outcome is None:
             outcome  = "timeout"
-            r_mult   = -1.0
-            exit_bar = 1   # advance only 1 bar so we don't skip over RSI crossings
+            r_mult   = 0.0   # break-even exit — no SL hit, closed at market
+            exit_bar = 1     # advance only 1 bar so we don't skip over confluence transitions
         trade_date = dates_hist[i] if i < len(dates_hist) else str(i)
+        r_net = round(r_mult - _fee_r, 4)   # deduct 0.2% round-trip fee
         trades.append({
             "n":       len(trades) + 1,
             "outcome": outcome,
-            "r":       r_mult,
+            "r":       r_net,
             "date":    trade_date,
             "entry":   round(hist_entry, 6),
         })
@@ -5691,10 +5771,10 @@ def backtest_route():
         # immediately after this trade closed (matching TradingView's behavior)
         i += exit_bar + 1
 
-    if len(trades) < 2:
+    if len(trades) < 10:
         return jsonify({
-            "error": f"Only {len(trades)} matching signal(s) found in {len(prices_hist)} bars. " +
-                     "Use TradingView Strategy Tester for longer history."
+            "error": f"Only {len(trades)} signal(s) found in {len(prices_hist)} bars — need 10+ for meaningful statistics. " +
+                     "Try a higher timeframe (e.g. 1H or 4H) for more data, or use TradingView Strategy Tester."
         }), 400
 
     wins   = [t for t in trades if t["outcome"] != "loss"]
@@ -5749,7 +5829,7 @@ def backtest_route():
         "avg_win_r":      avg_win,
         "avg_loss_r":     avg_los,
         "profit_factor":  pf,
-        "bars_tested":    min(200, len(prices_hist)),
+        "bars_tested":    min(500, len(prices_hist)),
         # Period covers only the signal-scan window (last 200 bars), not the RSI warmup bars
         "period":         f"{dates_hist[scan_start]} → {dates_hist[-1]}" if len(dates_hist) > scan_start else f"{len(prices_hist)} bars",
         "signal":         signal,
