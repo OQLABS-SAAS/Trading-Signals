@@ -6841,11 +6841,12 @@ function _sfRender(){
     <!-- Strategy Mode toggle -->
     <div class="strat-mode-bar">
       <span class="strat-mode-lbl">Mode</span>
-      <button class="strat-pill active" id="sm-scalp"    onclick="setStratMode('scalp',this)">SCALP</button>
+      <button class="strat-pill active" id="sm-all"      onclick="setStratMode('all',this)">ALL</button>
+      <button class="strat-pill"        id="sm-scalp"    onclick="setStratMode('scalp',this)">SCALP</button>
       <button class="strat-pill"        id="sm-day"      onclick="setStratMode('day',this)">DAY</button>
       <button class="strat-pill"        id="sm-swing"    onclick="setStratMode('swing',this)">SWING</button>
       <button class="strat-pill"        id="sm-position" onclick="setStratMode('position',this)">POSITION</button>
-      <span class="strat-mode-hint" id="stratModeHint">15m – 1H · intraday entries</span>
+      <span class="strat-mode-hint" id="stratModeHint">All timeframes · browse every opportunity</span>
     </div>
 
     <!-- Sub-tab strip -->
@@ -9292,7 +9293,7 @@ showAuthPanel('signin');
 // ══════════════════════════════════════════════════════════════
 // STRATEGY MODE (B8/B9 unified)
 // ══════════════════════════════════════════════════════════════
-window._stratMode = localStorage.getItem('dv_strat_mode') || 'scalp';
+window._stratMode = localStorage.getItem('dv_strat_mode') || 'all';
 
 function setStratMode(mode, btn){
   window._stratMode = mode;
@@ -9300,6 +9301,7 @@ function setStratMode(mode, btn){
   document.querySelectorAll('.strat-pill').forEach(p => p.classList.remove('active'));
   if(btn) btn.classList.add('active');
   const hints = {
+    all:      'All timeframes · browse every opportunity',
     scalp:    '15m – 1H · intraday entries',
     day:      '1H – 4H · close same day',
     swing:    '4H – 1D · hold 2–10 days',
@@ -9507,10 +9509,25 @@ function ctxIpoAnalyse(sym, sig, price){
   window._activeSignal.sym   = sym;
   window._activeSignal.sig   = sig;
   window._activeSignal.entry = price;
-  window._activeSignal.tf    = window._stratMode==='scalp'?'15M':window._stratMode==='day'?'1H':window._stratMode==='swing'?'4H':'1D';
+  // 'all' mode has no TF preference — default to 1D for IPOs
+  var modeMap = {scalp:'15M', day:'1H', swing:'4H', position:'1D'};
+  window._activeSignal.tf    = modeMap[window._stratMode] || '1D';
   window._activeSignal.asset = 'equity';
   window._activeSignal.conf  = 72;
   window._activeSignal.reason= 'IPO / new listing — momentum entry on open';
+  // Compute estimated SL / TP from entry price
+  // Equity IPO: 4% stop, 12% target = 3:1 R:R
+  var ep = parseFloat(price);
+  if (!isNaN(ep) && ep > 0) {
+    var isBuy  = sig === 'BUY';
+    var slDist = ep * 0.04;
+    var tpDist = ep * 0.12;
+    window._activeSignal.sl  = isBuy ? (ep - slDist).toFixed(2) : (ep + slDist).toFixed(2);
+    window._activeSignal.tp  = isBuy ? (ep + tpDist).toFixed(2) : (ep - tpDist).toFixed(2);
+    window._activeSignal.tp2 = isBuy ? (ep + tpDist * 1.5).toFixed(2) : (ep - tpDist * 1.5).toFixed(2);
+    window._activeSignal.tp3 = isBuy ? (ep + tpDist * 2.0).toFixed(2) : (ep - tpDist * 2.0).toFixed(2);
+    window._activeSignal.rr  = '3.0';
+  }
   setNav('understand');
   showUnderstand();
 }
@@ -12258,6 +12275,7 @@ function _mt5RenderOrders(orders) {
       + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:right;padding:8px 8px;letter-spacing:.6px;">LOTS</th>'
       + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:right;padding:8px 8px;letter-spacing:.6px;">PRICE</th>'
       + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:left;padding:8px 8px;letter-spacing:.6px;">STATUS</th>'
+      + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:right;padding:8px 8px;letter-spacing:.6px;">P&amp;L</th>'
       + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:left;padding:8px 14px;letter-spacing:.6px;">TIME</th>'
     + '</tr></thead><tbody>'
     + orders.map(function(o) {
@@ -12266,6 +12284,15 @@ function _mt5RenderOrders(orders) {
         var cancelBtn = (o.status === 'pending' || o.status === 'executing')
           ? ' <button onclick="mt5CancelOrder(' + o.id + ')" style="margin-left:6px;background:none;border:1px solid rgba(237,232,216,.15);border-radius:2px;color:rgba(237,232,216,.5);font-family:var(--mono);font-size:9px;padding:1px 5px;cursor:pointer;">cancel</button>'
           : '';
+        // P&L column: show if order is a filled CLOSE or if pnl field returned by backend
+        var pnlHtml;
+        if (typeof o.pnl === 'number' && o.status === 'filled') {
+          var pnlC = o.pnl > 0 ? 'rgba(93,232,160,.9)' : o.pnl < 0 ? 'rgba(224,85,85,.85)' : 'rgba(237,232,216,.45)';
+          var pnlSign = o.pnl > 0 ? '+' : '';
+          pnlHtml = '<span style="font-family:var(--mono);font-size:12px;font-weight:700;color:' + pnlC + ';">' + pnlSign + '$' + Math.abs(o.pnl).toFixed(2) + '</span>';
+        } else {
+          pnlHtml = '<span style="color:rgba(237,232,216,.25);font-family:var(--mono);font-size:11px;">—</span>';
+        }
         return '<tr style="border-bottom:1px solid rgba(237,232,216,.06);">'
           + '<td style="font-family:var(--mono);font-size:12px;color:rgba(255,255,255,.85);padding:9px 14px;">' + (o.symbol || '—') + '</td>'
           + '<td style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + typeCol + ';padding:9px 8px;">' + (o.order_type || '—') + '</td>'
@@ -12273,6 +12300,7 @@ function _mt5RenderOrders(orders) {
           + '<td style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);padding:9px 8px;text-align:right;">' + (o.fill_price ? _mt5Fmt(o.fill_price) : _mt5Fmt(o.price)) + '</td>'
           + '<td style="padding:9px 8px;"><span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + sc + ';text-transform:uppercase;letter-spacing:.4px;">' + (o.status || '—') + '</span>' + cancelBtn
             + (o.status === 'failed' && o.comment ? '<div style="font-family:var(--mono);font-size:9px;color:rgba(224,85,85,.7);margin-top:3px;">' + o.comment + '</div>' : '') + '</td>'
+          + '<td style="padding:9px 8px;text-align:right;">' + pnlHtml + '</td>'
           + '<td style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.4);padding:9px 14px;">' + (o.filled_at || o.created_at || '—') + '</td>'
           + '</tr>';
       }).join('')

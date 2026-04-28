@@ -3557,6 +3557,7 @@ def mt5_confirm_order():
     status    = body.get("status")   # filled | failed
     ticket    = body.get("ticket")
     fill_price= body.get("fill_price")
+    pnl       = body.get("pnl")      # realised P&L in account currency (for CLOSE orders)
     comment   = body.get("comment", "")
     db = _DBSession()
     try:
@@ -3566,6 +3567,11 @@ def mt5_confirm_order():
             order.mt5_ticket = ticket
             order.fill_price = fill_price
             order.comment    = comment
+            if pnl is not None:
+                try:
+                    order.pnl = float(pnl)
+                except (TypeError, ValueError):
+                    pass
             if status == "filled":
                 order.filled_at = datetime.utcnow()
                 # Send Telegram notification on fill
@@ -3791,6 +3797,7 @@ def mt5_get_orders():
             "status":     o.status,
             "mt5_ticket": o.mt5_ticket,
             "fill_price": o.fill_price,
+            "pnl":        o.pnl,
             "timeframe":  o.timeframe,
             "comment":    o.comment,
             "created_at": o.created_at.strftime("%Y-%m-%d %H:%M UTC"),
@@ -6055,6 +6062,7 @@ class MT5Order(_Base):
     status      = Column(String(16), nullable=False, default="pending")  # pending|executing|filled|failed|cancelled
     mt5_ticket  = Column(Integer,    nullable=True)
     fill_price  = Column(Float,      nullable=True)
+    pnl         = Column(Float,      nullable=True)    # realised P&L in account currency (set by EA on close)
     comment     = Column(String(128),nullable=True)
     created_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
     filled_at   = Column(DateTime,   nullable=True)
@@ -6194,6 +6202,7 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS action VARCHAR(8) DEFAULT 'open'"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS close_ticket INTEGER"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS pnl FLOAT"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 # Phase A/B/C/D automation tables (idempotent)
                 _conn.execute(text("""
