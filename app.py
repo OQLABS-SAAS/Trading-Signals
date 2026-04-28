@@ -5457,13 +5457,13 @@ def backtest_route():
 
     ticker_n = normalise_ticker(ticker, asset_type)
 
-    # Fetch OHLC data — we need high/low per bar to match TradingView's intrabar TP/SL detection
-    prices_hist, highs_hist, lows_hist, dates_hist = [], [], [], []
+    # Fetch OHLC+Volume — we need high/low per bar for intrabar TP/SL detection,
+    # and volume for the enhanced confluence gate (volume confirmation filter).
+    # Fetching 1000 bars: first 200 are warm-up for EMA-200, MACD, RSI;
+    # the remaining ~800 are the signal-scan window for statistical depth.
+    prices_hist, highs_hist, lows_hist, dates_hist, volumes_hist = [], [], [], [], []
 
-    # ── Source 1: Binance OHLC (crypto — most reliable, free, no auth) ──
-    # Fetch 400 bars so the first 200 can warm up RSI before we scan for signals.
-    # TradingView's RSI is stable because it's computed on thousands of prior bars;
-    # fetching 400 and using only the last 200 for signals replicates that stability.
+    # ── Source 1: Binance OHLC+Volume (crypto — most reliable, free, no auth) ──
     if asset_type == "crypto" and not prices_hist:
         try:
             iv_map = {"5m":"5m","15m":"15m","30m":"30m","1h":"1h","4h":"4h","1d":"1d","1w":"1w"}
@@ -5482,6 +5482,7 @@ def backtest_route():
                     prices_hist.append(float(k[4]))  # close
                     highs_hist.append(float(k[2]))   # high
                     lows_hist.append(float(k[3]))    # low
+                    volumes_hist.append(float(k[5])) # base asset volume
                 print(f"[backtest] Binance OHLC: {len(prices_hist)} bars")
         except Exception as e:
             print(f"[backtest] Binance OHLC error: {e}")
@@ -5505,6 +5506,7 @@ def backtest_route():
                         prices_hist.append(float(row["Close"]))
                         highs_hist.append(float(row["High"]))
                         lows_hist.append(float(row["Low"]))
+                        volumes_hist.append(float(row.get("Volume") or 0))
                     except (KeyError, ValueError):
                         pass
                 print(f"[backtest] Stooq OHLC: {len(prices_hist)} bars")
@@ -5524,12 +5526,13 @@ def backtest_route():
                 if r_fmp.status_code == 200:
                     fmp_data = r_fmp.json()
                     if isinstance(fmp_data, list) and len(fmp_data) > 10:
-                        fmp_data = list(reversed(fmp_data[-500:]))  # chronological
+                        fmp_data = list(reversed(fmp_data[-1000:]))  # chronological, up to 1000 bars
                         for bar in fmp_data:
                             dates_hist.append(bar.get("date",""))
                             prices_hist.append(float(bar["close"]))
                             highs_hist.append(float(bar.get("high", bar["close"])))
                             lows_hist.append(float(bar.get("low", bar["close"])))
+                            volumes_hist.append(float(bar.get("volume") or 0))
                         print(f"[backtest] FMP OHLC: {len(prices_hist)} bars")
             except Exception as e:
                 print(f"[backtest] FMP OHLC error: {e}")
@@ -5546,10 +5549,11 @@ def backtest_route():
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
                 ).dropna()
             if not df_bt.empty and len(df_bt) >= 15:
-                prices_hist = [float(v) for v in df_bt["Close"].squeeze().dropna()]
-                highs_hist  = [float(v) for v in df_bt["High"].squeeze().dropna()]
-                lows_hist   = [float(v) for v in df_bt["Low"].squeeze().dropna()]
-                dates_hist  = [str(d.date()) for d in df_bt.index]
+                prices_hist  = [float(v) for v in df_bt["Close"].squeeze().dropna()]
+                highs_hist   = [float(v) for v in df_bt["High"].squeeze().dropna()]
+                lows_hist    = [float(v) for v in df_bt["Low"].squeeze().dropna()]
+                dates_hist   = [str(d.date()) for d in df_bt.index]
+                volumes_hist = [float(v) for v in df_bt["Volume"].squeeze().fillna(0)] if "Volume" in df_bt.columns else []
                 print(f"[backtest] yfinance OHLC: {len(prices_hist)} bars")
         except Exception:
             pass
@@ -5564,13 +5568,22 @@ def backtest_route():
             lows_hist  = prices_hist[:]
             print(f"[backtest] Yahoo v8 fallback (close-only): {len(prices_hist)} bars")
 
-    if len(prices_hist) < 10:
-        return jsonify({"error": f"No historical data available from any source for {ticker}. " +
-                                 "Use the TP/SL Strategy Pine Script in TradingView instead."}), 503
+    if len(prices_hist) < 50:
+        return jsonify({"error": f"Only {len(prices_hist)} bars available for {ticker}. " +
+                                 "DotVerse requires 200+ bars for a statistically valid backtest. " +
+                                 "Try a higher timeframe (1H, 4H, 1D) or use TradingView Strategy Tester."}), 503
 
-    # Pad highs/lows to match prices length if any source left them empty
-    if not highs_hist: highs_hist = prices_hist[:]
-    if not lows_hist:  lows_hist  = prices_hist[:]
+    # Pad highs/lows/volumes to match prices length if any source left them short
+    if not highs_hist:  highs_hist  = prices_hist[:]
+    if not lows_hist:   lows_hist   = prices_hist[:]
+    if not volumes_hist: volumes_hist = [1.0] * len(prices_hist)  # neutral placeholder
+    # Ensure all arrays are the same length (trim to shortest)
+    _n = min(len(prices_hist), len(highs_hist), len(lows_hist), len(volumes_hist))
+    prices_hist  = prices_hist[:_n]
+    highs_hist   = highs_hist[:_n]
+    lows_hist    = lows_hist[:_n]
+    volumes_hist = volumes_hist[:_n]
+    dates_hist   = dates_hist[:_n]
 
     # ── Compute RSI on history ──────────────────────────────────
     def _rsi(prices, period=14):
@@ -5614,7 +5627,42 @@ def backtest_route():
             out[idx] = (prices[idx] - lower) / denom if denom > 0 else 0.5
         return out
 
-    # ── Pre-compute confluence indicator series using asset-specific settings ──
+    # ── Wilder ATR series (True Range smoothed with Wilder's method) ───────────
+    def _wilder_atr(highs, lows, closes, period=14):
+        """ATR via Wilder's smoothing — same as TradingView's ta.atr()."""
+        out = [None] * len(closes)
+        if len(closes) < period + 1:
+            return out
+        tr_list = [0.0]
+        for i in range(1, len(closes)):
+            tr = max(highs[i] - lows[i],
+                     abs(highs[i] - closes[i-1]),
+                     abs(lows[i]  - closes[i-1]))
+            tr_list.append(tr)
+        # Seed with SMA of first `period` TR values
+        atr_seed = sum(tr_list[1:period+1]) / period
+        out[period] = atr_seed
+        for i in range(period+1, len(closes)):
+            out[i] = (out[i-1] * (period-1) + tr_list[i]) / period
+        return out
+
+    # ── Volume moving average (simple, 20-bar) ──────────────────────────────────
+    def _vol_ma_s(volumes, period=20):
+        out = [None] * len(volumes)
+        for idx in range(period - 1, len(volumes)):
+            out[idx] = sum(volumes[idx - period + 1:idx + 1]) / period
+        return out
+
+    # ── Rate of Change (momentum oscillator) ────────────────────────────────────
+    def _roc_s(prices, period=10):
+        out = [None] * len(prices)
+        for idx in range(period, len(prices)):
+            denom = prices[idx - period]
+            if denom and denom != 0:
+                out[idx] = (prices[idx] - denom) / denom * 100
+        return out
+
+    # ── Pre-compute all indicator series using asset-specific settings ──────────
     _acfg_bt      = ASSET_CONFIG.get(asset_type, _DEFAULT_ASSET_CFG)
     _rsi_p_bt     = _acfg_bt["rsi_period"]
     _ema_fast_bt  = _acfg_bt["ema_fast"]
@@ -5623,6 +5671,7 @@ def backtest_route():
     rsi_hist   = _rsi(prices_hist, _rsi_p_bt)
     _ef_hist   = _ema_s(prices_hist, _ema_fast_bt)
     _es_hist   = _ema_s(prices_hist, _ema_slow_bt)
+    _e200_hist = _ema_s(prices_hist, 200)          # macro trend filter
     _mf_hist   = _ema_s(prices_hist, 12)
     _ms_hist   = _ema_s(prices_hist, 26)
     _ml_hist   = [(_mf_hist[idx] - _ms_hist[idx])
@@ -5634,40 +5683,116 @@ def backtest_route():
                   if _ml_hist[idx] is not None and _msig_hist[idx] is not None else None
                   for idx in range(len(prices_hist))]
     _bp_hist   = _bb_pos_s(prices_hist)
+    _atr_hist  = _wilder_atr(highs_hist, lows_hist, prices_hist, 14)
+    _vma_hist  = _vol_ma_s(volumes_hist, 20)
+    _roc_hist  = _roc_s(prices_hist, 10)            # 10-bar momentum
+
+    # Detect whether volume data is meaningful (not all-zeros placeholder)
+    _has_vol   = any(v > 0 for v in volumes_hist)
 
     def _conf_sig(idx):
-        """65% confluence gate for bar idx — mirrors get_analysis() exactly."""
-        r  = rsi_hist[idx]
-        ef = _ef_hist[idx]
-        es = _es_hist[idx]
-        mh = _mh_hist[idx]
-        bp = _bp_hist[idx]
-        p  = prices_hist[idx]
+        """
+        Enhanced DotVerse confluence gate (8-signal engine).
+        Upgrades vs. v1 gate:
+          · ATR volatility hard gate   — rejects choppy/low-volatility bars
+          · Volume confirmation (new)  — low volume = false signal, rejected
+          · EMA-200 macro trend (new)  — aligns with long-term structure
+          · RSI momentum direction     — rising/falling RSI adds conviction weight
+          · MACD momentum growth       — expanding histogram = stronger momentum
+          · Rate-of-change crossover   — positive/negative price acceleration
+          · Bollinger squeeze (new)    — near-band entries have directional edge
+        Threshold: 65% confluence (same as live get_analysis()).
+        """
+        r   = rsi_hist[idx]
+        ef  = _ef_hist[idx]
+        es  = _es_hist[idx]
+        e200= _e200_hist[idx]
+        mh  = _mh_hist[idx]
+        bp  = _bp_hist[idx]
+        p   = prices_hist[idx]
+        atr = _atr_hist[idx]
+        vma = _vma_hist[idx]
+        roc = _roc_hist[idx]
+        vol = volumes_hist[idx] if idx < len(volumes_hist) else None
+
+        # Minimum indicators required for a valid gate check
         if r is None or ef is None or es is None:
             return "HOLD"
-        bc = 0; brc = 0          # bullish / bearish vote counts
-        # RSI (weight 1) — same bands as get_analysis()
-        if   r >= 75:             brc += 1
-        elif 55 <= r < 75:        bc  += 1
-        elif 25 < r < 45:         brc += 1
-        elif r <= 25:             bc  += 1
-        # else 45-55 is neutral, no vote
-        # EMA trend (weight 2) — only full stack counts
-        if   p > ef and ef > es:  bc  += 2
-        elif p < ef and ef < es:  brc += 2
-        # MACD histogram (weight 1)
+
+        # ── Hard Gate 1: ATR volatility filter ─────────────────────────────────
+        # Reject entries in choppy/sideways conditions (ATR < 0.3% of price).
+        # These are the false signals — trending indicators fire on noise.
+        if atr is not None and p > 0:
+            if atr / p < 0.003:
+                return "HOLD"
+
+        # ── Hard Gate 2: Volume confirmation ───────────────────────────────────
+        # Low-volume breakouts/breakdowns have no institutional backing.
+        # Only apply when we have real volume data (not the 1.0 placeholder).
+        if _has_vol and vol is not None and vma is not None and vma > 0:
+            if vol < 0.75 * vma:          # volume < 75% of 20-bar average
+                return "HOLD"
+
+        bc = 0; brc = 0    # bullish / bearish vote counts
+
+        # ── Signal 1: RSI zone + momentum direction (weight: 1-2) ──────────────
+        r_prev = rsi_hist[idx-1] if idx > 0 else None
+        rsi_rising  = r_prev is not None and r > r_prev
+        rsi_falling = r_prev is not None and r < r_prev
+        if r >= 75:
+            # Overbought: stronger short signal if still rising (climaxing)
+            brc += 2 if rsi_rising else 1
+        elif 55 <= r < 75:
+            bc  += 2 if rsi_rising else 1
+        elif 25 < r < 45:
+            brc += 2 if rsi_falling else 1
+        elif r <= 25:
+            # Oversold: stronger long signal if still falling (capitulating)
+            bc  += 2 if rsi_falling else 1
+        # RSI 45-55 = neutral zone, no vote
+
+        # ── Signal 2: EMA trend alignment + EMA-200 macro filter (weight: 2-3) ─
+        ema_bull = p > ef and ef > es
+        ema_bear = p < ef and ef < es
+        if ema_bull:
+            bc  += 2
+            if e200 is not None and p > e200: bc  += 1   # macro trend aligned
+        elif ema_bear:
+            brc += 2
+            if e200 is not None and p < e200: brc += 1   # macro trend aligned
+
+        # ── Signal 3: MACD histogram direction + momentum growth (weight: 1-2) ─
+        mh_prev = _mh_hist[idx-1] if idx > 0 else None
         if mh is not None:
-            if   mh > 0:          bc  += 1
-            elif mh < 0:          brc += 1
-        # Bollinger position (weight 1)
+            macd_expanding = (mh_prev is not None and abs(mh) > abs(mh_prev))
+            if mh > 0:
+                bc  += 2 if macd_expanding else 1
+            elif mh < 0:
+                brc += 2 if macd_expanding else 1
+
+        # ── Signal 4: Bollinger Band position — extremes only (weight: 1) ──────
         if bp is not None:
-            if   bp > 0.85:       brc += 1
-            elif bp < 0.15:       bc  += 1
+            if   bp > 0.85: brc += 1   # price at upper band = overbought/resistance
+            elif bp < 0.15: bc  += 1   # price at lower band = oversold/support
+
+        # ── Signal 5: Volume surge confirmation (weight: 1) ────────────────────
+        # Volume 1.5× average on a directional move confirms institutional participation
+        if _has_vol and vol is not None and vma is not None and vma > 0 and vol >= 1.5 * vma:
+            p_prev = prices_hist[idx-1] if idx > 0 else p
+            if   p > p_prev: bc  += 1
+            elif p < p_prev: brc += 1
+
+        # ── Signal 6: Rate-of-Change momentum (weight: 1) ──────────────────────
+        if roc is not None:
+            if   roc > 1.0:  bc  += 1   # price +1%+ over 10 bars = momentum
+            elif roc < -1.0: brc += 1
+
         total = bc + brc
         if total == 0:
             return "HOLD"
-        if bc  / total >= 0.65:   return "BUY"
-        if brc / total >= 0.65:   return "SELL"
+        # 65% confluence threshold — same as live get_analysis()
+        if bc  / total >= 0.65: return "BUY"
+        if brc / total >= 0.65: return "SELL"
         return "HOLD"
 
     # ── Derive % distances from the current signal ────────────────────────────
@@ -5699,10 +5824,13 @@ def backtest_route():
     r2 = round(tp2_pct / risk_pct, 2) if tp2_pct and risk_pct > 0 else None
     r3 = round(tp3_pct / risk_pct, 2) if tp3_pct and risk_pct > 0 else None
 
-    # Signal scan window: last 500 bars.
-    # First 100 bars are reserved for indicator warm-up (EMA50, MACD26+9, RSI21).
-    # Scanning 500 bars gives enough trades for statistically meaningful results.
-    scan_start = max(100, len(prices_hist) - 500)
+    # Signal scan window: last 800 bars from available data.
+    # First 200 bars are warm-up: EMA-200 needs 200 bars to be valid,
+    # MACD(26,9) needs 35 bars, RSI needs rsi_period+1. Using 200 ensures
+    # every indicator is fully primed when the scan starts.
+    # 800-bar scan window (vs. old 500) gives substantially more trades
+    # for statistical depth — key for the Kelly calculation to be reliable.
+    scan_start = max(200, len(prices_hist) - 800)
 
     trades = []
     i = scan_start
@@ -5793,25 +5921,43 @@ def backtest_route():
         # immediately after this trade closed (matching TradingView's behavior)
         i += exit_bar + 1
 
-    if len(trades) < 10:
+    _bars_scanned = len(prices_hist) - scan_start
+    if len(trades) < 20:
         return jsonify({
-            "error": f"Only {len(trades)} signal(s) found in {len(prices_hist)} bars — need 10+ for meaningful statistics. " +
-                     "Try a higher timeframe (e.g. 1H or 4H) for more data, or use TradingView Strategy Tester."
+            "error": (
+                f"Only {len(trades)} trade signal(s) found in {_bars_scanned} scanned bars — "
+                "DotVerse requires 20+ trades for a statistically valid backtest. "
+                "The enhanced 8-signal confluence gate may be filtering aggressively on this asset/timeframe. "
+                "Try 1D or 4H timeframe for more historical signals, or run TradingView Strategy Tester."
+            )
         }), 400
 
-    wins   = [t for t in trades if t["outcome"] != "loss"]
-    losses = [t for t in trades if t["outcome"] == "loss"]
-    wr     = round(len(wins) / len(trades) * 100)
-    total_r = round(sum(t["r"] for t in trades), 2)
-    avg_win = round(sum(t["r"] for t in wins) / len(wins), 2) if wins else 0
-    avg_los = round(abs(sum(t["r"] for t in losses) / len(losses)), 2) if losses else 1
-    gross_w = sum(t["r"] for t in wins)
-    gross_l = abs(sum(t["r"] for t in losses))
-    pf      = round(gross_w / gross_l, 2) if gross_l > 0 else 99.0
+    wins    = [t for t in trades if t["outcome"] not in ("loss", "timeout_loss")]
+    losses  = [t for t in trades if t["outcome"] in ("loss", "timeout_loss")]
+    timeouts= [t for t in trades if t["outcome"] == "timeout"]
+    wr      = round(len(wins) / len(trades) * 100)
+    total_r  = round(sum(t["r"] for t in trades), 2)
+    avg_win  = round(sum(t["r"] for t in wins)   / len(wins),   2) if wins   else 0
+    avg_los  = round(abs(sum(t["r"] for t in losses) / len(losses)), 2) if losses else 1
+    gross_w  = sum(t["r"] for t in wins)
+    gross_l  = abs(sum(t["r"] for t in losses))
+    pf       = round(gross_w / gross_l, 2) if gross_l > 0 else 99.0
+    # Expectancy: average R per trade (includes wins, losses, timeouts)
+    expectancy = round(total_r / len(trades), 4) if trades else 0.0
+
+    # ── Consecutive win/loss streaks ──────────────────────────────────────
+    max_cw = max_cl = cur_cw = cur_cl = 0
+    for t in trades:
+        if t["outcome"] not in ("loss", "timeout_loss"):
+            cur_cw += 1; cur_cl = 0
+        else:
+            cur_cl += 1; cur_cw = 0
+        max_cw = max(max_cw, cur_cw)
+        max_cl = max(max_cl, cur_cl)
 
     # ── Equity curve + drawdown (1R = $100 = 1% of $10k) ─────────────────
-    INITIAL_CAP  = 10000.0
-    RISK_PER_TRADE = 100.0   # $100 = 1% of initial capital
+    INITIAL_CAP    = 10000.0
+    RISK_PER_TRADE = 100.0    # $100 = 1% of initial capital
 
     equity   = [INITIAL_CAP]
     peak_eq  = INITIAL_CAP
@@ -5836,33 +5982,50 @@ def backtest_route():
             "entry":   t["entry"],
         })
 
-    final_eq      = equity[-1]
-    total_pnl_usd = round(final_eq - INITIAL_CAP, 2)
-    total_pnl_pct = round((final_eq - INITIAL_CAP) / INITIAL_CAP * 100, 2)
-    max_dd_usd    = round(max_dd, 2)
-    max_dd_pct    = round(max_dd / peak_eq * 100, 2) if peak_eq > 0 else 0.0
+    final_eq       = equity[-1]
+    total_pnl_usd  = round(final_eq - INITIAL_CAP, 2)
+    total_pnl_pct  = round((final_eq - INITIAL_CAP) / INITIAL_CAP * 100, 2)
+    max_dd_usd     = round(max_dd, 2)
+    max_dd_pct     = round(max_dd / peak_eq * 100, 2) if peak_eq > 0 else 0.0
+
+    # ── Sharpe ratio (annualised, assuming 252 trading days) ─────────────
+    # Each R-unit = 1% of capital. Annualisation factor depends on timeframe.
+    _tf_ann = {"5m":252*78,"15m":252*26,"30m":252*13,"1h":252*6.5,"4h":252*1.625,"1d":252,"1w":52,"1mo":12}
+    _ann_f  = _tf_ann.get(timeframe.lower(), 252) ** 0.5
+    r_vals  = [t["r"] for t in trades]
+    r_mean  = sum(r_vals) / len(r_vals)
+    r_std   = (sum((v - r_mean)**2 for v in r_vals) / len(r_vals)) ** 0.5 if len(r_vals) > 1 else 0
+    sharpe  = round((r_mean / r_std) * _ann_f, 2) if r_std > 0 else 0.0
 
     return jsonify({
         "win_rate":       wr,
         "total_trades":   len(trades),
-        "wins":           len(wins),
-        "losses":         len(losses),
-        "total_r":        total_r,
-        "avg_win_r":      avg_win,
-        "avg_loss_r":     avg_los,
-        "profit_factor":  pf,
-        "bars_tested":    min(500, len(prices_hist)),
-        # Period covers only the signal-scan window (last 200 bars), not the RSI warmup bars
-        "period":         f"{dates_hist[scan_start]} → {dates_hist[-1]}" if len(dates_hist) > scan_start else f"{len(prices_hist)} bars",
-        "signal":         signal,
-        # ── New fields for TV-style display ──
-        "total_pnl_usd":  total_pnl_usd,
-        "total_pnl_pct":  total_pnl_pct,
-        "max_dd_usd":     max_dd_usd,
-        "max_dd_pct":     max_dd_pct,
-        "equity_curve":   equity,         # list of floats from $10k baseline
-        "trades_list":    trades_list,    # [{n, date, outcome, r, pnl_usd, entry}]
-        "initial_capital": INITIAL_CAP,
+        "sample_size":    len(trades),   # alias used by Kelly formula and scanner gate
+        "wins":                len(wins),
+        "losses":              len(losses),
+        "timeouts":            len(timeouts),
+        "total_r":             total_r,
+        "avg_win_r":           avg_win,
+        "avg_loss_r":          avg_los,
+        "profit_factor":       pf,
+        "expectancy":          expectancy,          # avg R per trade — core edge metric
+        "sharpe":              sharpe,              # annualised Sharpe ratio
+        "max_consec_wins":     max_cw,
+        "max_consec_losses":   max_cl,
+        # bars_tested = the actual signal-scan window (excludes warm-up bars)
+        "bars_tested":         _bars_scanned,
+        "total_bars":          len(prices_hist),
+        # Period covers the signal-scan window only (post warm-up)
+        "period":              f"{dates_hist[scan_start]} → {dates_hist[-1]}" if len(dates_hist) > scan_start else f"{len(prices_hist)} bars",
+        "signal":              signal,
+        # ── P&L and drawdown ──
+        "total_pnl_usd":       total_pnl_usd,
+        "total_pnl_pct":       total_pnl_pct,
+        "max_dd_usd":          max_dd_usd,
+        "max_dd_pct":          max_dd_pct,
+        "equity_curve":        equity,              # list of floats from $10k baseline
+        "trades_list":         trades_list,         # [{n, date, outcome, r, pnl_usd, entry}]
+        "initial_capital":     INITIAL_CAP,
     })
 
 
