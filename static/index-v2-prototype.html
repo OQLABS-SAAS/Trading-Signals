@@ -11850,6 +11850,16 @@ function mt5LoadTradeChart(sym, type, tf, levels) { /* prototype stub — no cha
 
 function mt5ClosePosition(ticket, sym, level) {
   if (!ticket) return;
+  // Guard: demo/prototype trades use non-integer ticket IDs (e.g. 'T001')
+  // Backend int(ticket) would throw ValueError → 500. Show friendly message instead.
+  var ticketInt = parseInt(ticket, 10);
+  if (isNaN(ticketInt) || ticketInt <= 0) {
+    if (typeof _dvToast === 'function') _dvToast(
+      'Demo trade — connect your MT5 EA to manage live positions',
+      'rgba(201,168,76,.12)', 'rgba(201,168,76,.4)'
+    );
+    return;
+  }
   var isExit = level === 'SL' || level === 'MARKET';
   var bg = isExit ? 'rgba(224,85,85,.12)' : 'rgba(93,232,160,.12)';
   var bd = isExit ? 'rgba(224,85,85,.4)'  : 'rgba(93,232,160,.4)';

@@ -3839,6 +3839,12 @@ def mt5_close_position():
     user_id = str(session.get("user_id"))
     if not ticket:
         return jsonify({"error": "ticket required"}), 400
+    try:
+        ticket_int = int(ticket)
+        if ticket_int <= 0:
+            raise ValueError("non-positive ticket")
+    except (TypeError, ValueError):
+        return jsonify({"error": f"Invalid ticket ID '{ticket}' — demo trades cannot be closed via API"}), 400
     db = _DBSession()
     try:
         order = MT5Order(
@@ -3848,7 +3854,7 @@ def mt5_close_position():
             volume       = 0,
             price        = 0,
             action       = "close",
-            close_ticket = int(ticket),
+            close_ticket = ticket_int,
             status       = "pending",
             comment      = f"User close {level}",
         )
