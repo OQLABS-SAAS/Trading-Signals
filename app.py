@@ -5081,119 +5081,85 @@ def scan_list():
             timeframe = "1h"
         cfg     = TIMEFRAME_CONFIG[timeframe]
         results = []
-        for ticker in tickers:
+        import threading as _threading
+        results_lock = _threading.Lock()
+
+        def _scan_one(ticker):
             raw = normalise_ticker(ticker, asset_type)
+            row = None
             try:
-                # ── PRIMARY: TradingView scanner (fast, works on Railway) ──
+                # ── PRIMARY: TradingView (fast) ──
                 tv = fetch_tv_data(raw, asset_type, timeframe)
                 if tv and tv.get("tv_price"):
-                    # Cache TV data so Signals page uses identical data when navigating from scanner
                     if _redis_client:
-                        try:
-                            _redis_client.setex(f"tv_cache:{raw}:{timeframe}", 300, json.dumps(tv))
-                        except Exception:
-                            pass
-                    ind = build_ind_from_tv(tv)
+                        try: _redis_client.setex(f"tv_cache:{raw}:{timeframe}", 300, json.dumps(tv))
+                        except Exception: pass
+                    ind      = build_ind_from_tv(tv)
                     analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv)
                     ct       = detect_counter_trade(ind)
-                    # Get volume from TV for display
-                    volume = tv.get("tv_volume") or 0
-                    results.append({
-                        "ticker":           ticker,
-                        "raw_ticker":       raw,
-                        "asset_type":       asset_type,
-                        "price":            ind["price"],
-                        "chg_1d":           ind["chg_1d"],
-                        "rsi":              ind["rsi"],
-                        "vol_ratio":        ind["vol_ratio"],
-                        "volume":           int(volume) if volume else 0,
-                        "ema_trend":        ind.get("ema_trend", "MIXED"),
-                        "supertrend":       ind.get("supertrend", "NEUTRAL"),
-                        "signal":           analysis["signal"],
-                        "entry":            analysis.get("entry"),
-                        "stop_loss":        analysis.get("stop_loss"),
-                        "tp1":              analysis.get("tp1"),
-                        "tp2":              analysis.get("tp2"),
-                        "tp3":              analysis.get("tp3"),
-                        "rr1":              analysis.get("rr1"),
-                        "rr2":              analysis.get("rr2"),
-                        "rr3":              analysis.get("rr3"),
-                        "reason":           analysis.get("summary", ""),
-                        "bull_score":       analysis.get("bullish_count", 0),
-                        "bear_score":       analysis.get("bearish_count", 0),
-                        "counter_trade":    ct["counter_trade"],
-                        "confidence":       analysis.get("confidence", "LOW"),
-                        "confidence_label": analysis.get("confidence_label", "HYPOTHESIS"),
-                    })
-                    # Cache scanner signal so Signals page returns same result when user navigates from scanner
+                    volume   = tv.get("tv_volume") or 0
+                    row = {
+                        "ticker": ticker, "raw_ticker": raw, "asset_type": asset_type,
+                        "price": ind["price"], "chg_1d": ind["chg_1d"], "rsi": ind["rsi"],
+                        "vol_ratio": ind["vol_ratio"], "volume": int(volume) if volume else 0,
+                        "ema_trend": ind.get("ema_trend","MIXED"), "supertrend": ind.get("supertrend","NEUTRAL"),
+                        "signal": analysis["signal"], "entry": analysis.get("entry"),
+                        "stop_loss": analysis.get("stop_loss"), "tp1": analysis.get("tp1"),
+                        "tp2": analysis.get("tp2"), "tp3": analysis.get("tp3"),
+                        "rr1": analysis.get("rr1"), "rr2": analysis.get("rr2"), "rr3": analysis.get("rr3"),
+                        "reason": analysis.get("summary",""), "bull_score": analysis.get("bullish_count",0),
+                        "bear_score": analysis.get("bearish_count",0), "counter_trade": ct["counter_trade"],
+                        "confidence": analysis.get("confidence","LOW"),
+                        "confidence_label": analysis.get("confidence_label","HYPOTHESIS"),
+                    }
                     if _redis_client:
                         try:
                             _scan_payload = {k: analysis.get(k) for k in (
                                 "signal","entry","stop_loss","tp1","tp2","tp3",
                                 "rr1","rr2","rr3","confidence","confidence_label",
-                                "summary","bullish_count","bearish_count","position_pct"
-                            )}
+                                "summary","bullish_count","bearish_count","position_pct")}
                             _redis_client.setex(f"scanner_signal:{raw}:{timeframe}", 300, json.dumps(_scan_payload))
-                        except Exception:
-                            pass
-                    continue
-
-                # ── FALLBACK: yfinance / Binance (slower, may 429) ──
-                df = safe_download(raw, period=cfg["period"], interval=cfg["interval"])
-                if "resample" in cfg and not df.empty:
-                    # Ensure DatetimeIndex before resample
-                    if not isinstance(df.index, pd.DatetimeIndex):
-                        df.index = pd.to_datetime(df.index)
-                    df = df.resample(cfg["resample"]).agg(
-                        {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
-                    ).dropna()
-                if df.empty or len(df) < 20:
-                    results.append({"ticker": ticker, "error": "no data"})
-                    continue
-                ind      = calculate_indicators(df, timeframe, asset_type)
-                analysis = get_analysis(ticker, asset_type, ind, timeframe)
-                ct       = detect_counter_trade(ind)
-                results.append({
-                    "ticker":           ticker,
-                    "raw_ticker":       raw,
-                    "asset_type":       asset_type,
-                    "price":            ind["price"],
-                    "chg_1d":           ind["chg_1d"],
-                    "rsi":              ind["rsi"],
-                    "vol_ratio":        ind["vol_ratio"],
-                    "volume":           int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
-                    "ema_trend":        ind["ema_trend"],
-                    "supertrend":       ind["supertrend"],
-                    "signal":           analysis["signal"],
-                    "entry":            analysis.get("entry"),
-                    "stop_loss":        analysis.get("stop_loss"),
-                    "tp1":              analysis.get("tp1"),
-                    "tp2":              analysis.get("tp2"),
-                    "tp3":              analysis.get("tp3"),
-                    "rr1":              analysis.get("rr1"),
-                    "rr2":              analysis.get("rr2"),
-                    "rr3":              analysis.get("rr3"),
-                    "reason":           analysis.get("summary", ""),
-                    "bull_score":       analysis.get("bullish_count", 0),
-                    "bear_score":       analysis.get("bearish_count", 0),
-                    "counter_trade":    ct["counter_trade"],
-                    "confidence":       analysis.get("confidence", "LOW"),
-                    "confidence_label": analysis.get("confidence_label", "HYPOTHESIS"),
-                })
-                # Cache scanner signal so Signals page returns same result when user navigates from scanner
-                if _redis_client:
-                    try:
-                        _scan_payload = {k: analysis.get(k) for k in (
-                            "signal","entry","stop_loss","tp1","tp2","tp3",
-                            "rr1","rr2","rr3","confidence","confidence_label",
-                            "summary","bullish_count","bearish_count","position_pct"
-                        )}
-                        _redis_client.setex(f"scanner_signal:{raw}:{timeframe}", 300, json.dumps(_scan_payload))
-                    except Exception:
-                        pass
+                        except Exception: pass
+                else:
+                    # ── FALLBACK: yfinance ──
+                    df = safe_download(raw, period=cfg["period"], interval=cfg["interval"])
+                    if "resample" in cfg and not df.empty:
+                        if not isinstance(df.index, pd.DatetimeIndex):
+                            df.index = pd.to_datetime(df.index)
+                        df = df.resample(cfg["resample"]).agg(
+                            {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
+                    if df.empty or len(df) < 20:
+                        row = {"ticker": ticker, "error": "no data"}
+                    else:
+                        ind      = calculate_indicators(df, timeframe, asset_type)
+                        analysis = get_analysis(ticker, asset_type, ind, timeframe)
+                        ct       = detect_counter_trade(ind)
+                        row = {
+                            "ticker": ticker, "raw_ticker": raw, "asset_type": asset_type,
+                            "price": ind["price"], "chg_1d": ind["chg_1d"], "rsi": ind["rsi"],
+                            "vol_ratio": ind["vol_ratio"],
+                            "volume": int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
+                            "ema_trend": ind["ema_trend"], "supertrend": ind["supertrend"],
+                            "signal": analysis["signal"], "entry": analysis.get("entry"),
+                            "stop_loss": analysis.get("stop_loss"), "tp1": analysis.get("tp1"),
+                            "tp2": analysis.get("tp2"), "tp3": analysis.get("tp3"),
+                            "rr1": analysis.get("rr1"), "rr2": analysis.get("rr2"), "rr3": analysis.get("rr3"),
+                            "reason": analysis.get("summary",""), "bull_score": analysis.get("bullish_count",0),
+                            "bear_score": analysis.get("bearish_count",0), "counter_trade": ct["counter_trade"],
+                            "confidence": analysis.get("confidence","LOW"),
+                            "confidence_label": analysis.get("confidence_label","HYPOTHESIS"),
+                        }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
-                results.append({"ticker": ticker, "error": str(e)[:80]})
+                row = {"ticker": ticker, "error": str(e)[:80]}
+            if row:
+                with results_lock:
+                    results.append(row)
+
+        # Run all tickers in parallel — 6 tickers in ~5s instead of ~30s
+        threads = [_threading.Thread(target=_scan_one, args=(t,)) for t in tickers]
+        for th in threads: th.start()
+        for th in threads: th.join(timeout=25)
 
         def sort_key(r):
             if r.get("error"): return 99
