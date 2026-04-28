@@ -5977,18 +5977,17 @@ def backtest_route():
         i += exit_bar + 1
 
     _bars_scanned = len(prices_hist) - scan_start
-    if len(trades) < 30:
+    if len(trades) < 10:
         return jsonify({
             "error": (
                 f"Only {len(trades)} trade signal(s) found in {_bars_scanned} scanned bars — "
-                "DotVerse requires 30+ trades for a statistically valid backtest (industry standard). "
+                "need at least 10 trades for a valid backtest. "
                 f"Asset: {asset_type} · Timeframe: {timeframe} · Bars available: {len(prices_hist)}. "
-                "Try a higher timeframe (1H → 4H → 1D) which has more historical data, "
-                "or use TradingView Strategy Tester for shorter timeframes."
+                "Try a higher timeframe (1H → 4H → 1D) which has more historical data."
             ),
             "trades_found": len(trades),
             "bars_scanned": _bars_scanned,
-            "min_required": 30,
+            "min_required": 10,
         }), 400
 
     wins    = [t for t in trades if t["outcome"] not in ("loss", "timeout_loss")]

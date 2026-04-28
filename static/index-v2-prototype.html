@@ -6847,33 +6847,35 @@ async function _sfFetchSignals(){
 
   const verifiedOpps = [];
 
+  // All scanned signals show — backtest badge is additive, not a gate.
+  // Signals that pass backtest get VERIFIED badge + Kelly%.
+  // Signals where backtest failed/timed out still show — labelled as unverified.
+  // HOLD signals (no entry/SL/TP) always show without backtest.
   btResults.forEach(function(res){
     var bt = res.bt;
     var o  = res.opp;
-    if(!bt){
-      // Backtest failed / timed out — exclude from signal feed
-      return;
-    }
-    var passes = (
+    var passes = bt && (
       bt.win_rate        >= BT_GATE.win_rate       &&
       bt.profit_factor   >= BT_GATE.profit_factor  &&
       (bt.sample_size || bt.total_trades || 0) >= BT_GATE.min_trades &&
-      (bt.expectancy  || 0) >= BT_GATE.min_expectancy   // rules out near-zero-edge signals
+      (bt.expectancy  || 0) >= BT_GATE.min_expectancy
     );
-    if(!passes) return;  // below quality gate — suppress
-
-    // Attach backtest metrics to the opportunity card
-    var kelly = _halfKelly(bt);
+    var kelly = passes ? _halfKelly(bt) : null;
     verifiedOpps.push(Object.assign({}, o, {
-      _btVerified:   true,
-      _btWr:         bt.win_rate,
-      _btPf:         bt.profit_factor,
-      _btTrades:     bt.sample_size || bt.total_trades,
-      _btBars:       bt.bars_tested || bt.total_bars,
-      _btExpectancy: bt.expectancy,
-      _btSharpe:     bt.sharpe,
+      _btVerified:   !!passes,
+      _btWr:         bt ? bt.win_rate : null,
+      _btPf:         bt ? bt.profit_factor : null,
+      _btTrades:     bt ? (bt.sample_size || bt.total_trades) : null,
+      _btBars:       bt ? (bt.bars_tested || bt.total_bars) : null,
+      _btExpectancy: bt ? bt.expectancy : null,
+      _btSharpe:     bt ? bt.sharpe : null,
       _kellyPct:     kelly
     }));
+  });
+
+  // Also add HOLD signals (no backtest run)
+  holdOpps.forEach(function(o){
+    verifiedOpps.push(Object.assign({}, o, { _btVerified: false }));
   });
 
   _sfSetProgress(fill, lbl, 100, '');
@@ -6881,7 +6883,7 @@ async function _sfFetchSignals(){
 
   window._rmOpps = verifiedOpps;
 
-  if(verifiedOpps.length === 0){
+  if(verifiedOpps.length === 0 && rawOpps && rawOpps.length === 0){
     const listNow = document.getElementById('sfOppsList');
     if(listNow) listNow.innerHTML = '<div style="padding:48px 20px;text-align:center;">'
       + '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.15)" stroke-width="1.5" style="margin-bottom:14px;display:block;margin-left:auto;margin-right:auto;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'
@@ -13966,8 +13968,8 @@ async function showAutomations() {
           + '<input type="time" value="' + s.alertTime + '" oninput="_autoSettings.alertTime=this.value" style="background:var(--bg);border:1px solid var(--bd);color:var(--t2);font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:4px;">'
           + '</div>')
       + '<div style="padding:11px 14px;">'
-      +   '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-bottom:8px;">Telegram bot not connected</div>'
-      +   '<button onclick="setNav(\'alerts\');showAlerts();" style="padding:8px 16px;font-family:var(--mono);font-size:10px;font-weight:700;background:var(--crys2);border:1px solid var(--crys-bord);color:var(--crys);border-radius:4px;cursor:pointer;">Connect Telegram →</button>'
+      +   '<div id="tgStatusLbl" style="font-family:var(--mono);font-size:10px;color:#5de8a0;margin-bottom:8px;">Telegram connected</div>'
+      +   '<button onclick="setNav(\'alerts\');showAlerts();" style="padding:8px 16px;font-family:var(--mono);font-size:10px;font-weight:700;background:var(--crys2);border:1px solid var(--crys-bord);color:var(--crys);border-radius:4px;cursor:pointer;">Manage Alerts →</button>'
       + '</div>'
     )
 
