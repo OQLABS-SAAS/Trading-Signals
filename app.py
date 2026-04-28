@@ -5846,12 +5846,15 @@ def backtest_route():
     r2 = round(tp2_pct / risk_pct, 2) if tp2_pct and risk_pct > 0 else None
     r3 = round(tp3_pct / risk_pct, 2) if tp3_pct and risk_pct > 0 else None
 
-    # Signal scan window: up to 1000 bars from available data.
-    # Warm-up = 200 bars (EMA-200 needs 200 bars; EMA-50 needs 50; MACD needs 35; RSI needs ~21).
-    # 1000-bar scan window maximises trade count for the 30+ minimum gate.
-    # On short TFs (5m/15m) total data may be < 1200 bars — scan window auto-shrinks.
-    # On longer TFs (1D) with 5-year yfinance data we get ~1260 bars → ~1060 bar scan window.
-    scan_start = max(200, len(prices_hist) - 1000)
+    # Signal scan window: up to 2500 bars from available data (raised from 1000).
+    # Adaptive warm-up: 50 on short TFs (5m/15m/30m/1H) where EMA-50 is the macro
+    # reference (EMA-200 covers <1 day on 1H — not "macro"); 200 on 4H+ where EMA-200
+    # is the genuine macro. Recovers ~150 bars of usable scan area on short TFs that
+    # the old fixed 200-bar warm-up was wasting. On longer TFs (1D) with 5-year
+    # yfinance data we still get ~1260 bars → ~1060 bar scan window (data ceiling).
+    _short_tf_set = {"5m", "15m", "30m", "1h"}
+    _warmup       = 50 if timeframe.lower() in _short_tf_set else 200
+    scan_start    = max(_warmup, len(prices_hist) - 2500)
 
     trades = []
     i = scan_start
@@ -5943,17 +5946,18 @@ def backtest_route():
         i += exit_bar + 1
 
     _bars_scanned = len(prices_hist) - scan_start
-    if len(trades) < 10:
+    if len(trades) < 30:
         return jsonify({
             "error": (
                 f"Only {len(trades)} trade signal(s) found in {_bars_scanned} scanned bars — "
-                "need at least 10 trades for a valid backtest. "
+                "need at least 30 trades for a statistically valid backtest. "
                 f"Asset: {asset_type} · Timeframe: {timeframe} · Bars available: {len(prices_hist)}. "
-                "Try a higher timeframe (1H → 4H → 1D) which has more historical data."
+                "Try a higher timeframe (1H → 4H → 1D) for more historical data, or a more active asset."
             ),
             "trades_found": len(trades),
             "bars_scanned": _bars_scanned,
-            "min_required": 10,
+            "min_required": 30,
+            "validity_tier": "insufficient",
         }), 400
 
     wins    = [t for t in trades if t["outcome"] not in ("loss", "timeout_loss")]
@@ -6030,6 +6034,11 @@ def backtest_route():
         "win_rate":       wr,
         "total_trades":   len(trades),
         "sample_size":    len(trades),   # alias used by Kelly formula and scanner gate
+        # Validity tier — used by frontend to label trust on win rate + cap Kelly:
+        #   <30  → "insufficient" (returned via the 400 error path above; never reaches here)
+        #   30–99 → "provisional" (Kelly capped 2.5%, label "Provisional")
+        #   ≥100 → "confirmed"   (Kelly up to 5%, label "Confirmed")
+        "validity_tier":  "confirmed" if len(trades) >= 100 else "provisional",
         "wins":                len(wins),
         "losses":              len(losses),
         "timeouts":            len(timeouts),

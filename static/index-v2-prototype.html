@@ -6209,7 +6209,9 @@ function updateFlowBadge() {
 
   if (bt && bt.win_rate != null) {
     btTrades = bt.total_trades || bt.num_trades || 0;
-    if (btTrades >= 10) {
+    // Statistical-validity floor: 30 trades minimum (95% CI on win rate at p=0.5
+    // is ±18% at n=30, ±30% at n=10 — anything below 30 is gambler's math).
+    if (btTrades >= 30) {
       var p = bt.win_rate / 100;
       var q = 1 - p;
       // Prefer explicit avg_win_r / avg_loss_r; fall back to avg_rr
@@ -6220,7 +6222,13 @@ function updateFlowBadge() {
         var fullKelly = p - q / b;
         var halfKelly = fullKelly / 2;
         if (halfKelly > 0) {
-          kellyPct   = Math.min(5.0, Math.max(0.5, Math.round(halfKelly * 100 * 10) / 10));
+          // Kelly hard-cap depends on sample size: 2.5% while sample is "provisional"
+          // (n<100), 5% once it's "confirmed" (n>=100). Smaller samples have wider
+          // error bars, so the math is throttled until the sample earns the right
+          // to drive larger sizing. Beginners stay protected from over-sizing on
+          // a lucky 35-trade run.
+          var kellyHardCap = btTrades >= 100 ? 5.0 : 2.5;
+          kellyPct   = Math.min(kellyHardCap, Math.max(0.5, Math.round(halfKelly * 100 * 10) / 10));
           usingKelly = true;
         }
       }
@@ -10833,7 +10841,13 @@ async function undRunBacktest(silent){
     wrVal.textContent=wrStr; wrVal.style.color=wrc;
     if(wrBar){ wrBar.style.background=wrc; setTimeout(()=>{ wrBar.style.width=(wr||0)+'%'; },50); }
     const samp = data.total_trades||data.num_trades;
-    if(wrSample) wrSample.textContent = samp ? samp+' trades in backtest' : '';
+    if(wrSample) {
+      // Validity tier surfaces the statistical confidence of the backtest sample.
+      // Backend sends data.validity_tier; fallback computed locally for safety.
+      var _tier = data.validity_tier || (samp >= 100 ? 'confirmed' : samp >= 30 ? 'provisional' : 'insufficient');
+      var _tierTag = _tier === 'confirmed' ? ' · Confirmed' : _tier === 'provisional' ? ' · Provisional' : '';
+      wrSample.textContent = samp ? (samp + ' trades' + _tierTag) : '';
+    }
     const pf = data.profit_factor!=null?data.profit_factor.toFixed(2):'—';
     const dd = data.max_dd_pct!=null?data.max_dd_pct.toFixed(1)+'%':'—';
     if(wrExtra) wrExtra.innerHTML = 'Profit Factor <strong style="color:rgba(237,232,216,.8);">'+pf+'</strong><br>Max Drawdown <strong style="color:rgba(224,85,85,.7);">'+dd+'</strong>';
@@ -13484,7 +13498,12 @@ async function runBacktest(d, showPanel = true) {
       wrBadge2.className = 'win-badge ' + wbCls2;
       wrBadge2.style.animation = 'wbPop .4s cubic-bezier(.34,1.56,.64,1) both';
       if (wrBar2) { wrBar2.style.width = '0%'; setTimeout(function(){ wrBar2.style.width = Math.min(wr,100) + '%'; }, 80); }
-      if (wrSample2) wrSample2.textContent = bt.total_trades ? `${bt.total_trades} past signals` : '';
+      if (wrSample2) {
+        // Validity tier mirrors the trust label shown next to scanner win rates.
+        var _tier2    = bt.validity_tier || (bt.total_trades >= 100 ? 'confirmed' : bt.total_trades >= 30 ? 'provisional' : 'insufficient');
+        var _tierTag2 = _tier2 === 'confirmed' ? ' · Confirmed' : _tier2 === 'provisional' ? ' · Provisional' : '';
+        wrSample2.textContent = bt.total_trades ? (bt.total_trades + ' past signals' + _tierTag2) : '';
+      }
     }
 
   } catch(e) {
