@@ -11849,12 +11849,31 @@ function _mt5UpdateStatePills(counts) { /* prototype stub */ }
 function mt5LoadTradeChart(sym, type, tf, levels) { /* prototype stub — no chart panel in v2 */ }
 
 function mt5ClosePosition(ticket, sym, level) {
-  var msg = level === 'SL'
-    ? 'Exit trade sent (prototype — EA not connected)'
-    : 'Take profit ' + level + ' for ' + sym + ' sent (prototype)';
-  var bg = level === 'SL' ? 'rgba(224,85,85,.12)' : 'rgba(93,232,160,.12)';
-  var bd = level === 'SL' ? 'rgba(224,85,85,.4)'  : 'rgba(93,232,160,.4)';
-  if (typeof _dvToast === 'function') _dvToast(msg, bg, bd);
+  if (!ticket) return;
+  var isExit = level === 'SL' || level === 'MARKET';
+  var bg = isExit ? 'rgba(224,85,85,.12)' : 'rgba(93,232,160,.12)';
+  var bd = isExit ? 'rgba(224,85,85,.4)'  : 'rgba(93,232,160,.4)';
+
+  dvFetch('/api/mt5/close', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticket: ticket, symbol: sym, level: level })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    if (data && data.status === 'ok') {
+      var msg = isExit
+        ? 'Close order queued for ' + sym + ' · EA will execute'
+        : 'Take profit ' + level + ' queued for ' + sym + ' · EA will execute';
+      if (typeof _dvToast === 'function') _dvToast(msg, bg, bd);
+    } else {
+      var err = (data && data.error) ? data.error : 'Unknown error';
+      if (typeof _dvToast === 'function') _dvToast('Close failed: ' + err, 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+    }
+  })
+  .catch(function(){
+    if (typeof _dvToast === 'function') _dvToast('Connection error — could not send close order', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+  });
 }
 
 function _mt5Fmt(n) {
