@@ -3088,9 +3088,31 @@ def normalise_ticker(ticker, asset_type):
         ticker = clean
 
     if asset_type == "crypto":
-        ticker = ticker.replace("/", "-")
-        if not ticker.endswith("-USD"):
-            ticker += "-USD"
+        # Normalise crypto ticker into yfinance/TV-friendly BASE-USD form.
+        # Handles every realistic input shape:
+        #   BTC-USD / BTC-USDT / BTC-USDC  → passthrough (already dashed)
+        #   BTC/USD                          → BTC-USD (slash → dash)
+        #   BTCUSDT / BTCUSDC                → BTC-USD (peel stablecoin suffix)
+        #   BTCUSD                           → BTC-USD (peel concat USD)
+        #   BTC                              → BTC-USD (append USD to bare base)
+        # Bug-fix note: the prior implementation appended "-USD" unconditionally
+        # when the ticker didn't END with "-USD", which mangled BTCUSD into
+        # BTCUSD-USD (invalid for both TV and yfinance) — silently filtered by
+        # the frontend and shown as an empty Signals tab.
+        clean = ticker.replace("/", "-").replace("=X", "").upper()
+        if "-" in clean:
+            # Already dashed (BTC-USD, BTC-USDT, BTC-USDC) — leave as is.
+            ticker = clean
+        else:
+            # Peel concat-quote suffix (USDT/USDC/USD) and replace with -USD.
+            # yfinance/TV resolve stablecoin pairs through the same -USD route.
+            for _suffix in ("USDT", "USDC", "USD"):
+                if clean.endswith(_suffix) and len(clean) > len(_suffix):
+                    ticker = clean[:-len(_suffix)] + "-USD"
+                    break
+            else:
+                # Bare base symbol — append -USD.
+                ticker = clean + "-USD"
     elif asset_type == "forex":
         ticker = ticker.replace("/", "").replace("-", "")
         if not ticker.endswith("=X"):
