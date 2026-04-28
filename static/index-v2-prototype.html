@@ -4554,7 +4554,19 @@ function goDash(u){
   try{ dvFetch('/api/signals/history?limit=30').then(function(d){ if(d&&Array.isArray(d)){ window._sigHistory=d; renderSigHistoryPanel(); } }); }catch(e){}
   try{ wlRender(document.getElementById('wlRows')); }catch(e){}
   try{ dvFetch('/api/notifications').then(function(d){ if(d&&Array.isArray(d.notifications)){ window._notifications=d.notifications; } }); }catch(e){}
-  if(u&&u.role==='admin'){ try{ document.getElementById('adminNavBtn') || (function(){ var b=document.createElement('button'); b.id='adminNavBtn'; b.textContent='Admin'; b.onclick=function(){ dvFetch('/api/admin/users').then(function(d){ console.log(d); }); }; document.body.appendChild(b); })(); }catch(e){} }
+  if(u&&u.role==='admin'){
+    try{
+      if(!document.getElementById('adminNavBtn')){
+        var _ab=document.createElement('button');
+        _ab.id='adminNavBtn';
+        _ab.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px;"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="19" cy="19" r="3"/><line x1="19" y1="16" x2="19" y2="19"/><line x1="19" y1="19" x2="22" y2="19"/></svg>Admin';
+        _ab.onclick=openAdminPanel;
+        _ab.style.cssText='font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;padding:7px 14px;background:transparent;color:var(--amb);border:1px solid rgba(212,135,10,.35);border-radius:5px;cursor:pointer;text-transform:uppercase;white-space:nowrap;display:flex;align-items:center;';
+        var _nav=document.querySelector('.top-nav-right')||document.querySelector('.nav-bar')||document.querySelector('nav');
+        if(_nav) _nav.prepend(_ab); else document.body.appendChild(_ab);
+      }
+    }catch(e){}
+  }
 }
 function _initStratMode(){
   const saved = window._stratMode || 'scalp';
@@ -4601,6 +4613,15 @@ function renderSignIn(){
       '<span>Keep me signed in for 30 days</span>'+
     '</div>'+
     '<button class="btn-amber" onclick="doLogin()">Sign In to DotVerse &#8594;</button>'+
+    '<div style="display:flex;align-items:center;gap:10px;margin:16px 0 4px;">'+
+      '<div style="flex:1;height:1px;background:rgba(212,135,10,.15);"></div>'+
+      '<span style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.35);letter-spacing:.08em;">OR</span>'+
+      '<div style="flex:1;height:1px;background:rgba(212,135,10,.15);"></div>'+
+    '</div>'+
+    '<a href="/auth/google" style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:11px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:var(--txt);text-decoration:none;font-family:var(--mono);font-size:12px;font-weight:500;transition:background .15s;margin-bottom:4px;box-sizing:border-box;" onmouseover="this.style.background=\'rgba(255,255,255,.10)\'" onmouseout="this.style.background=\'rgba(255,255,255,.05)\'">'+
+      '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-3.59-13.46-8.83l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>'+
+      'Continue with Google'+
+    '</a>'+
     '<div class="auth-foot">No account? <a onclick="showAuthPanel(\'signup\')">Create one free</a></div>'+
     '<div class="demo-box">'+
       '<div style="font-size:9px;letter-spacing:.1em;color:rgba(237,232,216,.35);margin-bottom:10px;">DEMO ACCOUNTS — click to autofill</div>'+
@@ -14008,6 +14029,129 @@ function actSelectOrderType(type, el){
   if(!box) return;
   if(hints[type]){ box.innerHTML = hints[type]; box.style.display = 'block'; }
   else { box.style.display = 'none'; }
+}
+</script>
+
+<!-- ══════════ ADMIN PANEL OVERLAY ══════════ -->
+<div id="adminPanel" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(12,10,8,.97);z-index:8888;overflow-y:auto;">
+  <div style="max-width:920px;margin:0 auto;padding:40px 24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;">
+      <div>
+        <div style="font-family:var(--mono);font-size:22px;font-weight:900;letter-spacing:-.5px;color:var(--amb);">Admin Panel</div>
+        <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.35);margin-top:4px;letter-spacing:.12em;text-transform:uppercase;">User Management · DotVerse</div>
+      </div>
+      <button onclick="document.getElementById('adminPanel').style.display='none'" style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.45);background:transparent;border:1px solid rgba(255,220,160,.12);padding:8px 18px;border-radius:5px;cursor:pointer;letter-spacing:.05em;">✕ Close</button>
+    </div>
+
+    <!-- Grant access -->
+    <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,220,160,.12);border-radius:8px;padding:20px;margin-bottom:24px;">
+      <div style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--amb);margin-bottom:14px;">Grant Access by Email</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <input id="adminGrantEmail" type="email" placeholder="user@email.com" style="flex:1;min-width:200px;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,220,160,.15);color:var(--txt);border-radius:5px;font-family:var(--mono);font-size:12px;outline:none;">
+        <select id="adminGrantRole" style="padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,220,160,.15);color:var(--txt);border-radius:5px;font-family:var(--mono);font-size:12px;outline:none;">
+          <option value="admin">Admin</option>
+          <option value="user" selected>User</option>
+        </select>
+        <select id="adminGrantTier" style="padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,220,160,.15);color:var(--txt);border-radius:5px;font-family:var(--mono);font-size:12px;outline:none;">
+          <option value="elite">Elite</option>
+          <option value="pro">Pro</option>
+          <option value="free" selected>Free</option>
+        </select>
+        <button onclick="adminGrantByEmail()" style="padding:9px 22px;background:var(--amb);color:#0C0A08;border:none;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.05em;text-transform:uppercase;">Grant</button>
+      </div>
+      <div id="adminGrantMsg" style="font-family:var(--mono);font-size:11px;margin-top:8px;min-height:16px;"></div>
+    </div>
+
+    <!-- Users table -->
+    <div style="background:rgba(0,0,0,.25);border:1px solid rgba(255,220,160,.10);border-radius:8px;overflow:hidden;">
+      <div style="padding:14px 20px;border-bottom:1px solid rgba(255,220,160,.10);display:flex;align-items:center;justify-content:space-between;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--amb);">All Users</div>
+        <button onclick="adminLoadUsers()" style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.45);background:transparent;border:1px solid rgba(255,220,160,.12);padding:5px 14px;border-radius:4px;cursor:pointer;letter-spacing:.05em;">↻ Refresh</button>
+      </div>
+      <div id="adminUsersTable" style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="background:rgba(255,255,255,.03);">
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(237,232,216,.35);padding:10px 16px;text-align:left;">Email</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(237,232,216,.35);padding:10px 16px;text-align:left;">Name</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(237,232,216,.35);padding:10px 16px;text-align:left;">Tier</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(237,232,216,.35);padding:10px 16px;text-align:left;">Role</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(237,232,216,.35);padding:10px 16px;text-align:left;">Joined</th>
+              <th style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(237,232,216,.35);padding:10px 16px;text-align:left;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="adminUsersTbody">
+            <tr><td colspan="6" style="padding:24px;text-align:center;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.35);">Loading users…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function openAdminPanel(){
+  document.getElementById('adminPanel').style.display='block';
+  adminLoadUsers();
+}
+
+async function adminLoadUsers(){
+  var tbody=document.getElementById('adminUsersTbody');
+  tbody.innerHTML='<tr><td colspan="6" style="padding:24px;text-align:center;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.35);">Loading…</td></tr>';
+  try{
+    var r=await dvFetch('/api/admin/users');
+    if(!r||r.error){ tbody.innerHTML='<tr><td colspan="6" style="padding:24px;text-align:center;color:#e05555;font-family:var(--mono);font-size:11px;">'+(r&&r.error||'Unauthorized')+'</td></tr>'; return; }
+    if(!r.users||!r.users.length){ tbody.innerHTML='<tr><td colspan="6" style="padding:24px;text-align:center;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.35);">No users yet.</td></tr>'; return; }
+    tbody.innerHTML=r.users.map(function(u){
+      var tc=u.tier==='elite'?'var(--amb)':u.tier==='pro'?'#3dbe6c':'rgba(237,232,216,.4)';
+      var rc=u.role==='admin'?'var(--amb)':'rgba(237,232,216,.4)';
+      return '<tr style="border-top:1px solid rgba(255,220,160,.07);">'
+        +'<td style="padding:10px 16px;font-family:var(--mono);font-size:11px;color:var(--txt);">'+u.email+'</td>'
+        +'<td style="padding:10px 16px;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.65);">'+(u.name||'—')+'</td>'
+        +'<td style="padding:10px 16px;"><select onchange="adminChangeTier('+u.id+',this.value)" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,220,160,.15);color:'+tc+';font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:4px;outline:none;">'
+          +'<option value="free"'+(u.tier==='free'?' selected':'')+'>Free</option>'
+          +'<option value="pro"'+(u.tier==='pro'?' selected':'')+'>Pro</option>'
+          +'<option value="elite"'+(u.tier==='elite'?' selected':'')+'>Elite</option>'
+        +'</select></td>'
+        +'<td style="padding:10px 16px;"><select onchange="adminChangeRole('+u.id+',this.value)" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,220,160,.15);color:'+rc+';font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:4px;outline:none;">'
+          +'<option value="user"'+(u.role==='user'?' selected':'')+'>User</option>'
+          +'<option value="admin"'+(u.role==='admin'?' selected':'')+'>Admin</option>'
+        +'</select></td>'
+        +'<td style="padding:10px 16px;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.35);">'+(u.created_at?u.created_at.slice(0,10):'—')+'</td>'
+        +'<td style="padding:10px 16px;font-family:var(--mono);font-size:11px;color:#3dbe6c;">Saved on change</td>'
+      +'</tr>';
+    }).join('');
+  }catch(e){
+    tbody.innerHTML='<tr><td colspan="6" style="padding:24px;text-align:center;color:#e05555;font-family:var(--mono);font-size:11px;">Network error</td></tr>';
+  }
+}
+
+async function adminChangeRole(userId,role){
+  await dvFetch('/api/admin/set-role',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,role:role})});
+}
+
+async function adminChangeTier(userId,tier){
+  await dvFetch('/api/admin/set-tier',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,tier:tier})});
+}
+
+async function adminGrantByEmail(){
+  var email=document.getElementById('adminGrantEmail').value.trim();
+  var role=document.getElementById('adminGrantRole').value;
+  var tier=document.getElementById('adminGrantTier').value;
+  var msg=document.getElementById('adminGrantMsg');
+  if(!email){ msg.style.color='#e05555'; msg.textContent='Enter an email address.'; return; }
+  try{
+    var r=await dvFetch('/api/admin/users');
+    var user=(r.users||[]).find(function(u){ return u.email.toLowerCase()===email.toLowerCase(); });
+    if(!user){ msg.style.color='#e05555'; msg.textContent='User not found — they must register first.'; return; }
+    await dvFetch('/api/admin/set-role',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:user.id,role:role})});
+    await dvFetch('/api/admin/set-tier',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:user.id,tier:tier})});
+    msg.style.color='#3dbe6c';
+    msg.textContent='✓ '+email+' updated to '+role+' / '+tier;
+    adminLoadUsers();
+  }catch(e){
+    msg.style.color='#e05555'; msg.textContent='Error — try again.';
+  }
 }
 </script>
 </body>
