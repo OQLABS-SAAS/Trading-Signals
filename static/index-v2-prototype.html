@@ -6692,8 +6692,13 @@ async function _sfFetchSignals(){
   const lbl   = document.getElementById('sfBtLbl');
   if(!list) return;
 
-  /* ── Mode → timeframe mapping ── */
-  var _modeToTf = {all:'4H', scalp:'1H', day:'1H', swing:'4H', position:'1D'};
+  /* ── Trade mode → timeframe mapping ──
+     Scalp: ultra-short, uses 15m (5m has too few historical bars for 30-trade gate)
+     Day:   intraday,   uses 1H
+     Swing: multi-day,  uses 4H (best balance of bar count + signal frequency)
+     Position: long-term, uses 1D (5yr yfinance data gives 1200+ bars → reliable 30+ trades)
+     All:   mixed, uses 4H as a universal standard                                          */
+  var _modeToTf = {scalp:'15M', day:'1H', swing:'4H', position:'1D', all:'4H'};
   var _activeTf = _modeToTf[window._stratMode||'all'] || '4H';
 
   const confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
@@ -6754,8 +6759,17 @@ async function _sfFetchSignals(){
   _sfSetProgress(fill, lbl, 25, 'Running 8-signal backtest engine · ' + actionable.length + ' signal(s)…');
 
   const NOW = Date.now();
-  const BT_TTL = 1800000;  // 30 minutes cache
-  const BT_GATE = { win_rate: 50, profit_factor: 1.0, min_trades: 20 };
+  // Cache TTL is timeframe-relative — a 1H signal cached for 29 minutes is half-expired.
+  // Short TFs expire quickly; long TFs can be cached longer safely.
+  var _tfTTL = {'5m':120000,'15m':300000,'30m':600000,'1h':600000,'4h':1200000,'1d':2700000,'1w':3600000};
+  const BT_TTL = _tfTTL[_activeTf.toLowerCase()] || 1200000;  // default 20min
+
+  // Four-condition quality gate — all must pass:
+  // 1. Win rate ≥ 50%         — strategy is right more than wrong
+  // 2. Profit factor ≥ 1.0    — gross wins exceed gross losses
+  // 3. Min 30 trades          — 30+ is the statistical minimum (30-trade p-value ~0.18 for 55% WR)
+  // 4. Expectancy > 0.1R      — rules out WR=50%+PF=1.0 strategies that are effectively break-even after fees
+  const BT_GATE = { win_rate: 50, profit_factor: 1.0, min_trades: 30, min_expectancy: 0.10 };
 
   /* Run all backtests in parallel — one per actionable signal */
   const btResults = await Promise.all(actionable.map(async function(o){
@@ -6819,9 +6833,10 @@ async function _sfFetchSignals(){
       return;
     }
     var passes = (
-      bt.win_rate      >= BT_GATE.win_rate    &&
-      bt.profit_factor >= BT_GATE.profit_factor &&
-      (bt.sample_size || bt.total_trades || 0) >= BT_GATE.min_trades
+      bt.win_rate        >= BT_GATE.win_rate       &&
+      bt.profit_factor   >= BT_GATE.profit_factor  &&
+      (bt.sample_size || bt.total_trades || 0) >= BT_GATE.min_trades &&
+      (bt.expectancy  || 0) >= BT_GATE.min_expectancy   // rules out near-zero-edge signals
     );
     if(!passes) return;  // below quality gate — suppress
 
@@ -6851,7 +6866,7 @@ async function _sfFetchSignals(){
       + '<div style="font-family:var(--mono);font-size:12px;color:var(--t3);line-height:1.8;margin-bottom:18px;">'
       + '<span style="color:var(--crys);font-weight:700;">No backtest-verified signals right now.</span><br>'
       + rawOpps.length + ' signal(s) scanned · ' + actionable.length + ' tested · 0 passed DotVerse quality gate<br>'
-      + '<span style="color:rgba(237,232,216,.35);font-size:10px;">Gate: Win Rate ≥50% · Profit Factor ≥1.0 · 20+ trades · 8-signal engine</span>'
+      + '<span style="color:rgba(237,232,216,.35);font-size:10px;">Gate: WR ≥50% · PF ≥1.0 · Expectancy >0.1R · 30+ trades · 8-signal engine</span>'
       + '</div>'
       + '<button onclick="_sfFetchSignals()" style="padding:8px 22px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--crys2);border:1px solid var(--crys-bord);color:var(--crys);border-radius:5px;cursor:pointer;margin-right:8px;">Rescan</button>'
       + '</div>';

@@ -147,13 +147,27 @@ TIMEFRAME_CONFIG = {
 # Crypto is more volatile → faster RSI and EMAs to stay responsive.
 # Indices are mean-reverting and slow → longer RSI and EMAs for stability.
 ASSET_CONFIG = {
-    "crypto":    {"rsi_period": 10, "ema_fast": 7,  "ema_slow": 14},
-    "forex":     {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21},
-    "stock":     {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21},
-    "index":     {"rsi_period": 21, "ema_fast": 20, "ema_slow": 50},
-    "commodity": {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21},
+    # rsi_period / ema_fast / ema_slow — live signal indicator settings
+    # atr_gate_pct — minimum ATR/price ratio for a bar to be tradeable (below = choppy noise)
+    # roc_gate_pct — minimum 10-bar price change % to count as momentum confirmation
+    # vol_gate     — whether to apply the volume hard gate (False for forex: tick volume unreliable)
+    "crypto":    {"rsi_period": 10, "ema_fast": 7,  "ema_slow": 14, "atr_gate_pct": 0.008, "roc_gate_pct": 3.0, "vol_gate": True},
+    "forex":     {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21, "atr_gate_pct": 0.0015,"roc_gate_pct": 0.3, "vol_gate": False},
+    "stock":     {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21, "atr_gate_pct": 0.004, "roc_gate_pct": 1.0, "vol_gate": True},
+    "index":     {"rsi_period": 21, "ema_fast": 20, "ema_slow": 50, "atr_gate_pct": 0.003, "roc_gate_pct": 0.8, "vol_gate": True},
+    "commodity": {"rsi_period": 14, "ema_fast": 9,  "ema_slow": 21, "atr_gate_pct": 0.005, "roc_gate_pct": 1.5, "vol_gate": True},
 }
-_DEFAULT_ASSET_CFG = {"rsi_period": 14, "ema_fast": 9, "ema_slow": 21}
+_DEFAULT_ASSET_CFG = {"rsi_period": 14, "ema_fast": 9, "ema_slow": 21, "atr_gate_pct": 0.004, "roc_gate_pct": 1.0, "vol_gate": True}
+
+# Trade mode → timeframe mapping (used by scanner and signal feed)
+# Each mode targets a specific holding period and filters to appropriate timeframes.
+TRADE_MODE_CONFIG = {
+    "scalp":    {"timeframes": ["5m","15m","30m"],        "label": "Scalping",        "hold": "mins–hours"},
+    "day":      {"timeframes": ["1h","4h"],               "label": "Day Trading",     "hold": "hours–1 day"},
+    "swing":    {"timeframes": ["4h","1d"],               "label": "Swing Trading",   "hold": "days–weeks"},
+    "position": {"timeframes": ["1d","1w"],               "label": "Position Trading","hold": "weeks–months"},
+    "all":      {"timeframes": ["15m","1h","4h","1d"],    "label": "All Modes",       "hold": "any"},
+}
 
 # How often to re-run the screen per timeframe (seconds)
 ALERT_INTERVALS = {
@@ -5541,7 +5555,9 @@ def backtest_route():
     if not prices_hist:
         try:
             cfg = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
-            period_map = {"5m":"5d","15m":"10d","30m":"15d","1h":"90d","4h":"180d","1d":"2y"}
+            # Extended periods to maximise bar count → more trades found → 30+ sample gate hit more reliably
+            # yfinance hard limits: 5m/15m/30m max 60d, 1h max 730d
+            period_map = {"5m":"60d","15m":"60d","30m":"60d","1h":"730d","4h":"730d","1d":"5y","1w":"10y","1mo":"max"}
             df_bt = safe_download(ticker_n, period=period_map.get(timeframe,"1y"),
                                   interval=cfg["interval"], progress=False, auto_adjust=True)
             if "resample" in cfg and not df_bt.empty:
@@ -5667,11 +5683,22 @@ def backtest_route():
     _rsi_p_bt     = _acfg_bt["rsi_period"]
     _ema_fast_bt  = _acfg_bt["ema_fast"]
     _ema_slow_bt  = _acfg_bt["ema_slow"]
+    _atr_gate_pct = _acfg_bt.get("atr_gate_pct", 0.004)   # asset-class ATR threshold
+    _roc_gate_pct = _acfg_bt.get("roc_gate_pct", 1.0)     # asset-class ROC threshold
+    _vol_gate_on  = _acfg_bt.get("vol_gate", True)         # False for forex
 
     rsi_hist   = _rsi(prices_hist, _rsi_p_bt)
     _ef_hist   = _ema_s(prices_hist, _ema_fast_bt)
     _es_hist   = _ema_s(prices_hist, _ema_slow_bt)
-    _e200_hist = _ema_s(prices_hist, 200)          # macro trend filter
+    _e200_hist = _ema_s(prices_hist, 200)          # macro trend — valid for 4H+
+    _e50_hist  = _ema_s(prices_hist, 50)           # session trend — used for short TFs
+    # Timeframe-adaptive macro reference:
+    # On 5m/15m/30m/1H, EMA-200 covers < 1 day of data — not "macro."
+    # EMA-50 on these TFs covers ~12H–3 days, which correctly represents the daily structure.
+    # On 4H+, EMA-200 covers weeks/months — genuinely macro.
+    _short_tf     = timeframe.lower() in ("5m","15m","30m","1h")
+    _macro_hist   = _e50_hist if _short_tf else _e200_hist
+
     _mf_hist   = _ema_s(prices_hist, 12)
     _ms_hist   = _ema_s(prices_hist, 26)
     _ml_hist   = [(_mf_hist[idx] - _ms_hist[idx])
@@ -5692,105 +5719,134 @@ def backtest_route():
 
     def _conf_sig(idx):
         """
-        Enhanced DotVerse confluence gate (8-signal engine).
-        Upgrades vs. v1 gate:
-          · ATR volatility hard gate   — rejects choppy/low-volatility bars
-          · Volume confirmation (new)  — low volume = false signal, rejected
-          · EMA-200 macro trend (new)  — aligns with long-term structure
-          · RSI momentum direction     — rising/falling RSI adds conviction weight
-          · MACD momentum growth       — expanding histogram = stronger momentum
-          · Rate-of-change crossover   — positive/negative price acceleration
-          · Bollinger squeeze (new)    — near-band entries have directional edge
-        Threshold: 65% confluence (same as live get_analysis()).
-        """
-        r   = rsi_hist[idx]
-        ef  = _ef_hist[idx]
-        es  = _es_hist[idx]
-        e200= _e200_hist[idx]
-        mh  = _mh_hist[idx]
-        bp  = _bp_hist[idx]
-        p   = prices_hist[idx]
-        atr = _atr_hist[idx]
-        vma = _vma_hist[idx]
-        roc = _roc_hist[idx]
-        vol = volumes_hist[idx] if idx < len(volumes_hist) else None
+        DotVerse 8-signal hardened confluence gate — SWOT-corrected.
 
-        # Minimum indicators required for a valid gate check
+        Hard gates (reject before voting):
+          1. ATR volatility gate    — asset-class relative threshold (not a fixed 0.3%)
+          2. Volume hard gate       — skipped for forex (tick volume unreliable for OTC)
+          3. Spike-bar guard        — bar range > 2.5× ATR = liquidation/news spike, skip
+
+        Voted signals (65% confluence → BUY/SELL):
+          1. RSI zone + 3-bar smoothed direction (removes single-bar noise)
+          2. EMA trend stack + timeframe-adaptive macro reference
+          3. MACD histogram direction + normalised expansion (significance threshold applied)
+          4. Bollinger Band extremes
+          5. Volume surge with bar-body direction (close>open, not close>prev_close)
+          6. Rate-of-Change with asset-class relative threshold
+
+        Trade mode awareness:
+          Scalp (5m/15m/30m) → macro ref = EMA-50 (session structure)
+          Day/Swing (1H/4H)  → macro ref = EMA-200 (daily/weekly structure)
+          Position (1D+)     → macro ref = EMA-200 (monthly structure)
+        """
+        r    = rsi_hist[idx]
+        ef   = _ef_hist[idx]
+        es   = _es_hist[idx]
+        mac  = _macro_hist[idx]   # timeframe-adaptive macro reference
+        mh   = _mh_hist[idx]
+        bp   = _bp_hist[idx]
+        p    = prices_hist[idx]
+        atr  = _atr_hist[idx]
+        vma  = _vma_hist[idx]
+        roc  = _roc_hist[idx]
+        vol  = volumes_hist[idx] if idx < len(volumes_hist) else None
+        hi   = highs_hist[idx]   if idx < len(highs_hist)   else p
+        lo   = lows_hist[idx]    if idx < len(lows_hist)    else p
+        opn  = prices_hist[idx - 1] if idx > 0 else p   # prev close as open proxy
+
+        # Minimum indicators required
         if r is None or ef is None or es is None:
             return "HOLD"
 
-        # ── Hard Gate 1: ATR volatility filter ─────────────────────────────────
-        # Reject entries in choppy/sideways conditions (ATR < 0.3% of price).
-        # These are the false signals — trending indicators fire on noise.
-        if atr is not None and p > 0:
-            if atr / p < 0.003:
+        # ── Hard Gate 1: ATR volatility — asset-class relative threshold ────────
+        # Below this level, trend indicators fire on compression noise.
+        # Each asset class has its own normal volatility regime.
+        if atr is not None and p > 0 and atr / p < _atr_gate_pct:
+            return "HOLD"
+
+        # ── Hard Gate 2: Volume — only for assets with real volume data ─────────
+        # Forex: skipped (_vol_gate_on=False) — OTC tick count is not real volume.
+        # For forex, the ATR gate already handles low-energy conditions.
+        if _vol_gate_on and _has_vol and vol is not None and vma is not None and vma > 0:
+            if vol < 0.75 * vma:
                 return "HOLD"
 
-        # ── Hard Gate 2: Volume confirmation ───────────────────────────────────
-        # Low-volume breakouts/breakdowns have no institutional backing.
-        # Only apply when we have real volume data (not the 1.0 placeholder).
-        if _has_vol and vol is not None and vma is not None and vma > 0:
-            if vol < 0.75 * vma:          # volume < 75% of 20-bar average
-                return "HOLD"
+        # ── Hard Gate 3: Spike-bar guard ────────────────────────────────────────
+        # A bar whose range > 2.5× ATR is a liquidation event / macro news spike.
+        # Trend indicators give a false reading on spike bars — skip entirely.
+        if atr is not None and atr > 0 and (hi - lo) > 2.5 * atr:
+            return "HOLD"
 
         bc = 0; brc = 0    # bullish / bearish vote counts
 
-        # ── Signal 1: RSI zone + momentum direction (weight: 1-2) ──────────────
-        r_prev = rsi_hist[idx-1] if idx > 0 else None
-        rsi_rising  = r_prev is not None and r > r_prev
-        rsi_falling = r_prev is not None and r < r_prev
-        if r >= 75:
-            # Overbought: stronger short signal if still rising (climaxing)
-            brc += 2 if rsi_rising else 1
-        elif 55 <= r < 75:
-            bc  += 2 if rsi_rising else 1
-        elif 25 < r < 45:
-            brc += 2 if rsi_falling else 1
-        elif r <= 25:
-            # Oversold: stronger long signal if still falling (capitulating)
-            bc  += 2 if rsi_falling else 1
-        # RSI 45-55 = neutral zone, no vote
+        # ── Signal 1: RSI zone + 3-bar smoothed momentum direction ─────────────
+        # 3-bar smoothing removes single-bar RSI oscillation noise in trending markets.
+        r1 = rsi_hist[idx - 1] if idx >= 1 else None
+        r2 = rsi_hist[idx - 2] if idx >= 2 else None
+        if r1 is not None and r2 is not None:
+            rsi_now3  = (r + r1 + r2) / 3
+            rsi_prev3 = (r1 + r2 + (rsi_hist[idx-3] if idx >= 3 and rsi_hist[idx-3] else r2)) / 3
+            rsi_rising  = rsi_now3 > rsi_prev3
+            rsi_falling = rsi_now3 < rsi_prev3
+        else:
+            rsi_rising  = r1 is not None and r > r1
+            rsi_falling = r1 is not None and r < r1
+        if   r >= 75:        brc += 2 if rsi_rising  else 1   # overbought + rising = peak short
+        elif 55 <= r < 75:   bc  += 2 if rsi_rising  else 1   # bullish momentum confirmed
+        elif 25 < r < 45:    brc += 2 if rsi_falling else 1   # bearish momentum confirmed
+        elif r <= 25:        bc  += 2 if rsi_falling else 1   # oversold + falling = capitulation long
+        # 45-55 neutral — no vote
 
-        # ── Signal 2: EMA trend alignment + EMA-200 macro filter (weight: 2-3) ─
+        # ── Signal 2: EMA trend stack + timeframe-adaptive macro reference ──────
         ema_bull = p > ef and ef > es
         ema_bear = p < ef and ef < es
         if ema_bull:
             bc  += 2
-            if e200 is not None and p > e200: bc  += 1   # macro trend aligned
+            if mac is not None and p > mac: bc  += 1   # macro/session structure aligned
         elif ema_bear:
             brc += 2
-            if e200 is not None and p < e200: brc += 1   # macro trend aligned
+            if mac is not None and p < mac: brc += 1   # macro/session structure aligned
 
-        # ── Signal 3: MACD histogram direction + momentum growth (weight: 1-2) ─
-        mh_prev = _mh_hist[idx-1] if idx > 0 else None
+        # ── Signal 3: MACD histogram direction + normalised expansion ────────────
+        # Normalisation: expansion only counts when histogram is significant
+        # (> 0.1% of price) — prevents micro-oscillations near zero getting weight 2.
+        mh_prev = _mh_hist[idx - 1] if idx > 0 else None
         if mh is not None:
-            macd_expanding = (mh_prev is not None and abs(mh) > abs(mh_prev))
-            if mh > 0:
-                bc  += 2 if macd_expanding else 1
-            elif mh < 0:
-                brc += 2 if macd_expanding else 1
+            macd_min_sig  = p * 0.001 if p else 0    # 0.1% of price = minimum significance
+            macd_expanding = (
+                mh_prev is not None and
+                abs(mh) > abs(mh_prev) and
+                abs(mh) > macd_min_sig              # must be above significance floor
+            )
+            if   mh > 0: bc  += 2 if macd_expanding else 1
+            elif mh < 0: brc += 2 if macd_expanding else 1
 
-        # ── Signal 4: Bollinger Band position — extremes only (weight: 1) ──────
+        # ── Signal 4: Bollinger Band extremes ───────────────────────────────────
         if bp is not None:
-            if   bp > 0.85: brc += 1   # price at upper band = overbought/resistance
-            elif bp < 0.15: bc  += 1   # price at lower band = oversold/support
+            if   bp > 0.85: brc += 1
+            elif bp < 0.15: bc  += 1
 
-        # ── Signal 5: Volume surge confirmation (weight: 1) ────────────────────
-        # Volume 1.5× average on a directional move confirms institutional participation
-        if _has_vol and vol is not None and vma is not None and vma > 0 and vol >= 1.5 * vma:
-            p_prev = prices_hist[idx-1] if idx > 0 else p
-            if   p > p_prev: bc  += 1
-            elif p < p_prev: brc += 1
+        # ── Signal 5: Volume surge with bar-body direction ───────────────────────
+        # Fix: use close > open (bar body) not close > prev_close.
+        # close > open correctly identifies whether high volume was buying or selling.
+        # close > prev_close can be misled by wicks (close up from a big down wick).
+        # Spike-bar guard (Gate 3) already removed liquidation events before we reach here.
+        if _vol_gate_on and _has_vol and vol is not None and vma is not None and vma > 0:
+            if vol >= 1.5 * vma:
+                bar_open = opn   # prev close as proxy for this bar's open
+                if   p > bar_open: bc  += 1   # bullish bar body + high volume
+                elif p < bar_open: brc += 1   # bearish bar body + high volume
 
-        # ── Signal 6: Rate-of-Change momentum (weight: 1) ──────────────────────
+        # ── Signal 6: Rate-of-Change with asset-class relative threshold ─────────
+        # Threshold is calibrated per asset: crypto needs 3%+, forex only 0.3%+
         if roc is not None:
-            if   roc > 1.0:  bc  += 1   # price +1%+ over 10 bars = momentum
-            elif roc < -1.0: brc += 1
+            if   roc >  _roc_gate_pct: bc  += 1
+            elif roc < -_roc_gate_pct: brc += 1
 
         total = bc + brc
         if total == 0:
             return "HOLD"
-        # 65% confluence threshold — same as live get_analysis()
+        # 65% confluence threshold — consistent with live get_analysis()
         if bc  / total >= 0.65: return "BUY"
         if brc / total >= 0.65: return "SELL"
         return "HOLD"
@@ -5824,13 +5880,12 @@ def backtest_route():
     r2 = round(tp2_pct / risk_pct, 2) if tp2_pct and risk_pct > 0 else None
     r3 = round(tp3_pct / risk_pct, 2) if tp3_pct and risk_pct > 0 else None
 
-    # Signal scan window: last 800 bars from available data.
-    # First 200 bars are warm-up: EMA-200 needs 200 bars to be valid,
-    # MACD(26,9) needs 35 bars, RSI needs rsi_period+1. Using 200 ensures
-    # every indicator is fully primed when the scan starts.
-    # 800-bar scan window (vs. old 500) gives substantially more trades
-    # for statistical depth — key for the Kelly calculation to be reliable.
-    scan_start = max(200, len(prices_hist) - 800)
+    # Signal scan window: up to 1000 bars from available data.
+    # Warm-up = 200 bars (EMA-200 needs 200 bars; EMA-50 needs 50; MACD needs 35; RSI needs ~21).
+    # 1000-bar scan window maximises trade count for the 30+ minimum gate.
+    # On short TFs (5m/15m) total data may be < 1200 bars — scan window auto-shrinks.
+    # On longer TFs (1D) with 5-year yfinance data we get ~1260 bars → ~1060 bar scan window.
+    scan_start = max(200, len(prices_hist) - 1000)
 
     trades = []
     i = scan_start
@@ -5922,14 +5977,18 @@ def backtest_route():
         i += exit_bar + 1
 
     _bars_scanned = len(prices_hist) - scan_start
-    if len(trades) < 20:
+    if len(trades) < 30:
         return jsonify({
             "error": (
                 f"Only {len(trades)} trade signal(s) found in {_bars_scanned} scanned bars — "
-                "DotVerse requires 20+ trades for a statistically valid backtest. "
-                "The enhanced 8-signal confluence gate may be filtering aggressively on this asset/timeframe. "
-                "Try 1D or 4H timeframe for more historical signals, or run TradingView Strategy Tester."
-            )
+                "DotVerse requires 30+ trades for a statistically valid backtest (industry standard). "
+                f"Asset: {asset_type} · Timeframe: {timeframe} · Bars available: {len(prices_hist)}. "
+                "Try a higher timeframe (1H → 4H → 1D) which has more historical data, "
+                "or use TradingView Strategy Tester for shorter timeframes."
+            ),
+            "trades_found": len(trades),
+            "bars_scanned": _bars_scanned,
+            "min_required": 30,
         }), 400
 
     wins    = [t for t in trades if t["outcome"] not in ("loss", "timeout_loss")]
@@ -5988,14 +6047,19 @@ def backtest_route():
     max_dd_usd     = round(max_dd, 2)
     max_dd_pct     = round(max_dd / peak_eq * 100, 2) if peak_eq > 0 else 0.0
 
-    # ── Sharpe ratio (annualised, assuming 252 trading days) ─────────────
-    # Each R-unit = 1% of capital. Annualisation factor depends on timeframe.
-    _tf_ann = {"5m":252*78,"15m":252*26,"30m":252*13,"1h":252*6.5,"4h":252*1.625,"1d":252,"1w":52,"1mo":12}
-    _ann_f  = _tf_ann.get(timeframe.lower(), 252) ** 0.5
-    r_vals  = [t["r"] for t in trades]
-    r_mean  = sum(r_vals) / len(r_vals)
-    r_std   = (sum((v - r_mean)**2 for v in r_vals) / len(r_vals)) ** 0.5 if len(r_vals) > 1 else 0
-    sharpe  = round((r_mean / r_std) * _ann_f, 2) if r_std > 0 else 0.0
+    # ── Risk-adjusted ratios (annualised) ────────────────────────────────
+    _tf_ann  = {"5m":252*78,"15m":252*26,"30m":252*13,"1h":252*6.5,"4h":252*1.625,"1d":252,"1w":52,"1mo":12}
+    _ann_f   = _tf_ann.get(timeframe.lower(), 252) ** 0.5
+    r_vals   = [t["r"] for t in trades]
+    r_mean   = sum(r_vals) / len(r_vals)
+    r_std    = (sum((v - r_mean)**2 for v in r_vals) / len(r_vals)) ** 0.5 if len(r_vals) > 1 else 0
+    sharpe   = round((r_mean / r_std) * _ann_f, 2) if r_std > 0 else 0.0
+    # Sortino ratio: penalises only downside volatility — more relevant for traders.
+    # A strategy with asymmetric gains (many small wins, rare large losses) will show
+    # higher Sortino than Sharpe, correctly reflecting its actual risk profile.
+    r_down   = [v for v in r_vals if v < 0]
+    r_down_std = (sum(v**2 for v in r_down) / len(r_down)) ** 0.5 if r_down else 0
+    sortino  = round((r_mean / r_down_std) * _ann_f, 2) if r_down_std > 0 else 0.0
 
     return jsonify({
         "win_rate":       wr,
@@ -6009,7 +6073,8 @@ def backtest_route():
         "avg_loss_r":          avg_los,
         "profit_factor":       pf,
         "expectancy":          expectancy,          # avg R per trade — core edge metric
-        "sharpe":              sharpe,              # annualised Sharpe ratio
+        "sharpe":              sharpe,              # annualised Sharpe (penalises all volatility)
+        "sortino":             sortino,             # annualised Sortino (penalises downside only)
         "max_consec_wins":     max_cw,
         "max_consec_losses":   max_cl,
         # bars_tested = the actual signal-scan window (excludes warm-up bars)
