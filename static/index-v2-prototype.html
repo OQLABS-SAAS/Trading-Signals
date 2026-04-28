@@ -6676,7 +6676,8 @@ async function _sfFetchSignals(){
         new Promise(function(r){ setTimeout(function(){ r(null); }, 5000); })
       ]);
       if(res && res.results && res.results.length > 0){
-        return res.results
+        const mapped = res.results
+          .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
           .map(function(r){
             return {
               sym: r.ticker || r.symbol || '',
@@ -6692,6 +6693,7 @@ async function _sfFetchSignals(){
               reason: r.reason || r.summary || 'Live DotVerse signal'
             };
           });
+        if(mapped.length > 0) return mapped;
       }
     } catch(e){ /* silent */ }
     return null;
@@ -6715,15 +6717,16 @@ async function _sfFetchSignals(){
   const visibleOpps = window._condFilter ? opps.filter(window._condFilter.filterFn) : opps.slice(0,8);
 
   const oppCards = visibleOpps.map(function(o, i){
-    const cc   = confColor(o.sig);
-    const circ = Math.round(o.conf / 100 * 144.5);
-    const cardCls = o.sig === 'BUY' ? 'buy-card' : o.sig === 'SELL' ? 'sell-card' : '';
+    const sig  = o.sig || 'HOLD';
+    const cc   = confColor(sig);
+    const circ = Math.round((o.conf || 0) / 100 * 144.5);
+    const cardCls = sig === 'BUY' ? 'buy-card' : sig === 'SELL' ? 'sell-card' : '';
     const oJson = JSON.stringify(o).replace(/"/g, '&quot;');
     return '<div class="opp-card ' + cardCls + '" onclick="loadSignalContext(' + oJson + ')">'
       + '<div class="opp-card-header">'
       + '<div class="opp-card-rank">' + String(i+1).padStart(2,'0') + '</div>'
       + '<div class="opp-card-id"><div class="opp-sym">' + o.sym + '</div><div class="opp-tf">' + o.tf + ' · ' + o.asset + '</div></div>'
-      + '<span class="opp-badge ' + o.sig.toLowerCase() + '">' + o.sig + '</span>'
+      + '<span class="opp-badge ' + sig.toLowerCase() + '">' + sig + '</span>'
       + '</div>'
       + '<div class="opp-card-mid">'
       + '<div class="opp-conf-wrap">'
@@ -8033,13 +8036,22 @@ async function _mktFetchTopSignals(){
         dvFetch('/api/scan-list', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ tickers: tickers, timeframe: '4H', asset_types: ['crypto','crypto','crypto','equity','equity','forex','commodity'] })}),
         new Promise(function(r){ setTimeout(function(){ r(null); }, 10000); })
       ]);
-      if(res && res.results) return res.results;
+      if(res && res.results) return res.results.filter(function(r){ return r.signal && !r.error; });
     } catch(e){ /* silent */ }
     return [];
   })();
 
+  /* Fallback if API slow/unavailable */
+  const mktFallback = [
+    {ticker:'BTC/USD', signal:'BUY',  timeframe:'4H', rr1:'2.8', confidence:'HIGH', confidence_label:'CONFIRMED'},
+    {ticker:'NVDA',    signal:'BUY',  timeframe:'1D', rr1:'3.1', confidence:'HIGH', confidence_label:'CONFIRMED'},
+    {ticker:'XAUUSD',  signal:'BUY',  timeframe:'4H', rr1:'2.5', confidence:'HIGH', confidence_label:'CONFIRMED'},
+    {ticker:'EURUSD',  signal:'SELL', timeframe:'1H', rr1:'2.3', confidence:'MEDIUM', confidence_label:'LIKELY'},
+    {ticker:'ETH/USD', signal:'BUY',  timeframe:'4H', rr1:'2.4', confidence:'MEDIUM', confidence_label:'LIKELY'},
+  ];
+
   const fetched = await Promise.all([fetchData, minWait]);
-  results = fetched[0];
+  results = (fetched[0] && fetched[0].length > 0) ? fetched[0] : mktFallback;
 
   clearInterval(prog);
   if(fill){ fill.style.width = '100%'; fill.style.transition = 'width .2s ease-out'; }
@@ -9957,7 +9969,7 @@ function showUnderstand(){
             <div class="und-sig-sym">${sig.sym}</div>
             <div class="und-sig-tf">${sig.tf} · ${sig.asset}</div>
           </div>
-          <span class="opp-badge ${sig.sig.toLowerCase()}" style="font-size:11px;padding:5px 14px;">${sig.sig}</span>
+          <span class="opp-badge ${(sig.sig||'hold').toLowerCase()}" style="font-size:11px;padding:5px 14px;">${sig.sig||'—'}</span>
         </div>
         <div class="und-sig-levels">
           <div class="und-sig-level entry"><span class="und-sig-lbl">ENTRY</span><span class="und-sig-price">${sig.entry}</span></div>
@@ -12003,6 +12015,12 @@ function mt5ClosePosition(ticket, sym, level) {
         pnlMsg = profit > 0 ? ' · P&L: +$' + profit.toFixed(2) : profit < 0 ? ' · P&L: -$' + Math.abs(profit).toFixed(2) : '';
       }
       window._demoPosCache = window._demoPosCache.filter(function(p){ return String(p.ticket) !== String(ticket); });
+      // Persist exited ticket IDs so they stay gone after hard refresh
+      try {
+        var _prev = JSON.parse(localStorage.getItem('dv_exited_demos') || '[]');
+        if(_prev.indexOf(String(ticket)) === -1) _prev.push(String(ticket));
+        localStorage.setItem('dv_exited_demos', JSON.stringify(_prev));
+      } catch(e){}
     }
     var msg = isExit2
       ? (sym + ' demo trade closed' + pnlMsg)
@@ -12089,11 +12107,14 @@ function _mt5RenderPositions(positions) {
   if (!positions || positions.length === 0) {
     // Initialise demo cache once; allows demo trades to be "exited" locally
     if (!window._demoPosCache) {
+      // Read previously exited ticket IDs from localStorage so they stay gone after hard refresh
+      var _exitedDemo = [];
+      try { _exitedDemo = JSON.parse(localStorage.getItem('dv_exited_demos') || '[]'); } catch(e){}
       window._demoPosCache = [
         {ticket:'T001',symbol:'NVDA',  type:'BUY', open_price:'847.20',current_price:'861.40',sl:'818.00',tp:'912.00',  tp2:'938.00',tp3:'972.00',profit:170.40,volume:0.12,timeframe:'1D'},
         {ticket:'T002',symbol:'XAUUSD',type:'BUY', open_price:'2341',  current_price:'2348',  sl:'2308',  tp:'2412',    tp2:'2460',  tp3:'2510',  profit:70.00, volume:0.10,timeframe:'4H'},
         {ticket:'T003',symbol:'EURUSD',type:'SELL',open_price:'1.0784',current_price:'1.0761',sl:'1.0822',tp:'1.0698',  tp2:'1.0650',tp3:'1.0600',profit:69.00, volume:0.30,timeframe:'1H'}
-      ];
+      ].filter(function(p){ return _exitedDemo.indexOf(p.ticket) === -1; });
     }
     positions = window._demoPosCache;
   }
