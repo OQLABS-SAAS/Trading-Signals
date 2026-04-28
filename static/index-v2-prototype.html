@@ -7525,10 +7525,10 @@ function showMarket(){
     <div class="pg-hd-right"><span class="pg-tag live">● Live</span></div>
   </div>
 
-  \${conditionsChip}
+  ${conditionsChip}
 
   <!-- Ticker strip -->
-  <div class="mkt-ticker-bar">\${tickerBar}</div>
+  <div class="mkt-ticker-bar">${tickerBar}</div>
 
   <!-- Row 1: Indices + Crypto + Commodities/F&G -->
   <div class="mkt-body">
@@ -7659,19 +7659,23 @@ function _mktRenderCockpit(){
   const curMode = window._stratMode || 'scalp';
 
   const modes = [
-    { id:'scalp',    label:'Scalp',       tf:'15m – 1H', emoji_icon:'⚡',
+    { id:'scalp',    label:'Scalp',       tf:'15m – 1H',
+      icon:'<polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/>',
       desc:'Minutes to hours',
       verdict: sessScore>=70 && !eventRisk ? 'go' : sessScore>=50 ? 'caution' : 'wait',
       why: sessScore>=70 && !eventRisk ? 'Good liquidity — fast fills' : eventRisk ? 'News risk — widen stops' : 'Thin market — hold off' },
-    { id:'day',      label:'Day Trade',   tf:'1H – 4H', emoji_icon:'📊',
+    { id:'day',      label:'Day Trade',   tf:'1H – 4H',
+      icon:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
       desc:'Open & close same day',
       verdict: sessScore>=60 ? 'go' : sessScore>=40 ? 'caution' : 'wait',
       why: sessScore>=60 ? 'Session active — trends forming' : sessScore>=40 ? 'Mid-session lag' : 'Session ending soon' },
-    { id:'swing',    label:'Swing',       tf:'4H – 1D', emoji_icon:'📈',
+    { id:'swing',    label:'Swing',       tf:'4H – 1D',
+      icon:'<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
       desc:'Hold 2 – 10 days',
       verdict: !eventRisk ? 'go' : 'caution',
       why: !eventRisk ? 'No major catalysts blocking' : 'Catalyst ahead — size smaller' },
-    { id:'position', label:'Position',    tf:'1D – 1W', emoji_icon:'🏛',
+    { id:'position', label:'Position',    tf:'1D – 1W',
+      icon:'<line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
       desc:'Hold weeks to months',
       verdict: 'go',
       why: 'Intraday noise irrelevant — focus on weekly close' },
@@ -7695,7 +7699,10 @@ function _mktRenderCockpit(){
         onmouseover="if('${curMode}'!=='${m.id}'){this.style.borderColor='rgba(237,232,216,.14)';this.style.background='rgba(237,232,216,.05)';}"
         onmouseout="if('${curMode}'!=='${m.id}'){this.style.borderColor='rgba(237,232,216,.07)';this.style.background='rgba(237,232,216,.03)';}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">
-          <div style="font-family:var(--syne);font-size:13px;font-weight:700;color:${active?'var(--t1)':'rgba(237,232,216,.55)'};">${m.label}</div>
+          <div style="display:flex;align-items:center;gap:7px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${active?vCol[v]:'rgba(237,232,216,.35)'}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${m.icon}</svg>
+            <div style="font-family:var(--syne);font-size:13px;font-weight:700;color:${active?'var(--t1)':'rgba(237,232,216,.55)'};">${m.label}</div>
+          </div>
           <span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;
                  background:${v==='go'?'rgba(93,232,160,.13)':v==='caution'?'rgba(201,168,76,.13)':'rgba(232,112,110,.13)'};
                  color:${vCol[v]};letter-spacing:.07em;">${vTxt[v]}</span>
@@ -11197,49 +11204,211 @@ function showAct(){
     <div class="sf-breadcrumb">MARKET › SIGNAL › UNDERSTAND › SIZE › <em>ACT</em></div>
   </div>
 
-  <!-- Execute new trade -->
+  <!-- Execute new trade — beginner-first design -->
   <div class="act-exec-card">
-    <div class="act-exec-title">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.8)" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      Execute Trade${sig.sym?' — '+sig.sym:''}
-    </div>
-    ${sig.sym?`
-    <div class="act-exec-sig-row">
-      <span class="opp-badge ${isBuy?'buy':'sell'}">${sig.sig}</span>
-      <span class="act-exec-detail">Entry <strong>${sig.entry}</strong> · SL <strong>${sig.sl}</strong> · TP <strong>${sig.tp}</strong> · ${sig.rr}R</span>
-    </div>`:'<div class="act-exec-no-sig">No signal loaded — go to Signal page to select a trade.</div>'}
-    <div class="act-exec-fields">
-      <div class="sz-field"><label class="sz-lbl">Order Type</label>
-        <select class="sz-inp" id="actOrderType" onchange="actOrderTypeHint(this)">
-          <option value="market">Buy/Sell Now — at current price</option>
-          <option value="limit">At My Price — only fills if price reaches my target</option>
-          <option value="stop">On Breakout — triggers when price breaks a level</option>
-        </select>
-        <div id="actOrderHint" style="margin-top:5px;padding:7px 10px;border-radius:5px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.12);font-size:11px;color:rgba(237,232,216,.6);line-height:1.5;display:none;"></div>
-      </div>
-      <div class="sz-field"><label class="sz-lbl">Lots / Units</label>
-        <input class="sz-inp" id="actLots" type="text" placeholder="0.10" value="">
-      </div>
-      <div class="sz-field"><label class="sz-lbl">Platform</label>
-        <select class="sz-inp" id="actPlatform">
-          <option>MT5 (auto-execute)</option>
-          <option>Manual (copy levels)</option>
-          <option>Paper trade</option>
-        </select>
+
+    ${sig.sym ? `
+    <!-- What DotVerse is recommending -->
+    <div style="margin-bottom:14px;">
+      <div style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:8px;">DotVerse recommends this trade</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:${isBuy?'rgba(93,232,160,.06)':'rgba(232,112,110,.06)'};border:1px solid ${isBuy?'rgba(93,232,160,.2)':'rgba(232,112,110,.2)'};border-radius:10px;">
+        <span class="opp-badge ${isBuy?'buy':'sell'}" style="font-size:13px;padding:4px 12px;">${sig.sig}</span>
+        <div style="flex:1;">
+          <div style="font-family:var(--syne);font-size:16px;font-weight:800;color:var(--t1);margin-bottom:2px;">${sig.sym}</div>
+          <div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.55);">Entry <span style="color:var(--t1);font-weight:600;">${sig.entry}</span> &nbsp;·&nbsp; Stop <span style="color:#e8706e;font-weight:600;">${sig.sl}</span> &nbsp;·&nbsp; Target <span style="color:#5de8a0;font-weight:600;">${sig.tp}</span> &nbsp;·&nbsp; <span style="color:var(--amb);">${sig.rr}R</span></div>
+        </div>
       </div>
     </div>
-    <div class="act-exec-btns">
-      <button class="btn-ghost" onclick="actPaperTrade()">Paper Trade</button>
-      <button class="btn-amber act-exec-btn" id="mt5ExecBtn" onclick="actExecute()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Execute via MT5
-      </button>
-      <div id="mt5ExecStatus" style="font-size:12px;color:rgba(237,232,216,.6);text-align:center;min-height:20px;margin-top:6px;font-family:var(--mono);"></div>
+
+    <!-- Plain English — what will actually happen -->
+    <div style="padding:12px 14px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.15);border-radius:8px;margin-bottom:16px;">
+      <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--amb);margin-bottom:6px;letter-spacing:.06em;">WHAT WILL HAPPEN</div>
+      <div style="font-size:13px;color:rgba(237,232,216,.85);line-height:1.65;" id="actPlainExplain">
+        ${isBuy
+          ? `DotVerse will <strong style="color:#5de8a0;">buy ${sig.sym}</strong> for you right now at the current market price — around <strong>${sig.entry}</strong>.<br><br>If the price drops to <strong style="color:#e8706e;">${sig.sl}</strong>, the trade closes automatically to protect you. If the price rises to <strong style="color:#5de8a0;">${sig.tp}</strong>, you take your first profit.`
+          : `DotVerse will <strong style="color:#e8706e;">sell ${sig.sym}</strong> for you right now at the current market price — around <strong>${sig.entry}</strong>.<br><br>If the price rises to <strong style="color:#e8706e;">${sig.sl}</strong>, the trade closes automatically to protect you. If the price drops to <strong style="color:#5de8a0;">${sig.tp}</strong>, you take your first profit.`
+        }
+      </div>
     </div>
+
+    <!-- How many units — simple label -->
+    <div style="margin-bottom:16px;">
+      <label style="font-family:var(--mono);font-size:10px;font-weight:700;color:rgba(237,232,216,.5);letter-spacing:.08em;display:block;margin-bottom:6px;">HOW MANY UNITS ARE YOU BUYING?</label>
+      <input class="sz-inp" id="actLots" type="text" placeholder="0.10" value=""
+        style="font-size:16px;font-weight:700;letter-spacing:.02em;padding:10px 14px;">
+      <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.35);margin-top:5px;line-height:1.5;">
+        This is pre-filled from your SIZE calculation. Only change it if you want to trade more or less than recommended.
+      </div>
+    </div>
+
+    <!-- THE button — one single action -->
+    <button id="mt5ExecBtn" onclick="actExecute()"
+      style="width:100%;padding:16px;border-radius:10px;background:${isBuy?'rgba(93,232,160,.15)':'rgba(232,112,110,.15)'};border:1px solid ${isBuy?'rgba(93,232,160,.4)':'rgba(232,112,110,.4)'};color:${isBuy?'#5de8a0':'#e8706e'};font-family:var(--syne);font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .2s;letter-spacing:.02em;margin-bottom:10px;"
+      onmouseover="this.style.background='${isBuy?'rgba(93,232,160,.25)':'rgba(232,112,110,.25)'}'"
+      onmouseout="this.style.background='${isBuy?'rgba(93,232,160,.15)':'rgba(232,112,110,.15)'}'">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Place this trade
+    </button>
+
+    <!-- Practice option — secondary, quiet -->
+    <button onclick="actPaperTrade()"
+      style="width:100%;padding:10px;border-radius:8px;background:transparent;border:1px solid rgba(237,232,216,.1);color:rgba(237,232,216,.4);font-family:var(--mono);font-size:11px;cursor:pointer;margin-bottom:14px;transition:all .2s;"
+      onmouseover="this.style.borderColor='rgba(237,232,216,.25)';this.style.color='rgba(237,232,216,.65)'"
+      onmouseout="this.style.borderColor='rgba(237,232,216,.1)';this.style.color='rgba(237,232,216,.4)'">
+      Practice without real money (paper trade)
+    </button>
+
+    ` : `<div class="act-exec-no-sig" style="text-align:center;padding:28px 16px;">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.2)" stroke-width="1.5" style="display:block;margin:0 auto 12px;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      <div style="font-family:var(--mono);font-size:12px;color:rgba(237,232,216,.35);margin-bottom:8px;">No signal loaded yet</div>
+      <div style="font-size:11px;color:rgba(237,232,216,.25);">Go to the Signal tab, pick an instrument, and run an analysis — then come back here to place the trade.</div>
+    </div>`}
+
+    <!-- Exec status feedback -->
+    <div id="mt5ExecStatus" style="font-size:12px;color:rgba(237,232,216,.6);text-align:center;min-height:20px;font-family:var(--mono);"></div>
+
+    <!-- MT5 connection -->
     <div class="act-mt5-status">
       <div class="act-mt5-dot"></div>
       <span id="actMt5Lbl">MT5 connection: checking...</span>
     </div>
+
+    <!-- Advanced options — hidden by default, for experienced traders only -->
+    <div style="margin-top:14px;border-top:1px solid rgba(237,232,216,.07);padding-top:12px;">
+      <button onclick="actToggleAdvanced()" id="actAdvBtn"
+        style="background:none;border:none;color:rgba(237,232,216,.3);font-family:var(--mono);font-size:10px;cursor:pointer;display:flex;align-items:center;gap:6px;padding:0;letter-spacing:.05em;">
+        <svg id="actAdvChev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
+        Advanced options — for experienced traders
+      </button>
+      <div id="actAdvancedOpts" style="display:none;margin-top:12px;">
+        <div class="sz-field" style="margin-bottom:10px;">
+          <label class="sz-lbl" style="margin-bottom:10px;display:block;">Order Type <span style="font-size:10px;color:var(--t3);font-weight:400;">— how your trade opens</span></label>
+
+          <!-- 7 MT5 Order Type Cards -->
+          <div id="actOrderTypeCards" style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">
+
+            <!-- ① Market Execution — full width, default selected -->
+            <div onclick="actSelectOrderType('market',this)" data-ot="market"
+                 style="grid-column:1/-1;display:flex;align-items:center;gap:13px;padding:11px 14px;background:var(--s2);border:2px solid var(--amber,#d4870a);border-radius:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s;box-shadow:0 0 0 2px rgba(201,168,76,.18);">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--amber,#d4870a)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+              <div style="flex:1;">
+                <div style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--t1);">Market Execution</div>
+                <div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px;">Opens instantly at current price</div>
+              </div>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--amber,#d4870a);font-weight:700;background:rgba(201,168,76,.12);padding:3px 8px;border-radius:4px;white-space:nowrap;">DEFAULT</div>
+            </div>
+
+            <!-- ② Buy Limit -->
+            <div onclick="actSelectOrderType('buy_limit',this)" data-ot="buy_limit"
+                 style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 8px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s;text-align:center;">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.45)" stroke-width="2" stroke-linecap="round">
+                <!-- arrow pointing down toward limit line -->
+                <line x1="12" y1="3" x2="12" y2="13"/>
+                <polyline points="8 10 12 14 16 10"/>
+                <!-- dashed limit line -->
+                <line x1="4" y1="18" x2="20" y2="18" stroke-dasharray="3 2"/>
+                <!-- small tick marks on limit line -->
+                <line x1="4" y1="16" x2="4" y2="20"/>
+                <line x1="20" y1="16" x2="20" y2="20"/>
+              </svg>
+              <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--t2);">Buy Limit</div>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--t3);line-height:1.5;">Buy cheaper<br>than now</div>
+            </div>
+
+            <!-- ③ Sell Limit -->
+            <div onclick="actSelectOrderType('sell_limit',this)" data-ot="sell_limit"
+                 style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 8px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s;text-align:center;">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.45)" stroke-width="2" stroke-linecap="round">
+                <!-- dashed limit line at top -->
+                <line x1="4" y1="6" x2="20" y2="6" stroke-dasharray="3 2"/>
+                <line x1="4" y1="4" x2="4" y2="8"/>
+                <line x1="20" y1="4" x2="20" y2="8"/>
+                <!-- arrow pointing up toward limit line -->
+                <line x1="12" y1="21" x2="12" y2="11"/>
+                <polyline points="8 14 12 10 16 14"/>
+              </svg>
+              <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--t2);">Sell Limit</div>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--t3);line-height:1.5;">Sell higher<br>than now</div>
+            </div>
+
+            <!-- ④ Buy Stop -->
+            <div onclick="actSelectOrderType('buy_stop',this)" data-ot="buy_stop"
+                 style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 8px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s;text-align:center;">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.45)" stroke-width="2" stroke-linecap="round">
+                <!-- horizontal trigger line in middle -->
+                <line x1="3" y1="14" x2="21" y2="14"/>
+                <!-- arrow breaking upward through it -->
+                <line x1="12" y1="20" x2="12" y2="7"/>
+                <polyline points="8 10 12 6 16 10"/>
+              </svg>
+              <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--t2);">Buy Stop</div>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--t3);line-height:1.5;">Buy on<br>breakout up</div>
+            </div>
+
+            <!-- ⑤ Sell Stop -->
+            <div onclick="actSelectOrderType('sell_stop',this)" data-ot="sell_stop"
+                 style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 8px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s;text-align:center;">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.45)" stroke-width="2" stroke-linecap="round">
+                <!-- horizontal trigger line in middle -->
+                <line x1="3" y1="10" x2="21" y2="10"/>
+                <!-- arrow breaking downward through it -->
+                <line x1="12" y1="4" x2="12" y2="17"/>
+                <polyline points="8 14 12 18 16 14"/>
+              </svg>
+              <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--t2);">Sell Stop</div>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--t3);line-height:1.5;">Sell on<br>breakdown</div>
+            </div>
+
+            <!-- ⑥ Buy Stop Limit -->
+            <div onclick="actSelectOrderType('buy_stop_limit',this)" data-ot="buy_stop_limit"
+                 style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 8px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s;text-align:center;">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.45)" stroke-width="2" stroke-linecap="round">
+                <!-- stop trigger line (dashed, higher) -->
+                <line x1="3" y1="8" x2="21" y2="8" stroke-dasharray="3 2"/>
+                <!-- limit ceiling line (solid, just below trigger) -->
+                <line x1="3" y1="13" x2="21" y2="13"/>
+                <!-- arrow shooting up, stopping between the two lines -->
+                <line x1="12" y1="21" x2="12" y2="9"/>
+                <polyline points="9 12 12 9 15 12"/>
+              </svg>
+              <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--t2);">Buy Stop Limit</div>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--t3);line-height:1.5;">Breakout with<br>price ceiling</div>
+            </div>
+
+            <!-- ⑦ Sell Stop Limit -->
+            <div onclick="actSelectOrderType('sell_stop_limit',this)" data-ot="sell_stop_limit"
+                 style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 8px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s;text-align:center;">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.45)" stroke-width="2" stroke-linecap="round">
+                <!-- limit floor line (solid, higher) -->
+                <line x1="3" y1="11" x2="21" y2="11"/>
+                <!-- stop trigger line (dashed, lower) -->
+                <line x1="3" y1="16" x2="21" y2="16" stroke-dasharray="3 2"/>
+                <!-- arrow shooting down, stopping between the two lines -->
+                <line x1="12" y1="3" x2="12" y2="15"/>
+                <polyline points="9 12 12 15 15 12"/>
+              </svg>
+              <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--t2);">Sell Stop Limit</div>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--t3);line-height:1.5;">Breakdown with<br>price floor</div>
+            </div>
+
+          </div><!-- /actOrderTypeCards -->
+
+          <!-- Explanation box — shown on card select -->
+          <div id="actOrderHint" style="margin-top:10px;padding:11px 13px;border-radius:7px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.15);font-size:12px;color:rgba(237,232,216,.75);line-height:1.75;display:none;"></div>
+        </div>
+        <div class="sz-field">
+          <label class="sz-lbl">Platform</label>
+          <select class="sz-inp" id="actPlatform">
+            <option>MT5 (auto-execute)</option>
+            <option>Manual (copy levels)</option>
+            <option>Paper trade</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- Automations shortcut banner -->
@@ -13292,17 +13461,92 @@ function showAutomations() {
 }
 
 
-function actOrderTypeHint(sel){
+function actToggleAdvanced(){
+  const panel = document.getElementById('actAdvancedOpts');
+  const chev  = document.getElementById('actAdvChev');
+  if(!panel) return;
+  const open = panel.style.display === 'none' || panel.style.display === '';
+  panel.style.display = open ? 'block' : 'none';
+  if(chev) chev.style.transform = open ? 'rotate(180deg)' : 'rotate(0deg)';
+}
+
+/* Default order type on load */
+window._actOrderType = 'market';
+
+function actSelectOrderType(type, el){
+  window._actOrderType = type;
+
+  /* Deselect all cards */
+  const grid = document.getElementById('actOrderTypeCards');
+  if(grid){
+    grid.querySelectorAll('[data-ot]').forEach(function(card){
+      card.style.border       = '1px solid var(--bd)';
+      card.style.boxShadow    = 'none';
+      /* reset SVG stroke to muted */
+      var svg = card.querySelector('svg');
+      if(svg) svg.setAttribute('stroke','rgba(237,232,216,.45)');
+    });
+  }
+
+  /* Highlight selected card */
+  if(el){
+    el.style.border    = '2px solid var(--amber,#d4870a)';
+    el.style.boxShadow = '0 0 0 2px rgba(201,168,76,.18)';
+    var svg = el.querySelector('svg');
+    if(svg) svg.setAttribute('stroke','var(--amber,#d4870a)');
+  }
+
+  /* Show plain-English explanation */
   const hints = {
-    market: 'Executes instantly at whatever the current price is. Best for most beginners — what you see is what you get.',
-    limit:  'Your order only fills if price drops to (or rises to) the price you set. Useful when you want a better entry than the current price.',
-    stop:   'Triggers automatically when price breaks through a level you set. Used to catch breakouts or protect against losses.'
+    market:
+      '<strong>Market Execution</strong> — Your order fills immediately at the current market price. ' +
+      'MT5 fills BUY orders at the <em>ask</em> price and SELL orders at the <em>bid</em> price. ' +
+      'In fast-moving markets you may get a slightly different price than shown on screen — this is called slippage, and is usually tiny. ' +
+      '<br><br>Example: Gold is at 4,631. You click BUY. MT5 fills you at 4,631.50 (the ask). You\'re in the trade instantly. ' +
+      '<br><br><em>Best choice for most traders. DotVerse uses this by default.</em>',
+    buy_limit:
+      '<strong>Buy Limit</strong> — A pending order that sits in MT5 and waits. You want to BUY, but only if price drops to a cheaper level first. ' +
+      'MT5 triggers it when the <em>ask</em> price falls to your limit level. ' +
+      '<br><br>Example: Gold is at 4,631. You believe it will dip to 4,580 before moving up. You place a Buy Limit at 4,580. ' +
+      'If Gold falls to 4,580 your order fills automatically. If it never drops that far, the order sits open until you cancel it. ' +
+      '<br><br><em>You get a better entry price — but the trade may never open.</em>',
+    sell_limit:
+      '<strong>Sell Limit</strong> — A pending order that waits for price to rise before selling. You want to SELL, but only at a higher price than now. ' +
+      'MT5 triggers it when the <em>bid</em> price rises to your limit level. ' +
+      '<br><br>Example: Gold is at 4,631. You think it will spike to 4,700 before falling. You place a Sell Limit at 4,700. ' +
+      'If Gold rises to 4,700 your sell order fills automatically. ' +
+      '<br><br><em>You get a better sell price — but the trade may never open.</em>',
+    buy_stop:
+      '<strong>Buy Stop</strong> — A pending order placed <em>above</em> the current price. You want to BUY only after the price breaks upward through a key level, confirming the move. ' +
+      'MT5 triggers it when the <em>ask</em> price rises to your stop level. ' +
+      '<br><br>Example: Gold is at 4,631. Resistance is at 4,660. You place a Buy Stop at 4,662. ' +
+      'Only when Gold breaks above 4,662 does your buy order fire — the breakout is confirmed before you enter. ' +
+      '<br><br><em>You pay more than the current price, but only enter if the move is real.</em>',
+    sell_stop:
+      '<strong>Sell Stop</strong> — A pending order placed <em>below</em> the current price. You want to SELL only after price breaks downward through a key level. ' +
+      'MT5 triggers it when the <em>bid</em> price falls to your stop level. ' +
+      '<br><br>Example: Gold is at 4,631. Support is at 4,600. You place a Sell Stop at 4,598. ' +
+      'Only when Gold breaks below 4,598 does your sell order fire — the breakdown is confirmed before you enter. ' +
+      '<br><br><em>You sell lower than the current price, but only after the breakdown is confirmed.</em>',
+    buy_stop_limit:
+      '<strong>Buy Stop Limit</strong> — A two-price order. Advanced traders use this to catch breakouts without overpaying on fast spikes. ' +
+      '<br><br><strong>Price 1 — Stop:</strong> the trigger level. When the ask rises here, MT5 activates the order. ' +
+      '<strong>Price 2 — Limit:</strong> the maximum price you\'ll accept. MT5 will only buy between the stop and limit prices. ' +
+      '<br><br>Example: Gold at 4,631. Stop at 4,662 (breakout trigger). Limit at 4,658 (ceiling). ' +
+      'When Gold hits 4,662, MT5 places a Buy Limit at 4,658. You only buy if Gold is at 4,658 or better — you won\'t overpay on a violent spike to 4,680. ' +
+      '<br><br><em>If the price blows straight through both levels, the order may not fill at all.</em>',
+    sell_stop_limit:
+      '<strong>Sell Stop Limit</strong> — A two-price order. Advanced traders use this to catch breakdowns without underselling on fast crashes. ' +
+      '<br><br><strong>Price 1 — Stop:</strong> the trigger level. When the bid falls here, MT5 activates the order. ' +
+      '<strong>Price 2 — Limit:</strong> the minimum price you\'ll accept. MT5 will only sell between the stop and limit prices. ' +
+      '<br><br>Example: Gold at 4,631. Stop at 4,598 (breakdown trigger). Limit at 4,602 (floor). ' +
+      'When Gold hits 4,598, MT5 places a Sell Limit at 4,602. You only sell if Gold is at 4,602 or better — you won\'t get a terrible fill on a flash crash to 4,550. ' +
+      '<br><br><em>If the price crashes straight through both levels, the order may not fill at all.</em>',
   };
   const box = document.getElementById('actOrderHint');
   if(!box) return;
-  const v = sel.value;
-  if(hints[v]){ box.textContent = hints[v]; box.style.display='block'; }
-  else { box.style.display='none'; }
+  if(hints[type]){ box.innerHTML = hints[type]; box.style.display = 'block'; }
+  else { box.style.display = 'none'; }
 }
 </script>
 </body>
