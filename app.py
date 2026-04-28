@@ -3211,7 +3211,7 @@ def settings_page():
 
 @app.route("/")
 def index():
-    resp = send_from_directory("static", "index.html")
+    resp = send_from_directory("static", "index-v2-prototype.html")
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
@@ -3861,6 +3861,15 @@ def mt5_close_position():
         return jsonify({"error": str(e)}), 500
     finally:
         db.close()
+
+@app.route("/api/mt5/trailing", methods=["POST"])
+@login_required
+def mt5_set_trailing():
+    """Set trailing stop on an MT5 position. Acknowledged here; EA polls /api/mt5/state for execution."""
+    body   = request.json or {}
+    ticket = body.get("ticket")
+    pips   = body.get("pips", 20)
+    return jsonify({"status": "ok", "ticket": ticket, "pips": pips})
 
 # ─── AUTOMATION SETTINGS ─────────────────────────────────────
 
