@@ -6731,15 +6731,27 @@ async function _sfFetchSignals(){
 
   let rawOpps = null;
   try {
-    const tickers = ['BTCUSD','ETHUSD','NVDA','AAPL','EURUSD','XAUUSD'];
-    const res = await Promise.race([
-      dvFetch('/api/scan-list', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ tickers: tickers, timeframe: _activeTf })
-      }),
+    // Group tickers by asset type so backend normalise_ticker routes each one
+    // correctly (crypto -> -USD, forex -> =X, commodity -> futures map). A
+    // single batch with one asset_type would mangle 4 of 6 tickers and the
+    // errored rows get silently filtered, leaving an empty Signals tab.
+    const groups = [
+      { tickers: ['BTCUSD','ETHUSD'], asset_type: 'crypto'    },
+      { tickers: ['NVDA','AAPL'],     asset_type: 'stock'     },
+      { tickers: ['EURUSD'],          asset_type: 'forex'     },
+      { tickers: ['XAUUSD'],          asset_type: 'commodity' }
+    ];
+    const all = await Promise.race([
+      Promise.all(groups.map(function(g){
+        return dvFetch('/api/scan-list', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: _activeTf })
+        });
+      })),
       new Promise(function(r){ setTimeout(function(){ r(null); }, 45000); })
     ]);
+    const res = all ? { results: all.flatMap(function(b){ return (b && b.results) || []; }) } : null;
     if(res && res.results && res.results.length > 0){
       rawOpps = res.results
         .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
