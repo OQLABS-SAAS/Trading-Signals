@@ -5059,6 +5059,16 @@ var _settTz      = _dvRead('dv_sett_tz')      || 'New York';
 var _settSliders = (function(){ try{ var v=JSON.parse(_dvRead('dv_sett_sliders')); if(v&&typeof v==='object') return v; }catch(e){} return {confidence:70,price:2,drawdown:10,loss:5}; })();
 var _settChartTheme = _dvRead('dv_sett_theme')  || 'constellation';
 var _settChartType  = _dvRead('dv_sett_ctype')  || 'candles';
+// Portfolio tab state — missing declarations caused silent ReferenceError on tab click
+var _settAlloc = (function(){ try{ var v=JSON.parse(_dvRead('dv_sett_alloc')); if(Array.isArray(v)) return v; }catch(e){} return [
+  {label:'Crypto',     pct:30},
+  {label:'Stocks',     pct:30},
+  {label:'Forex',      pct:20},
+  {label:'Commodities',pct:15},
+  {label:'Cash',       pct:5}
+]; })();
+var _pgSliders = (function(){ try{ var v=JSON.parse(_dvRead('dv_sett_pg')); if(v&&typeof v==='object') return v; }catch(e){} return {winrate:55, rr:2, trades:5, annual:20}; })();
+var _prcSliders = (function(){ try{ var v=JSON.parse(_dvRead('dv_sett_prc')); if(v&&typeof v==='object') return v; }catch(e){} return {corr:0.7, conc:20}; })();
 
 function _settSaveAll(){
   _dvWrite('dv_sett_assets', JSON.stringify(_settAssets));
@@ -5071,23 +5081,114 @@ function _settSaveAll(){
   _dvWrite('dv_sett_sliders',JSON.stringify(_settSliders));
   _dvWrite('dv_sett_theme',  _settChartTheme);
   _dvWrite('dv_sett_ctype',  _settChartType);
+  _dvWrite('dv_sett_alloc',  JSON.stringify(_settAlloc));
+  _dvWrite('dv_sett_pg',     JSON.stringify(_pgSliders));
+  _dvWrite('dv_sett_prc',    JSON.stringify(_prcSliders));
+}
+
+function _spConnections(){
+  var inpStyle='width:100%;box-sizing:border-box;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.12);border-radius:6px;padding:9px 12px;font-family:var(--mono);font-size:12px;color:var(--t1);outline:none;margin-top:6px;';
+  var lblStyle='font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.07em;color:rgba(237,232,216,.5);text-transform:uppercase;';
+  var rowStyle='margin-bottom:14px;';
+  var hintStyle='font-size:10px;color:rgba(237,232,216,.35);margin-top:4px;line-height:1.5;';
+  var divStyle='background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:16px;margin-bottom:20px;';
+  return `<div class="sett-sect">
+    <div class="sett-sect-title">MT5 Bridge</div>
+    <div class="sett-sect-sub">Connect your MetaTrader 5 EA to DotVerse so you can execute trades directly from the dashboard.</div>
+    <div style="${divStyle}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amb)" stroke-width="2.2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span style="font-family:var(--syne);font-size:13px;font-weight:700;color:var(--t1);">MetaTrader 5 EA</span>
+        <span id="mt5ConnBadge" style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:3px;background:rgba(224,85,85,.12);color:rgba(224,85,85,.85);">NOT CONNECTED</span>
+      </div>
+      <div style="font-size:11px;color:rgba(237,232,216,.45);line-height:1.6;margin-bottom:14px;">
+        1. Download the DotVerse EA (.ex5) from your account page<br>
+        2. Open MT5 → Navigator → Expert Advisors → drag onto your chart<br>
+        3. Enter your DotVerse API key below and click Allow DLL imports<br>
+        4. The EA polls this dashboard every 5 seconds for pending orders
+      </div>
+      <div style="${rowStyle}">
+        <div style="${lblStyle}">DotVerse API Key</div>
+        <input style="${inpStyle}" type="password" id="settApiKey" placeholder="dv_live_xxxxxxxxxxxx" autocomplete="off">
+        <div style="${hintStyle}">Your key is shown on the Account page. The EA sends this with every heartbeat to verify identity.</div>
+      </div>
+      <div style="${rowStyle}">
+        <div style="${lblStyle}">MT5 Account Number</div>
+        <input style="${inpStyle}" type="text" id="settMt5Acct" placeholder="e.g. 12345678" autocomplete="off">
+      </div>
+      <div style="${rowStyle}">
+        <div style="${lblStyle}">Broker Server</div>
+        <input style="${inpStyle}" type="text" id="settMt5Server" placeholder="e.g. ICMarkets-Live02" autocomplete="off">
+      </div>
+      <button onclick="_saveConnSettings()" style="margin-top:4px;padding:9px 20px;border-radius:6px;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.3);color:var(--amb);font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;cursor:pointer;">Save MT5 Settings</button>
+    </div>
+  </div>
+  <div class="sett-sect">
+    <div class="sett-sect-title">Telegram Alerts</div>
+    <div class="sett-sect-sub">Get instant trade execution and signal notifications in Telegram.</div>
+    <div style="${divStyle}">
+      <div style="${rowStyle}">
+        <div style="${lblStyle}">Bot Token</div>
+        <input style="${inpStyle}" type="password" id="settTgToken" placeholder="110201543:AAHdqTcvCH1vGWJxfSeofSz42KVRr7FGdgA" autocomplete="off">
+        <div style="${hintStyle}">From BotFather — send /newbot then /token to get this.</div>
+      </div>
+      <div style="${rowStyle}">
+        <div style="${lblStyle}">Chat ID</div>
+        <input style="${inpStyle}" type="text" id="settTgChat" placeholder="e.g. 123456789" autocomplete="off">
+        <div style="${hintStyle}">Message your bot, then open: api.telegram.org/bot&lt;TOKEN&gt;/getUpdates — find "chat":{"id":…}</div>
+      </div>
+      <button onclick="_saveTgSettings()" style="margin-top:4px;padding:9px 20px;border-radius:6px;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);color:var(--grn);font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;cursor:pointer;">Save &amp; Test Telegram</button>
+    </div>
+  </div>
+  <div class="sett-sect">
+    <div class="sett-sect-title">TradingView</div>
+    <div class="sett-sect-sub">Sync DotVerse signals with TradingView alerts via webhooks.</div>
+    <div style="${divStyle}">
+      <div style="${rowStyle}">
+        <div style="${lblStyle}">Webhook URL</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+          <input style="${inpStyle.replace('margin-top:6px;','')}width:auto;flex:1;" type="text" id="settTvWebhook" placeholder="https://dot-verse.up.railway.app/api/webhook/tv" readonly value="https://dot-verse.up.railway.app/api/webhook/tv">
+          <button onclick="navigator.clipboard.writeText('https://dot-verse.up.railway.app/api/webhook/tv');if(typeof _dvToast==='function')_dvToast('Webhook URL copied','rgba(201,168,76,.12)','rgba(201,168,76,.4)');" style="padding:9px 12px;border-radius:6px;background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.12);color:var(--t2);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;">Copy</button>
+        </div>
+        <div style="${hintStyle}">Paste this into TradingView alert → Webhook URL. DotVerse will receive the signal and display it in your feed.</div>
+      </div>
+    </div>
+  </div>`;
+}
+function _saveConnSettings(){
+  var key=document.getElementById('settApiKey');
+  var acct=document.getElementById('settMt5Acct');
+  var srv=document.getElementById('settMt5Server');
+  if(key) _dvWrite('dv_mt5_key', key.value);
+  if(acct) _dvWrite('dv_mt5_acct', acct.value);
+  if(srv) _dvWrite('dv_mt5_srv', srv.value);
+  if(typeof _dvToast==='function') _dvToast('MT5 settings saved','rgba(201,168,76,.12)','rgba(201,168,76,.4)');
+}
+function _saveTgSettings(){
+  var tok=document.getElementById('settTgToken');
+  var chat=document.getElementById('settTgChat');
+  if(tok) _dvWrite('dv_tg_tok', tok.value);
+  if(chat) _dvWrite('dv_tg_chat', chat.value);
+  if(typeof _dvToast==='function') _dvToast('Telegram settings saved — EA will use these on next heartbeat','rgba(93,232,160,.12)','rgba(93,232,160,.4)');
 }
 
 function showSettings(tab){
   const el=document.getElementById('dashContent');
-  tab=tab||'assets';
+  tab=tab||'connections';
   const tabs=[
-    {id:'assets',   label:'Asset Preferences'},
-    {id:'visuals',  label:'Chart Visuals'},
-    {id:'risk',     label:'Risk Tolerance'},
-    {id:'perf',     label:'Performance'},
-    {id:'portfolio',label:'Portfolio'},
-    {id:'alerts',   label:'Alert Thresholds'},
-    {id:'timezone', label:'Timezone & Hours'},
+    {id:'connections',label:'Connections'},
+    {id:'assets',     label:'Asset Preferences'},
+    {id:'visuals',    label:'Chart Visuals'},
+    {id:'risk',       label:'Risk Tolerance'},
+    {id:'perf',       label:'Performance'},
+    {id:'portfolio',  label:'Portfolio'},
+    {id:'alerts',     label:'Alert Thresholds'},
+    {id:'timezone',   label:'Timezone & Hours'},
   ];
   const navHtml=tabs.map(t=>`<div class="sett-snav-item${tab===t.id?' on':''}" onclick="showSettings('${t.id}')">${t.label}</div>`).join('');
   let panelHtml='';
-  if(tab==='assets')   panelHtml=_spAssets();
+  if(tab==='connections') panelHtml=_spConnections();
+  else if(tab==='assets')   panelHtml=_spAssets();
   else if(tab==='visuals')  panelHtml=_spVisuals();
   else if(tab==='risk')     panelHtml=_spRisk();
   else if(tab==='perf')     panelHtml=_spPerf();
@@ -6584,7 +6685,10 @@ async function _sfFetchSignals(){
   liveOpps = results[0];
 
   clearInterval(prog);
-  if(fill){ fill.style.width = '100%'; fill.style.transition = 'width .2s ease-out'; }
+  // Re-fetch fill/lbl at write time — original refs can go stale if user navigated away and back
+  const fillNow = document.getElementById('sfBtFill');
+  const lblNow  = document.getElementById('sfBtLbl');
+  if(fillNow){ fillNow.style.width = '100%'; fillNow.style.transition = 'width .2s ease-out'; }
   await new Promise(function(r){ setTimeout(r, 400); });
 
   const opps = (liveOpps && liveOpps.length > 0) ? liveOpps : fallbackOpps;
@@ -6624,7 +6728,9 @@ async function _sfFetchSignals(){
       + '</div></div>';
   }).join('');
 
-  if(list) list.innerHTML = '<div class="opp-list">' + oppCards + '</div>';
+  // Re-fetch live reference — stale if user navigated away + back during 2.5s wait
+  const listNow = document.getElementById('sfOppsList');
+  if(listNow) listNow.innerHTML = '<div class="opp-list">' + oppCards + '</div>';
 
   /* ── Populate scanner table with the same fallback data ── */
   const scanAssets=[
@@ -11868,13 +11974,24 @@ function mt5LoadTradeChart(sym, type, tf, levels) { /* prototype stub — no cha
 function mt5ClosePosition(ticket, sym, level) {
   if (!ticket) return;
   // Guard: demo/prototype trades use non-integer ticket IDs (e.g. 'T001')
-  // Backend int(ticket) would throw ValueError → 500. Show friendly message instead.
+  // Remove from local demo cache and re-render instead of hitting the backend.
   var ticketInt = parseInt(ticket, 10);
   if (isNaN(ticketInt) || ticketInt <= 0) {
-    if (typeof _dvToast === 'function') _dvToast(
-      'Demo trade — connect your MT5 EA to manage live positions',
-      'rgba(201,168,76,.12)', 'rgba(201,168,76,.4)'
-    );
+    var isExit2 = level === 'SL' || level === 'MARKET';
+    var pnlMsg = '';
+    if (window._demoPosCache) {
+      var pos = window._demoPosCache.find(function(p){ return String(p.ticket) === String(ticket); });
+      if (pos) {
+        var profit = parseFloat(pos.profit) || 0;
+        pnlMsg = profit > 0 ? ' · P&L: +$' + profit.toFixed(2) : profit < 0 ? ' · P&L: -$' + Math.abs(profit).toFixed(2) : '';
+      }
+      window._demoPosCache = window._demoPosCache.filter(function(p){ return String(p.ticket) !== String(ticket); });
+    }
+    var msg = isExit2
+      ? (sym + ' demo trade closed' + pnlMsg)
+      : ('Demo TP taken on ' + sym + pnlMsg);
+    if (typeof _dvToast === 'function') _dvToast(msg, 'rgba(93,232,160,.12)', 'rgba(93,232,160,.4)');
+    _mt5RenderPositions(window._demoPosCache || []);
     return;
   }
   var isExit = level === 'SL' || level === 'MARKET';
@@ -11938,11 +12055,15 @@ function _mt5RenderPositions(positions) {
   if (!tbody) return;
 
   if (!positions || positions.length === 0) {
-    positions = [
-      {ticket:'T001',symbol:'NVDA',  type:'BUY', open_price:'847.20',current_price:'861.40',sl:'818.00',tp:'912.00',  tp2:'938.00',tp3:'972.00',profit:170.40,volume:0.12,timeframe:'1D'},
-      {ticket:'T002',symbol:'XAUUSD',type:'BUY', open_price:'2341',  current_price:'2348',  sl:'2308',  tp:'2412',    tp2:'2460',  tp3:'2510',  profit:70.00, volume:0.10,timeframe:'4H'},
-      {ticket:'T003',symbol:'EURUSD',type:'SELL',open_price:'1.0784',current_price:'1.0761',sl:'1.0822',tp:'1.0698',  tp2:'1.0650',tp3:'1.0600',profit:69.00, volume:0.30,timeframe:'1H'}
-    ];
+    // Initialise demo cache once; allows demo trades to be "exited" locally
+    if (!window._demoPosCache) {
+      window._demoPosCache = [
+        {ticket:'T001',symbol:'NVDA',  type:'BUY', open_price:'847.20',current_price:'861.40',sl:'818.00',tp:'912.00',  tp2:'938.00',tp3:'972.00',profit:170.40,volume:0.12,timeframe:'1D'},
+        {ticket:'T002',symbol:'XAUUSD',type:'BUY', open_price:'2341',  current_price:'2348',  sl:'2308',  tp:'2412',    tp2:'2460',  tp3:'2510',  profit:70.00, volume:0.10,timeframe:'4H'},
+        {ticket:'T003',symbol:'EURUSD',type:'SELL',open_price:'1.0784',current_price:'1.0761',sl:'1.0822',tp:'1.0698',  tp2:'1.0650',tp3:'1.0600',profit:69.00, volume:0.30,timeframe:'1H'}
+      ];
+    }
+    positions = window._demoPosCache;
   }
   if (countEl) countEl.textContent = positions.length + ' position' + (positions.length !== 1 ? 's' : '') + ' open';
 
