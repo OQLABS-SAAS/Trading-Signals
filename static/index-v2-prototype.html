@@ -11724,52 +11724,98 @@ var _mt5ChartTF     = null;
 window._mt5RiskAmt  = 0;
 window._tradeAuto   = {};   // per-trade automation state keyed by ticket
 
-function _slDistToPips(entry, sl, sym) {
+// Returns MT5 points (smallest price increment units) — what the EA trailing stop expects.
+// USD account assumed throughout. All asset types covered.
+function _slToMt5Points(entry, sl, sym) {
   var dist = Math.abs(parseFloat(entry) - parseFloat(sl));
-  if (!dist || isNaN(dist)) return 20;
+  if (!dist || isNaN(dist)) return 500; // safe default
   var s = (sym || '').toUpperCase();
 
-  // Commodities and metals first — must come before the forex check
-  // because XAUUSD / XAGUSD contain currency codes
-  if (/^XAU|^XAG|^XPT|^OIL|^WTI|^GAS/.test(s)) {
-    // Gold, silver, oil: price points, rounded to nearest whole number
-    return Math.max(1, Math.round(dist));
+  // ── Metals: Gold (XAUUSD), Silver (XAGUSD), Platinum (XPTUSD) ───
+  // Quoted to 2dp. Point = $0.01. $50 move = 5,000 MT5 points.
+  if (/^XAU|^XAG|^XPT/.test(s)) return Math.round(dist / 0.01);
+
+  // ── Energy / Commodities: WTI, Brent, Natural Gas ───────────────
+  // Quoted to 2dp. Point = $0.01. $2 move = 200 MT5 points.
+  if (/^OIL|^WTI|^BRENT|^USOIL|^UKOIL|^NGAS|^NATGAS/.test(s)) return Math.round(dist / 0.01);
+
+  // ── Crypto: BTC, ETH, SOL, BNB, XRP etc ─────────────────────────
+  // Quoted to 2dp on MT5. Point = $0.01. $500 BTC move = 50,000 MT5 points.
+  if (/BTC|ETH|SOL|BNB|XRP|ADA|DOGE|AVAX|MATIC|LTC|DOT|LINK/.test(s)) return Math.round(dist / 0.01);
+
+  // ── JPY forex pairs: USDJPY, EURJPY, GBPJPY etc ─────────────────
+  // Quoted to 3dp. Point = 0.001. 1 pip = 0.01 = 10 points.
+  // 50 pip move = 0.50 price = 500 MT5 points.
+  if (/JPY/.test(s) && /^[A-Z]{6}$/.test(s)) return Math.round(dist / 0.001);
+
+  // ── Standard forex: EURUSD, GBPUSD, AUDUSD, USDCHF etc ─────────
+  // Quoted to 5dp. Point = 0.00001. 1 pip = 0.0001 = 10 points.
+  // 50 pip move = 0.0050 price = 500 MT5 points.
+  if (/^(EUR|GBP|USD|AUD|CAD|CHF|NZD)(EUR|GBP|USD|AUD|CAD|CHF|NZD)$/.test(s)) return Math.round(dist / 0.00001);
+
+  // ── Indices: S&P 500, NASDAQ, Dow, DAX, FTSE, also ETFs SPY/QQQ ─
+  // Quoted to 1dp. Point = 0.1. 1 index point = 10 MT5 points.
+  // S&P 50pt move = 500 MT5 points.
+  if (/US500|US100|US30|GER40|UK100|JP225|AUS200|HK50|SPX|NDX|FTSE|DAX|^SPY$|^QQQ$|^DIA$|^IWM$/.test(s)) return Math.round(dist / 0.1);
+
+  // ── Stocks and all other ETFs (USD account) ──────────────────────
+  // Quoted to 2dp. Point = $0.01. $5 move = 500 MT5 points.
+  return Math.round(dist / 0.01);
+}
+
+// Human-readable trailing stop display — what to show the trader on screen.
+// Uses the stored MT5 points value and formats per asset type.
+function _formatTrailDisplay(mt5Points, sym) {
+  var s = (sym || '').toUpperCase();
+
+  // Metals — show in dollars: "$51"
+  if (/^XAU|^XAG|^XPT/.test(s)) {
+    var d = mt5Points * 0.01;
+    return '$' + (d >= 10 ? Math.round(d) : d.toFixed(2));
   }
 
-  // Crypto — price distance, rounded sensibly by magnitude
-  if (/BTC|ETH|SOL|BNB|XRP|ADA|DOGE|AVAX|MATIC|LTC/.test(s)) {
-    if (dist >= 1000) return Math.round(dist / 100) * 100;
-    if (dist >= 100)  return Math.round(dist / 10) * 10;
-    if (dist >= 1)    return Math.round(dist);
-    return Math.round(dist * 100) / 100;
+  // Energy / Commodities — show in dollars: "$2.50"
+  if (/^OIL|^WTI|^BRENT|^USOIL|^UKOIL|^NGAS|^NATGAS/.test(s)) {
+    var d = mt5Points * 0.01;
+    return '$' + d.toFixed(2);
   }
 
-  // True forex pairs — 6-char symbols made of two 3-letter currency codes
-  // e.g. EURUSD, GBPJPY, USDJPY — NOT XAUUSD, BTCUSD
-  var isTrueFx = /^(EUR|GBP|USD|AUD|CAD|CHF|NZD|JPY)(EUR|GBP|USD|AUD|CAD|CHF|NZD|JPY)$/.test(s);
-  if (isTrueFx) {
-    if (/JPY/.test(s)) return Math.round(dist / 0.01);    // JPY pairs: pip = 0.01
-    return Math.round(dist / 0.0001);                      // Standard: pip = 0.0001
+  // Crypto — show in dollars: "$500" or "$0.0025"
+  if (/BTC|ETH|SOL|BNB|XRP|ADA|DOGE|AVAX|MATIC|LTC|DOT|LINK/.test(s)) {
+    var d = mt5Points * 0.01;
+    if (d >= 1000) return '$' + Math.round(d).toLocaleString();
+    if (d >= 1)    return '$' + d.toFixed(2);
+    return '$' + d.toFixed(4);
   }
 
-  // Stocks, indices, everything else — use raw price distance
-  if (dist >= 100)  return Math.round(dist / 10) * 10;
-  if (dist >= 10)   return Math.round(dist);
-  if (dist >= 1)    return Math.round(dist * 10) / 10;
-  return Math.round(dist * 10000) / 10000;
+  // JPY pairs — show in pips: "50 pips" (10 MT5 points = 1 pip for JPY)
+  if (/JPY/.test(s) && /^[A-Z]{6}$/.test(s)) return Math.round(mt5Points / 10) + ' pips';
+
+  // Standard forex — show in pips: "50 pips" (10 MT5 points = 1 pip)
+  if (/^(EUR|GBP|USD|AUD|CAD|CHF|NZD)(EUR|GBP|USD|AUD|CAD|CHF|NZD)$/.test(s)) return Math.round(mt5Points / 10) + ' pips';
+
+  // Indices — show in index points: "50 pts" (10 MT5 points = 1 index point)
+  if (/US500|US100|US30|GER40|UK100|JP225|AUS200|HK50|SPX|NDX|FTSE|DAX|^SPY$|^QQQ$|^DIA$|^IWM$/.test(s)) {
+    var pts = mt5Points * 0.1;
+    return (pts % 1 === 0 ? Math.round(pts) : pts.toFixed(1)) + ' pts';
+  }
+
+  // Stocks and ETFs — show in dollars: "$5.00"
+  var d = mt5Points * 0.01;
+  return '$' + d.toFixed(2);
 }
 
 function _getTradeAuto(ticket, entry, sl, sym) {
   if (!window._tradeAuto[ticket]) {
-    // Try to restore from persistent storage first
     var stored = null;
     try { stored = JSON.parse(_dvRead('dv_ta_' + ticket) || 'null'); } catch(e) {}
-    window._tradeAuto[ticket] = stored || { breakeven: false, trailing: false, trailing_pips: 20 };
+    window._tradeAuto[ticket] = stored || { breakeven: false, trailing: false, trailing_pips: 500, sym: sym || '' };
   }
-  // Always recalculate trailing_pips from SL distance when trade data is available
-  // This ensures the value is calibrated even if the record was created before trade loaded
+  // Store sym so display formatter can access it from _buildAutoChips
+  if (sym) window._tradeAuto[ticket].sym = sym;
+  // Always recalculate MT5 points from SL distance when trade data is available
   if (entry && sl) {
-    window._tradeAuto[ticket].trailing_pips = _slDistToPips(entry, sl, sym);
+    window._tradeAuto[ticket].trailing_pips = _slToMt5Points(entry, sl, sym);
   }
   return window._tradeAuto[ticket];
 }
@@ -11794,7 +11840,7 @@ function _buildAutoChips(ticket) {
     + 'Breakeven after TP1</span>';
   if (s.trailing) html += '<span style="' + _chip + 'background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.2);color:var(--amb);">'
     + '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>'
-    + 'Trailing ' + s.trailing_pips + ' pips</span>';
+    + 'Trailing ' + _formatTrailDisplay(s.trailing_pips, s.sym) + '</span>';
   return html;
 }
 
@@ -12041,11 +12087,11 @@ function _mt5RenderPositions(positions) {
       +    '<div style="font-family:var(--mono);font-size:11px;color:var(--t2);">Trailing stop</div>'
       +    '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;">'
       +      '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">Distance</span>'
-      +      '<input type="number" value="'+ta.trailing_pips+'" min="5" max="99999" onclick="event.stopPropagation();" oninput="event.stopPropagation();_setTradeAuto(\''+ticket+'\',\'trailing_pips\',parseInt(this.value)||20);"'
-      +        ' style="width:64px;background:var(--bg);border:1px solid var(--bd);color:var(--t2);font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;text-align:center;">'
-      +      '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">pips</span>'
+      +      '<input type="number" value="'+ta.trailing_pips+'" min="1" max="999999" onclick="event.stopPropagation();" oninput="event.stopPropagation();_setTradeAuto(\''+ticket+'\',\'trailing_pips\',parseInt(this.value)||500);"'
+      +        ' style="width:72px;background:var(--bg);border:1px solid var(--bd);color:var(--t2);font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;text-align:center;">'
+      +      '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">MT5 pts · '+_formatTrailDisplay(ta.trailing_pips, ta.sym || sym)+'</span>'
       +    '</div>'
-      +    '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:3px;">auto-set from SL distance</div>'
+      +    '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:3px;">auto-calculated from SL · edit to override</div>'
       +  '</div>'
       +  '<label class="ta-switch" onclick="event.stopPropagation();">'
       +    '<input type="checkbox" '+(ta.trailing?'checked':'')+' onchange="_setTradeAuto(\''+ticket+'\',\'trailing\',this.checked)">'
