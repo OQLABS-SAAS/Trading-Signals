@@ -2048,30 +2048,24 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         confidence = "LOW"
 
     # ══════════════════════════════════════════════════════════════
-    # TRADINGVIEW PRIMARY SIGNAL OVERRIDE
-    # When TV data is available, use TradingView's 26-indicator
-    # Recommend.All score as the authoritative signal.  Our custom
-    # analysis still drives the narrative, trade levels, and context
-    # but the headline BUY / HOLD / SELL matches what traders see
-    # on TradingView exactly.
+    # TRADINGVIEW = CONTEXT, NOT AUTHORITY (Stage 1 unification)
+    # TradingView's 26-indicator Recommend.All score is fetched and
+    # surfaced to the user as an external reference (tv_rec_label,
+    # tv_rec_all are still in the response for the UI to display as
+    # a context badge). It NEVER overrides DotVerse's local verdict.
+    #
+    # Why: signal generation must be one coherent voice. The previous
+    # behaviour silently overrode `signal` from TV while leaving local
+    # `bullish_count`/`bearish_count` exposed — beginners saw "BUY"
+    # alongside vote breakdowns that mathematically said HOLD or SELL.
+    # That contradiction undermines trust. The fix keeps the displayed
+    # verdict and the displayed evidence always sourced from the same
+    # logic so they agree by construction.
+    #
+    # tv_signal_used is preserved as a field (always False post-fix)
+    # for backwards compatibility with any consumer reading it.
     # ══════════════════════════════════════════════════════════════
     tv_signal_used = False
-    if tv:
-        tv_rec_label = tv.get("tv_rec_label", "")
-        tv_rec_all   = tv.get("tv_rec_all")
-        if tv_rec_label in ("STRONG BUY", "BUY", "NEUTRAL", "SELL", "STRONG SELL"):
-            if tv_rec_label == "STRONG BUY":
-                signal, confidence = "BUY",  "HIGH"
-            elif tv_rec_label == "BUY":
-                signal, confidence = "BUY",  "MEDIUM"
-            elif tv_rec_label == "NEUTRAL":
-                signal, confidence = "HOLD", "LOW"
-            elif tv_rec_label == "SELL":
-                signal, confidence = "SELL", "MEDIUM"
-            else:  # STRONG SELL
-                signal, confidence = "SELL", "HIGH"
-            tv_signal_used = True
-            print(f"[TV-signal] {ticker} → {tv_rec_label} (score={tv_rec_all}) → {signal}/{confidence}")
 
     # ══════════════════════════════════════════════════════════════
     # GATE 1: Higher-timeframe trend filter
@@ -2289,11 +2283,14 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         "tv_rec_label": tv.get("tv_rec_label") if tv else None,
         "tv_rec_all": tv.get("tv_rec_all") if tv else None,
         # ── 3d: Confidence label (protocol vocabulary) ────────────────────
-        # CONFIRMED — TV scanner data used (26 indicators) OR very strong net score
-        # LIKELY    — Medium/high conviction from our indicator stack, no TV override
+        # CONFIRMED — Strong net conviction from DotVerse's own indicator stack (>=5 net)
+        # LIKELY    — Medium conviction (3-4 net votes one direction)
         # HYPOTHESIS — Weak agreement; signal exists but conviction is marginal
+        # Note: previously also CONFIRMED when TV's 26-indicator override fired,
+        # but TV is no longer authoritative (Stage 1 unification) — labels now
+        # reflect DotVerse's own conviction strictly.
         "confidence_label": (
-            "CONFIRMED"  if (tv_signal_used or abs(net) >= 5) else
+            "CONFIRMED"  if abs(net) >= 5 else
             "LIKELY"     if abs(net) >= 3 else
             "HYPOTHESIS"
         ),
