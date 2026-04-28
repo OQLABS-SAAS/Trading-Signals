@@ -5211,6 +5211,13 @@ function showSettings(tab){
     </div>
   </div>`;
   if(tab==='timezone') _initTzClocks();
+  if(tab==='connections') {
+    // Apply live MT5 status to badge now that DOM is ready
+    var badge = document.getElementById('mt5ConnBadge');
+    if (badge && typeof _mt5ApplyConnBadge === 'function') {
+      _mt5ApplyConnBadge(badge, window._mt5IsConnected, window._mt5LastSeen);
+    }
+  }
 }
 
 
@@ -12037,15 +12044,30 @@ function _mt5GuessAssetType(sym) {
 }
 
 function _mt5SetStatus(connected, lastSeenStr) {
+  // Store globally so Settings → Connections tab can read live state
+  window._mt5IsConnected = !!connected;
+  window._mt5LastSeen    = lastSeenStr || null;
   const lbl = document.getElementById('actMt5Lbl');
   const dot = document.querySelector('.act-mt5-dot');
-  if (!lbl) return;
+  if (lbl) {
+    lbl.textContent = connected
+      ? 'MT5 connected — ready to execute'
+      : (lastSeenStr ? 'EA Offline — last seen ' + lastSeenStr : 'EA Offline — open MT5 and start EA');
+  }
+  if (dot) dot.style.background = connected ? '#5de8a0' : '#e05555';
+  // Update Settings badge if Connections tab is currently open
+  var badge = document.getElementById('mt5ConnBadge');
+  if (badge) _mt5ApplyConnBadge(badge, connected, lastSeenStr);
+}
+function _mt5ApplyConnBadge(badge, connected, lastSeenStr) {
   if (connected) {
-    lbl.textContent = 'MT5 connected — ready to execute';
-    if (dot) dot.style.background = '#5de8a0';
+    badge.textContent = 'CONNECTED';
+    badge.style.background = 'rgba(93,232,160,.12)';
+    badge.style.color = 'rgba(93,232,160,.9)';
   } else {
-    lbl.textContent = lastSeenStr ? 'EA Offline — last seen ' + lastSeenStr : 'EA Offline — open MT5 and start EA';
-    if (dot) dot.style.background = '#e05555';
+    badge.textContent = lastSeenStr ? 'OFFLINE · ' + lastSeenStr : 'NOT CONNECTED';
+    badge.style.background = 'rgba(224,85,85,.12)';
+    badge.style.color = 'rgba(224,85,85,.85)';
   }
 }
 
