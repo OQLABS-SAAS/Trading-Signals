@@ -5212,11 +5212,21 @@ function showSettings(tab){
   </div>`;
   if(tab==='timezone') _initTzClocks();
   if(tab==='connections') {
-    // Apply live MT5 status to badge now that DOM is ready
+    // Apply cached state immediately (avoids flash of NOT CONNECTED)
     var badge = document.getElementById('mt5ConnBadge');
-    if (badge && typeof _mt5ApplyConnBadge === 'function') {
+    if (badge && typeof _mt5ApplyConnBadge === 'function' && window._mt5IsConnected !== undefined) {
       _mt5ApplyConnBadge(badge, window._mt5IsConnected, window._mt5LastSeen);
     }
+    // Then fetch live state regardless — ACT tab might never have been opened
+    dvFetch('/api/mt5/state').then(function(d) {
+      var b = document.getElementById('mt5ConnBadge');
+      if (!b || typeof _mt5ApplyConnBadge !== 'function') return;
+      if (!d) { _mt5ApplyConnBadge(b, false, null); return; }
+      var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
+        ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago / 60) + 'm ago')
+        : null;
+      _mt5ApplyConnBadge(b, d.connected, lastSeenStr);
+    });
   }
 }
 
@@ -6651,19 +6661,19 @@ async function _sfFetchSignals(){
   /* ── Animate progress bar ── */
   let pct = 0;
   const prog = setInterval(function(){
-    pct = Math.min(pct + 9.5, 85);
+    pct = Math.min(pct + 18, 85);
     if(fill) fill.style.width = Math.min(pct, 90) + '%';
-  }, 280);
+  }, 140);
 
-  /* ── Fetch + minimum 2.5s display — run both in parallel ── */
+  /* ── Fetch + minimum 0.8s display — run both in parallel ── */
   let liveOpps = null;
-  const minWait = new Promise(function(r){ setTimeout(r, 2500); });
+  const minWait = new Promise(function(r){ setTimeout(r, 800); });
   const fetchData = (async function(){
     try {
       const tickers = ['BTCUSD','ETHUSD','SOLUSD','NVDA','AAPL','EURUSD','GBPJPY','XAUUSD','USOIL','SPY'];
       const res = await Promise.race([
         dvFetch('/api/scan-list', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ tickers: tickers, timeframe: '4H' })}),
-        new Promise(function(r){ setTimeout(function(){ r(null); }, 10000); })
+        new Promise(function(r){ setTimeout(function(){ r(null); }, 5000); })
       ]);
       if(res && res.results && res.results.length > 0){
         return res.results
@@ -6695,8 +6705,8 @@ async function _sfFetchSignals(){
   // Re-fetch fill/lbl at write time — original refs can go stale if user navigated away and back
   const fillNow = document.getElementById('sfBtFill');
   const lblNow  = document.getElementById('sfBtLbl');
-  if(fillNow){ fillNow.style.width = '100%'; fillNow.style.transition = 'width .2s ease-out'; }
-  await new Promise(function(r){ setTimeout(r, 400); });
+  if(fillNow){ fillNow.style.width = '100%'; fillNow.style.transition = 'width .15s ease-out'; }
+  await new Promise(function(r){ setTimeout(r, 150); });
 
   const opps = (liveOpps && liveOpps.length > 0) ? liveOpps : fallbackOpps;
   window._rmOpps = opps;
