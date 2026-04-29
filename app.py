@@ -4420,21 +4420,19 @@ def analyze():
                 df = _fill_date_grid(df, timeframe, asset_type)
             if not df.empty and len(df) >= 51:  # EMA50 needs 51 bars minimum to be valid
                 ind_full = calculate_indicators(df, timeframe, asset_type)
-                if tv_ok:
-                    # TV is primary — only take chart arrays + win rate from yfinance
-                    # rsi_divergence MUST be included: build_ind_from_tv hardcodes it
-                    # to type="none", so the real pivot-based detection only lives in
-                    # ind_full (calculate_indicators).  Without this, divergences never show.
-                    for k in ("chart_dates","chart_prices","chart_ema20","chart_ema50",
-                              "chart_volumes","chart_bb_upper","chart_bb_lower",
-                              "chart_rsi","chart_buy_signals","chart_sell_signals",
-                              "chart_opens","chart_highs","chart_lows",
-                              "rsi_divergence"):
-                        ind[k] = ind_full.get(k, [])
-                else:
-                    # TV failed — yfinance is primary; use full indicator set
-                    ind = ind_full
-                    # Build MTF from yfinance daily data as best-effort
+                # Bug N fix 2026-04-29: ALWAYS prefer calculate_indicators (yfinance)
+                # over build_ind_from_tv when both are available. Previously, when
+                # tv_ok was True, ind remained TV-based (vol_ratio=1.0 hardcoded,
+                # supertrend=NEUTRAL hardcoded — suppressing two votes) and only
+                # chart arrays from yfinance were merged in. That meant analyze and
+                # scan-list could disagree on the same ticker because TV-based ind
+                # is structurally less rich than calculate_indicators output.
+                # Single source of truth — yfinance — for signal voting. TV data
+                # remains available via the `tv` arg passed to get_analysis() for
+                # informational context (tv_rec_label, tv_rec_all).
+                ind = ind_full
+                if not tv_ok:
+                    # TV failed — build MTF from yfinance daily data as best-effort
                     try:
                         c = df["Close"].squeeze()
                         e20 = float(ema_tv(c, 20).iloc[-1])
@@ -4672,22 +4670,15 @@ def analyze():
             **counter,
             "tv": tv,
         })
-        # ── Scanner/Signals consistency: override signal fields with cached scanner result ──
-        # When user navigates from scanner, the scanner's computed signal is returned so the
-        # Signals page always matches what the scanner showed. Chart, MTF, indicators stay fresh.
-        if _redis_client:
-            try:
-                _sc = _redis_client.get(f"scanner_signal:{ticker}:{timeframe}")
-                if _sc:
-                    _sc_data = json.loads(_sc)
-                    for _key in ("signal","entry","stop_loss","tp1","tp2","tp3",
-                                 "rr1","rr2","rr3","confidence","confidence_label",
-                                 "summary","bullish_count","bearish_count","position_pct"):
-                        if _key in _sc_data:
-                            response_data[_key] = _sc_data[_key]
-                    print(f"[analyze] Scanner cache hit — signal overridden to {_sc_data.get('signal')}")
-            except Exception:
-                pass
+        # ── Scanner cache override REMOVED 2026-04-29 (Bug N fix) ──
+        # Previously read scanner_signal Redis key and overrode response_data signal
+        # fields. Created the same trust violation we removed from TV override:
+        # scan-list could compute one signal (using TV-based ind), cache it, then
+        # /api/analyze would compute a different signal (using yfinance-based ind)
+        # and silently override with the cached scanner result. Scanner and analyze
+        # now ALWAYS compute via the same path (yfinance + calculate_indicators), so
+        # this cache override is no longer needed for consistency. Removing it lets
+        # /api/analyze always return its own fresh computation — coherent verdict.
         # ── Persist to signal history (fire-and-forget, never block the response) ──
         # Bug J fix 2026-04-29: previous code had two bugs that silently failed every
         # write: (1) user_id was looked up via session.get('user',{}).get('localId',...)
@@ -5149,24 +5140,46 @@ def scan_list():
         results_lock = _threading.Lock()
 
         def _scan_one(ticker):
+            # Bug N fix 2026-04-29: scan_list now uses the SAME data source as
+            # /api/analyze (yfinance + calculate_indicators). Previously the TV
+            # fast-path used build_ind_from_tv() which hardcodes vol_ratio=1.0 and
+            # supertrend='NEUTRAL', producing different `ind` than calculate_indicators.
+            # Same ticker/TF could yield BUY in scan-list and SELL in analyze. The
+            # signal-coherence ethos requires one source of truth — scan-list and
+            # analyze must agree by construction. TV is still used elsewhere for chart
+            # rendering and MTF context; for SIGNAL VOTING, only yfinance.
             raw = normalise_ticker(ticker, asset_type)
             row = None
             try:
-                # ── PRIMARY: TradingView (fast) ──
-                tv = fetch_tv_data(raw, asset_type, timeframe)
-                if tv and tv.get("tv_price"):
-                    if _redis_client:
-                        try: _redis_client.setex(f"tv_cache:{raw}:{timeframe}", 300, json.dumps(tv))
-                        except Exception: pass
-                    ind      = build_ind_from_tv(tv)
-                    analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv)
+                df = safe_download(raw, period=cfg["period"], interval=cfg["interval"])
+                # Yahoo v8 rate-limits Railway IPs — yfinance package fallback (Bug Y fix).
+                if df.empty:
+                    try:
+                        df = yf.download(raw, period=cfg["period"], interval=cfg["interval"],
+                                         progress=False, auto_adjust=True)
+                        if isinstance(df.columns, pd.MultiIndex):
+                            df.columns = df.columns.get_level_values(0)
+                        print(f"[yfinance-fallback] {raw} {timeframe}: {len(df)} bars")
+                    except Exception as _yfe:
+                        print(f"[yfinance-fallback] {raw} error: {_yfe}")
+                        df = pd.DataFrame()
+                if "resample" in cfg and not df.empty:
+                    if not isinstance(df.index, pd.DatetimeIndex):
+                        df.index = pd.to_datetime(df.index)
+                    df = df.resample(cfg["resample"]).agg(
+                        {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
+                if df.empty or len(df) < 20:
+                    row = {"ticker": ticker, "error": "no data"}
+                else:
+                    ind      = calculate_indicators(df, timeframe, asset_type)
+                    analysis = get_analysis(ticker, asset_type, ind, timeframe)
                     ct       = detect_counter_trade(ind)
-                    volume   = tv.get("tv_volume") or 0
                     row = {
                         "ticker": ticker, "raw_ticker": raw, "asset_type": asset_type,
                         "price": ind["price"], "chg_1d": ind["chg_1d"], "rsi": ind["rsi"],
-                        "vol_ratio": ind["vol_ratio"], "volume": int(volume) if volume else 0,
-                        "ema_trend": ind.get("ema_trend","MIXED"), "supertrend": ind.get("supertrend","NEUTRAL"),
+                        "vol_ratio": ind["vol_ratio"],
+                        "volume": int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
+                        "ema_trend": ind["ema_trend"], "supertrend": ind["supertrend"],
                         "signal": analysis["signal"], "entry": analysis.get("entry"),
                         "stop_loss": analysis.get("stop_loss"), "tp1": analysis.get("tp1"),
                         "tp2": analysis.get("tp2"), "tp3": analysis.get("tp3"),
@@ -5176,59 +5189,6 @@ def scan_list():
                         "confidence": analysis.get("confidence","LOW"),
                         "confidence_label": analysis.get("confidence_label","HYPOTHESIS"),
                     }
-                    if _redis_client:
-                        try:
-                            _scan_payload = {k: analysis.get(k) for k in (
-                                "signal","entry","stop_loss","tp1","tp2","tp3",
-                                "rr1","rr2","rr3","confidence","confidence_label",
-                                "summary","bullish_count","bearish_count","position_pct")}
-                            _redis_client.setex(f"scanner_signal:{raw}:{timeframe}", 300, json.dumps(_scan_payload))
-                        except Exception: pass
-                else:
-                    # ── FALLBACK: yfinance ──
-                    df = safe_download(raw, period=cfg["period"], interval=cfg["interval"])
-                    # Bug Y fix 2026-04-29: safe_download (direct Yahoo v8 HTTP) gets
-                    # rate-limited (429) from Railway IPs — its comment claims a
-                    # Stooq/FMP fallback but no fallback was wired into scan_list, so
-                    # stocks/commodity all returned 'no data' silently. Add yfinance
-                    # package as second-tier fallback (different HTTP path, different
-                    # rate-limit pool, often succeeds when v8 HTTP fails).
-                    if df.empty:
-                        try:
-                            df = yf.download(raw, period=cfg["period"], interval=cfg["interval"],
-                                             progress=False, auto_adjust=True)
-                            if isinstance(df.columns, pd.MultiIndex):
-                                df.columns = df.columns.get_level_values(0)
-                            print(f"[yfinance-fallback] {raw} {timeframe}: {len(df)} bars")
-                        except Exception as _yfe:
-                            print(f"[yfinance-fallback] {raw} error: {_yfe}")
-                            df = pd.DataFrame()
-                    if "resample" in cfg and not df.empty:
-                        if not isinstance(df.index, pd.DatetimeIndex):
-                            df.index = pd.to_datetime(df.index)
-                        df = df.resample(cfg["resample"]).agg(
-                            {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
-                    if df.empty or len(df) < 20:
-                        row = {"ticker": ticker, "error": "no data"}
-                    else:
-                        ind      = calculate_indicators(df, timeframe, asset_type)
-                        analysis = get_analysis(ticker, asset_type, ind, timeframe)
-                        ct       = detect_counter_trade(ind)
-                        row = {
-                            "ticker": ticker, "raw_ticker": raw, "asset_type": asset_type,
-                            "price": ind["price"], "chg_1d": ind["chg_1d"], "rsi": ind["rsi"],
-                            "vol_ratio": ind["vol_ratio"],
-                            "volume": int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
-                            "ema_trend": ind["ema_trend"], "supertrend": ind["supertrend"],
-                            "signal": analysis["signal"], "entry": analysis.get("entry"),
-                            "stop_loss": analysis.get("stop_loss"), "tp1": analysis.get("tp1"),
-                            "tp2": analysis.get("tp2"), "tp3": analysis.get("tp3"),
-                            "rr1": analysis.get("rr1"), "rr2": analysis.get("rr2"), "rr3": analysis.get("rr3"),
-                            "reason": analysis.get("summary",""), "bull_score": analysis.get("bullish_count",0),
-                            "bear_score": analysis.get("bearish_count",0), "counter_trade": ct["counter_trade"],
-                            "confidence": analysis.get("confidence","LOW"),
-                            "confidence_label": analysis.get("confidence_label","HYPOTHESIS"),
-                        }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
                 row = {"ticker": ticker, "error": str(e)[:80]}
