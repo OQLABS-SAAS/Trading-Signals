@@ -6349,6 +6349,32 @@ function updateFlowBadge() {
       + '<b>' + val + arrow + '</b></span>';
   }
 
+  // ── Plain-English reasoning for each factor + final grade ──────────────
+  // Beginners need to understand WHY the engine picked this size, not just see a number.
+  function _confReason(pct, adj) {
+    if (adj > 0) return 'Confluence ' + pct + '% — strong agreement: indicators are pointing the same direction with high conviction. Size scales up.';
+    if (adj < 0) return 'Confluence ' + pct + '% — weak agreement: only just over half the indicators agree. Size scales down so a wrong call costs less.';
+    return 'Confluence ' + pct + '% — moderate agreement: indicators mostly aligned but not perfect. Size stays neutral.';
+  }
+  function _rrReason(rr, adj) {
+    if (adj > 0) return 'R:R ' + rr.toFixed(1) + ':1 — high reward-to-risk: every $1 risked targets $' + rr.toFixed(1) + '+ profit. Size scales up because the math is forgiving.';
+    if (adj < 0) return 'R:R ' + rr.toFixed(1) + ':1 — low reward-to-risk: target profit barely beats the stop distance. Size scales down because you need to win more often to break even.';
+    return 'R:R ' + rr.toFixed(1) + ':1 — standard reward-to-risk (around 2:1). Size stays neutral.';
+  }
+  function _volReason(vr, adj) {
+    if (adj > 0) return 'Volume ' + vr.toFixed(1) + '× — heavy participation: real money is moving, this isn\'t a fake breakout. Size scales up.';
+    if (adj < 0) return 'Volume ' + vr.toFixed(1) + '× — quiet market: under 80% of normal activity. Setups in low-volume conditions whipsaw. Size scales down.';
+    return 'Volume ' + vr.toFixed(1) + '× — normal participation. Size stays neutral.';
+  }
+  var _gradeBlurb;
+  if (grade === 'SCALE UP') {
+    _gradeBlurb = 'Verdict: SCALE UP — multiple factors favourable, the engine recommends a larger position than your default risk %.';
+  } else if (grade === 'FULL SIZE') {
+    _gradeBlurb = 'Verdict: FULL SIZE — setup is solid at standard size, no reason to go bigger or smaller than your default risk %.';
+  } else {
+    _gradeBlurb = 'Verdict: SCALE DOWN — at least one factor is weak, the engine recommends cutting size below your default risk %.';
+  }
+
   badge.innerHTML =
     // Header row
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
@@ -6371,10 +6397,21 @@ function updateFlowBadge() {
     + '</div>'
     + '</div>'
     // Factor pills
-    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">'
     + pill('Confluence', confPct + '%', confAdj)
     + pill('R:R', rr.toFixed(1) + ':1', rrAdj)
     + pill('Volume', vr.toFixed(1) + '×', vrAdj)
+    + '</div>'
+    // Reasoning panel — plain-English explanation of WHY the engine picked this size
+    + '<div style="background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:6px;padding:9px 11px;margin-bottom:12px;">'
+    +   '<div style="font-family:var(--mono);font-size:9px;color:rgba(200,210,230,.55);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px;">Why this size?</div>'
+    +   '<div style="font-size:10.5px;color:rgba(220,225,235,.78);line-height:1.55;margin-bottom:5px;"><b style="color:rgba(180,190,210,.85);">Confluence</b> = how many of the 7 DotVerse indicators (RSI, EMAs, MACD, Bollinger, supertrend, volume, MTF trend) point the same direction. Higher % = stronger consensus.</div>'
+    +   '<ul style="margin:0;padding:0;list-style:none;font-size:10px;line-height:1.6;color:rgba(200,210,230,.7);">'
+    +     '<li style="margin-bottom:3px;">• ' + _confReason(confPct, confAdj) + '</li>'
+    +     '<li style="margin-bottom:3px;">• ' + _rrReason(rr, rrAdj) + '</li>'
+    +     '<li style="margin-bottom:6px;">• ' + _volReason(vr, vrAdj) + '</li>'
+    +     '<li style="padding-top:5px;border-top:1px solid rgba(237,232,216,.08);color:' + gradeCol + ';font-weight:600;">' + _gradeBlurb + '</li>'
+    +   '</ul>'
     + '</div>'
     // Apply button — SVG icon, no emoji
     + '<button id="kellyApplyBtn" onclick="applyKellyRisk(this)" style="width:100%;padding:11px;border-radius:7px;border:1px solid ' + btnBdr + ';background:' + btnBg + ';color:' + btnCol + ';font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.8px;cursor:pointer;transition:all .18s;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:7px;" onmouseover="this.style.background=\'' + btnHover + '\'" onmouseout="this.style.background=\'' + btnBg + '\'">'
