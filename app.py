@@ -4755,6 +4755,35 @@ def analyze():
         except Exception as _re:
             print(f"[regime] error: {_re}")
 
+        # ── VOLATILITY THROTTLE (commit 5 — 2026-04-29) ────────────────────
+        # When the current bar's high-low range exceeds the 95th percentile
+        # of the last 100 bars, suppress new BUY/SELL signals. Extreme
+        # volatility = wider stops, worse fills, more whipsaws. Existing
+        # atr_gate_pct filters MINIMUM volatility; this caps the MAXIMUM.
+        try:
+            if analysis.get("signal") in ("BUY", "SELL"):
+                _hs = ind.get("chart_highs") or []
+                _ls = ind.get("chart_lows")  or []
+                if len(_hs) >= 50 and len(_ls) >= 50:
+                    _ranges = [(_hs[i] - _ls[i]) for i in range(-100, 0)
+                               if _hs[i] is not None and _ls[i] is not None]
+                    if len(_ranges) >= 30:
+                        _ranges.sort()
+                        _p95 = _ranges[int(len(_ranges) * 0.95)]
+                        _curr = (_hs[-1] - _ls[-1]) if _hs[-1] is not None and _ls[-1] is not None else 0
+                        if _curr > _p95 and _p95 > 0:
+                            analysis["signal"]              = "HOLD"
+                            analysis["confidence"]          = "LOW"
+                            analysis["confidence_label"]    = "HYPOTHESIS"
+                            analysis["volatility_throttle"] = True
+                            analysis["volatility_range"]    = round(_curr, 4)
+                            analysis["volatility_p95"]      = round(_p95, 4)
+                            analysis["summary"] = (analysis.get("summary","") +
+                                f" [Volatility throttle: current range {_curr:.4f} above 95th percentile {_p95:.4f}.]")
+                            print(f"[vol-throttle] {ticker} {timeframe} SUPPRESSED: range={_curr:.4f} p95={_p95:.4f}")
+        except Exception as _ve:
+            print(f"[vol-throttle] error: {_ve}")
+
         response_data = _sanitize({
             "ticker":     ticker,
             "asset_type": asset_type,
