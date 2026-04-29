@@ -4737,6 +4737,24 @@ def analyze():
         except Exception as _ce:
             print(f"[circuit] error: {_ce}")
 
+        # ── ADX REGIME DETECTION (commit 4 — 2026-04-29) ───────────────────
+        # Classify market regime from TV's ADX. TRENDING (ADX>25) — directional
+        # moves likely persist. RANGING (ADX<20) — mean-reversion favoured.
+        # TRANSITION (20-25) — regime shifting, lower conviction.
+        try:
+            _adx_val = (tv or {}).get("tv_adx") if isinstance(tv, dict) else None
+            if _adx_val is None:
+                analysis["regime"] = "UNKNOWN"
+            elif _adx_val > 25:
+                analysis["regime"] = "TRENDING"
+            elif _adx_val < 20:
+                analysis["regime"] = "RANGING"
+            else:
+                analysis["regime"] = "TRANSITION"
+            analysis["adx"] = _adx_val
+        except Exception as _re:
+            print(f"[regime] error: {_re}")
+
         response_data = _sanitize({
             "ticker":     ticker,
             "asset_type": asset_type,
