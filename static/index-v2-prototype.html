@@ -10777,6 +10777,31 @@ function _initUndChart(sig){
   const apiDates = sig && sig.chartDates && sig.chartDates.length ? sig.chartDates : null;
   const apiPrices = sig && sig.chartPrices && sig.chartPrices.length ? sig.chartPrices : null;
 
+  // ── TradingView widget fallback (called when LWC data unavailable) ──
+  // When backend cannot fetch OHLC (Railway IP rate-limited by Yahoo v8 for
+  // stocks/forex), replace the empty chart with TradingView's public iframe
+  // widget. Works in any browser, requires no backend, no auth.
+  function _showTvFallback(reason){
+    console.warn('[chart] TV widget fallback:', reason);
+    if(!wrap) return;
+    // Map asset to TV exchange prefix
+    var tvSym = sym.toUpperCase().replace('/','').replace('-','');
+    if(isCrypto){ tvSym = 'BINANCE:' + tvSym + (tvSym.endsWith('USDT')||tvSym.endsWith('USD')?'':'USDT'); }
+    else if(sig?.asset === 'forex' || /^[A-Z]{6}$/.test(tvSym)) { tvSym = 'FX:' + tvSym; }
+    else if(sig?.asset === 'commodity') { tvSym = 'TVC:' + tvSym; }
+    else { tvSym = 'NASDAQ:' + tvSym; }
+    var tvInt = ({'15M':'15','1H':'60','4H':'240','1D':'D','1W':'W'})[tf] || '60';
+    var tvUrl = 'https://s.tradingview.com/widgetembed/?frameElementId=tv_' + Date.now()
+              + '&symbol=' + encodeURIComponent(tvSym)
+              + '&interval=' + tvInt
+              + '&theme=dark&style=1&hide_top_toolbar=1&hide_side_toolbar=1'
+              + '&allow_symbol_change=0&studies=[]&hide_legend=1';
+    wrap.innerHTML = '<div style="padding:6px 10px;font-size:9.5px;color:rgba(201,168,76,.85);font-family:var(--mono);background:rgba(201,168,76,.06);border-bottom:1px solid rgba(201,168,76,.18);">'
+      + 'Live OHLC unavailable — embedding TradingView chart instead'
+      + '</div>'
+      + '<iframe src="' + tvUrl + '" style="width:100%;height:380px;border:0;"></iframe>';
+  }
+
   if(apiDates && apiPrices){
     // Convert API OHLCV arrays → LWC bar format
     const opens = sig.chartOpens||apiPrices, highs = sig.chartHighs||apiPrices, lows = sig.chartLows||apiPrices;
@@ -10801,14 +10826,12 @@ function _initUndChart(sig){
       _applyChartBars(bars);
     }
     else if(isCrypto) { console.log('[chart] bars empty, crypto -> Binance fallback'); _fetchBinance(); }
-    else { console.warn('[chart] bars empty, not crypto -> Chart data unavailable'); if(loadEl){loadEl.style.display='flex';loadEl.textContent='Chart data unavailable';} }
+    else { _showTvFallback('bars filtered empty for ' + sym); }
   } else if(isCrypto){
     console.log('[chart] no API data, crypto -> Binance fallback');
     _fetchBinance();
   } else {
-    console.warn('[chart] no API data, not crypto -> trying Binance USDT pair as last resort');
-    // Try Binance even for stocks/forex — won't work for AAPL but might catch BTC mistyped as stock
-    _fetchBinance();
+    _showTvFallback('no chart_prices in API response for ' + sym);
   }
 
   function _fetchBinance(){
