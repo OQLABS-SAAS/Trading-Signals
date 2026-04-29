@@ -7438,6 +7438,13 @@ function _scRenderLive(results,tf){
       <td><div style="display:flex;gap:5px;align-items:center;"><span style="font-size:9px;padding:2px 5px;border-radius:4px;color:${cc};border:1px solid ${cc.replace('.85','.3').replace('.8','.3').replace('.5','.2')}">${r.confidence_label||r.confidence||'–'}</span><button class="sc-act-btn" onclick="event.stopPropagation();loadScannerSignal(JSON.parse(this.closest('tr').dataset.payload));setNav('understand');showUnderstand();">Analyse →</button></div></td>
     </tr>`;
   }).join('');
+  // Bug O fix 2026-04-29: re-apply current filter state to freshly rendered rows.
+  // Previously, when user clicked "Run Scan" with BUY-only or SELL-only already
+  // active, the new rows rendered with filter ignored — table showed all signals
+  // including HOLDs even though the filter pill was selected. _scApplyFilters
+  // walks the rows and toggles display based on current _scAssetFilter / _scRRMin
+  // / _scConfMin / _scTFFilter state.
+  _scApplyFilters();
 }
 let _scRRMin=2.0,_scConfMin=0,_scTFFilter='all';
 
