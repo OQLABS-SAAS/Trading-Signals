@@ -6851,6 +6851,13 @@ async function _sfFetchSignals(){
       return { opp: o, bt: cached.data };
     }
     try {
+      // Validate parsed numeric values before calling backtest — backend 400s on NaN/null
+      const _e = parseFloat(String(o.entry).replace(/,/g,''));
+      const _s = parseFloat(String(o.sl).replace(/,/g,''));
+      const _t = parseFloat(String(o.tp).replace(/,/g,''));
+      if(!isFinite(_e) || !isFinite(_s) || !isFinite(_t) || _e<=0 || _s<=0 || _t<=0){
+        return { opp: o, bt: null };  // skip silently — no console error
+      }
       const btRes = await Promise.race([
         dvFetch('/api/backtest', {
           method:'POST',
@@ -6860,9 +6867,9 @@ async function _sfFetchSignals(){
             asset_type: o.asset === 'equity' ? 'stock' : (o.asset || 'stock'),
             timeframe:  o.tf.toLowerCase(),
             signal:     o.sig,
-            entry:      parseFloat(String(o.entry).replace(/,/g,'')),
-            stop_loss:  parseFloat(String(o.sl).replace(/,/g,'')),
-            tp1:        parseFloat(String(o.tp).replace(/,/g,'')),
+            entry:      _e,
+            stop_loss:  _s,
+            tp1:        _t,
             tp2:        o.tp2 ? parseFloat(String(o.tp2).replace(/,/g,'')) : null,
             tp3:        o.tp3 ? parseFloat(String(o.tp3).replace(/,/g,'')) : null
           })
@@ -10916,6 +10923,16 @@ async function undRunBacktest(silent){
   // HOLD signals have no directional conviction — no backtest to run
   if((sig.sig||'').toUpperCase()==='HOLD'){
     if(!silent) alert('No trade signal to backtest. Signal is HOLD — wait for a BUY or SELL before backtesting.');
+    return;
+  }
+  // Skip backtest if any required level is missing/invalid — backend rejects with 400
+  // when entry/stop_loss/tp1 are null and that floods console with errors.
+  const _e = parseFloat(String(sig.entry||'').replace(/,/g,''));
+  const _s = parseFloat(String(sig.sl||'').replace(/,/g,''));
+  const _t = parseFloat(String(sig.tp||'').replace(/,/g,''));
+  if(!isFinite(_e) || !isFinite(_s) || !isFinite(_t) || _e<=0 || _s<=0 || _t<=0){
+    console.log('[backtest] skipped — entry/sl/tp incomplete', {entry:sig.entry, sl:sig.sl, tp:sig.tp});
+    if(!silent) alert('Backtest needs entry, stop loss, and take profit. Run a full analysis first.');
     return;
   }
   const panel=document.getElementById('undBtPanel'),content=document.getElementById('undBtContent');
