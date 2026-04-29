@@ -6163,6 +6163,19 @@ async function dvRunAnalyze(){
       chartLows:data.chart_lows||[],
       chartPrices:data.chart_prices||[],
       chartVolumes:data.chart_volumes||[],
+      // Engine context fields (commits 1-7 today — surface in UI)
+      regime: data.regime,
+      adx: data.adx,
+      historical_wr_pct: data.historical_wr_pct,
+      historical_wr_n:   data.historical_wr_n,
+      historical_wr_block: data.historical_wr_block === true,
+      circuit_breaker:     data.circuit_breaker === true,
+      daily_pnl:           data.daily_pnl,
+      account_balance:     data.account_balance,
+      volatility_throttle: data.volatility_throttle === true,
+      volatility_range:    data.volatility_range,
+      volatility_p95:      data.volatility_p95,
+      tv_signal_used:      data.tv_signal_used === true,
     };
     showUnderstand();
     // Auto-run backtest silently to populate win rate badge (non-blocking)
@@ -10294,6 +10307,33 @@ function showUnderstand(){
             <div style="font-size:10.5px;color:var(--t3);margin-top:2px;">Confluence confidence score</div>
           </div>
         </div>
+        <!-- Engine context badges (commits 1-7 — surface engine state) -->
+        ${(()=>{
+          const badges = [];
+          const _bChip = (color, text, title) =>
+            `<span title="${title||''}" style="font-size:9.5px;font-family:var(--mono);letter-spacing:.04em;padding:3px 8px;border-radius:4px;background:rgba(237,232,216,.04);border:1px solid ${color}55;color:${color};white-space:nowrap;">${text}</span>`;
+          if (sig.regime && sig.regime !== 'UNKNOWN') {
+            const c = sig.regime === 'TRENDING' ? '#5de8a0' : sig.regime === 'RANGING' ? '#d4b87a' : '#9aa0a8';
+            badges.push(_bChip(c, `REGIME · ${sig.regime}${sig.adx!=null?` (ADX ${Math.round(sig.adx)})`:''}`, 'Market regime from ADX'));
+          }
+          if (sig.tv_signal_used) {
+            badges.push(_bChip('#9aa0a8', 'TV · primary signal', 'TradingView 26-indicator score used as authoritative signal'));
+          }
+          if (sig.historical_wr_pct != null && !sig.historical_wr_block) {
+            const c = sig.historical_wr_pct >= 55 ? '#5de8a0' : '#d4b87a';
+            badges.push(_bChip(c, `PATTERN WR · ${sig.historical_wr_pct}% (n=${sig.historical_wr_n||0})`, 'Historical win rate of this pattern over recent samples'));
+          }
+          if (sig.historical_wr_block) {
+            badges.push(_bChip('#e8706e', `SUPPRESSED · WR ${sig.historical_wr_pct}% < 55%`, 'Historical-quality gate suppressed this signal'));
+          }
+          if (sig.circuit_breaker) {
+            badges.push(_bChip('#e8706e', `CIRCUIT-BREAKER · daily P&L $${sig.daily_pnl} / balance $${sig.account_balance}`, 'Daily loss circuit-breaker active'));
+          }
+          if (sig.volatility_throttle) {
+            badges.push(_bChip('#e8706e', `VOL-THROTTLE · range ${sig.volatility_range} > p95 ${sig.volatility_p95}`, 'Volatility throttle active'));
+          }
+          return badges.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${badges.join('')}</div>` : '';
+        })()}
         <!-- Win rate badge — populated automatically after backtest -->
         <div id="undWrWrap" style="display:none;margin-top:12px;padding:10px 14px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:7px;animation:wbPop .35s ease;">
           <div style="display:flex;align-items:center;gap:12px;">
@@ -10984,6 +11024,29 @@ if shortCond
     Strategy Report · ${sig.sym} · ${sig.tf}
   </div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">${statCells}</div>
+  ${(()=>{
+    const wf = data.walkforward;
+    if (!wf) return '';
+    const isC = wf.in_sample_wr >= 55 ? 'rgba(93,232,160,.85)' : wf.in_sample_wr >= 45 ? 'rgba(201,168,76,.85)' : 'rgba(224,85,85,.75)';
+    const oosC = wf.out_sample_wr >= 55 ? 'rgba(93,232,160,.85)' : wf.out_sample_wr >= 45 ? 'rgba(201,168,76,.85)' : 'rgba(224,85,85,.75)';
+    const flagBlock = wf.overfit_flag
+      ? `<div style="margin-top:8px;padding:7px 10px;background:rgba(232,112,110,.1);border:1px solid rgba(232,112,110,.3);border-radius:5px;font-size:10px;color:rgba(232,112,110,.95);font-family:var(--mono);">Overfit warning · OOS WR dropped ${wf.wr_dropoff_pp}pp from in-sample. Past performance may not predict future.</div>`
+      : `<div style="margin-top:8px;padding:7px 10px;background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.2);border-radius:5px;font-size:10px;color:rgba(93,232,160,.85);font-family:var(--mono);">Strategy holds out-of-sample · ${wf.wr_dropoff_pp >= 0 ? wf.wr_dropoff_pp : Math.abs(wf.wr_dropoff_pp)}pp ${wf.wr_dropoff_pp >= 0 ? 'drop' : 'gain'} between IS and OOS.</div>`;
+    return `<div style="margin-top:14px;padding:11px 14px;background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:7px;">
+      <div style="font-size:10px;font-weight:600;color:rgba(237,232,216,.6);letter-spacing:.4px;text-transform:uppercase;margin-bottom:8px;">Walk-Forward Validation</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:6px;padding:8px;text-align:center;">
+          <div style="font-size:9px;color:var(--t3);letter-spacing:.4px;margin-bottom:3px;">IN-SAMPLE (first 70%)</div>
+          <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:${isC};">${wf.in_sample_wr}% · ${wf.in_sample_trades}t</div>
+        </div>
+        <div style="background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:6px;padding:8px;text-align:center;">
+          <div style="font-size:9px;color:var(--t3);letter-spacing:.4px;margin-bottom:3px;">OUT-OF-SAMPLE (last 30%)</div>
+          <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:${oosC};">${wf.out_sample_wr}% · ${wf.out_sample_trades}t</div>
+        </div>
+      </div>
+      ${flagBlock}
+    </div>`;
+  })()}
   ${tradeList}
   <div style="margin-top:14px;padding:10px 14px;background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:7px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
