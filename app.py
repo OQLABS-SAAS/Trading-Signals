@@ -1971,11 +1971,26 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         bullish_count += 1
         rsi_assessment = f"RSI at {rsi} indicates oversold conditions; bounce potential is present."
 
-    # ── EMA Trend logic (higher weight: counts as 2) ──
-    if ema_trend.lower() == "bullish":
+    # ── EMA Trend logic (higher weight: counts as 2-3) ──
+    # FIX 2026-04-29: calculate_indicators produces "STRONG BULL"/"BULL"/"STRONG BEAR"/
+    # "BEAR"/"MIXED", but the previous check was ".lower() == 'bullish'" which never
+    # matched any of those values. The +2 EMA vote (heaviest single contribution) was
+    # dead the entire time — local voting only counted RSI/MACD/Supertrend/BB. This is
+    # why the dashboard signals were over-conservative after the TV override was
+    # removed in the same session: TV had been masking the broken local logic.
+    # Now matches the actual values, with STRONG BULL/BEAR weighted +3 to reflect
+    # the additional macro-trend confirmation (price aligned through EMA-200).
+    _emat = (ema_trend or "").upper()
+    if _emat == "STRONG BULL":
+        bullish_count += 3
+        trend_assessment = "EMA stack is strongly bullish — price is above all key moving averages with macro alignment."
+    elif _emat == "BULL":
         bullish_count += 2
         trend_assessment = "EMA stack is bullish; uptrend structure is intact and price is above key moving averages."
-    elif ema_trend.lower() == "bearish":
+    elif _emat == "STRONG BEAR":
+        bearish_count += 3
+        trend_assessment = "EMA stack is strongly bearish — price is below all key moving averages with macro alignment."
+    elif _emat == "BEAR":
         bearish_count += 2
         trend_assessment = "EMA stack is bearish; downtrend structure dominates and price remains below key MAs."
     else:
@@ -1991,12 +2006,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
     else:
         macd_assessment = "MACD histogram is flat; momentum is transitioning."
 
-    # ── Volume logic ──
+    # ── Volume logic (cross-check with EMA trend direction) ──
+    # FIX 2026-04-29: same string mismatch as above. Using actual ema_trend values.
     if vol_ratio > 1.2:
         # High volume confirms the prevailing EMA trend direction
-        if ema_trend.lower() == "bullish":
+        if _emat in ("STRONG BULL", "BULL"):
             bullish_count += 1
-        elif ema_trend.lower() == "bearish":
+        elif _emat in ("STRONG BEAR", "BEAR"):
             bearish_count += 1
         volume_assessment = f"Volume ratio at {vol_ratio:.2f}x confirms participation above average."
     else:
