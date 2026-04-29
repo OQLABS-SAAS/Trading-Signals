@@ -11912,7 +11912,16 @@ async function mt5Execute() {
   const btn = document.getElementById('mt5ExecBtn');
   const status = document.getElementById('mt5ExecStatus');
   const orderType = document.getElementById('mt5OrderType')?.value || 'Market';
-  const lots = parseFloat(document.getElementById('mt5Lots')?.value) || 0.1;
+  // ── AUTO-SIZE FROM CALCULATOR (commit 6 — 2026-04-29) ────────────────
+  // Previously read a non-existent #mt5Lots input, falling back to 0.1
+  // every time. Now reads window._szLastCalc populated by szCalc() with
+  // the user's account-+-risk-based position size. Safe fallback: 0.1.
+  const _szLast = window._szLastCalc || {};
+  const _autoLots = (_szLast.lots && _szLast.lots > 0) ? _szLast.lots
+                  : (_szLast.posSize && _szLast.posSize > 0) ? _szLast.posSize
+                  : 0.1;
+  const lots = parseFloat(document.getElementById('mt5Lots')?.value) || _autoLots;
+  console.log('[mt5] auto-size:', lots, 'source:', _szLast.lots ? 'calculator-lots' : (_szLast.posSize ? 'calculator-posSize' : 'fallback-0.1'));
   const direction = window._mt5Dir;
   const signal = window._activeSignal || {};
   const ticker = signal.sym || '';
