@@ -1252,6 +1252,78 @@ def _fetch_fmp(ticker, asset_type, timeframe):
         return None
 
 
+def _fetch_twelvedata(ticker, asset_type, timeframe):
+    """Twelve Data — works on cloud IPs (Railway) for stocks/forex/commodity at intraday TFs.
+    Free tier: 800 req/day, 8 req/min. Set TWELVEDATA_API_KEY env var to enable.
+    Endpoint: https://api.twelvedata.com/time_series."""
+    td_key = os.environ.get("TWELVEDATA_API_KEY", "").strip()
+    if not td_key:
+        return None
+    # Map DotVerse timeframes to Twelve Data intervals
+    td_map = {"5m": "5min", "15m": "15min", "30m": "30min",
+              "1h": "1h", "4h": "4h", "1d": "1day", "1w": "1week", "1mo": "1month"}
+    td_iv = td_map.get(timeframe, "1day")
+    # Build the symbol — stocks plain, forex/commodity with slash, crypto with /USD or /USDT
+    sym_raw = ticker.upper().replace("=X", "").replace("-", "")
+    if asset_type == "forex":
+        clean = sym_raw.replace("/", "")
+        sym = clean[:3] + "/" + clean[3:]
+    elif asset_type == "crypto":
+        return None  # Binance handles crypto better
+    elif asset_type == "commodity":
+        # XAUUSD / XAGUSD / WTIUSD style
+        clean = sym_raw.replace("/", "")
+        if len(clean) >= 6:
+            sym = clean[:3] + "/" + clean[3:]
+        else:
+            sym = clean
+    else:
+        sym = sym_raw  # stocks: AAPL, NVDA, SPX
+    try:
+        url = "https://api.twelvedata.com/time_series"
+        params = {"symbol": sym, "interval": td_iv, "outputsize": 200,
+                  "order": "ASC", "apikey": td_key, "format": "JSON"}
+        r = requests.get(url, params=params, timeout=(5, 12))
+        if r.status_code != 200:
+            print(f"[twelvedata] HTTP {r.status_code} for {sym} {td_iv}")
+            return None
+        data = r.json()
+        if not data or data.get("status") == "error":
+            print(f"[twelvedata] API error for {sym}: {data.get('message','no message')}")
+            return None
+        values = data.get("values") or []
+        if len(values) < 10:
+            print(f"[twelvedata] insufficient data for {sym}: {len(values)} bars")
+            return None
+        dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m", "15m", "30m", "1h", "4h") else "%Y-%m-%d"
+        dates, opens, highs, lows, prices, vols = [], [], [], [], [], []
+        for bar in values:
+            try:
+                from datetime import datetime as dt_cls
+                d_raw = bar.get("datetime", "")
+                if " " in d_raw:
+                    d_parsed = dt_cls.strptime(d_raw, "%Y-%m-%d %H:%M:%S") if len(d_raw) > 10 else dt_cls.strptime(d_raw, "%Y-%m-%d")
+                else:
+                    d_parsed = dt_cls.strptime(d_raw, "%Y-%m-%d")
+                dates.append(d_parsed.strftime(dt_fmt))
+                opens.append(round(float(bar["open"]), 6))
+                highs.append(round(float(bar["high"]), 6))
+                lows.append(round(float(bar["low"]), 6))
+                prices.append(round(float(bar["close"]), 6))
+                vols.append(int(float(bar.get("volume", 0) or 0)))
+            except (ValueError, KeyError):
+                continue
+        if len(prices) < 10:
+            return None
+        df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows,
+                           "Close": prices, "Volume": vols}, index=pd.to_datetime(dates))
+        print(f"[twelvedata] OK — {sym} {td_iv}: {len(df)} bars")
+        return _build_chart_output(df, timeframe)
+    except Exception as e:
+        print(f"[twelvedata] error {sym}: {e}")
+        return None
+
+
 def fetch_chart_direct(ticker, asset_type, timeframe):
     """Try multiple free data sources in priority order.
     Returns (dates, prices, vols, ema20, ema50) or None if all fail."""
@@ -1269,7 +1341,15 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[chart] Stooq failed for {ticker}")
 
-    # 3. FMP — reliable for stocks on cloud servers (needs API key)
+    # 3. Twelve Data — primary for stocks/forex intraday on Railway (Yahoo v8 is 429-blocked)
+    if asset_type in ("stock", "index", "forex", "commodity"):
+        print(f"[chart] trying Twelve Data for {ticker} ({asset_type}) {timeframe}")
+        result = _fetch_twelvedata(ticker, asset_type, timeframe)
+        if result:
+            return result
+        print(f"[chart] Twelve Data failed for {ticker}")
+
+    # 4. FMP — alternative when TD key missing or quota hit
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying FMP for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_fmp(ticker, asset_type, timeframe)
@@ -1277,7 +1357,7 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[chart] FMP failed for {ticker}")
 
-    # 4. Yahoo Finance v8 — last resort (likely 429 on Railway)
+    # 5. Yahoo Finance v8 — last resort (likely 429 on Railway)
     print(f"[chart] trying Yahoo v8 for {ticker} ({asset_type}) {timeframe}")
     result = _fetch_yahoo_v8(ticker, asset_type, timeframe)
     if result:
