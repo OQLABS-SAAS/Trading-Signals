@@ -10534,9 +10534,14 @@ function showUnderstand(){
       <button class="flow-btn-next" onclick="setNav('size');showSize();">Size Position → SIZE</button>
     </div>
   </div>`;
-  _initUndChart(window._activeSignal);
-  rsiGaugeUpdate(sig.rsi||50);
-  renderOrderFlow(sig);
+  // Wait for DOM layout before initialising charts. Without this,
+  // wrap.clientWidth can be 0 during the initial render, creating
+  // zero-width charts that show no bars even when data is set.
+  requestAnimationFrame(() => {
+    _initUndChart(window._activeSignal);
+    rsiGaugeUpdate(sig.rsi||50);
+    renderOrderFlow(sig);
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -10558,7 +10563,7 @@ function _initUndChart(sig){
 
   // Main price chart
   const chart = LightweightCharts.createChart(inner, {
-    width: wrap.clientWidth, height: 240,
+    width: wrap.clientWidth || wrap.parentElement?.clientWidth || 800, height: 240,
     layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:'rgba(200,210,220,.65)', fontFamily:'IBM Plex Mono' },
     grid:{ vertLines:{color:'rgba(237,232,216,.05)'}, horzLines:{color:'rgba(237,232,216,.05)'} },
     crosshair:{ mode:1 },
@@ -10569,7 +10574,7 @@ function _initUndChart(sig){
 
   // Volume chart (no time axis)
   const volChart = LightweightCharts.createChart(volInner, {
-    width: wrap.clientWidth, height: 60,
+    width: wrap.clientWidth || wrap.parentElement?.clientWidth || 800, height: 60,
     layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:'rgba(200,210,220,.4)', fontFamily:'IBM Plex Mono' },
     grid:{ vertLines:{color:'rgba(237,232,216,.05)'}, horzLines:{color:'rgba(237,232,216,.05)'} },
     rightPriceScale:{ borderColor:'rgba(237,232,216,.1)', visible:false },
@@ -10580,7 +10585,7 @@ function _initUndChart(sig){
 
   // RSI chart (no time axis)
   const rsiChart = LightweightCharts.createChart(rsiInner, {
-    width: wrap.clientWidth, height: 80,
+    width: wrap.clientWidth || wrap.parentElement?.clientWidth || 800, height: 80,
     layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:'rgba(200,210,220,.4)', fontFamily:'IBM Plex Mono' },
     grid:{ vertLines:{color:'rgba(237,232,216,.05)'}, horzLines:{color:'rgba(237,232,216,.05)'} },
     rightPriceScale:{ borderColor:'rgba(237,232,216,.1)' },
