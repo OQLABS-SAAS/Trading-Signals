@@ -5170,6 +5170,22 @@ def scan_list():
                 else:
                     # ── FALLBACK: yfinance ──
                     df = safe_download(raw, period=cfg["period"], interval=cfg["interval"])
+                    # Bug Y fix 2026-04-29: safe_download (direct Yahoo v8 HTTP) gets
+                    # rate-limited (429) from Railway IPs — its comment claims a
+                    # Stooq/FMP fallback but no fallback was wired into scan_list, so
+                    # stocks/commodity all returned 'no data' silently. Add yfinance
+                    # package as second-tier fallback (different HTTP path, different
+                    # rate-limit pool, often succeeds when v8 HTTP fails).
+                    if df.empty:
+                        try:
+                            df = yf.download(raw, period=cfg["period"], interval=cfg["interval"],
+                                             progress=False, auto_adjust=True)
+                            if isinstance(df.columns, pd.MultiIndex):
+                                df.columns = df.columns.get_level_values(0)
+                            print(f"[yfinance-fallback] {raw} {timeframe}: {len(df)} bars")
+                        except Exception as _yfe:
+                            print(f"[yfinance-fallback] {raw} error: {_yfe}")
+                            df = pd.DataFrame()
                     if "resample" in cfg and not df.empty:
                         if not isinstance(df.index, pd.DatetimeIndex):
                             df.index = pd.to_datetime(df.index)
