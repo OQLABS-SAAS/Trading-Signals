@@ -4249,7 +4249,7 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
   <div class="dmain">
     <div class="dtop">
       <div>
-        <div class="dtop-label">Trading Dashboard &nbsp;·&nbsp; Apr 24, 2026</div>
+        <div class="dtop-label">Trading Dashboard &nbsp;·&nbsp; <span id="dashDate">—</span></div>
       </div>
       <div class="dtop-r">
         <div class="live-badge"><div class="live-dot"></div><span id="dashClock">—</span></div>
@@ -4385,6 +4385,22 @@ function _renderSessionBar(){
 // Init + refresh every 60s
 _renderSessionBar();
 setInterval(_renderSessionBar, 60000);
+
+// ── Dashboard date + clock — updates the previously hardcoded "Apr 24, 2026"
+// header and the dashClock UTC timer in the live badge.
+function _updateDashHeader() {
+  const dt = new Date();
+  const dEl = document.getElementById('dashDate');
+  if (dEl) dEl.textContent = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const cEl = document.getElementById('dashClock');
+  if (cEl) {
+    const hh = String(dt.getUTCHours()).padStart(2,'0');
+    const mm = String(dt.getUTCMinutes()).padStart(2,'0');
+    cEl.textContent = `UTC ${hh}:${mm}`;
+  }
+}
+_updateDashHeader();
+setInterval(_updateDashHeader, 30000);
 
 // ── ROUTING ────────────────────────────────────────────────────
 function showView(id){
