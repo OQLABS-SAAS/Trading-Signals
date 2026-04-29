@@ -4702,6 +4702,41 @@ def analyze():
         except Exception as _hge:
             print(f"[hist-gate] error: {_hge}")
 
+        # ── DAILY LOSS CIRCUIT-BREAKER (commit 3 — 2026-04-29) ────────────
+        # Halt new BUY/SELL signals when today's filled MT5 P&L is below
+        # -2% of account balance. Protects against revenge-trading after a
+        # losing morning. Skips silently if user has no MT5 connection.
+        try:
+            if _DBSession and analysis.get("signal") in ("BUY", "SELL"):
+                _user_id_str = str(session.get("user_id") or "")
+                _today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                _db_cb = _DBSession()
+                try:
+                    from sqlalchemy import func as _sa_func
+                    _today_pnl = _db_cb.query(_sa_func.coalesce(_sa_func.sum(MT5Order.pnl), 0.0))\
+                        .filter(MT5Order.user_id == _user_id_str,
+                                MT5Order.status == "filled",
+                                MT5Order.pnl.isnot(None),
+                                MT5Order.filled_at >= _today_start).scalar()
+                    _today_pnl = float(_today_pnl or 0.0)
+                finally:
+                    _db_cb.close()
+                with mt5_state_lock:
+                    _state_cb = mt5_state.get(_user_id_str) or mt5_state.get("default") or {}
+                _balance = float((_state_cb.get("account") or {}).get("balance", 0.0) or 0.0)
+                if _balance > 0 and _today_pnl < -0.02 * _balance:
+                    analysis["signal"]              = "HOLD"
+                    analysis["confidence"]          = "LOW"
+                    analysis["confidence_label"]    = "HYPOTHESIS"
+                    analysis["circuit_breaker"]     = True
+                    analysis["daily_pnl"]           = round(_today_pnl, 2)
+                    analysis["account_balance"]     = round(_balance, 2)
+                    analysis["summary"] = (analysis.get("summary","") +
+                        f" [Circuit-breaker: today's MT5 P&L {_today_pnl:.2f} < -2% of {_balance:.2f} balance.]")
+                    print(f"[circuit] {ticker} {timeframe} HALTED: today_pnl={_today_pnl:.2f} balance={_balance:.2f}")
+        except Exception as _ce:
+            print(f"[circuit] error: {_ce}")
+
         response_data = _sanitize({
             "ticker":     ticker,
             "asset_type": asset_type,
