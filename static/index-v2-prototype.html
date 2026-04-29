@@ -10110,6 +10110,23 @@ function showUnderstand(){
       <div class="und-mtf-sig" style="color:${m.sig==='BUY'?'#5de8a0':m.sig==='SELL'?'#e8706e':'rgba(237,232,216,.55)'}">${m.sig}</div>
       ${m.rsi?`<div style="font-size:9px;color:rgba(237,232,216,.4);margin-top:2px">RSI ${m.rsi}</div>`:''}
     </div>`).join('');
+  // ── MTF alignment summary (replaces hardcoded "All 5 timeframes align" lie) ──
+  // Count how many cells actually agree with the headline direction so the
+  // copy under the table tells the truth instead of a fixed line.
+  const _mtfDirWanted = isBuy ? 'BUY' : 'SELL';
+  const _mtfMatchCount = mtf.filter(m => m.sig === _mtfDirWanted).length;
+  const _mtfTotal = mtf.length;
+  const _mtfDirWord = isBuy ? 'bullish' : 'bearish';
+  let _mtfSummary;
+  if (_mtfMatchCount === _mtfTotal) {
+    _mtfSummary = `All ${_mtfTotal} timeframes align ${_mtfDirWord} — highest-conviction setup.`;
+  } else if (_mtfMatchCount >= Math.ceil(_mtfTotal * 0.66)) {
+    _mtfSummary = `${_mtfMatchCount} of ${_mtfTotal} timeframes align ${_mtfDirWord} — strong setup with some divergence.`;
+  } else if (_mtfMatchCount >= Math.ceil(_mtfTotal * 0.5)) {
+    _mtfSummary = `${_mtfMatchCount} of ${_mtfTotal} timeframes align ${_mtfDirWord} — mixed picture, lower conviction.`;
+  } else {
+    _mtfSummary = `Only ${_mtfMatchCount} of ${_mtfTotal} timeframes align ${_mtfDirWord} — weak alignment, treat with caution.`;
+  }
 
   el.innerHTML=`
   <div class="sf-page-head">
@@ -10416,7 +10433,7 @@ function showUnderstand(){
         <div class="und-card-title">Multi-Timeframe Alignment</div>
         <div class="und-mtf-row">${mtfHtml}</div>
         <div style="font-size:10.5px;color:var(--t3);margin-top:10px;padding:0 2px;">
-          All 5 timeframes align ${isBuy?'bullish':'bearish'} — highest-conviction setup.
+          ${_mtfSummary}
         </div>
       </div>
       <div class="und-card" style="margin-top:12px;">
