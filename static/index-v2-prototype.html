@@ -6714,8 +6714,22 @@ function dvSetTFByLabel(label){
 // ── Signal history ────────────────────────────────────────────────────────────
 window._sigHistory=[];
 async function loadSigHistory(){
-  const data=await dvFetch('/api/signals/history');
-  if(!data||!Array.isArray(data)) return;
+  const wrap=document.getElementById('sfHistPanel');
+  let data;
+  try {
+    data = await dvFetch('/api/signals/history');
+  } catch(e) {
+    if(wrap) wrap.innerHTML='<div style="color:rgba(232,112,110,.7);font-size:11px;text-align:center;padding:14px;">Failed to load history — '+(e?.message||'network error')+' · <a href="javascript:loadSigHistory()" style="color:var(--crys);">retry</a></div>';
+    return;
+  }
+  if(data===null||data===undefined){
+    if(wrap) wrap.innerHTML='<div style="color:rgba(201,168,76,.7);font-size:11px;text-align:center;padding:14px;">History endpoint returned no response. <a href="javascript:loadSigHistory()" style="color:var(--crys);">Retry</a></div>';
+    return;
+  }
+  if(!Array.isArray(data)){
+    if(wrap) wrap.innerHTML='<div style="color:rgba(232,112,110,.7);font-size:11px;text-align:center;padding:14px;">Unexpected history response: '+(data.error||JSON.stringify(data).slice(0,80))+'</div>';
+    return;
+  }
   window._sigHistory=data;
   renderSigHistoryPanel();
 }
@@ -6850,10 +6864,24 @@ async function _sfFetchSignals(){
   } catch(e){ /* silent */ }
 
   if(!rawOpps || rawOpps.length === 0){
+    // Diagnose: was the response actually empty, or did the call fail entirely?
+    var _diag = '';
+    try {
+      // Probe one source to surface the real backend state to the user
+      const probe = await dvFetch('/api/auth-check').catch(()=>null);
+      if (!probe || probe.error || probe.login_required) {
+        _diag = 'You appear to be logged out. Refresh and sign in again.';
+      } else {
+        _diag = 'Backend reachable but no signals returned. The OHLC data sources for stocks/forex may be rate-limited on Railway. Add TWELVEDATA_API_KEY env var (free key from twelvedata.com) and redeploy.';
+      }
+    } catch(e) {
+      _diag = 'Network error reaching backend: ' + (e?.message||'unknown');
+    }
     const listNow = document.getElementById('sfOppsList');
     if(listNow) listNow.innerHTML = '<div style="padding:48px 20px;text-align:center;">'
       + '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.2)" stroke-width="1.5" style="margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-      + '<div style="font-family:var(--mono);font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:16px;">Market scan unavailable right now.<br>Check your connection or try again.</div>'
+      + '<div style="font-family:var(--mono);font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:8px;">No signals returned by the scan.</div>'
+      + '<div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.7);line-height:1.55;margin-bottom:16px;max-width:520px;margin-left:auto;margin-right:auto;">' + _diag + '</div>'
       + '<button onclick="_sfFetchSignals()" style="padding:8px 22px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--crys2);border:1px solid var(--crys-bord);color:var(--crys);border-radius:5px;cursor:pointer;">Retry Scan</button>'
       + '</div>';
     _sfSetProgress(fill, lbl, 0, '');
