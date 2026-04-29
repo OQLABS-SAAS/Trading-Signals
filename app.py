@@ -4667,9 +4667,40 @@ def analyze():
             "rsi":   round(ind.get("rsi", 50) or 50, 1)
         }
 
-        # Win rate: already calculated above if yfinance succeeded (no extra call needed)
-        # Skipping a redundant Yahoo Finance fetch here — if Yahoo failed above it will
-        # fail again and just waste ~8 more seconds approaching the gunicorn timeout.
+        # ── HISTORICAL QUALITY GATE (commit 2 — 2026-04-29) ───────────────
+        # Earlier the code called calculate_win_rate(df_daily, "HOLD") which
+        # always returned {win_rate: None, sample_size: 0} because the function
+        # only computes for "BUY"/"SELL" signal directions. This left the
+        # win_rate field in the response permanently null.
+        #
+        # Now we recompute WR using the ACTUAL signal direction returned by
+        # get_analysis. If the historical pattern shows <55% win rate over
+        # >=30 samples, we suppress the signal to HOLD with a clear reason.
+        # This is the "winning signals only" filter the user asked for.
+        try:
+            _df_for_wr = locals().get("df_daily")
+            if _df_for_wr is not None and not _df_for_wr.empty:
+                _sig_now = analysis.get("signal", "HOLD")
+                if _sig_now in ("BUY", "SELL"):
+                    wr = calculate_win_rate(_df_for_wr, _sig_now)
+                    _wr_pct = wr.get("win_rate")
+                    _wr_n   = wr.get("sample_size", 0) or 0
+                    if _wr_pct is not None and _wr_n >= 30 and _wr_pct < 55:
+                        analysis["signal"]              = "HOLD"
+                        analysis["confidence"]          = "LOW"
+                        analysis["confidence_label"]    = "HYPOTHESIS"
+                        analysis["historical_wr_block"] = True
+                        analysis["historical_wr_pct"]   = _wr_pct
+                        analysis["historical_wr_n"]     = _wr_n
+                        analysis["summary"] = (analysis.get("summary","") +
+                            f" [Suppressed by historical-quality gate: pattern WR {_wr_pct}% over {_wr_n} samples — below 55% threshold.]")
+                        print(f"[hist-gate] {ticker} {timeframe} {_sig_now} SUPPRESSED: WR={_wr_pct}% n={_wr_n}")
+                    else:
+                        analysis["historical_wr_pct"] = _wr_pct
+                        analysis["historical_wr_n"]   = _wr_n
+                        print(f"[hist-gate] {ticker} {timeframe} {_sig_now} pass: WR={_wr_pct}% n={_wr_n}")
+        except Exception as _hge:
+            print(f"[hist-gate] error: {_hge}")
 
         response_data = _sanitize({
             "ticker":     ticker,
