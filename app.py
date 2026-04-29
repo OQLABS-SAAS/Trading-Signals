@@ -2186,6 +2186,14 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
             # ── Minimum R:R gate — reject trades below 1:2 ──────────────────
             if rr1 < 2.0:
                 print(f"[rr-gate] {ticker} rr1={rr1} < 2.0 — downgrading {signal} to HOLD")
+                # FIX 2026-04-29: set gate_note so the summary text explains WHY
+                # the signal was demoted. Without this, user saw the bare
+                # 'Mixed signals: X bullish vs Y bearish' text with no reason.
+                # Beginner trust requires honesty about gate decisions.
+                gate_note = gate_note or (
+                    f"Risk:reward only 1:{rr1} — below DotVerse's minimum 1:2 floor. "
+                    f"Trade levels exist but the math doesn't favour entry."
+                )
                 signal = "HOLD"
                 entry = stop_loss = tp1 = tp2 = tp3 = None
                 rr1 = rr2 = rr3 = None
