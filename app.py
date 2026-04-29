@@ -2124,15 +2124,27 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
             gate_note = f"Footprint shows {seller_pct}% seller pressure — BUY contradicts order flow."
 
     # ══════════════════════════════════════════════════════════════
-    # GATE 3: Confidence floor
-    # Any signal that survives the gates but still scores LOW is
-    # not actionable — downgrade to HOLD so we don't mislead users.
-    # Skip when using TV signal — TV's label is always actionable.
+    # GATE 3: Minimum votes (refactored 2026-04-29 from confidence floor)
+    # The previous gate "confidence == LOW → HOLD" was too aggressive in mixed
+    # markets, demoting valid 2-vs-1 directional signals (e.g. dashboard
+    # screenshot at midnight 4-29) to HOLD even when they passed the 65%
+    # confluence gate. The new check requires at least 3 total indicator votes
+    # for an actionable signal:
+    #   • Protects against single-vote signals (1 bull / 0 bear is trivially
+    #     100% bullish but statistically meaningless — sample of one).
+    #   • Lets marginal signals (2-vs-1 = 67% confluence) display as BUY/SELL
+    #     with the HYPOTHESIS label so the user sees the actual direction with
+    #     a clear "weak conviction" warning. Calculator coaches them to size
+    #     smaller. This is exactly the ethos: math, verdict, and trust label
+    #     all agree — no silent censoring of an honest directional signal.
+    # Conviction strength is still communicated via confidence_label
+    # (CONFIRMED / LIKELY / HYPOTHESIS); frontend styles each distinctly.
     # ══════════════════════════════════════════════════════════════
-    if not tv_signal_used and signal != "HOLD" and confidence == "LOW":
-        print(f"[gate] confidence floor — downgrading {signal} to HOLD on {ticker}")
+    MIN_VOTES_FOR_SIGNAL = 3
+    if signal != "HOLD" and total_votes < MIN_VOTES_FOR_SIGNAL:
+        print(f"[gate] minimum votes ({total_votes} < {MIN_VOTES_FOR_SIGNAL}) — downgrading {signal} to HOLD on {ticker}")
         signal = "HOLD"
-        gate_note = gate_note or "Indicator conviction is too weak for an actionable signal."
+        gate_note = gate_note or f"Only {total_votes} indicator{'s' if total_votes != 1 else ''} voted — need at least {MIN_VOTES_FOR_SIGNAL} for an actionable signal."
 
     # Generate trade levels based on ATR
     if signal != "HOLD" and atr > 0:
