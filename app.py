@@ -4561,12 +4561,17 @@ def analyze():
                         for _k in ("chart_rsi", "chart_buy_signals", "chart_sell_signals",
                                    "chart_bb_upper", "chart_bb_lower", "rsi_divergence"):
                             ind[_k] = _ind_fb.get(_k, ind.get(_k, []))
-                        # If TV is not available, pull scalar indicators from the full calc too
-                        if not tv_ok:
-                            for _k in ("rsi", "ema_trend", "ema20", "ema50", "macd_hist",
-                                       "bb_pos", "bb_width", "atr", "vol_ratio", "supertrend",
-                                       "resistance", "support"):
-                                ind[_k] = _ind_fb.get(_k, ind.get(_k))
+                        # Pull scalar indicators from the full calc for any flat field
+                        # missing from ind. Previously this was guarded by `if not tv_ok:`
+                        # which meant when TV provided the SIGNAL but no flat indicators
+                        # (e.g. AAPL 4H on Railway), the response had a valid BUY/SELL but
+                        # rsi/atr/vol_ratio all None — frontend rendered "—" everywhere.
+                        # Now we always fill missing flat fields from the fallback calc.
+                        for _k in ("rsi", "ema_trend", "ema20", "ema50", "macd_hist",
+                                   "bb_pos", "bb_width", "atr", "vol_ratio", "supertrend",
+                                   "resistance", "support", "price"):
+                            if ind.get(_k) is None:
+                                ind[_k] = _ind_fb.get(_k)
                         _div_type = _ind_fb.get("rsi_divergence", {}).get("type", "none")
                         _rsi_fb   = _ind_fb.get("rsi", "?")
                         print(f"[analyze] fallback calc_ind OK — rsi={_rsi_fb} divergence={_div_type} bars={len(prices_c)}")
