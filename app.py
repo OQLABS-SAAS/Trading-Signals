@@ -6197,7 +6197,39 @@ def backtest_route():
     r_down_std = (sum(v**2 for v in r_down) / len(r_down)) ** 0.5 if r_down else 0
     sortino  = round((r_mean / r_down_std) * _ann_f, 2) if r_down_std > 0 else 0.0
 
+    # ── WALK-FORWARD VALIDATION (commit 7 — 2026-04-29) ──────────────
+    # Split trades chronologically 70/30. In-sample = first 70%,
+    # out-of-sample = last 30%. If OOS WR drops by >10pp from in-sample,
+    # flag potential overfit. Pure measurement — does not change signals.
+    walkforward = None
+    try:
+        if len(trades) >= 30:
+            _split   = int(len(trades) * 0.7)
+            _in_s    = trades[:_split]
+            _oos     = trades[_split:]
+            if _in_s and _oos:
+                _is_wins  = [t for t in _in_s if t["outcome"] not in ("loss", "timeout_loss")]
+                _oos_wins = [t for t in _oos  if t["outcome"] not in ("loss", "timeout_loss")]
+                _is_wr  = round(len(_is_wins) / len(_in_s) * 100)
+                _oos_wr = round(len(_oos_wins) / len(_oos)  * 100)
+                _is_r   = round(sum(t["r"] for t in _in_s), 2)
+                _oos_r  = round(sum(t["r"] for t in _oos),  2)
+                walkforward = {
+                    "in_sample_trades":   len(_in_s),
+                    "in_sample_wr":       _is_wr,
+                    "in_sample_total_r":  _is_r,
+                    "out_sample_trades":  len(_oos),
+                    "out_sample_wr":      _oos_wr,
+                    "out_sample_total_r": _oos_r,
+                    "wr_dropoff_pp":      _is_wr - _oos_wr,
+                    "overfit_flag":       (_is_wr - _oos_wr) > 10,
+                }
+                print(f"[walkforward] IS={_is_wr}% n={len(_in_s)}  OOS={_oos_wr}% n={len(_oos)}  drop={_is_wr-_oos_wr}pp")
+    except Exception as _wfe:
+        print(f"[walkforward] error: {_wfe}")
+
     return jsonify({
+        "walkforward":    walkforward,
         "win_rate":       wr,
         "total_trades":   len(trades),
         "sample_size":    len(trades),   # alias used by Kelly formula and scanner gate
