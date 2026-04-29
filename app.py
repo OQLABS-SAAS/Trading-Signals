@@ -4689,11 +4689,20 @@ def analyze():
             except Exception:
                 pass
         # ── Persist to signal history (fire-and-forget, never block the response) ──
+        # Bug J fix 2026-04-29: previous code had two bugs that silently failed every
+        # write: (1) user_id was looked up via session.get('user',{}).get('localId',...)
+        # which never matched the real session shape (session['user_id'] is the canonical
+        # key) so all writes saved as user_id='default'; (2) confidence was inserted as
+        # a string ('HIGH'/'MEDIUM'/'LOW') into a Float column, raising DataError which
+        # the bare except caught and logged but never surfaced. Result: count=0 forever.
         try:
             if _DBSession:
+                # Map confidence string label to numeric (column is Float)
+                _conf_str = response_data.get("confidence", "LOW")
+                _conf_num = {"HIGH": 90.0, "MEDIUM": 70.0, "LOW": 50.0}.get(_conf_str, 50.0)
                 _sh_db = _DBSession()
                 _sh = SignalHistory(
-                    user_id   = session.get("user", {}).get("localId", "default"),
+                    user_id   = str(session.get("user_id", "default")),
                     ticker    = ticker,
                     asset_type= asset_type,
                     timeframe = timeframe,
@@ -4702,7 +4711,7 @@ def analyze():
                     entry     = response_data.get("entry"),
                     stop_loss = response_data.get("stop_loss"),
                     tp1       = response_data.get("tp1"),
-                    confidence= response_data.get("confidence"),
+                    confidence= _conf_num,
                     confidence_label = response_data.get("confidence_label"),
                 )
                 _sh_db.add(_sh)
@@ -6625,7 +6634,12 @@ def signal_history_get():
     db = _DBSession()
     try:
         limit = min(int(request.args.get("limit", 50)), 200)
+        # Bug J fix 2026-04-29: filter by current session's user_id so users only see
+        # their own history (was returning every user's signals — privacy issue +
+        # confusing data leakage).
+        _uid = str(session.get("user_id", "default"))
         rows = (db.query(SignalHistory)
+                  .filter(SignalHistory.user_id == _uid)
                   .order_by(SignalHistory.fired_at.desc())
                   .limit(limit)
                   .all())
