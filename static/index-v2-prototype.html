@@ -10727,9 +10727,17 @@ function _initUndChart(sig){
   window._undChartRefs = { chart, cs, rsiChart, rsiLine, wrap };
 
   function _applyChartBars(bars){
+    console.log('[chart] _applyChartBars called with', bars?.length || 0, 'bars');
     if(loadEl) loadEl.style.display = 'none';
-    if(!bars||!bars.length){ if(loadEl){loadEl.style.display='flex';loadEl.textContent='No chart data';} return; }
-    cs.setData(bars.map(b=>({time:b.time,open:b.open,high:b.high,low:b.low,close:b.close})));
+    if(!bars||!bars.length){ console.warn('[chart] no bars, showing No chart data'); if(loadEl){loadEl.style.display='flex';loadEl.textContent='No chart data';} return; }
+    try {
+      cs.setData(bars.map(b=>({time:b.time,open:b.open,high:b.high,low:b.low,close:b.close})));
+      console.log('[chart] cs.setData OK with', bars.length, 'candles');
+    } catch(e) {
+      console.error('[chart] cs.setData FAILED:', e.message, 'first bar:', bars[0]);
+      if(loadEl){loadEl.style.display='flex';loadEl.textContent='Chart render error: '+e.message;}
+      return;
+    }
     volSeries.setData(bars.map(b=>({
       time:b.time, value:b.volume||0,
       color: b.close>=b.open ? 'rgba(93,232,160,.4)' : 'rgba(232,112,110,.4)'
@@ -10744,6 +10752,19 @@ function _initUndChart(sig){
   }
 
   if(loadEl) loadEl.style.display = 'flex';
+
+  // ── DIAGNOSTIC LOGGING (added 2026-04-29 for empty-chart debug) ──
+  console.log('[chart] init', {
+    sym: sym, tf: tf, asset: sig?.asset, isCrypto: isCrypto,
+    chartDates_len: sig?.chartDates?.length || 0,
+    chartPrices_len: sig?.chartPrices?.length || 0,
+    chartHighs_len: sig?.chartHighs?.length || 0,
+    chartLows_len:  sig?.chartLows?.length  || 0,
+    rsi: sig?.rsi, atr: sig?.atr,
+    wrap_clientWidth: wrap?.clientWidth,
+    inner_clientWidth: inner?.clientWidth,
+    loadEl_display: loadEl?.style?.display
+  });
 
   // Use API chart data if available (stocks, forex, commodities)
   const apiDates = sig && sig.chartDates && sig.chartDates.length ? sig.chartDates : null;
@@ -10760,13 +10781,27 @@ function _initUndChart(sig){
       time:toTs(d), open:opens[i]||apiPrices[i], high:highs[i]||apiPrices[i],
       low:lows[i]||apiPrices[i], close:apiPrices[i], volume:(sig.chartVolumes||[])[i]||0
     })).filter(b=>b.time&&!isNaN(b.close));
-    if(bars.length) { _applyChartBars(bars); }
-    else if(isCrypto) { _fetchBinance(); }
-    else { if(loadEl){loadEl.style.display='flex';loadEl.textContent='Chart data unavailable';} }
+    console.log('[chart] bars built:', {
+      total_input: apiDates.length,
+      after_filter: bars.length,
+      first_date_raw: apiDates[0],
+      first_ts: bars[0]?.time,
+      last_date_raw: apiDates[apiDates.length-1],
+      last_ts: bars[bars.length-1]?.time
+    });
+    if(bars.length) {
+      console.log('[chart] -> _applyChartBars (data path)');
+      _applyChartBars(bars);
+    }
+    else if(isCrypto) { console.log('[chart] bars empty, crypto -> Binance fallback'); _fetchBinance(); }
+    else { console.warn('[chart] bars empty, not crypto -> Chart data unavailable'); if(loadEl){loadEl.style.display='flex';loadEl.textContent='Chart data unavailable';} }
   } else if(isCrypto){
+    console.log('[chart] no API data, crypto -> Binance fallback');
     _fetchBinance();
   } else {
-    if(loadEl){loadEl.style.display='flex';loadEl.textContent='Fetching chart…';}
+    console.warn('[chart] no API data, not crypto -> trying Binance USDT pair as last resort');
+    // Try Binance even for stocks/forex — won't work for AAPL but might catch BTC mistyped as stock
+    _fetchBinance();
   }
 
   function _fetchBinance(){
