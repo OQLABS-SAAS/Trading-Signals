@@ -1809,6 +1809,28 @@ body > *:not(canvas) {
 .journey-panel, .next-steps-panel,
 .mkt-section-card,
 .pg-hd,
+/* ═══ GLOBAL HOVER TOOLTIP — restored from v1 DotVerse ═══
+   Any element with data-tip="text" attribute auto-shows this popup on
+   hover via the engine in the JS section. Hovering Confluence shows what
+   it is; hovering "75%" shows what THAT specific value means in context. */
+#dvTip.dv-tip-popup {
+  position: fixed; pointer-events: none; z-index: 99999;
+  background: rgba(15,17,24,.98); color: rgba(237,232,216,.94);
+  padding: 9px 12px; border-radius: 7px;
+  border: 1px solid rgba(212,135,10,.45);
+  font: 400 12px/1.55 system-ui,-apple-system,"Helvetica Neue",sans-serif;
+  letter-spacing: 0; text-transform: none;
+  max-width: 320px; min-width: 160px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.6), 0 0 0 1px rgba(0,0,0,.15);
+  opacity: 0; transform: translateY(2px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+#dvTip.dv-tip-popup.show { opacity: 1; transform: translateY(0); }
+#dvTip.dv-tip-popup b, #dvTip.dv-tip-popup strong { color: rgba(212,135,10,.95); font-weight: 600; }
+#dvTip.dv-tip-popup .v { font-family:'IBM Plex Mono',monospace; color: rgba(93,232,160,.95); font-weight: 600; }
+[data-tip] { cursor: help; }
+[data-tip].dv-tip-target { border-bottom: 1px dotted rgba(212,135,10,.35); }
+
 .tab-pane, .tab-content-inner,
 .results-area, .results-panel,
 .chart-panel, .chart-wrap,
@@ -3983,6 +4005,13 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
 <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
+
+<!-- ═══ GLOBAL TOOLTIP POPUP — referenced by the engine at line ~14170 ═══
+     The tooltip engine reads data-tip="..." attributes from elements on
+     hover and renders the text inside this popup. Without this element
+     the entire hover-tooltip system was silently broken in v2 (was
+     working in v1 DotVerse). Restored 2026-05-01.                       -->
+<div id="dvTip" class="dv-tip-popup" role="tooltip" aria-hidden="true"></div>
 
 <!-- TIER SELECTOR MODAL -->
 <div id="tierModal">
@@ -6396,14 +6425,23 @@ function updateFlowBadge() {
   mult = Math.round(mult * 4) / 4;
   window._flowMult = mult;
 
-  // ── Final suggested risk — Kelly when available, quality when not ─────
+  // ── Final suggested risk — Kelly when available, multiplier × user's default when not ─
+  // Read the user's default risk from the calculator so "FULL SIZE" actually
+  // matches it (was hardcoded to 1.0 × multiplier — ignored user input).
+  var userDefaultRisk = parseFloat(document.getElementById('szRisk')?.value) || 1.0;
+  // Cap user's default risk at 10% to prevent reckless suggestions
+  if (userDefaultRisk > 10) userDefaultRisk = 10;
+  if (userDefaultRisk < 0.1) userDefaultRisk = 1.0;
   var sugRisk = usingKelly
     ? kellyPct
-    : Math.min(3.0, Math.round(1.0 * mult * 10) / 10);
+    : Math.min(10.0, Math.round(userDefaultRisk * mult * 10) / 10);
   window._kellyPct = sugRisk;
 
   // ── Grade thresholds ──────────────────────────────────────────────────
-  var gradeVal = usingKelly ? sugRisk : (mult >= 1.5 ? 2.5 : mult >= 1.0 ? 1.5 : 0.5);
+  // Use the multiplier directly so verdict matches the math regardless of
+  // user's default risk %. mult >= 1.25 = SCALE UP, 0.75-1.24 = FULL SIZE,
+  // < 0.75 = SCALE DOWN.
+  var gradeVal = usingKelly ? sugRisk : (mult >= 1.25 ? 2.5 : mult >= 1.0 ? 1.5 : 0.5);
   var grade, gradeCol, gradeBg, gradeBdr, btnCol, btnBdr, btnBg, btnHover, iconStroke;
   if (gradeVal >= 2.0) {
     grade='SCALE UP'; gradeCol='var(--grn)';
@@ -6437,13 +6475,17 @@ function updateFlowBadge() {
   }
 
   // ── Factor pills ──────────────────────────────────────────────────────
-  function pill(label, val, adj) {
+  function pill(label, val, adj, kind) {
     var c  = adj > 0 ? 'rgba(61,190,108,.8)'  : adj < 0 ? 'rgba(224,85,85,.7)'  : 'rgba(237,232,216,.5)';
     var bg = adj > 0 ? 'rgba(61,190,108,.08)' : adj < 0 ? 'rgba(224,85,85,.07)' : 'rgba(237,232,216,.05)';
     var arrow = adj > 0 ? ' ↑' : adj < 0 ? ' ↓' : '';
+    // Strip non-numeric chars for value tip lookup ('%' / '×' / '1:')
+    var rawVal = String(val).replace(/[^0-9.\-]/g,'').replace(/^\./,'0.');
+    var termTip = (typeof dvTermTip === 'function' && kind) ? dvTermTip(kind).replace(/"/g,'&quot;') : '';
+    var valTip  = (typeof dvValueTip === 'function' && kind) ? dvValueTip(kind, rawVal).replace(/"/g,'&quot;') : '';
     return '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;background:' + bg + ';border:1px solid ' + c + ';font-family:var(--mono);font-size:9px;color:' + c + ';white-space:nowrap;">'
-      + '<span style="color:rgba(180,190,210,.5);">' + label + '</span>'
-      + '<b>' + val + arrow + '</b></span>';
+      + '<span data-tip="' + termTip + '" style="color:rgba(180,190,210,.5);">' + label + '</span>'
+      + '<b data-tip="' + valTip + '">' + val + arrow + '</b></span>';
   }
 
   // ── Plain-English reasoning for each factor + final grade ──────────────
@@ -6463,13 +6505,17 @@ function updateFlowBadge() {
     if (adj < 0) return 'Volume ' + vr.toFixed(1) + '× — quiet market: under 80% of normal activity. Setups in low-volume conditions whipsaw. Size scales down.';
     return 'Volume ' + vr.toFixed(1) + '× — normal participation. Size stays neutral.';
   }
+  // Verdict text — quotes the actual numbers so user can confirm math matches recommendation.
+  // userDefaultRisk = the % they typed in calculator. sugRisk = engine recommendation.
   var _gradeBlurb;
-  if (grade === 'SCALE UP') {
-    _gradeBlurb = 'Verdict: SCALE UP — multiple factors favourable, the engine recommends a larger position than your default risk %.';
+  if (usingKelly) {
+    _gradeBlurb = 'Verdict: KELLY — backtest produced a verified ' + bt.win_rate + '% win rate over ' + btTrades + ' trades. Engine recommends ' + sugRisk.toFixed(1) + '% risk (Half-Kelly math). Your default of ' + userDefaultRisk + '% would be ' + (userDefaultRisk > sugRisk ? 'aggressive' : 'conservative') + ' relative to optimal.';
+  } else if (grade === 'SCALE UP') {
+    _gradeBlurb = 'Verdict: SCALE UP — signal quality favourable on all factors. Engine recommends ' + sugRisk.toFixed(1) + '% (your default of ' + userDefaultRisk + '% × ' + mult.toFixed(2) + ' multiplier).';
   } else if (grade === 'FULL SIZE') {
-    _gradeBlurb = 'Verdict: FULL SIZE — setup is solid at standard size, no reason to go bigger or smaller than your default risk %.';
+    _gradeBlurb = 'Verdict: FULL SIZE — solid standard setup. Engine recommends your default ' + userDefaultRisk + '% (multiplier 1.00×). No reason to scale up or down.';
   } else {
-    _gradeBlurb = 'Verdict: SCALE DOWN — at least one factor is weak, the engine recommends cutting size below your default risk %.';
+    _gradeBlurb = 'Verdict: SCALE DOWN — at least one factor (confluence/R:R/volume) is weak. Engine recommends ' + sugRisk.toFixed(1) + '% (your default of ' + userDefaultRisk + '% × ' + mult.toFixed(2) + ' multiplier).';
   }
 
   badge.innerHTML =
@@ -6495,9 +6541,9 @@ function updateFlowBadge() {
     + '</div>'
     // Factor pills
     + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">'
-    + pill('Confluence', confPct + '%', confAdj)
-    + pill('R:R', rr.toFixed(1) + ':1', rrAdj)
-    + pill('Volume', vr.toFixed(1) + '×', vrAdj)
+    + pill('Confluence', confPct + '%', confAdj, 'confluence')
+    + pill('R:R', rr.toFixed(1) + ':1', rrAdj, 'rr')
+    + pill('Volume', vr.toFixed(1) + '×', vrAdj, 'volratio')
     + '</div>'
     // Reasoning panel — plain-English explanation of WHY the engine picked this size
     + '<div style="background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:6px;padding:9px 11px;margin-bottom:12px;">'
@@ -14166,6 +14212,112 @@ function switchBtPineTab(tab, btn) {
   }
 }
 
+// ─── GLOBAL TOOLTIP HELPERS — restored from v1 DotVerse ───
+// dvTermTip(kind) -> string explaining what the term means
+// dvValueTip(kind, value) -> string explaining what THAT value means
+// Use as: <span data-tip="${dvTermTip('confluence')}">Confluence</span>
+//         <span data-tip="${dvValueTip('confluence', 75)}">75%</span>
+// All copy in plain English, no jargon for the value tier.
+window.dvTermTip = function(kind) {
+  const T = {
+    confluence: 'Confluence — how many of the 7 DotVerse indicators (RSI, EMAs, MACD, Bollinger, supertrend, volume, multi-timeframe trend) agree on direction. Higher = stronger consensus across signals.',
+    rr:         'Risk-to-Reward — for every $1 you risk on the stop loss, how many dollars you target on take profit. 1:2 means risk $1 to make $2.',
+    atr:        'ATR (Average True Range) — how much the asset typically moves per bar. Used to size stops correctly so you do not get stopped out by normal noise.',
+    halfkelly:  'Half-Kelly position size — mathematically optimal risk based on your win-rate and average reward. We use HALF Kelly because full Kelly is too aggressive and survives drawdowns poorly.',
+    kelly:      'Kelly position size — mathematically optimal risk percentage based on win-rate and reward-to-risk ratio.',
+    slippage:   'Slippage — the difference between the price you wanted and the price you got filled at. High slippage on big trades = shallow market liquidity.',
+    spread:     'Spread — the gap between the buy (ask) and sell (bid) price. Wider spread = costlier to enter+exit.',
+    rsi:        'RSI (Relative Strength Index) — measures momentum on a 0-100 scale. Below 30 = oversold, above 70 = overbought. Above 50 = bullish bias.',
+    ema:        'EMA (Exponential Moving Average) — average price over N bars, weighted to recent. Price above EMA = uptrend, below = downtrend.',
+    macd:       'MACD — measures whether momentum is accelerating or decelerating. Histogram bars above zero and rising = momentum building bullish.',
+    bb:         'Bollinger Bands — show where price is relative to its recent volatility. Near upper band = overbought, near lower = oversold.',
+    supertrend: 'Supertrend — direction indicator. Green/Bullish = trend up, Red/Bearish = trend down.',
+    volume:     'Volume — number of contracts/shares traded. Higher than average volume confirms moves; lower volume = weak/fake moves.',
+    volratio:   'Volume Ratio — current bar volume divided by 20-bar average. >1.5x = heavy participation, <0.8x = quiet market.',
+    winrate:    'Win Rate — percentage of past signals on this asset/timeframe that hit TP1 before SL. Anything above 55% over 30+ samples is a real edge.',
+    samplesize: 'Sample Size — number of past signals tested. Below 30 trades is statistically too small to trust; 30+ is the minimum for valid win-rate.',
+    confidence: 'Confidence label — DotVerse trust tier for this signal. CONFIRMED = high conviction, LIKELY = medium, HYPOTHESIS = weak.',
+    profitfactor:'Profit Factor — gross winning $ / gross losing $. >1.5 is genuinely profitable, 1.0 is break-even, <1.0 is losing strategy.',
+    sharpe:     'Sharpe Ratio — risk-adjusted return. >1.0 is good, >2.0 is excellent. Annualised.',
+    sortino:    'Sortino Ratio — like Sharpe but only penalises downside volatility. More relevant for traders than Sharpe.',
+    maxdd:      'Max Drawdown — biggest peak-to-trough loss in backtest. The pain you would have endured holding through the worst stretch.',
+    expectancy: 'Expectancy — average $ gained per trade across the backtest. Positive = strategy edge, negative = lose money over time.',
+    regime:     'Market Regime — TRENDING (ADX>25, momentum trades work) / RANGING (ADX<20, mean-reversion works) / TRANSITION (mixed).',
+    adx:        'ADX (Average Directional Index) — strength of the trend regardless of direction. Above 25 = trending market, below 20 = ranging.',
+    realbuyer:  'Real Buyer % — share of recent volume from aggressive market-buy orders that took the ask price. Strong upward signal.',
+    poserbuyer: 'Poser Buyer % — share from passive bids that crept up without volume. Looks like demand but is fake.',
+    realseller: 'Real Seller % — share from aggressive market-sell orders hitting the bid with volume. Strong downward signal.',
+    poserseller:'Poser Seller % — share from spoofing or thin asks dropping without volume. Fake supply.',
+    liquidity:  'Market Liquidity — how much volume sits in the order book within 0.1% of current price. Deep = your orders fill clean. Thin = expect slippage.',
+    contractsize:'Contract Size — what 1 standard lot of THIS asset means. e.g. 1 lot EUR/USD = 100,000 EUR; 1 lot XAU/USD = 100 oz of gold.',
+    pipvalue:   'Pip Value — dollar change per pip per standard lot. e.g. EUR/USD pip = $10/lot.',
+    margin:     'Margin — capital required to open the position. Lower margin = higher leverage = bigger profits and bigger losses.',
+    leverage:   'Leverage — how much position size you control per dollar of margin. 1:30 means $1 controls $30 of position.',
+    multiplier: 'Flow-Scaled Multiplier — how the engine adjusts your default risk based on signal quality. >1x = scale up, <1x = scale down.',
+    daterange:  'Date Range — how long you might hold this trade based on the timeframe and target distance.',
+  };
+  return T[kind] || kind;
+};
+
+window.dvValueTip = function(kind, value) {
+  const v = parseFloat(value);
+  switch (kind) {
+    case 'confluence':
+      if (v >= 80) return `<b>${v}%</b> — <span class="v">very strong</span>. 6 of 7 indicators agree. Above the 65% gate by a wide margin. Trade with confidence.`;
+      if (v >= 70) return `<b>${v}%</b> — <span class="v">strong</span>. Comfortably above the 65% confluence gate. Solid setup.`;
+      if (v >= 65) return `<b>${v}%</b> — just above the 65% gate. Barely qualifies, treat as marginal.`;
+      return `<b>${v}%</b> — below the 65% gate. Signal would normally be suppressed to HOLD.`;
+    case 'rr':
+      if (v >= 3) return `<b>1:${v.toFixed(1)}</b> — <span class="v">excellent</span>. Even at 40% win-rate this strategy makes money.`;
+      if (v >= 2) return `<b>1:${v.toFixed(1)}</b> — <span class="v">healthy</span>. Standard professional minimum. Profitable above 40% win-rate.`;
+      if (v >= 1.5) return `<b>1:${v.toFixed(1)}</b> — acceptable. Needs 50%+ win rate to be profitable after fees.`;
+      return `<b>1:${v.toFixed(1)}</b> — <span style="color:rgba(232,112,110,.95)">below DotVerse minimum</span>. Need to win 60%+ to break even.`;
+    case 'atr':
+      return `<b>${v}</b> — typical bar range of ${v} price units. Used to set stops at 4× ATR (=${(v*4).toFixed(2)} away from entry) so normal volatility does not stop you out.`;
+    case 'halfkelly':
+    case 'kelly':
+      if (v >= 5) return `<b>${v}%</b> — aggressive but capped at 5% max. Strategy has 100+ verified trades and a strong edge.`;
+      if (v >= 2.5) return `<b>${v}%</b> — moderate. Above the 30-trade provisional cap, you have statistical confidence in the math.`;
+      if (v >= 1) return `<b>${v}%</b> — conservative. Either sample size is small or edge is thin. Sensible for newer setups.`;
+      return `<b>${v}%</b> — minimal risk. Math says edge is weak; size accordingly.`;
+    case 'rsi':
+      if (v <= 30) return `<b>${v}</b> — <span class="v">oversold</span>. Bounce candidate; mean-reversion BUY setups tend to work here.`;
+      if (v >= 70) return `<b>${v}</b> — <span style="color:rgba(232,112,110,.95)">overbought</span>. Pullback risk; mean-reversion SELL setups likely.`;
+      if (v >= 50) return `<b>${v}</b> — bullish bias. Above the midline, momentum favours upside.`;
+      return `<b>${v}</b> — bearish bias. Below the midline, momentum favours downside.`;
+    case 'volratio':
+      if (v >= 1.5) return `<b>${v.toFixed(1)}×</b> — <span class="v">heavy participation</span>. Real money is moving. Confirms the signal.`;
+      if (v >= 1.2) return `<b>${v.toFixed(1)}×</b> — above-average volume. Solid confirmation.`;
+      if (v >= 0.8) return `<b>${v.toFixed(1)}×</b> — normal volume. Neutral.`;
+      return `<b>${v.toFixed(1)}×</b> — quiet market. Setups in low volume tend to whipsaw. Take with caution.`;
+    case 'winrate':
+      if (v >= 60) return `<b>${v}%</b> — <span class="v">strong edge</span>. Above the typical 55% threshold and well clear of randomness.`;
+      if (v >= 55) return `<b>${v}%</b> — meets DotVerse quality gate. Real edge over time.`;
+      if (v >= 50) return `<b>${v}%</b> — coin-flip range. Profitability depends entirely on R:R holding above 2.`;
+      return `<b>${v}%</b> — <span style="color:rgba(232,112,110,.95)">below 50%</span>. Strategy loses on win-rate alone; would need R:R >2.5 just to break even.`;
+    case 'samplesize':
+      if (v >= 100) return `<b>${v}</b> trades — <span class="v">confirmed</span> tier. Sample is large enough that win-rate is statistically reliable.`;
+      if (v >= 30) return `<b>${v}</b> trades — provisional tier. Enough for a quality gate but error bars are still ±10%.`;
+      return `<b>${v}</b> trades — <span style="color:rgba(232,112,110,.95)">insufficient</span>. Below the 30-trade statistical floor.`;
+    case 'profitfactor':
+      if (v >= 2) return `<b>${v.toFixed(2)}</b> — <span class="v">excellent</span>. Wins outpace losses 2:1.`;
+      if (v >= 1.5) return `<b>${v.toFixed(2)}</b> — <span class="v">profitable</span>. Wins clearly exceed losses.`;
+      if (v >= 1.0) return `<b>${v.toFixed(2)}</b> — break-even. Wins barely cover losses; fees turn this negative.`;
+      return `<b>${v.toFixed(2)}</b> — <span style="color:rgba(232,112,110,.95)">losing</span>. Strategy loses money over time.`;
+    case 'spread':
+      return `<b>${value}</b> — every entry-and-exit pays this twice (round trip). Heavy on small TP setups.`;
+    case 'multiplier':
+      if (v >= 1.25) return `<b>${v.toFixed(2)}×</b> — engine recommends scaling UP because all factors are favourable.`;
+      if (v >= 1.0) return `<b>${v.toFixed(2)}×</b> — full size. Standard setup, no need to deviate from default risk.`;
+      return `<b>${v.toFixed(2)}×</b> — engine recommends scaling DOWN because at least one factor (confluence/R:R/volume) is weak.`;
+    case 'adx':
+      if (v >= 25) return `<b>${v}</b> — <span class="v">trending market</span>. Trend-following setups have edge here.`;
+      if (v >= 20) return `<b>${v}</b> — transition zone. Regime is shifting, lower conviction.`;
+      return `<b>${v}</b> — <span style="color:rgba(212,135,10,.95)">ranging market</span>. Mean-reversion setups have edge; trend trades fail.`;
+  }
+  // Fallback — just show the value
+  return `<b>${value}</b>`;
+};
 // ─── GLOBAL TOOLTIP ENGINE ───
 (function() {
   const tip = document.getElementById('dvTip');
