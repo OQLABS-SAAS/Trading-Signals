@@ -11697,7 +11697,44 @@ function szLadderRender() {
     <div style="font-family:var(--mono);font-size:11px;color:${tp2Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp2Dist?('+$'+totalTp2.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP2</div></div>
     <div style="font-family:var(--mono);font-size:11px;color:${tp3Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp3Dist?('+$'+totalTp3.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP3</div></div>
     <div></div>
-  </div>`;
+  </div>` +
+  // Combined / scenario row — what you actually take home depending on exit style
+  (() => {
+    const haveAnyTP = tp1Dist || tp2Dist || tp3Dist;
+    if (!haveAnyTP) return '';
+    // Standard scale-out: 50% at TP1, 30% at TP2, 20% at TP3.
+    // If a TP isn't set, that portion stays at the next-set TP (or TP1).
+    const fallback = tp3Dist || tp2Dist || tp1Dist;
+    const useTp1 = tp1Dist || fallback;
+    const useTp2 = tp2Dist || tp3Dist || tp1Dist;
+    const useTp3 = tp3Dist || tp2Dist || tp1Dist;
+    // Per-row scale-out profit then summed
+    let combinedScaleOut = 0;
+    let bestCaseAllTp3   = 0;
+    (window._szLadder||[]).forEach((risk) => {
+      const moneyAtRisk = acct * (risk/100);
+      const units       = moneyAtRisk / slDist;
+      combinedScaleOut += units * (0.5 * useTp1 + 0.3 * useTp2 + 0.2 * useTp3);
+      bestCaseAllTp3   += units * (tp3Dist || tp2Dist || tp1Dist);
+    });
+    const netRR = totalRisk > 0 ? (combinedScaleOut / totalRisk) : 0;
+    return `<div style="margin-top:8px;padding:11px 14px;background:linear-gradient(90deg, rgba(93,232,160,.08), rgba(201,168,76,.05));border:1px solid rgba(93,232,160,.28);border-radius:7px;">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);letter-spacing:.6px;text-transform:uppercase;margin-bottom:3px;">Combined potential profit</div>
+          <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.45);">Standard scale-out: 50% TP1 + 30% TP2 + 20% TP3 across all ${(window._szLadder||[]).length} trade(s)</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-family:var(--mono);font-size:22px;font-weight:700;color:rgba(93,232,160,.95);line-height:1;">+$${combinedScaleOut.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+          <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);margin-top:3px;">Risk:Reward 1 : ${netRR.toFixed(2)}</div>
+        </div>
+      </div>
+      <div style="margin-top:9px;padding-top:9px;border-top:1px solid rgba(237,232,216,.1);display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.6);">
+        <span>Worst case (all SL): <strong style="color:rgba(232,112,110,.9);">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:0})}</strong></span>
+        <span>Best case (all TP3): <strong style="color:rgba(93,232,160,.9);">+$${bestCaseAllTp3.toLocaleString(undefined,{maximumFractionDigits:0})}</strong></span>
+      </div>
+    </div>`;
+  })();
   // Disable Add button at 10 rows
   const addBtn = document.getElementById('szLadderAddBtn');
   if (addBtn) addBtn.disabled = (window._szLadder.length >= 10);
