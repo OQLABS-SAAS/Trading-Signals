@@ -90,6 +90,28 @@ def handle_404(e):
 #   APP_PASSWORD → the password you want to protect the app with
 app.secret_key   = os.environ.get("SECRET_KEY", "change-me-set-SECRET_KEY-in-railway")
 APP_PASSWORD     = os.environ.get("APP_PASSWORD", "").strip()
+
+# ─── Session cookie config (fix refresh-logout bug) ───
+# Without these, Flask defaults can drop the session cookie on page refresh
+# in some browser/OS combinations, dumping the user back to the login screen.
+# Setting them explicitly with SECURE=True (HTTPS-only) + SAMESITE=Lax
+# (sent on top-level navigations + same-origin XHR) + a 30-day lifetime
+# keeps the user logged in across refreshes for a month.
+from datetime import timedelta as _td
+app.config["SESSION_COOKIE_SAMESITE"]    = "Lax"
+app.config["SESSION_COOKIE_SECURE"]      = True   # Railway serves HTTPS; required for Chrome to accept SameSite=None cookies and harmless on other browsers
+app.config["SESSION_COOKIE_HTTPONLY"]    = True   # JS cannot read the session cookie — XSS protection
+app.config["PERMANENT_SESSION_LIFETIME"] = _td(days=30)
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True  # rolling expiration — every request bumps the cookie's expires-at to now+30d
+
+@app.before_request
+def _make_session_persistent():
+    """If a user has logged in (user_id or authenticated set), keep the
+    session permanent on every request so the rolling 30-day window
+    survives page refreshes and tab closes."""
+    if session.get("user_id") or session.get("authenticated"):
+        session.permanent = True
+
 ADMIN_EMAIL           = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 MT5_EA_SECRET         = os.environ.get("MT5_EA_SECRET", "").strip()
 GOOGLE_CLIENT_ID      = os.environ.get("GOOGLE_CLIENT_ID", "")
