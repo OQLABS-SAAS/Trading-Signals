@@ -11585,6 +11585,23 @@ function showSize(){
     </div>
   </div>
 
+  <!-- ── Multi-Trade Ladder — fire up to 10 sims of the same signal at different risk % ── -->
+  <div class="und-card" style="margin-top:16px;">
+    <div class="und-card-title">Multi-Trade Ladder
+      <span style="font-size:10px;color:rgba(237,232,216,.5);font-weight:400;margin-left:6px;">Fire up to 10 simultaneous trades at different risk % to ladder your exposure.</span>
+    </div>
+    <div id="szLadderRows" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <button onclick="szLadderAdd()" id="szLadderAddBtn" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.2);color:rgba(237,232,216,.85);border-radius:5px;cursor:pointer;">+ Add Row</button>
+      <button onclick="szLadderPreset('conservative')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(93,232,160,.07);border:1px solid rgba(93,232,160,.25);color:rgba(93,232,160,.85);border-radius:5px;cursor:pointer;">Conservative (0.5×5)</button>
+      <button onclick="szLadderPreset('balanced')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);border-radius:5px;cursor:pointer;">Balanced (1/1.5/2/2.5/3)</button>
+      <button onclick="szLadderPreset('aggressive')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(232,112,110,.07);border:1px solid rgba(232,112,110,.25);color:rgba(232,112,110,.85);border-radius:5px;cursor:pointer;">Aggressive (1/2/3/4/5)</button>
+      <div style="flex:1"></div>
+      <button onclick="szLadderSubmitAll()" id="szLadderSubmitBtn" style="padding:8px 18px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--crys);color:#07080c;border:none;border-radius:5px;cursor:pointer;letter-spacing:.04em;">Submit All to MT5</button>
+    </div>
+    <div id="szLadderStatus" style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);min-height:14px;"></div>
+  </div>
+
   <div class="flow-footer" style="margin-top:16px;">
     <div class="flow-footer-left">
       <div class="flow-footer-step">Step 4 of 5 · SIZE</div>
@@ -11615,6 +11632,106 @@ function szSetDir(dir, btn){
   if(btn) btn.classList.add('active');
   document.getElementById('szDir') && (document.getElementById('szDir').value=dir) || (window._szDir=dir);
   szCalc();
+}
+
+// ── Multi-Trade Ladder — up to 10 simultaneous trades at varying risk % ──
+window._szLadder = window._szLadder || [1.0, 1.5, 2.0, 2.5, 3.0];
+function szLadderRender() {
+  const wrap = document.getElementById('szLadderRows');
+  if (!wrap) return;
+  // Read account size to compute $ for each risk
+  const acct = parseFloat(document.getElementById('szAcct')?.value) || 10000;
+  // Read SL distance to estimate lots
+  const entry = parseFloat((document.getElementById('szEntry')?.value||'').replace(/,/g,'')) || 0;
+  const sl    = parseFloat((document.getElementById('szSL')?.value||'').replace(/,/g,''))    || 0;
+  const slDist= Math.abs(entry - sl) || 1;
+  wrap.innerHTML = (window._szLadder||[]).map((risk, i) => {
+    const dollars = (acct * (risk/100)).toFixed(2);
+    const lots    = (acct * (risk/100) / slDist).toFixed(4);
+    return `<div style="display:grid;grid-template-columns:42px 130px 1fr 1fr 30px;gap:8px;align-items:center;padding:5px 8px;background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:5px;">
+      <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input type="number" step="0.1" min="0.1" max="10" value="${risk}" onchange="szLadderUpdate(${i}, this.value)"
+          style="width:60px;padding:5px 7px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
+        <span style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);">% risk</span>
+      </div>
+      <div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);">$<span style="color:rgba(237,232,216,.9);font-weight:600;">${Number(dollars).toLocaleString(undefined,{maximumFractionDigits:2})}</span> at risk</div>
+      <div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);">≈ <span style="color:rgba(201,168,76,.95);font-weight:600;">${lots}</span> units / lots</div>
+      <button onclick="szLadderRemove(${i})" style="background:none;border:none;color:rgba(232,112,110,.6);cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button>
+    </div>`;
+  }).join('');
+  // Disable Add button at 10 rows
+  const addBtn = document.getElementById('szLadderAddBtn');
+  if (addBtn) addBtn.disabled = (window._szLadder.length >= 10);
+}
+function szLadderAdd() {
+  if (window._szLadder.length >= 10) return;
+  const last = window._szLadder[window._szLadder.length - 1] || 1.0;
+  window._szLadder.push(Math.min(10, Math.round((last + 0.5) * 10) / 10));
+  szLadderRender();
+}
+function szLadderRemove(i) {
+  window._szLadder.splice(i, 1);
+  if (window._szLadder.length === 0) window._szLadder = [1.0];
+  szLadderRender();
+}
+function szLadderUpdate(i, v) {
+  const n = parseFloat(v);
+  if (isFinite(n) && n > 0) { window._szLadder[i] = n; szLadderRender(); }
+}
+function szLadderPreset(kind) {
+  if (kind === 'conservative') window._szLadder = [0.5, 0.5, 0.5, 0.5, 0.5];
+  else if (kind === 'balanced')  window._szLadder = [1.0, 1.5, 2.0, 2.5, 3.0];
+  else if (kind === 'aggressive')window._szLadder = [1.0, 2.0, 3.0, 4.0, 5.0];
+  szLadderRender();
+}
+async function szLadderSubmitAll() {
+  const sig = window._activeSignal;
+  if (!sig || !sig.sym || !sig.entry || !sig.sl || !sig.tp) {
+    if (typeof _dvToast === 'function') _dvToast('Need a full signal (entry/SL/TP) before laddering','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    return;
+  }
+  const status = document.getElementById('szLadderStatus');
+  const acct   = parseFloat(document.getElementById('szAcct')?.value) || 10000;
+  const slDist = Math.abs(parseFloat(sig.entry) - parseFloat(sig.sl)) || 1;
+  const orderType = 'Market';
+  const direction = (sig.sig||'BUY').toUpperCase();
+  const ladder = (window._szLadder||[]).slice(0, 10);
+  if (status) status.innerHTML = '<span style="color:rgba(201,168,76,.9);">Submitting ' + ladder.length + ' orders…</span>';
+  let ok = 0, fail = 0;
+  for (let i = 0; i < ladder.length; i++) {
+    const risk    = ladder[i];
+    const dollars = acct * (risk/100);
+    const lots    = parseFloat((dollars / slDist).toFixed(4));
+    try {
+      const res = await dvFetch('/api/mt5/order', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          ticker: sig.sym, order_type: orderType, lots: lots, direction: direction,
+          entry: sig.entry, sl: sig.sl, tp1: sig.tp, tp2: sig.tp2, tp3: sig.tp3,
+          comment: 'DotVerse ladder #' + (i+1) + ' @ ' + risk + '%'
+        })
+      });
+      if (res && res.order_id) ok++; else fail++;
+    } catch(e) { fail++; }
+  }
+  if (status) {
+    const okCol  = ok > 0 ? 'rgba(93,232,160,.9)' : 'rgba(237,232,216,.5)';
+    const failCol= fail > 0 ? 'rgba(232,112,110,.9)' : 'rgba(237,232,216,.5)';
+    status.innerHTML = '<span style="color:' + okCol + ';">' + ok + ' submitted</span>'
+                     + (fail > 0 ? '  <span style="color:' + failCol + ';">' + fail + ' failed</span>' : '')
+                     + '  · Tickets will appear in the ACT tab as the EA fills them.';
+  }
+  if (typeof _dvToast === 'function') {
+    if (ok > 0) _dvToast('Ladder sent: ' + ok + ' orders queued for MT5', 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
+    else _dvToast('All ladder orders failed — check MT5 connection', 'rgba(232,112,110,.15)', 'rgba(232,112,110,.4)');
+  }
+}
+// Render ladder when Size tab template injects (after szCalc populates inputs)
+const _orig_szCalc = (typeof szCalc === 'function') ? szCalc : null;
+if (_orig_szCalc) {
+  szCalc = function() { _orig_szCalc(); try { szLadderRender(); } catch(e){} };
 }
 
 function szTypeChange(){

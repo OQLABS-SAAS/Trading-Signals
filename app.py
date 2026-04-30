@@ -3818,21 +3818,48 @@ def mt5_level_alert():
         state["level_hits"][str(ticket)] = level
         mt5_state["default"] = state
 
-    # Phase C — breakeven automation: when TP1 hit, move SL to entry price
-    if level == "TP1" and _DBSession:
+    # ── Phase C — progressive SL-ladder automation ───────────────────
+    # TP1 hit → SL moves to entry (breakeven, can't lose now)
+    # TP2 hit → SL moves to TP1 price (locks TP1 profit)
+    # TP3 hit → SL moves to TP2 price (locks TP2 profit; trade still has runway)
+    # Each step requires the corresponding price to be available — the
+    # original MT5Order.tp / tp2 fields hold them.
+    if level in ("TP1", "TP2", "TP3") and _DBSession:
         try:
             auto_cfg = _get_automation_settings("default")
             if auto_cfg.get("breakeven_on"):
-                # Find the original open_price from mt5_state positions
-                open_price = None
-                with mt5_state_lock:
-                    for uid, st in mt5_state.items():
-                        if isinstance(st, dict):
-                            for p in st.get("positions", []):
-                                if str(p.get("ticket")) == str(ticket):
-                                    open_price = p.get("open_price")
-                                    break
-                if open_price:
+                new_sl = None
+                ladder_label = None
+                if level == "TP1":
+                    # Move to entry
+                    open_price = None
+                    with mt5_state_lock:
+                        for uid, st in mt5_state.items():
+                            if isinstance(st, dict):
+                                for p in st.get("positions", []):
+                                    if str(p.get("ticket")) == str(ticket):
+                                        open_price = p.get("open_price")
+                                        break
+                    new_sl = float(open_price) if open_price else None
+                    ladder_label = f"Breakeven after TP1 — SL → entry {new_sl}" if new_sl else None
+                elif level in ("TP2", "TP3"):
+                    # Look up the original TP1/TP2 price from MT5Order using mt5_ticket
+                    db_lookup = _DBSession()
+                    try:
+                        original = db_lookup.query(MT5Order)\
+                            .filter(MT5Order.mt5_ticket == int(ticket),
+                                    MT5Order.action == "open",
+                                    MT5Order.status == "filled").first()
+                        if original:
+                            if level == "TP2" and original.tp:
+                                new_sl = float(original.tp)
+                                ladder_label = f"Lock TP1 after TP2 — SL → TP1 ({new_sl})"
+                            elif level == "TP3" and original.tp2:
+                                new_sl = float(original.tp2)
+                                ladder_label = f"Lock TP2 after TP3 — SL → TP2 ({new_sl})"
+                    finally:
+                        db_lookup.close()
+                if new_sl is not None and ladder_label:
                     db_be = _DBSession()
                     try:
                         be_order = MT5Order(
@@ -3841,30 +3868,31 @@ def mt5_level_alert():
                             order_type   = "MODIFY",
                             volume       = 0,
                             price        = 0,
-                            sl           = float(open_price),
+                            sl           = new_sl,
                             action       = "modify_sl",
                             close_ticket = int(ticket),
                             status       = "pending",
-                            comment      = f"Breakeven after TP1 #{ticket}",
+                            comment      = ladder_label,
                         )
                         db_be.add(be_order)
                         db_be.commit()
-                        be_tg = (f"🔒 Breakeven Set — {symbol}\n"
-                                 f"TP1 reached. SL moved to entry {open_price}\n"
-                                 f"Ticket #{ticket} — trade cannot lose now.")
+                        be_tg = (f"🔒 SL Ladder — {symbol}\n"
+                                 f"{ladder_label}\n"
+                                 f"Ticket #{ticket} — profit locked.")
                         try:
                             send_telegram(be_tg)
                         except Exception:
                             pass
                         _push_notification("default", "level",
-                                           f"🔒 Breakeven — {symbol}",
-                                           f"SL moved to entry {open_price} after TP1 hit")
+                                           f"🔒 SL Locked — {symbol}",
+                                           ladder_label)
+                        print(f"[sl-ladder] {symbol} #{ticket} {level} -> SL={new_sl}")
                     except Exception as be_e:
-                        print(f"[breakeven] {be_e}")
+                        print(f"[sl-ladder] DB error: {be_e}")
                     finally:
                         db_be.close()
         except Exception as e:
-            print(f"[breakeven] {e}")
+            print(f"[sl-ladder] {e}")
 
     return jsonify({"status": "ok"})
 
