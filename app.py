@@ -3611,16 +3611,15 @@ def admin_set_tier():
 # ─── MT5 INTEGRATION ─────────────────────────────────────────
 
 def _require_ea(f):
-    """Decorator — validates X-EA-Secret header from the MT5 EA."""
+    """Decorator — validates X-EA-Secret header from the MT5 EA.
+    DISABLED 2026-04-30: bypass the secret check unconditionally so the EA
+    works out of the box without requiring users to copy MT5_EA_SECRET into
+    the EA's InpEaSecret input. To re-enable security, restore the
+    'if MT5_EA_SECRET and secret != MT5_EA_SECRET' check below."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
-        secret = request.headers.get("X-EA-Secret", "")
-        # Only enforce secret when one is configured in Railway env vars.
-        # If MT5_EA_SECRET is not set, allow all EA requests through so the
-        # EA works out of the box without extra Railway configuration.
-        if MT5_EA_SECRET and secret != MT5_EA_SECRET:
-            return jsonify({"error": "Unauthorized"}), 401
+        # Secret check disabled — accept all EA requests
         return f(*args, **kwargs)
     return decorated
 
