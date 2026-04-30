@@ -11799,8 +11799,22 @@ async function szLadderSubmitAll() {
                      + '  · Tickets will appear in the ACT tab as the EA fills them.';
   }
   if (typeof _dvToast === 'function') {
-    if (ok > 0) _dvToast('Ladder sent: ' + ok + ' orders queued for MT5', 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
+    if (ok > 0) _dvToast('Ladder sent: ' + ok + ' orders queued for MT5 — opening Act tab to track', 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
     else _dvToast('All ladder orders failed — check MT5 connection', 'rgba(232,112,110,.15)', 'rgba(232,112,110,.4)');
+  }
+  // After at least one successful submission, jump to ACT so user sees the
+  // live trades populate as the EA fills them.
+  if (ok > 0) {
+    setTimeout(() => {
+      if (typeof setNav === 'function') setNav('act');
+      if (typeof showAct === 'function') showAct();
+      // Force a state refresh so the Active Trades panel pulls latest
+      if (typeof mt5Poll === 'function') {
+        setTimeout(mt5Poll, 600);
+        setTimeout(mt5Poll, 2500);
+        setTimeout(mt5Poll, 5500);
+      }
+    }, 800);
   }
 }
 // Render ladder when Size tab template injects (after szCalc populates inputs)
