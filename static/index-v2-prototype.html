@@ -4268,18 +4268,19 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
     <!-- ── Persistent Quick Analyse bar — pick any ticker + TF from any tab ── -->
     <div id="globalQuickBar" style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:8px 24px;border-bottom:1px solid rgba(201,168,76,.12);background:rgba(8,9,14,.78);flex-wrap:wrap;">
       <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.7px;color:rgba(201,168,76,.7);text-transform:uppercase;">Quick Analyse</span>
-      <input id="qpTickerInput" type="text" placeholder="BTC, AAPL, EUR/USD, XAU/USD, NVDA…"
-        style="flex:1;min-width:200px;max-width:340px;padding:6px 10px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"
-        onkeydown="if(event.key==='Enter')qpAnalyse()" />
-      <select id="qpAssetSel" title="Asset class — auto-detects if left at Auto"
+      <select id="qpAssetSel" title="Asset class" onchange="qpAssetChanged()"
         style="padding:6px 10px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.85);outline:none;cursor:pointer;">
-        <option value="auto">Auto</option>
         <option value="crypto">Crypto</option>
         <option value="stock">Stock</option>
         <option value="forex">Forex</option>
         <option value="commodity">Commodity</option>
         <option value="index">Index</option>
       </select>
+      <select id="qpTickerSel" title="Ticker — populated by asset class"
+        style="min-width:220px;padding:6px 10px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.85);outline:none;cursor:pointer;"></select>
+      <input id="qpTickerInput" type="text" placeholder="or type custom (e.g. AVAX, AMZN)"
+        style="width:170px;padding:6px 10px;font-family:var(--mono);font-size:10.5px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.12);border-radius:5px;color:rgba(237,232,216,.85);outline:none;"
+        onkeydown="if(event.key==='Enter')qpAnalyse()" />
       <div id="qpTfRow" style="display:flex;gap:4px;flex-wrap:wrap;">
         <button class="qp-tf" data-tf="15m" onclick="qpSetTF('15m',this)" style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">15M</button>
         <button class="qp-tf" data-tf="1h"  onclick="qpSetTF('1h',this)"  style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">1H</button>
@@ -6158,6 +6159,24 @@ function dvLoadInst(sym,asset){const inp=document.getElementById('dvTickerInput'
 // Lets the user pick any ticker + TF + asset class from anywhere and jump
 // straight to Understand with the analysis result. No need to navigate
 // through Market → Signal → click chip → Understand pipeline.
+const QP_TICKERS = {
+  crypto:    [['BTCUSD','BTC · Bitcoin'],['ETHUSD','ETH · Ethereum'],['SOLUSD','SOL · Solana'],['BNBUSD','BNB · Binance Coin'],['XRPUSD','XRP · Ripple'],['ADAUSD','ADA · Cardano'],['DOGEUSD','DOGE · Dogecoin'],['DOTUSD','DOT · Polkadot'],['AVAXUSD','AVAX · Avalanche'],['LINKUSD','LINK · Chainlink'],['MATICUSD','MATIC · Polygon'],['LTCUSD','LTC · Litecoin'],['ATOMUSD','ATOM · Cosmos'],['NEARUSD','NEAR · Near'],['ARBUSD','ARB · Arbitrum'],['APTUSD','APT · Aptos'],['INJUSD','INJ · Injective'],['SUIUSD','SUI · Sui']],
+  stock:     [['AAPL','AAPL · Apple'],['NVDA','NVDA · Nvidia'],['TSLA','TSLA · Tesla'],['AMZN','AMZN · Amazon'],['MSFT','MSFT · Microsoft'],['GOOGL','GOOGL · Alphabet'],['META','META · Meta'],['AMD','AMD · AMD'],['NFLX','NFLX · Netflix'],['JPM','JPM · JPMorgan'],['BAC','BAC · Bank of America'],['XOM','XOM · ExxonMobil'],['V','V · Visa'],['MA','MA · Mastercard'],['WMT','WMT · Walmart'],['DIS','DIS · Disney'],['COIN','COIN · Coinbase'],['INTC','INTC · Intel'],['CRM','CRM · Salesforce'],['SHOP','SHOP · Shopify']],
+  forex:     [['EURUSD','EUR/USD'],['GBPUSD','GBP/USD'],['USDJPY','USD/JPY'],['AUDUSD','AUD/USD'],['USDCAD','USD/CAD'],['USDCHF','USD/CHF'],['NZDUSD','NZD/USD'],['EURGBP','EUR/GBP'],['EURJPY','EUR/JPY'],['GBPJPY','GBP/JPY'],['AUDJPY','AUD/JPY'],['USDINR','USD/INR'],['USDCNH','USD/CNH'],['USDMXN','USD/MXN']],
+  commodity: [['XAUUSD','XAU/USD · Gold'],['XAGUSD','XAG/USD · Silver'],['WTI','WTI · Crude Oil'],['BRENT','BRENT · Brent Oil'],['NATGAS','NATGAS · Natural Gas'],['COPPER','COPPER · Copper'],['XPTUSD','XPT/USD · Platinum'],['XPDUSD','XPD/USD · Palladium']],
+  index:     [['SPX','S&P 500'],['NDX','Nasdaq 100'],['DJI','Dow Jones'],['RUT','Russell 2000'],['DAX','DAX'],['FTSE','FTSE 100'],['NIKKEI','Nikkei 225'],['HSI','Hang Seng'],['VIX','VIX']],
+};
+function qpAssetChanged() {
+  const asset = document.getElementById('qpAssetSel')?.value || 'crypto';
+  const sel   = document.getElementById('qpTickerSel');
+  if (!sel) return;
+  const list  = QP_TICKERS[asset] || [];
+  sel.innerHTML = list.map(([sym,lbl]) => `<option value="${sym}">${lbl}</option>`).join('');
+  window._dvAsset = asset;
+}
+// Init on page load — populate the default Crypto list
+document.addEventListener('DOMContentLoaded', qpAssetChanged);
+setTimeout(qpAssetChanged, 200);  // fallback if load fired earlier
 function qpSetTF(tf, btn) {
   window._dvTF = tf;
   document.querySelectorAll('.qp-tf').forEach(b => {
@@ -6173,16 +6192,21 @@ function qpSetTF(tf, btn) {
   });
 }
 async function qpAnalyse(presetTicker, presetTf) {
-  const inp = document.getElementById('qpTickerInput');
-  const sel = document.getElementById('qpAssetSel');
-  const sym = (presetTicker || (inp?.value || '').trim() || '').toUpperCase();
+  const inp     = document.getElementById('qpTickerInput');
+  const tickSel = document.getElementById('qpTickerSel');
+  const assetSel= document.getElementById('qpAssetSel');
+  // Free-text input takes precedence over the dropdown selection.
+  // Otherwise use the dropdown's selected ticker.
+  let sym = presetTicker || (inp?.value || '').trim();
+  if (!sym && tickSel && tickSel.value) sym = tickSel.value;
+  sym = (sym || '').toUpperCase();
   if (!sym) {
     if (inp) inp.focus();
-    if (typeof _dvToast === 'function') _dvToast('Type a ticker first (e.g. AAPL, BTC, EUR/USD)','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+    if (typeof _dvToast === 'function') _dvToast('Pick a ticker from the dropdown or type one','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
     return;
   }
   if (presetTf) window._dvTF = presetTf;
-  if (sel && sel.value) window._dvAsset = sel.value === 'auto' ? null : sel.value;
+  if (assetSel && assetSel.value) window._dvAsset = assetSel.value;
   // Mirror into the Understand-tab input so dvRunAnalyze finds the value
   const undInp = document.getElementById('dvTickerInput');
   if (undInp) undInp.value = sym;
