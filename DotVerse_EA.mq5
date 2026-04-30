@@ -229,23 +229,23 @@ void CheckLevels()
       double cur = isBuy ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK);
       int    hit = g_tk_hit[i];
 
-      // SL check
-      if (g_tk_sl[i] > 0 && !(hit & 1)) {
+      // SL check  ((hit & N) == 0  is the strict-mode-correct way to test "bit not yet set")
+      if (g_tk_sl[i] > 0 && (hit & 1) == 0) {
          bool slHit = isBuy ? (cur <= g_tk_sl[i]) : (cur >= g_tk_sl[i]);
          if (slHit) { SendLevelAlert(ticket, sym, dir, "SL", cur); g_tk_hit[i] |= 1; }
       }
       // TP1 check
-      if (g_tk_tp1[i] > 0 && !(hit & 2)) {
+      if (g_tk_tp1[i] > 0 && (hit & 2) == 0) {
          bool tp1Hit = isBuy ? (cur >= g_tk_tp1[i]) : (cur <= g_tk_tp1[i]);
          if (tp1Hit) { SendLevelAlert(ticket, sym, dir, "TP1", cur); g_tk_hit[i] |= 2; }
       }
       // TP2 check
-      if (g_tk_tp2[i] > 0 && !(hit & 4)) {
+      if (g_tk_tp2[i] > 0 && (hit & 4) == 0) {
          bool tp2Hit = isBuy ? (cur >= g_tk_tp2[i]) : (cur <= g_tk_tp2[i]);
          if (tp2Hit) { SendLevelAlert(ticket, sym, dir, "TP2", cur); g_tk_hit[i] |= 4; }
       }
       // TP3 check
-      if (g_tk_tp3[i] > 0 && !(hit & 8)) {
+      if (g_tk_tp3[i] > 0 && (hit & 8) == 0) {
          bool tp3Hit = isBuy ? (cur >= g_tk_tp3[i]) : (cur <= g_tk_tp3[i]);
          if (tp3Hit) { SendLevelAlert(ticket, sym, dir, "TP3", cur); g_tk_hit[i] |= 8; }
       }
@@ -516,7 +516,7 @@ void ExecuteOrder(string obj)
          ENUM_ORDER_TYPE closeType = (posType == 0) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
          ENUM_ORDER_TYPE_FILLING filling = ORDER_FILLING_RETURN;
          int fillFlags = (int)SymbolInfoInteger(posSym, SYMBOL_FILLING_MODE);
-         if (fillFlags & SYMBOL_FILLING_IOC) filling = ORDER_FILLING_IOC;
+         if ((fillFlags & SYMBOL_FILLING_IOC) != 0) filling = ORDER_FILLING_IOC;
 
          MqlTradeRequest req = {};
          MqlTradeResult  res = {};
@@ -633,9 +633,9 @@ void ExecuteOrder(string obj)
    // Auto-detect supported filling mode for this symbol
    ENUM_ORDER_TYPE_FILLING filling = ORDER_FILLING_FOK;
    int fillFlags = (int)SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
-   if      (fillFlags & SYMBOL_FILLING_IOC)    filling = ORDER_FILLING_IOC;
-   else if (fillFlags & SYMBOL_FILLING_BOC)    filling = ORDER_FILLING_BOC;
-   else                                         filling = ORDER_FILLING_RETURN;
+   if      ((fillFlags & SYMBOL_FILLING_IOC) != 0)  filling = ORDER_FILLING_IOC;
+   else if ((fillFlags & SYMBOL_FILLING_BOC) != 0)  filling = ORDER_FILLING_BOC;
+   else                                              filling = ORDER_FILLING_RETURN;
 
    req.action      = TRADE_ACTION_DEAL;
    req.symbol      = symbol;
