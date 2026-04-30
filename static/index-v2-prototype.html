@@ -11639,27 +11639,65 @@ window._szLadder = window._szLadder || [1.0, 1.5, 2.0, 2.5, 3.0];
 function szLadderRender() {
   const wrap = document.getElementById('szLadderRows');
   if (!wrap) return;
-  // Read account size to compute $ for each risk
-  const acct = parseFloat(document.getElementById('szAcct')?.value) || 10000;
-  // Read SL distance to estimate lots
+  // Read account size, entry, SL, TP1/2/3 from the szCalc inputs.
+  const acct  = parseFloat(document.getElementById('szAcct')?.value) || 10000;
   const entry = parseFloat((document.getElementById('szEntry')?.value||'').replace(/,/g,'')) || 0;
   const sl    = parseFloat((document.getElementById('szSL')?.value||'').replace(/,/g,''))    || 0;
-  const slDist= Math.abs(entry - sl) || 1;
+  const tp1   = parseFloat((document.getElementById('szTP1')?.value||'').replace(/,/g,''))   || 0;
+  const tp2   = parseFloat((document.getElementById('szTP2')?.value||'').replace(/,/g,''))   || 0;
+  const tp3   = parseFloat((document.getElementById('szTP3')?.value||'').replace(/,/g,''))   || 0;
+  const slDist = Math.abs(entry - sl) || 1;
+  // Per-unit gain at each TP level (price distance from entry to TP).
+  // For SELL the SL is above entry and TPs below — Math.abs handles both.
+  const tp1Dist = tp1 ? Math.abs(tp1 - entry) : 0;
+  const tp2Dist = tp2 ? Math.abs(tp2 - entry) : 0;
+  const tp3Dist = tp3 ? Math.abs(tp3 - entry) : 0;
+  // Running totals across all rows
+  let totalRisk = 0, totalTp1 = 0, totalTp2 = 0, totalTp3 = 0;
+  // Format helper — short for negative + dollar, signed
+  const fmt$ = (v) => (v >= 0 ? '+$' : '-$') + Math.abs(v).toLocaleString(undefined, {maximumFractionDigits: 2});
   wrap.innerHTML = (window._szLadder||[]).map((risk, i) => {
-    const dollars = (acct * (risk/100)).toFixed(2);
-    const lots    = (acct * (risk/100) / slDist).toFixed(4);
-    return `<div style="display:grid;grid-template-columns:42px 130px 1fr 1fr 30px;gap:8px;align-items:center;padding:5px 8px;background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:5px;">
+    const moneyAtRisk = acct * (risk/100);
+    const units       = moneyAtRisk / slDist;
+    const lotsStr     = units.toFixed(4);
+    // Per-row $ profit at each TP. Lots × distance per unit.
+    const p1 = tp1Dist ? units * tp1Dist : 0;
+    const p2 = tp2Dist ? units * tp2Dist : 0;
+    const p3 = tp3Dist ? units * tp3Dist : 0;
+    totalRisk += moneyAtRisk;
+    totalTp1  += p1;
+    totalTp2  += p2;
+    totalTp3  += p3;
+    // Per-target cell — shows "—" if that TP isn't set
+    const tpCell = (val, label) => val
+      ? `<div style="font-family:var(--mono);font-size:10px;color:rgba(93,232,160,.85);text-align:right;line-height:1.2;"><div style="font-size:8.5px;color:rgba(237,232,216,.4);letter-spacing:.4px;">${label}</div>+$${val.toLocaleString(undefined,{maximumFractionDigits:0})}</div>`
+      : `<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.3);text-align:right;line-height:1.2;"><div style="font-size:8.5px;color:rgba(237,232,216,.3);letter-spacing:.4px;">${label}</div>—</div>`;
+    return `<div style="display:grid;grid-template-columns:38px 120px 110px 110px 70px 70px 70px 24px;gap:7px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:5px;">
       <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
       <div style="display:flex;align-items:center;gap:6px;">
         <input type="number" step="0.1" min="0.1" max="10" value="${risk}" onchange="szLadderUpdate(${i}, this.value)"
-          style="width:60px;padding:5px 7px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
-        <span style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);">% risk</span>
+          style="width:55px;padding:5px 7px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
+        <span style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">% risk</span>
       </div>
-      <div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);">$<span style="color:rgba(237,232,216,.9);font-weight:600;">${Number(dollars).toLocaleString(undefined,{maximumFractionDigits:2})}</span> at risk</div>
-      <div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);">≈ <span style="color:rgba(201,168,76,.95);font-weight:600;">${lots}</span> units / lots</div>
+      <div style="font-family:var(--mono);font-size:10.5px;color:rgba(232,112,110,.85);">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}<div style="font-size:8.5px;color:rgba(237,232,216,.4);letter-spacing:.4px;">if SL hit</div></div>
+      <div style="font-family:var(--mono);font-size:10.5px;color:rgba(201,168,76,.95);">${lotsStr}<div style="font-size:8.5px;color:rgba(237,232,216,.4);letter-spacing:.4px;">units/lots</div></div>
+      ${tpCell(p1, 'TP1')}
+      ${tpCell(p2, 'TP2')}
+      ${tpCell(p3, 'TP3')}
       <button onclick="szLadderRemove(${i})" style="background:none;border:none;color:rgba(232,112,110,.6);cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button>
     </div>`;
-  }).join('');
+  }).join('') +
+  // Totals row — sums across all ladder rows
+  `<div style="display:grid;grid-template-columns:38px 120px 110px 110px 70px 70px 70px 24px;gap:7px;align-items:center;padding:9px 9px;margin-top:4px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.22);border-radius:6px;">
+    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);font-weight:700;letter-spacing:.5px;">SUM</div>
+    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">${(window._szLadder||[]).length} trade(s)</div>
+    <div style="font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.95);font-weight:700;">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:2})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total at risk</div></div>
+    <div></div>
+    <div style="font-family:var(--mono);font-size:11px;color:${tp1Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp1Dist?('+$'+totalTp1.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP1</div></div>
+    <div style="font-family:var(--mono);font-size:11px;color:${tp2Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp2Dist?('+$'+totalTp2.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP2</div></div>
+    <div style="font-family:var(--mono);font-size:11px;color:${tp3Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp3Dist?('+$'+totalTp3.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP3</div></div>
+    <div></div>
+  </div>`;
   // Disable Add button at 10 rows
   const addBtn = document.getElementById('szLadderAddBtn');
   if (addBtn) addBtn.disabled = (window._szLadder.length >= 10);
