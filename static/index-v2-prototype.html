@@ -6413,10 +6413,18 @@ function updateFlowBadge() {
     : Math.min(10.0, Math.round(userBase * mult * 10) / 10);
   window._kellyPct = sugRisk;
 
-  // ── Grade thresholds — based on multiplier directly so the verbal verdict
-  //    (SCALE UP / FULL SIZE / SCALE DOWN) matches the math. Anything above
-  //    the user's default is SCALE UP; anything below is SCALE DOWN.
-  var gradeVal = usingKelly ? sugRisk : (mult >= 1.25 ? 2.5 : mult >= 1.0 ? 1.5 : 0.5);
+  // ── Grade thresholds — match the actual math the trader sees. Any time
+  //    multiplier > 1.0 the engine is recommending MORE than the user's
+  //    default — that's SCALE UP. Any time < 1.0 it's SCALE DOWN. Only
+  //    exactly 1.0 is FULL SIZE. Tiny epsilon to avoid floating-point
+  //    artefacts at the boundary. For Kelly mode, compare suggested risk
+  //    against the user's base preference.
+  var gradeVal;
+  if (usingKelly) {
+    gradeVal = (sugRisk > userBase * 1.02) ? 2.5 : (sugRisk < userBase * 0.98) ? 0.5 : 1.5;
+  } else {
+    gradeVal = (mult > 1.001) ? 2.5 : (mult < 0.999) ? 0.5 : 1.5;
+  }
   var grade, gradeCol, gradeBg, gradeBdr, btnCol, btnBdr, btnBg, btnHover, iconStroke;
   if (gradeVal >= 2.0) {
     grade='SCALE UP'; gradeCol='var(--grn)';
