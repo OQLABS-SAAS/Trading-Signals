@@ -168,6 +168,45 @@ TIMEFRAME_CONFIG = {
 # RSI period and EMA fast/slow per asset class.
 # Crypto is more volatile → faster RSI and EMAs to stay responsive.
 # Indices are mean-reverting and slow → longer RSI and EMAs for stability.
+# ─── ATR MULTIPLIERS PER TRADE TYPE ──────────────────────────────────────
+# Maps each timeframe to the trade-type-appropriate ATR multipliers for
+# stop loss and the three take-profit levels. Day Trade values match the
+# previous global defaults (4/10/14/18) so 1H and 4H signals — the most
+# common — produce identical levels to before this change. Scalp signals
+# get tighter levels because the trader holds for minutes; swing/position
+# get wider levels because the trader holds through multi-day pullbacks.
+#
+# Each dict entry: {sl_mult, tp1_mult, tp2_mult, tp3_mult, type, hold,
+#   beginner_explainer} — the explainer is rendered as plain English on
+# the signal card so the trader knows WHY these distances are right for
+# this kind of trade.
+TRADE_LEVEL_PROFILES = {
+    "scalp":    {"sl_mult": 3.0, "tp1_mult":  6.0, "tp2_mult":  9.0, "tp3_mult": 12.0,
+                 "type": "Scalp", "hold": "minutes – 1 hour",
+                 "beginner_explainer": "Tight stops because hold time is minutes — wider stops would mean sitting through normal price wobbles you should avoid when scalping."},
+    "day":      {"sl_mult": 4.0, "tp1_mult": 10.0, "tp2_mult": 14.0, "tp3_mult": 18.0,
+                 "type": "Day Trade", "hold": "1–8 hours, close same day",
+                 "beginner_explainer": "Standard stops — wide enough to absorb intraday noise, tight enough that you exit within a single trading session if the trade fails."},
+    "swing":    {"sl_mult": 5.0, "tp1_mult": 13.0, "tp2_mult": 18.0, "tp3_mult": 24.0,
+                 "type": "Swing", "hold": "2–10 days",
+                 "beginner_explainer": "Wider stops because hold is multiple days — daily price swings need room, otherwise normal overnight moves stop you out before the trade plays out."},
+    "position": {"sl_mult": 6.0, "tp1_mult": 15.0, "tp2_mult": 24.0, "tp3_mult": 36.0,
+                 "type": "Position", "hold": "weeks – months",
+                 "beginner_explainer": "Widest stops — even great trades pull back significantly over weeks. Tight stops would shake you out right before the move plays out."},
+}
+_TF_TO_PROFILE = {
+    "5m": "scalp", "15m": "scalp", "30m": "scalp",
+    "1h": "day",   "4h": "day",
+    "1d": "swing",
+    "1w": "position", "1mo": "position", "1m": "position",  # 1m here = 1 month, not 1 minute
+}
+def _atr_profile_for_tf(timeframe):
+    """Return the trade-level profile dict for a given timeframe.
+    Falls back to 'day' for unknown timeframes (safest middle ground)."""
+    tf = (timeframe or "").lower().strip()
+    return TRADE_LEVEL_PROFILES[_TF_TO_PROFILE.get(tf, "day")]
+
+
 ASSET_CONFIG = {
     # rsi_period / ema_fast / ema_slow — live signal indicator settings
     # atr_gate_pct — minimum ATR/price ratio for a bar to be tradeable (below = choppy noise)
@@ -2274,16 +2313,21 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
 
         entry = prnd(price)
 
+        # ATR multipliers now depend on trade type (timeframe-derived).
+        # See TRADE_LEVEL_PROFILES at top of file. 1H/4H Day Trade values
+        # are unchanged from the previous global defaults (4/10/14/18).
+        _profile = _atr_profile_for_tf(timeframe)
+        _sl_m, _t1_m, _t2_m, _t3_m = _profile["sl_mult"], _profile["tp1_mult"], _profile["tp2_mult"], _profile["tp3_mult"]
         if signal == "BUY":
-            stop_loss = prnd(price - (4.0 * atr))
-            tp1 = prnd(price + (10.0 * atr))  # TP always > SL dist; ≥2:1 after fees
-            tp2 = prnd(price + (14.0 * atr))  # ≥3:1 after fees
-            tp3 = prnd(price + (18.0 * atr))  # ≥4:1 after fees
+            stop_loss = prnd(price - (_sl_m * atr))
+            tp1 = prnd(price + (_t1_m * atr))  # ≥2:1 R:R after fees
+            tp2 = prnd(price + (_t2_m * atr))  # ≥3:1 R:R after fees
+            tp3 = prnd(price + (_t3_m * atr))  # ≥4:1 R:R after fees
         else:  # SELL
-            stop_loss = prnd(price + (4.0 * atr))
-            tp1 = prnd(price - (10.0 * atr))
-            tp2 = prnd(price - (14.0 * atr))
-            tp3 = prnd(price - (18.0 * atr))
+            stop_loss = prnd(price + (_sl_m * atr))
+            tp1 = prnd(price - (_t1_m * atr))
+            tp2 = prnd(price - (_t2_m * atr))
+            tp3 = prnd(price - (_t3_m * atr))
 
         # ── 2d: Net RR after fees — 0.2% round-trip (0.1% entry + 0.1% exit) ──
         fee_adj = entry * 0.002
@@ -2422,6 +2466,14 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         "rr2": rr2,
         "rr3": rr3,
         "position_pct": position_pct,
+        # Trade-type metadata so the frontend card can show what kind of
+        # trade this is and the plain-English reasoning for why the SL/TP
+        # are at these distances. Beginner-first: the trader sees this on
+        # every signal so they understand the holding period and the
+        # rationale before they look at the numbers.
+        "trade_type":           _profile["type"],
+        "trade_type_hold":      _profile["hold"],
+        "trade_type_explainer": _profile["beginner_explainer"],
         "rsi_assessment": rsi_assessment,
         "trend_assessment": trend_assessment,
         "macd_assessment": macd_assessment,
@@ -2677,16 +2729,19 @@ def get_watch_signal(ticker, asset_type, ind, timeframe):
         _dp2 = 2 if price >= 100 else 4 if price >= 1 else 6 if price >= 0.01 else 8
         prnd2 = lambda v: round(v, _dp2)
         entry = prnd2(price)
+        # Per-trade-type ATR multipliers (see TRADE_LEVEL_PROFILES).
+        _profile2 = _atr_profile_for_tf(timeframe)
+        _sl_m2, _t1_m2, _t2_m2, _t3_m2 = _profile2["sl_mult"], _profile2["tp1_mult"], _profile2["tp2_mult"], _profile2["tp3_mult"]
         if signal == "BUY":
-            stop_loss = prnd2(price - (4.0 * atr))
-            tp1 = prnd2(price + (10.0 * atr))
-            tp2 = prnd2(price + (14.0 * atr))
-            tp3 = prnd2(price + (18.0 * atr))
+            stop_loss = prnd2(price - (_sl_m2 * atr))
+            tp1 = prnd2(price + (_t1_m2 * atr))
+            tp2 = prnd2(price + (_t2_m2 * atr))
+            tp3 = prnd2(price + (_t3_m2 * atr))
         else:  # SELL
-            stop_loss = prnd2(price + (4.0 * atr))
-            tp1 = prnd2(price - (10.0 * atr))
-            tp2 = prnd2(price - (14.0 * atr))
-            tp3 = prnd2(price - (18.0 * atr))
+            stop_loss = prnd2(price + (_sl_m2 * atr))
+            tp1 = prnd2(price - (_t1_m2 * atr))
+            tp2 = prnd2(price - (_t2_m2 * atr))
+            tp3 = prnd2(price - (_t3_m2 * atr))
 
         # ── 2d: Net RR after fees — 0.2% round-trip ──────────────────────────
         fee_adj = entry * 0.002
