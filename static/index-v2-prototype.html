@@ -11304,6 +11304,111 @@ if shortCond
 
 // SIZE PAGE (Position Calculator — step 4)
 // ══════════════════════════════════════════════════════════════
+
+/* ── Beginner-first risk % helpers ────────────────────────────────────────
+   The user's chosen risk % is persisted in localStorage so refreshing the
+   page does not snap them back to the default. Default is 1% (industry-
+   standard "conservative" floor) for a beginner who has not yet decided.
+   The teaching panel updates as the user changes the value, so every
+   click on the Size tab quietly explains what the number means. */
+function szRiskRestore(){
+  try{
+    var stored = parseFloat(localStorage.getItem('dotverse_default_risk'));
+    if(isFinite(stored) && stored >= 0.1 && stored <= 50){
+      var inp = document.getElementById('szRisk');
+      if(inp){ inp.value = stored; }
+    }
+  }catch(e){ /* localStorage may be blocked — fall back to HTML default */ }
+  szRiskOnInput();  // refresh chip highlight + teaching panel from current value
+}
+function szRiskPersist(v){
+  try{ localStorage.setItem('dotverse_default_risk', String(v)); }catch(e){}
+}
+function szSetRiskPreset(value, btn){
+  var inp = document.getElementById('szRisk');
+  if(!inp) return;
+  if(value === 'custom'){
+    // focus the input and let the user type — don't change current value
+    inp.focus(); inp.select();
+  } else {
+    inp.value = value;
+    szRiskPersist(value);
+    if(typeof window._szTradeSizeManual !== 'undefined') window._szTradeSizeManual = false;
+    if(typeof szCalc === 'function') szCalc();
+  }
+  szRiskHighlightChip(value);
+  szRiskTeach();
+}
+function szRiskHighlightChip(active){
+  var map = { '1':'szRP1', '2':'szRP2', '3':'szRP3', 'custom':'szRPC' };
+  ['szRP1','szRP2','szRP3','szRPC'].forEach(function(id){
+    var el = document.getElementById(id); if(!el) return;
+    var on = (id === map[String(active)]);
+    if(on){
+      // active chip — coloured fill
+      if(id==='szRP1'){ el.style.background='rgba(93,232,160,.18)'; el.style.borderColor='rgba(93,232,160,.55)'; el.style.color='#5de8a0'; }
+      else if(id==='szRP2'){ el.style.background='rgba(212,135,10,.18)'; el.style.borderColor='rgba(212,135,10,.55)'; el.style.color='var(--amb)'; }
+      else if(id==='szRP3'){ el.style.background='rgba(232,112,110,.18)'; el.style.borderColor='rgba(232,112,110,.55)'; el.style.color='#e8706e'; }
+      else if(id==='szRPC'){ el.style.background='rgba(237,232,216,.12)'; el.style.borderColor='rgba(237,232,216,.42)'; el.style.color='var(--t1)'; }
+    } else {
+      // inactive — muted
+      if(id==='szRP1'){ el.style.background='rgba(93,232,160,.05)'; el.style.borderColor='rgba(93,232,160,.22)'; el.style.color='rgba(93,232,160,.7)'; }
+      else { el.style.background='rgba(255,255,255,.03)'; el.style.borderColor='rgba(237,232,216,.18)'; el.style.color='var(--t2)'; }
+    }
+  });
+}
+function szRiskOnInput(){
+  var inp = document.getElementById('szRisk');
+  var v = inp ? parseFloat(inp.value) : NaN;
+  if(isFinite(v)){
+    szRiskPersist(v);
+    // Match a preset if value lines up exactly, else mark Custom
+    var preset = (v === 1) ? '1' : (v === 2) ? '2' : (v === 3) ? '3' : 'custom';
+    szRiskHighlightChip(preset);
+  } else {
+    szRiskHighlightChip(null);
+  }
+  szRiskTeach();
+}
+function szRiskTeach(){
+  var box = document.getElementById('szRiskTeach');
+  var inp = document.getElementById('szRisk');
+  if(!box || !inp) return;
+  var v = parseFloat(inp.value);
+  var acctEl = document.getElementById('szAcct');
+  var acct = acctEl ? (parseFloat(acctEl.value) || 10000) : 10000;
+  if(!isFinite(v) || v <= 0){
+    box.innerHTML = '<span style="color:var(--mut);">Enter a risk % to see what it means in dollars.</span>';
+    return;
+  }
+  var dollars = (acct * v / 100);
+  var trades50 = Math.ceil(Math.log(0.5) / Math.log(1 - v/100));  // # losing trades to drop 50%
+  var label, why, warn = '';
+  if(v <= 1){
+    label = '<strong style="color:#5de8a0;">CONSERVATIVE</strong>';
+    why = 'Industry-standard floor for beginners. You can take ~50 losing trades in a row before losing half your account — survival math is on your side while you learn your edge.';
+  } else if(v <= 2){
+    label = '<strong style="color:var(--amb);">STANDARD</strong>';
+    why = 'Common across professional retail traders with verified strategies. Reasonable when you have ~30+ backtested trades on this setup and a stable win rate.';
+  } else if(v <= 3){
+    label = '<strong style="color:#e8706e;">AGGRESSIVE</strong>';
+    why = 'Used by experienced traders with verified edge over hundreds of trades. Drawdowns hit faster — losing 14 trades in a row drops your account ~35%.';
+  } else if(v <= 5){
+    label = '<strong style="color:#e8706e;">VERY AGGRESSIVE</strong>';
+    why = 'Prop-firm territory. Most retail accounts cannot withstand the drawdowns this produces. Reconsider unless you have hundreds of verified trades and a strong edge.';
+    warn = '<div style="margin-top:7px;padding:7px 9px;border-radius:4px;background:rgba(232,112,110,.1);border:1px solid rgba(232,112,110,.3);color:#e8706e;font-weight:600;">⚠ Losing 14 trades in a row at this risk drops your account ~50%. Most beginners hit this drawdown within their first month.</div>';
+  } else {
+    label = '<strong style="color:#e8706e;">EXTREME</strong>';
+    why = 'No professional risk-management framework supports this level. You will blow up the account on a normal losing streak.';
+    warn = '<div style="margin-top:7px;padding:7px 9px;border-radius:4px;background:rgba(232,112,110,.18);border:1px solid rgba(232,112,110,.55);color:#e8706e;font-weight:700;">⚠ At ' + v + '% per trade, ' + Math.ceil(Math.log(0.5)/Math.log(1 - v/100)) + ' losing trades in a row halve your account. This is not a sustainable risk level.</div>';
+  }
+  box.innerHTML =
+    '<div>' + label + ' &nbsp;·&nbsp; <span style="color:var(--t1);">$' + dollars.toFixed(2) + ' at risk per trade</span> on a $' + acct.toLocaleString() + ' account</div>' +
+    '<div style="margin-top:5px;color:var(--t3);font-size:9.5px;line-height:1.5;">' + why + '</div>' +
+    '<div style="margin-top:5px;color:var(--mut);font-size:9px;font-family:var(--mono);">Survival math: ' + trades50 + ' losing trades in a row would halve your account.</div>' +
+    warn;
+}
+
 function showSize(){
   window._szTradeSizeManual = false;
   const el=document.getElementById('dashContent'); if(!el) return;
@@ -11390,10 +11495,31 @@ function showSize(){
           <label class="sz-lbl">Account Size ($)</label>
           <input class="sz-inp" id="szAcct" type="number" placeholder="10000" value="10000" oninput="window._szTradeSizeManual=false;szCalc()">
         </div>
-        <!-- Risk % -->
+        <!-- Risk % — beginner-first preset selector with plain-English teaching -->
         <div class="sz-field">
-          <label class="sz-lbl">Risk %</label>
-          <input class="sz-inp" id="szRisk" type="number" placeholder="5" value="5" step="0.5" oninput="window._szTradeSizeManual=false;szCalc()">
+          <label class="sz-lbl">Risk % <span style="font-size:9px;color:var(--mut);font-weight:400;">— how much of your account you risk per trade</span></label>
+          <!-- Preset chip row -->
+          <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+            <button type="button" id="szRP1" onclick="szSetRiskPreset(1,this)"
+              style="flex:1;min-width:0;padding:7px 4px;border-radius:5px;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.3);color:#5de8a0;font-family:var(--mono);font-size:9.5px;font-weight:700;cursor:pointer;text-align:center;line-height:1.35;transition:all .15s;">
+              <div style="letter-spacing:.04em;">CONSERVATIVE</div><div style="font-size:11.5px;margin-top:2px;">1%</div>
+            </button>
+            <button type="button" id="szRP2" onclick="szSetRiskPreset(2,this)"
+              style="flex:1;min-width:0;padding:7px 4px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.18);color:var(--t2);font-family:var(--mono);font-size:9.5px;font-weight:700;cursor:pointer;text-align:center;line-height:1.35;transition:all .15s;">
+              <div style="letter-spacing:.04em;">STANDARD</div><div style="font-size:11.5px;margin-top:2px;">2%</div>
+            </button>
+            <button type="button" id="szRP3" onclick="szSetRiskPreset(3,this)"
+              style="flex:1;min-width:0;padding:7px 4px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.18);color:var(--t2);font-family:var(--mono);font-size:9.5px;font-weight:700;cursor:pointer;text-align:center;line-height:1.35;transition:all .15s;">
+              <div style="letter-spacing:.04em;">AGGRESSIVE</div><div style="font-size:11.5px;margin-top:2px;">3%</div>
+            </button>
+            <button type="button" id="szRPC" onclick="szSetRiskPreset('custom',this)"
+              style="flex:1;min-width:0;padding:7px 4px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.18);color:var(--t2);font-family:var(--mono);font-size:9.5px;font-weight:700;cursor:pointer;text-align:center;line-height:1.35;transition:all .15s;">
+              <div style="letter-spacing:.04em;">CUSTOM</div><div style="font-size:11.5px;margin-top:2px;">Type</div>
+            </button>
+          </div>
+          <input class="sz-inp" id="szRisk" type="number" placeholder="1" value="1" step="0.5" min="0.1" max="50" oninput="window._szTradeSizeManual=false;szRiskOnInput();szCalc()">
+          <!-- Plain-English teaching panel — updates as the user changes the value -->
+          <div id="szRiskTeach" style="margin-top:7px;padding:9px 11px;border-radius:5px;background:rgba(255,248,230,.04);border:1px solid rgba(201,168,76,.18);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.6;"></div>
           <div class="sz-hint" id="szRiskHint" style="color:var(--crys);"></div>
         </div>
         <!-- Trade Size -->
@@ -11624,6 +11750,9 @@ function showSize(){
     const db=document.getElementById('szDirSell');
     if(db) db.click();
   }
+  // Restore the user's persisted risk % from localStorage and refresh the
+  // chip highlight + teaching panel. Done after the DOM is built.
+  if(typeof szRiskRestore === 'function') szRiskRestore();
   szCalc();
 }
 
