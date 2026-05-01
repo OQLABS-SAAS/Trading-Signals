@@ -6396,14 +6396,21 @@ function updateFlowBadge() {
   mult = Math.round(mult * 4) / 4;
   window._flowMult = mult;
 
-  // ── Final suggested risk — Kelly when available, quality when not ─────
+  // ── Final suggested risk — Kelly when backtest-verified, otherwise scale
+  //    the user's BASE preference by the multiplier (e.g. default 5% × 0.75
+  //    = 3.75%). _getUserBaseRisk() reads from window._userBaseRisk which
+  //    APPLY does NOT touch, so clicking APPLY does not feed back into
+  //    this calculation and shrink the suggestion on every click.
+  var userBase = _getUserBaseRisk();  // user's default % preference, stable across APPLY clicks
   var sugRisk = usingKelly
     ? kellyPct
-    : Math.min(3.0, Math.round(1.0 * mult * 10) / 10);
+    : Math.min(10.0, Math.round(userBase * mult * 10) / 10);
   window._kellyPct = sugRisk;
 
-  // ── Grade thresholds ──────────────────────────────────────────────────
-  var gradeVal = usingKelly ? sugRisk : (mult >= 1.5 ? 2.5 : mult >= 1.0 ? 1.5 : 0.5);
+  // ── Grade thresholds — based on multiplier directly so the verbal verdict
+  //    (SCALE UP / FULL SIZE / SCALE DOWN) matches the math. Anything above
+  //    the user's default is SCALE UP; anything below is SCALE DOWN.
+  var gradeVal = usingKelly ? sugRisk : (mult >= 1.25 ? 2.5 : mult >= 1.0 ? 1.5 : 0.5);
   var grade, gradeCol, gradeBg, gradeBdr, btnCol, btnBdr, btnBg, btnHover, iconStroke;
   if (gradeVal >= 2.0) {
     grade='SCALE UP'; gradeCol='var(--grn)';
@@ -6463,13 +6470,17 @@ function updateFlowBadge() {
     if (adj < 0) return 'Volume ' + vr.toFixed(1) + '× — quiet market: under 80% of normal activity. Setups in low-volume conditions whipsaw. Size scales down.';
     return 'Volume ' + vr.toFixed(1) + '× — normal participation. Size stays neutral.';
   }
+  // ── Verdict text — quotes the actual numbers so the trader can verify the
+  //    math against their default. Beginner-first: explains WHY this size.
   var _gradeBlurb;
-  if (grade === 'SCALE UP') {
-    _gradeBlurb = 'Verdict: SCALE UP — multiple factors favourable, the engine recommends a larger position than your default risk %.';
+  if (usingKelly) {
+    _gradeBlurb = 'Verdict: KELLY — backtest-verified setup with ' + (bt && bt.win_rate != null ? bt.win_rate + '% win rate over ' + btTrades + ' trades' : 'verified statistics') + '. Engine recommends ' + sugRisk.toFixed(1) + '% risk (Half-Kelly). Your default of ' + userBase + '% is ' + (userBase > sugRisk ? 'aggressive' : 'conservative') + ' relative to optimal.';
+  } else if (grade === 'SCALE UP') {
+    _gradeBlurb = 'Verdict: SCALE UP — signal quality is favourable. Engine recommends ' + sugRisk.toFixed(1) + '% risk (your default of ' + userBase + '% × multiplier ' + mult.toFixed(2) + ').';
   } else if (grade === 'FULL SIZE') {
-    _gradeBlurb = 'Verdict: FULL SIZE — setup is solid at standard size, no reason to go bigger or smaller than your default risk %.';
+    _gradeBlurb = 'Verdict: FULL SIZE — solid standard setup. Engine recommends your default ' + userBase + '% (multiplier 1.00×). No reason to scale up or down.';
   } else {
-    _gradeBlurb = 'Verdict: SCALE DOWN — at least one factor is weak, the engine recommends cutting size below your default risk %.';
+    _gradeBlurb = 'Verdict: SCALE DOWN — at least one factor (confluence / R:R / volume) is weak. Engine recommends ' + sugRisk.toFixed(1) + '% risk (your default of ' + userBase + '% × multiplier ' + mult.toFixed(2) + ').';
   }
 
   badge.innerHTML =
@@ -11350,15 +11361,40 @@ if shortCond
    page does not snap them back to the default. Default is 1% (industry-
    standard "conservative" floor) for a beginner who has not yet decided.
    The teaching panel updates as the user changes the value, so every
-   click on the Size tab quietly explains what the number means. */
+   click on the Size tab quietly explains what the number means.
+
+   _getUserBaseRisk() — returns the user's BASE preference, NOT the active
+   trade risk. The Flow-Scaled Sizing engine multiplies this by the
+   multiplier so the suggested risk scales the user's actual default
+   (e.g. 5% × 0.75 = 3.75%) instead of treating the multiplier as a raw
+   percentage. Reads window._userBaseRisk if cached; otherwise reads
+   localStorage; otherwise falls back to 1%. The APPLY button writes only
+   to szRisk (the active-trade input), never to _userBaseRisk, which
+   prevents the feedback loop that broke a previous attempt at this fix. */
+function _getUserBaseRisk(){
+  if (typeof window._userBaseRisk === 'number' && isFinite(window._userBaseRisk)) {
+    return window._userBaseRisk;
+  }
+  try{
+    var v = parseFloat(localStorage.getItem('dotverse_default_risk'));
+    if(isFinite(v) && v >= 0.1 && v <= 50) return v;
+  }catch(e){}
+  return 1.0;
+}
 function szRiskRestore(){
   try{
     var stored = parseFloat(localStorage.getItem('dotverse_default_risk'));
     if(isFinite(stored) && stored >= 0.1 && stored <= 50){
       var inp = document.getElementById('szRisk');
       if(inp){ inp.value = stored; }
+      window._userBaseRisk = stored;
     }
   }catch(e){ /* localStorage may be blocked — fall back to HTML default */ }
+  if(typeof window._userBaseRisk !== 'number'){
+    var inp2 = document.getElementById('szRisk');
+    var v2 = inp2 ? parseFloat(inp2.value) : 1.0;
+    window._userBaseRisk = isFinite(v2) ? v2 : 1.0;
+  }
   szRiskOnInput();  // refresh chip highlight + teaching panel from current value
 }
 function szRiskPersist(v){
@@ -11373,6 +11409,7 @@ function szSetRiskPreset(value, btn){
   } else {
     inp.value = value;
     szRiskPersist(value);
+    window._userBaseRisk = parseFloat(value);  // explicit user choice — update the base preference
     if(typeof window._szTradeSizeManual !== 'undefined') window._szTradeSizeManual = false;
     if(typeof szCalc === 'function') szCalc();
   }
@@ -11402,6 +11439,7 @@ function szRiskOnInput(){
   var v = inp ? parseFloat(inp.value) : NaN;
   if(isFinite(v)){
     szRiskPersist(v);
+    window._userBaseRisk = v;  // user typed — update the base preference (NOT done by APPLY)
     // Match a preset if value lines up exactly, else mark Custom
     var preset = (v === 1) ? '1' : (v === 2) ? '2' : (v === 3) ? '3' : 'custom';
     szRiskHighlightChip(preset);
