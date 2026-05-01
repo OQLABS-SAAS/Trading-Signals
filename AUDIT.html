@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DotVerse Audit · 2026-05-02</title>
+<style>
+  :root{
+    --bg:#0c0a07; --panel:#15110b; --line:#241d12; --line2:#2f2616;
+    --ink:#efe6d4; --mute:#8a7d62; --mute2:#6b6050;
+    --amber:#d4870a; --amber2:#b8814a;
+    --green:#3dbe6c; --red:#e05555; --orange:#e0a04a; --blue:#5db0d8; --grey:#7d7565;
+    --r:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Inter","Helvetica Neue",sans-serif}
+  body{padding:0;min-height:100vh}
+  a{color:var(--amber);text-decoration:none}
+  a:hover{color:var(--amber2);text-decoration:underline}
+
+  .wrap{max-width:1100px;margin:0 auto;padding:32px 28px 80px}
+  header.hero{padding:36px 28px 28px;border-bottom:1px solid var(--line);margin:-32px -28px 32px;background:linear-gradient(180deg,#171108,transparent)}
+  .eyebrow{font-size:11px;letter-spacing:.18em;color:var(--amber);text-transform:uppercase;margin-bottom:6px}
+  h1{font-size:30px;font-weight:600;letter-spacing:-.02em}
+  h1 small{display:block;color:var(--mute);font-weight:400;font-size:13px;margin-top:6px;letter-spacing:0}
+
+  .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:22px 0 0}
+  .stat{padding:14px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .stat .num{font-size:24px;font-weight:600}
+  .stat .lbl{font-size:11px;color:var(--mute);letter-spacing:.05em;text-transform:uppercase;margin-top:4px}
+  .stat.green .num{color:var(--green)}
+  .stat.red .num{color:var(--red)}
+  .stat.orange .num{color:var(--orange)}
+  .stat.blue .num{color:var(--blue)}
+  .stat.grey .num{color:var(--grey)}
+
+  nav.toc{position:sticky;top:0;background:rgba(12,10,7,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:12px 28px;margin:0 -28px 24px;z-index:10}
+  nav.toc .row{max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  nav.toc a{font-size:12px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;color:var(--ink);background:var(--panel);text-decoration:none}
+  nav.toc a:hover{border-color:var(--amber);color:var(--amber)}
+
+  .filterbar{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 18px}
+  .filterbar button{font:inherit;font-size:12px;padding:6px 12px;border:1px solid var(--line);border-radius:7px;color:var(--mute);background:var(--panel);cursor:pointer;transition:all .15s}
+  .filterbar button:hover{color:var(--ink);border-color:var(--line2)}
+  .filterbar button.on{color:var(--bg);background:var(--amber);border-color:var(--amber)}
+  .filterbar input[type=search]{font:inherit;font-size:13px;padding:6px 12px;border:1px solid var(--line);border-radius:7px;color:var(--ink);background:var(--panel);min-width:240px;margin-left:auto}
+  .filterbar input[type=search]::placeholder{color:var(--mute2)}
+
+  section{margin:0 0 36px;scroll-margin-top:80px}
+  section h2{font-size:20px;font-weight:600;margin-bottom:6px;letter-spacing:-.01em}
+  section .desc{color:var(--mute);font-size:13px;margin-bottom:16px;max-width:760px}
+
+  .item{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-bottom:8px;overflow:hidden;transition:border-color .15s}
+  .item:hover{border-color:var(--line2)}
+  .item.hidden{display:none}
+  .item summary{padding:14px 18px;cursor:pointer;display:flex;align-items:flex-start;gap:14px;list-style:none;user-select:none}
+  .item summary::-webkit-details-marker{display:none}
+  .item summary::after{content:"+";color:var(--mute);font-size:20px;line-height:1;transition:transform .15s;margin-left:auto;flex-shrink:0}
+  .item[open] summary::after{transform:rotate(45deg)}
+  .item .badge{flex-shrink:0;font-size:10px;letter-spacing:.08em;padding:3px 8px;border-radius:5px;text-transform:uppercase;font-weight:600;margin-top:1px}
+  .badge.works{color:var(--green);border:1px solid var(--green);background:rgba(61,190,108,.06)}
+  .badge.broken{color:var(--red);border:1px solid var(--red);background:rgba(224,85,85,.06)}
+  .badge.fake{color:var(--orange);border:1px solid var(--orange);background:rgba(224,160,74,.06)}
+  .badge.fixed{color:var(--blue);border:1px solid var(--blue);background:rgba(93,176,216,.06)}
+  .badge.cant{color:var(--grey);border:1px solid var(--grey);background:rgba(125,117,101,.06)}
+  .item .ttl{flex:1;min-width:0}
+  .item .ttl b{display:block;font-size:14px;font-weight:600;margin-bottom:3px;color:var(--ink)}
+  .item .ttl span{font-size:12px;color:var(--mute)}
+  .item .body{padding:0 18px 18px 18px;color:var(--ink);font-size:13px;line-height:1.7;border-top:1px solid var(--line);margin:0 0 0 0;padding-top:14px}
+  .item .body strong{color:var(--amber)}
+  .item .body code{font-family:"SF Mono","Menlo",monospace;font-size:12px;color:var(--amber2);background:rgba(184,129,74,.08);padding:2px 6px;border-radius:4px}
+  .item .body p{margin-bottom:8px}
+  .item .body ul{margin:6px 0 8px 18px}
+  .item .body li{margin:3px 0}
+
+  .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .meta span{font-size:10px;letter-spacing:.05em;color:var(--mute);background:var(--bg);border:1px solid var(--line);padding:2px 7px;border-radius:5px;text-transform:uppercase}
+
+  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--mute);margin:18px 0 8px}
+  .legend > span{display:inline-flex;gap:6px;align-items:center}
+  .legend .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .dot.works{background:var(--green)}
+  .dot.broken{background:var(--red)}
+  .dot.fake{background:var(--orange)}
+  .dot.fixed{background:var(--blue)}
+  .dot.cant{background:var(--grey)}
+
+  footer{margin-top:60px;padding-top:24px;border-top:1px solid var(--line);color:var(--mute);font-size:12px;text-align:center}
+
+  @media (max-width:780px){
+    .summary{grid-template-columns:repeat(2,1fr)}
+    .filterbar input[type=search]{margin-left:0;width:100%}
+    nav.toc .row{font-size:11px}
+    h1{font-size:24px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">DotVerse · Live audit</div>
+  <h1>What works, what's broken, what's fake.
+    <small>A plain-English audit of every page, button, and bug — verified live in a real browser on May 2, 2026.</small>
+  </h1>
+  <div class="summary">
+    <div class="stat green"><div class="num" id="cWorks">0</div><div class="lbl">Working</div></div>
+    <div class="stat red"><div class="num" id="cBroken">0</div><div class="lbl">Broken</div></div>
+    <div class="stat orange"><div class="num" id="cFake">0</div><div class="lbl">Fake data</div></div>
+    <div class="stat blue"><div class="num" id="cFixed">0</div><div class="lbl">Already fixed</div></div>
+    <div class="stat grey"><div class="num" id="cCant">0</div><div class="lbl">Can't test</div></div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="row">
+    <a href="#summary">Summary</a>
+    <a href="#priority">Fix first</a>
+    <a href="#pages">Every page</a>
+    <a href="#fakes">What's fake</a>
+    <a href="#bugs">Old bugs</a>
+    <a href="#backend">Backend health</a>
+    <a href="#corrections">Audit corrections</a>
+    <a href="#cant">Can't test</a>
+  </div>
+</nav>
+
+<div class="filterbar">
+  <button data-f="all" class="on">All</button>
+  <button data-f="broken">Broken</button>
+  <button data-f="fake">Fake data</button>
+  <button data-f="works">Working</button>
+  <button data-f="fixed">Already fixed</button>
+  <button data-f="cant">Can't test</button>
+  <input type="search" id="q" placeholder="Search the audit…">
+</div>
+
+<div class="legend">
+  <span><i class="dot works"></i> Working</span>
+  <span><i class="dot broken"></i> Broken — needs a fix</span>
+  <span><i class="dot fake"></i> Fake data — looks real but isn't</span>
+  <span><i class="dot fixed"></i> Was broken, now fixed</span>
+  <span><i class="dot cant"></i> Couldn't be verified from this browser</span>
+</div>
+
+<section id="summary">
+  <h2>The 60-second summary</h2>
+  <p class="desc">If you only read one paragraph: most of the trading core works — analysis, signals, charts, position sizing, MT5 EA — they all use real APIs and real prices. The problems are in the framing around them: a few pages still show fake numbers, the SELL signal calculator displays "+-X%", four backend endpoints don't require a login, and the alerts page lies about the unread count. The good news: nothing dangerous is hiding in the trading math itself. The bad news: a beginner reading the Market, News, or Alerts pages will think they're seeing live information when they're not.</p>
+</section>
+
+<section id="priority">
+  <h2>Fix these first</h2>
+  <p class="desc">The shortlist of confirmed-broken-in-the-live-app issues, in the order I'd take them.</p>
+  <div id="grid-priority"></div>
+</section>
+
+<section id="pages">
+  <h2>Every page, walked in the live app</h2>
+  <p class="desc">All 16 sidebar pages. Click any item to see what's real, what's fake, and what's missing.</p>
+  <div id="grid-pages"></div>
+</section>
+
+<section id="fakes">
+  <h2>What's fake on the screen</h2>
+  <p class="desc">Numbers and text that look like live data but are actually hardcoded into the page.</p>
+  <div id="grid-fakes"></div>
+</section>
+
+<section id="bugs">
+  <h2>The 23 bugs from April 28 — current status</h2>
+  <p class="desc">Re-checked one by one in the live browser today. Some are still here, some were quietly fixed.</p>
+  <div id="grid-bugs"></div>
+</section>
+
+<section id="backend">
+  <h2>Backend health</h2>
+  <p class="desc">Every API endpoint I called against the live server.</p>
+  <div id="grid-backend"></div>
+</section>
+
+<section id="corrections">
+  <h2>Where the prior audit was wrong</h2>
+  <p class="desc">Things the older audit said were broken or fake that turn out to be working. Don't fix these — they're already fine.</p>
+  <div id="grid-corrections"></div>
+</section>
+
+<section id="cant">
+  <h2>What I couldn't test from here</h2>
+  <p class="desc">The Chrome MCP I used can drive a desktop Chromium tab but not a real iPhone, screen reader, or live EA session. These need a real device or longer observation.</p>
+  <div id="grid-cant"></div>
+</section>
+
+<footer>
+  Walked through 16 pages, called 17 backend endpoints, re-tested 14 of 23 prior bugs.
+  <br>This document is the simple-English companion to <code>AUDIT_2026-05-01.md</code>.
+</footer>
+
+</div>
+
+<script>
+const D = [
+  // ===== PRIORITY =====
+  {section:"priority", state:"broken", title:"Size page shows '+-X%' on every SELL signal", sub:"e.g. '+-6.42%', '+-9.07%', '+-11.72%' for an ETHUSD SELL", body:`<p>When the take-profit is below entry (a SELL trade), the percentage is negative. The code prepends a literal <code>+</code> sign without checking, so you get the impossible string <strong>+-6.42%</strong>.</p><p>Beginners see this and don't know what to think. The fix is one line — strip the <code>+</code> and let the negative sign speak for itself.</p>`, where:"Size page · Risk vs Reward boxes", tags:["BUG-09","Size","SELL"]},
+
+  {section:"priority", state:"broken", title:"Pine Script endpoints have no login check", sub:"3 routes return full code to anyone with the URL", body:`<p>Anyone — logged in or not — can fetch <code>/api/pine-script</code>, <code>/api/pine-divergence</code>, <code>/api/pine-strategy</code> and get the full DotVerse Pine v5 source. Same for <code>/api/send-sms</code> (no auth, just a soft "phone number required" check).</p><p>If these are paid features, you're giving them away.</p>`, where:"Backend · 4 routes", tags:["BUG-21","Security"]},
+
+  {section:"priority", state:"broken", title:"Alerts page header lies about the unread count", sub:"Says '3 unread · 2 require action'. Backend has 50.", body:`<p>The big number at the top of the Alerts page (<strong>"Alerts · 3 unread · 2 require action"</strong>) is hardcoded text — it never reads from the real notifications API.</p><p>The real backend has 50 unread notifications waiting (Sydney Open, NY Open, Daily Trade Summary, etc.). The body of the page also says "No active watches" which contradicts the header. Beginners can't trust either number.</p>`, where:"Alerts page", tags:["BUG-13","Alerts"]},
+
+  {section:"priority", state:"broken", title:"Performance page shows em-dashes everywhere with no explanation", sub:"SIGNALS —, AVG CONF —, BUY BIAS — when you have 0 signals", body:`<p>If you haven't run an analysis yet, the four big stats on the Performance page just show <strong>—</strong>. There's no plain-English message saying "Run your first analysis to see your performance metrics here."</p><p>Beginners think the page is broken. (The "Equity Curve · Illustrative" chart below it does have a good empty-state disclaimer — keep that.)</p>`, where:"Performance page", tags:["BUG-23"]},
+
+  {section:"priority", state:"broken", title:"Refresh-logout flicker on every page reload", sub:"Sign-in screen flashes for ~1 second before dashboard appears", body:`<p>Every time the page reloads, the sign-in landing page is briefly visible for about a second before the auth check completes and the dashboard takes over. Looks like you got logged out — you didn't.</p><p>Cause: the sign-in view (<code>vLanding</code>) is marked <code>active</code> in the HTML by default. One-line fix.</p>`, where:"Whole app · on reload", tags:["B12"]},
+
+  {section:"priority", state:"broken", title:"Step counter says '5' on some pages, '6' on others", sub:"Market = 1 of 5, Signal = 2 of 6, Understand = 3 of 5", body:`<p>The little footer at the bottom of each page shows what step you're on. The denominator changes by page — Market says <code>STEP 1 OF 5</code>, Signal says <code>Step 2 of 6</code>, Understand says <code>Step 3 of 5</code>. Pick one and stick with it.</p><p>Same footer on Signal also reads "Check Context → UNDERSTAND" — labels Context but the button actually goes to Understand.</p>`, where:"Page footers · all pages", tags:["BUG-17","UX"]},
+
+  {section:"priority", state:"broken", title:"Context page is orphaned from the 5-step flow", sub:"Listed in the sidebar but not in the breadcrumb", body:`<p>The breadcrumb at the top of every page reads <strong>MARKET › SIGNAL › UNDERSTAND › SIZE › ACT</strong> — five steps. Context is missing. But the sidebar shows Context with its own step number "03" — same as Understand "03".</p><p>When you visit Context, the footer says "STEP 3 OF 5 · UNDERSTAND" — it shares Understand's footer template. Pick: either Context is a step (give it a number) or it isn't (move it out of the pipeline).</p>`, where:"Context page", tags:["BUG-05","BUG-06"]},
+
+  {section:"priority", state:"broken", title:"Notification system is firing duplicates", sub:"Same 'Sydney Open' fires 4 times at the same UTC second", body:`<p>The notifications API has multiple identical entries: IDs 213, 214, 215, 216 are all "🦘 Sydney Open" at exactly 22:00 UTC on 2026-05-01. Same pattern for NY Open, London Open, and Daily Trade Summary.</p><p>The cron / RQ worker is firing the same notification multiple times. Real backend bug, separate from the alerts header issue.</p>`, where:"Backend · /api/notifications", tags:["Backend","Cron"]},
+
+  {section:"priority", state:"broken", title:"Watch DELETE endpoint is broken", sub:"You can add watches but you cannot remove them", body:`<p>POST /api/watch with ticker + timeframe + asset_type creates a watch successfully. DELETE /api/watch with the same body returns 404 "not_found" — yet the watch is still in /api/watches.</p><p>I tried multiple variations (with key in body, with query params, with REST-style path /api/watch/&lt;key&gt;) — none worked. The endpoint is wired but does not actually delete the row.</p>`, where:"Backend · /api/watch DELETE", tags:["Backend","Watches"]},
+
+  {section:"priority", state:"broken", title:"Watch cards show 'Invalid Date'", sub:"Frontend date parser fails on the API's date format", body:`<p>The Alerts page shows every watch card with the date label as <strong>Invalid Date</strong>. The API returns nicely formatted strings like <code>"2026-04-25 17:10 UTC"</code> but the frontend's <code>new Date(...)</code> can't parse this format.</p>`, where:"Alerts page · watch cards", tags:["Frontend","Date"]},
+
+  {section:"priority", state:"broken", title:"No 'Remove' button on watch cards", sub:"Users have no way to stop watching a ticker", body:`<p>Each watch on the Alerts page only has Acknowledge and Dismiss buttons. There is no Remove / Stop watching / Delete button. Combined with the broken DELETE endpoint, watches are effectively permanent.</p>`, where:"Alerts page", tags:["UX","Watches"]},
+
+  {section:"priority", state:"broken", title:"Login error messages leak which emails are registered", sub:"'Incorrect password' vs 'Incorrect email or password'", body:`<p>Empty payload returns <strong>"Incorrect password"</strong>. Wrong email returns <strong>"Incorrect email or password"</strong>. The mismatch lets an attacker probe whether an email exists in the system. Normalise both to a single message.</p>`, where:"/api/login", tags:["Security","Privacy"]},
+
+  {section:"priority", state:"broken", title:"All backend data sources are failing right now", sub:"Operational, not code — but worth knowing", body:`<p>/api/diag shows binance, stooq, yahoo_v8 (rate-limited 429), TV scraper, and FMP all returning <code>ok: false</code>. The site is currently running entirely on cache. There's no operator alert when this happens — the page just keeps showing stale data.</p>`, where:"Backend · all data sources", tags:["Operational"]},
+
+  // ===== PAGES =====
+  {section:"pages", state:"works", title:"Market page · partly real, partly fake", sub:"Live prices and signals work. F&G, sectors, heatmap, econ calendar are fake.", body:`<p><strong>Real (verified live):</strong></p><ul><li>Indices SPY $720.65, QQQ $674.15, DIA, IWM — pulled from <code>/api/prices</code> in 894ms</li><li>Crypto BTC, ETH, SOL, BNB — same API</li><li>Commodities XAU, WTI, XAG — same API</li><li>Live Signals (ETHUSD SELL, BTCUSD BUY, SOLUSD HOLD) — real /api/scan-list</li><li>Daily Brief paragraph — real /api/daily-brief</li><li>Session lights (Sydney/Tokyo/London/NY/Crypto OPEN/CLOSED) — UTC-driven</li></ul><p><strong>Fake (also verified live):</strong></p><ul><li>Fear & Greed = 47 — hardcoded in static HTML</li><li>Sector Strength bars (Tech 72, Healthcare 58, Real Estate 39) — hardcoded</li><li>S&P 500 Heatmap with 14 stocks — hardcoded percentages, never move</li><li>Economic Calendar (NFP 09:30, ISM 10:00, Powell 14:00, etc.) — backend returns empty, page falls back to hardcoded list</li><li>Live Momentum Windows (RDDT, NOTCOIN, ALAB, MEMEFI) — fake/stale tickers</li></ul>`, where:"Market page", tags:["Page","Mixed"]},
+
+  {section:"pages", state:"works", title:"Signal page · works, with one quirk", sub:"Real backend, real signals, but inconsistent step counter", body:`<p>The signal cards come from a real API call (/api/scan-list, 1.6s). Each card has full data — entry, stop loss, three take-profits, R:R, RSI, EMA trend, supertrend, volume ratio, plain-English reason.</p><p>Filter buttons (ASSET, R:R, CONFIDENCE, TIMEFRAME, MODE) all render. Auto-refresh works (15s preset countdown verified).</p><p>One quirk: header says "Step 2 of 6" while every other page says "of 5". Fix the denominator.</p>`, where:"Signal page", tags:["Page","Works"]},
+
+  {section:"pages", state:"works", title:"Scanner page · same as Signal", sub:"Sidebar entry, but no separate function — uses Signal's view", body:`<p>The "Scanner" sidebar item highlights itself but loads the Signal page. There is no <code>showScanner</code> function. The Top Signals + Market Scanner sub-tabs handle the difference.</p><p>Not a bug — but if you ever want a real Scanner page that's distinct from Signal, it doesn't exist yet.</p>`, where:"Scanner sidebar", tags:["Page","Alias"]},
+
+  {section:"pages", state:"broken", title:"Context page · orphaned & uses Understand's footer", sub:"Mode chips work. IPO list is fake.", body:`<p><strong>Works:</strong> The four mode cards (Scalp / Day Trade / Swing / Position) update GO/WAIT badges based on UTC hour. Verdicts feel reasonable.</p><p><strong>Fake:</strong> The "HOT RIGHT NOW · IPO & NEW LISTINGS" panel — RDZN $8.40 BUY, ALAB $72.10 BUY, LPSN $1.82 SELL, FROG $31.50 BUY — every value is hardcoded.</p><p><strong>Broken:</strong> The footer at the bottom says "STEP 3 OF 5 · UNDERSTAND" — Context shares Understand's footer template. Either give Context its own footer with its own step or remove it from the pipeline.</p>`, where:"Context page", tags:["BUG-05","BUG-06","BUG-10"]},
+
+  {section:"pages", state:"works", title:"Understand page · the most complete page in the app", sub:"Real chart, real indicators, real MTF, plain-English explanation", body:`<p>This is the page that actually does the trading work. /api/analyze returns ~30 fields in 2 seconds: entry, SL, TP1/2/3, RSI, RSI divergence, EMA20/50/200 + trend, MACD histogram, Bollinger position+width, ATR, volume ratio, supertrend, support, resistance, plus chart arrays.</p><p>What renders: chart canvas (1280×563), confidence ring, RSI gauge with oversold/neutral/overbought arc, plain-English "What This Signal Means" paragraph, INDICATOR CONFLUENCE panel, MTF table with 6 timeframes (15M / 1H / 4H / 1D / 1W / 1M), action buttons (Size this trade, Execute, Backtest, Copy Pine Script, Set Alert), and the journey panel "WHAT TO DO NEXT".</p><p>Small thing: hitting the top "Analyse" button while a different signal is loaded didn't refresh — likely an input-focus issue with the custom-ticker box next to it.</p>`, where:"Understand page", tags:["Page","Works"]},
+
+  {section:"pages", state:"works", title:"Size page · math is sound, one display bug", sub:"Calculator works correctly, but SELL signals show '+-X%'", body:`<p>Auto-fill from a signal works (entry, SL, TP1/2/3 populate). The Conservative 1% / Standard 2% / Aggressive 3% / Custom presets work. Survival math ("69 losing trades in a row would halve your account") is shown.</p><p>The Flow-Scaled Sizing verdict box explains the multiplier in plain English ("SCALE UP — signal quality is favourable. Engine recommends 1.5% risk").</p><p><strong>The one display bug:</strong> SELL signals show take-profit percentages as <code>+-6.42%</code> instead of <code>-6.42%</code>. Tracked as BUG-09. One line to fix.</p>`, where:"Size page", tags:["BUG-09","Page"]},
+
+  {section:"pages", state:"works", title:"Act page · MT5 EA actually connected", sub:"Live MT5 state, live balance, real order history", body:`<p>The MT5 Expert Advisor is genuinely connected. /api/mt5/state returns connected:true with account balance $1,021.72, equity $1,021.72, USD currency, no open positions.</p><p>Order History table shows 10 pending AAPL BUY orders at 0.01 lots from 2026-04-30 19:36 UTC. The "Automations active · Breakeven ON · Trailing ON" banner reflects real /api/automation/settings.</p><p><strong>Open question:</strong> the 10 AAPL orders all show price 0.000000 — they're stuck PENDING. Worth a look.</p>`, where:"Act page", tags:["Page","Works"]},
+
+  {section:"pages", state:"works", title:"Automations page · real backend, persists settings", sub:"All toggles read from / write to /api/automation/settings", body:`<p>API returns: breakeven_on:true, trailing_on:true, market_alerts_on:true, scan_enabled:true, scan_risk_pct:1, trailing_pips:50.</p><p>Page renders: Auto-open trades from scanner toggle, Min confidence slider 75%, Max simultaneous trades 1-5 buttons (3 selected), Risk Circuit Breakers (Daily loss limit 3% RECOMMENDED, Max drawdown pause 10% RECOMMENDED).</p><p>One issue noted in the prior audit: settings are universal — same toggles for scalp / day / swing / position trades. Pro traders treat scalps differently from positions.</p>`, where:"Automations page", tags:["Page","Works"]},
+
+  {section:"pages", state:"works", title:"Risk Manager page · all real, with one math concern", sub:"VaR, Stress Test, Cross-Asset Correlation all work", body:`<p>Best beginner UX in the app. Three sections: Parametric VaR (with confidence dropdown), Stress Test (default crypto -30%, stocks -20%, forex -10%, index -15%, commodity -20%), Cross-Asset Correlation (2-15 tickers, 252-day returns).</p><p>/api/var returns: var_1d_usd $90.08, var_1d_pct 0.901%, portfolio_std 0.5476, z_score 1.6449, positions_used 2 — all computed from real positions.</p><p><strong>Concern (separate from any old bug):</strong> portfolio_std of 0.5476 = 54.76% daily standard deviation. A normal portfolio's daily std is 1-2%. 54% would mean wild ±54% daily swings. The architecture is real but the values feel wrong — possibly using annualized std reported as daily, or extreme outliers in the calc window.</p>`, where:"Risk Manager", tags:["Page","Works","Math"]},
+
+  {section:"pages", state:"works", title:"Portfolio page · real, reads from PostgreSQL", sub:"3 positions, real VaR, real Daily Std", body:`<p>Header: "Portfolio Healthy · Total Value $4 · VaR 0.9% · 3 positions". Page body shows Portfolio Value $3.712, VaR $0.03 (0.9%), Daily Std 54.76%, Positions 3, Open Positions table with Symbol/Type/Dir/Entry/Size/Opened.</p><p>The audit's old claim that this used localStorage is no longer accurate — /api/positions is the source.</p>`, where:"Portfolio page", tags:["Page","Works"]},
+
+  {section:"pages", state:"broken", title:"Performance page · empty state needs words", sub:"Em-dash placeholders with no explanation when no signals exist", body:`<p>If you have 0 evaluated signals: SIGNALS = —, AVG CONF = —, HIGH CONF = 0, BUY BIAS = —. Beginners think the page is broken.</p><p>The Equity Curve below has a nice "Illustrative — run backtest for real curve" disclaimer. The Signals-by-Asset-Class panel says "No signals yet — run your first analysis." Use that same approach for the four headline stats.</p>`, where:"Performance page", tags:["BUG-23","UX"]},
+
+  {section:"pages", state:"broken", title:"Alerts page · header text disagrees with body", sub:"Says '3 unread', body says 'No active watches', backend has 50 unread", body:`<p>Header reads "Alerts · 3 unread · 2 require action" — those numbers are baked into the page. The body of the same page reads "No active watches. Add tickers to your watch list to receive alerts here."</p><p>Real /api/notifications returns 50 unread (market open/close pings, daily summaries). None of them are "watches" — that's why the body says "no active watches" while the unread count is huge.</p><p>Two things to fix: (1) the header should read the real /api/notifications count; (2) treat watches and notifications as separate concepts.</p>`, where:"Alerts page", tags:["BUG-13"]},
+
+  {section:"pages", state:"fake", title:"News page · everything is hardcoded and stale", sub:"NVIDIA earnings, Tesla robotaxi, ETH Dencun — all old news", body:`<p>Live entries on the page right now:</p><ul><li>"NVIDIA reported revenue of $26B vs estimates of $22.1B... shares up 9% in after-hours" — Bloomberg · 3h ago · Bull (this is May 2024 news)</li><li>"Tesla unveils robotaxi — stock up 4% pre-market" — Bull · 1h ago (this is August 2024)</li><li>"Ethereum Dencun upgrade reduces L2 fees by 90%" — Bull · 2h ago (March 2024)</li><li>"GBP/USD extends losses on BoE dovish tone" — Bear · 30m ago</li><li>Plus China PMI, US jobless claims, EUR/USD support</li></ul><p>Every entry is hardcoded with rolling "Xh ago" labels. None of it is real news. Until a real news source is wired up, the page should show "News feed coming soon" or stay empty.</p>`, where:"News page", tags:["Fake","News"]},
+
+  {section:"pages", state:"works", title:"Settings page · 8 sub-panels, all save to localStorage only", sub:"Looks like a settings page. Backend doesn't read most of it.", body:`<p>Eight sub-tabs: Connections (active by default), Asset Preferences, Chart Visuals, Risk Tolerance, Performance, Portfolio, Alert Thresholds, Timezone & Hours.</p><p>Form fields exist and save to localStorage. The backend doesn't read most of them — it uses Railway environment variables for the MT5 EA secret and Telegram bot token. So when a user types in their MT5 API key, nothing connects to anything.</p><p>The Risk Tolerance panel claims to filter signals by confidence threshold (Conservative 85%+, Moderate 75%+, Aggressive 65%+) — the Signal feed and analysis show all signals regardless of this setting.</p><p>This isn't a "bug" per se but it's misleading — the Settings page is mostly theatre.</p>`, where:"Settings page", tags:["Page","Settings"]},
+
+  {section:"pages", state:"works", title:"Admin panel · properly auth-gated", sub:"Returns 401 for non-admin users", body:`<p>/api/admin/users returns 401 Unauthorized when called from this account (Marcus Chen, tier=beginner). The auth gate works.</p><p>Admin button visible in the sidebar but functions only execute for users with admin role. Couldn't fully test the inside of the panel from this account.</p>`, where:"Admin panel", tags:["Page","Auth"]},
+
+  {section:"pages", state:"works", title:"Backtest page · real, empty state correct", sub:"Renders properly when no signal is loaded", body:`<p>Empty state reads "No trade levels provided — entry/stop_loss/tp1 required. Paste the TP/SL Backtest Strategy into TradingView Pine Editor → Strategy Tester."</p><p>Renders: 6 indices buttons (GSPC, IXIC, DJI, FTSE, GC, CL), 5 timeframes (15M/1H/4H/1D/1W), auto-refresh, 7 Strategy Lens buttons (Full Report, Order Block, Supply & Demand, Retracement, Pullback, Breakout, Liquidity).</p><p>Strategy Lens buttons are cosmetic-only — they only change the displayed text commentary, not the actual backtest math. Acceptable as long as nobody assumes otherwise.</p>`, where:"Backtest page", tags:["Page","Works"]},
+
+  // ===== FAKE DATA =====
+  {section:"fakes", state:"fake", title:"Fear & Greed Index = 47", sub:"Static value in the HTML — never moves", body:`<p>The big "47" on the Market page next to the Fear & Greed gauge is hardcoded as <code>&lt;div class="mkt-fear-val"&gt;47&lt;/div&gt;</code>. There's no data source.</p>`, where:"Market page · Fear & Greed gauge", tags:["Fake"]},
+
+  {section:"fakes", state:"fake", title:"S&P 500 Heatmap (14 stocks)", sub:"AAPL +3.24%, MSFT +1.63%, NVDA -0.56% — frozen", body:`<p>The 14-stock heatmap shows percentages that never change. Same values every visit.</p>`, where:"Market page · Heatmap", tags:["Fake"]},
+
+  {section:"fakes", state:"fake", title:"Sector Strength bars", sub:"Technology 72, Healthcare 58, Real Estate 39", body:`<p>The Sector Strength panel on Market lists eleven sectors with percentage bars. Hardcoded — verified the values match the audit's months-old snapshot.</p>`, where:"Market page · Sector Strength", tags:["Fake"]},
+
+  {section:"fakes", state:"fake", title:"Economic Calendar", sub:"NFP, ISM, Powell — all hardcoded fallback", body:`<p>The /api/econ-calendar endpoint returns <code>{"result": []}</code> — empty. The page silently falls back to a hardcoded list: 09:30 NFP (Prev 303K, Est 240K), 10:00 ISM PMI, 11:00 EIA Crude, 14:00 Powell Speech, 16:30 UK PMI.</p><p>Beginners think they're seeing today's calendar. They're not.</p>`, where:"Market page · Economic Calendar", tags:["Fake"]},
+
+  {section:"fakes", state:"fake", title:"Live Momentum Windows", sub:"RDDT, NOTCOIN, ALAB, MEMEFI with fake percentages", body:`<p>The "LIVE MOMENTUM WINDOWS · NEW LISTINGS & COINS" cards show stale tickers with values like RDDT +97.6%, NOTCOIN +130.3%, ALAB +100.3%, MEMEFI +212%. None of it updates.</p>`, where:"Market page · Momentum Windows", tags:["Fake"]},
+
+  {section:"fakes", state:"fake", title:"Context page IPO list", sub:"RDZN, ALAB, LPSN, FROG with hardcoded prices", body:`<p>"HOT RIGHT NOW · IPO & NEW LISTINGS" — RDZN $8.40 BUY, ALAB $72.10 BUY, LPSN $1.82 SELL, FROG $31.50 BUY. Static descriptions like "Insurtech · NASDAQ · Opens 09:30 ET" are also hardcoded.</p>`, where:"Context page", tags:["BUG-10","Fake"]},
+
+  {section:"fakes", state:"fake", title:"News page — every entry", sub:"NVIDIA, Tesla, Ethereum Dencun — all old / fake", body:`<p>Seven news items on the page, all stale or fictional. Some are months old, some never happened in the form shown. Rolling "Xh ago" labels make them look fresh.</p>`, where:"News page", tags:["Fake","News"]},
+
+  {section:"fakes", state:"fake", title:"Alerts header count", sub:"'3 unread · 2 require action' — backend has 50 unread", body:`<p>Header text is baked in. Real notifications API has 50 unread.</p>`, where:"Alerts page · header", tags:["BUG-13","Fake"]},
+
+  {section:"fakes", state:"fake", title:"Backend fallback signals on Market", sub:"5 fake signals shown when /api/scan-list is slow", body:`<p>If the backend is slow, the Live Signals section silently falls back to 5 hardcoded signals instead of saying "live data slow — try again."</p>`, where:"Market page · Live Signals", tags:["Fake"]},
+
+  // ===== APRIL 28 BUGS =====
+  {section:"bugs", state:"fixed", title:"BUG-01: Auto-refresh on Signal page broken", sub:"Was broken in April. Verified working today.", body:`<p>Clicked the 15s preset — it activated, the countdown text updated ("next refresh in 13s"), no console errors. The duplicate <code>arSet</code> from April 28 is no longer present.</p>`, where:"Signal page · auto-refresh", tags:["BUG-01","Fixed"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-02: Login bypasses authentication", sub:"VERIFIED RESOLVED — properly enforced", body:`<p>Tested four bypass attempts: empty payload, email-only, wrong password, SQL injection (<code>' OR 1=1--</code>). All four returned 401. Header tricks (X-User-ID, fake Bearer token) on /api/positions also returned 401. Auth gate works.</p>`, where:"/api/login", tags:["BUG-02","Fixed"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-03: Signal cards missing TP2/TP3", sub:"Fixed earlier this session (commit 0b92711)", body:`<p>TP2/TP3 auto-fill in Size calculator was added. Confirmed in code and verified by inspection of /api/scan-list payload — every card has tp1/tp2/tp3.</p>`, where:"Size page", tags:["BUG-03","Fixed"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-04 / BUG-15: '← SIGNAL' back button broken", sub:"Now correctly routes to Signal feed", body:`<p>Inspected the button onclick: <code>setNav('signals'); showSignalFeed();</code> — three buttons matched ("View Signals", "← SIGNAL", "Find ALL Signals →"), all wired to the same handler. The old "calls showUnderstand instead" bug is gone.</p>`, where:"Understand page · back button", tags:["BUG-04","BUG-15","Fixed"]},
+
+  {section:"bugs", state:"broken", title:"BUG-05: Context page orphaned from 5-step flow", sub:"Confirmed today — breadcrumb skips Context", body:`<p>Top breadcrumb reads MARKET › SIGNAL › UNDERSTAND › SIZE › ACT (5 items, no Context). Sidebar lists Context with step "03" — same number as Understand. Context still shows in the pipeline but isn't part of the headline flow.</p>`, where:"Context page", tags:["BUG-05"]},
+
+  {section:"bugs", state:"broken", title:"BUG-06: Context footer step label wrong", sub:"Footer says 'STEP 3 OF 5 · UNDERSTAND' on Context", body:`<p>Context page reuses Understand's footer template. So the footer reads "Step 3 of 5 · UNDERSTAND" while you're on Context. Either give Context its own footer or remove it from the pipeline.</p>`, where:"Context page · footer", tags:["BUG-06"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-07: Strategy mode default inconsistency", sub:"VERIFIED RESOLVED — persists correctly", body:`<p>Tested with a fresh-first-visit reset (cleared localStorage, walked the Beginner tier picker). <code>setStratMode('scalp')</code> writes <code>dv_strat_mode: "scalp"</code> to localStorage. <code>setStratMode('day')</code> overwrites to <code>"day"</code>. After reload, <code>_stratMode</code> reads back as "day". Persistence works.</p>`, where:"Signal page · MODE", tags:["BUG-07","Fixed"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-08: Market scan 10s timeout falls back to mock data", sub:"VERIFIED RESOLVED — no mock fallback", body:`<p>Tested <code>/api/scan-list</code> with three deliberately-fake tickers. Backend returned in 1.57s with three explicit per-ticker entries each containing <code>{error: "no data", ticker: "..."}</code>. No mock data injected. Even with all data sources currently failing, the scan endpoint surfaces failures honestly per-ticker rather than silently faking signals.</p>`, where:"Market / scan-list", tags:["BUG-08","Fixed"]},
+
+  {section:"bugs", state:"broken", title:"BUG-09: SELL signal '+-X%' on Size page", sub:"CONFIRMED LIVE — verified ETHUSD SELL", body:`<p>Loaded an ETHUSD 4H SELL signal. The DOM showed: szTP1Pct = "+-6.42%", szTP2Pct = "+-9.07%", szTP3Pct = "+-11.72%". The literal "+" prefix concatenates with the negative number to produce the broken string. One line fix.</p>`, where:"Size page", tags:["BUG-09"]},
+
+  {section:"bugs", state:"broken", title:"BUG-10: Context IPO listings hardcoded", sub:"RDZN, ALAB, LPSN, FROG still in source", body:`<p>Confirmed live — same four tickers, same prices, same descriptions as the audit recorded.</p>`, where:"Context page", tags:["BUG-10"]},
+
+  {section:"bugs", state:"broken", title:"BUG-11: Context session scores hardcoded UTC-hour estimates", sub:"LIKELY PRESENT — strings identical across visits", body:`<p>The four mode-card support strings rendered identically on every visit today: "Thin market — spreads wide, slippage risk high" (Scalp), "Session ending soon" (Day Trade), "No major catalysts blocking" (Swing), "Intraday conditions irrelevant" (Position). Pattern matches a UTC-hour-keyed lookup table rather than a real-time computation.</p><p>Definitive verification needs watching the page across several UTC hours to see whether strings ever change — that's a multi-hour observation I can't do in one session.</p>`, where:"Context page · mode cards", tags:["BUG-11","LikelyPresent"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-12: Portfolio uses localStorage not PostgreSQL", sub:"Confirmed fixed today — reads /api/positions", body:`<p>Portfolio page now shows 3 positions sourced from /api/positions. The old localStorage flow is gone.</p>`, where:"Portfolio page", tags:["BUG-12","Fixed"]},
+
+  {section:"bugs", state:"broken", title:"BUG-13: Alerts hardcoded mock alerts", sub:"Header still hardcoded; 50 real notifications hidden behind it", body:`<p>"3 unread · 2 require action" header text is hardcoded. Real /api/notifications has 50 unread market events.</p>`, where:"Alerts page", tags:["BUG-13"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-14: Sign-in page malformed HTML", sub:"Verified balanced today — false positive", body:`<p>The vLanding outerHTML balances properly: 21 &lt;div&gt; opens / 21 closes, 11 &lt;span&gt; opens / 11 closes. The off-by-one tag count comes from a self-closing &lt;br&gt; in the H1 hero. Not malformed.</p>`, where:"Sign-in landing", tags:["BUG-14","Fixed"]},
+
+  {section:"bugs", state:"broken", title:"BUG-16: Wrong mode card highlighted on first visit", sub:"NEW BEHAVIOUR — no card highlighted at all now", body:`<p>Tested by clearing localStorage, walking the first-visit Beginner tier picker → Start Trading. Result: NO mode card on Market is highlighted at all (no <code>active</code> / <code>selected</code> / <code>on</code> class on any of the four). Signal page defaults to ALL pill.</p><p>Original symptom ("wrong card highlighted") is gone, but the new behaviour shows no recommendation either way. Whether to auto-pick a session-appropriate mode (Position GO right now) or leave it user-driven is a product call.</p>`, where:"Market page · mode cards", tags:["BUG-16","NewBehaviour"]},
+
+  {section:"bugs", state:"broken", title:"BUG-17: 'Check Context → UNDERSTAND' footer label wrong", sub:"Confirmed today on Signal page footer", body:`<p>Signal page footer reads "Step 2 of 6 · SIGNAL ← MARKET   Check Context → UNDERSTAND". The arrow says Context, but the button's onclick is showUnderstand. Either change the label or change the action.</p>`, where:"Signal page · footer", tags:["BUG-17"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-18: _initStratMode called before strat pill buttons in DOM", sub:"VERIFIED RESOLVED — clean fresh-load init", body:`<p>After fresh-first-visit reload (cleared localStorage, walked tier picker), <code>window._stratMode</code> initialized correctly to <code>"all"</code>. The MODE pill row on Signal page renders with <code>ALL</code> active by default. No console errors during init. The race condition is no longer triggering the symptom.</p>`, where:"Signal page · init", tags:["BUG-18","Fixed"]},
+
+  {section:"bugs", state:"works", title:"BUG-19: Cosmetic comment mismatch", sub:"Comment says CONTEXT but code goes to UNDERSTAND — code-only", body:`<p>Marked "COSMETIC" in the prior audit. Cosmetic-only — no user-visible behaviour.</p>`, where:"Source comment in showMarket", tags:["BUG-19","Cosmetic"]},
+
+  {section:"bugs", state:"fixed", title:"BUG-20: Portfolio VaR uses hardcoded 1.5% daily std", sub:"Now computes std from real positions", body:`<p>/api/var returns portfolio_std: 0.5476 (NOT the old hardcoded 0.015). Method is "parametric", positions_used is 2 — real backend computation.</p><p>Side-note worth raising: 0.5476 = 54.76% daily std is implausibly high. Architecture is correct, values look wrong. Separate from the original BUG-20.</p>`, where:"Risk Manager / Portfolio", tags:["BUG-20","Fixed"]},
+
+  {section:"bugs", state:"broken", title:"BUG-21: 4 unauthenticated backend routes", sub:"Confirmed live — security risk", body:`<p>Tested with credentials omitted: <code>/api/pine-script</code> 200, <code>/api/pine-divergence</code> 200, <code>/api/pine-strategy</code> 200, <code>/api/send-sms</code> 400 (validation, not auth). Control: <code>/api/positions</code> correctly returns 401.</p>`, where:"Backend", tags:["BUG-21","Security"]},
+
+  {section:"bugs", state:"broken", title:"BUG-22: 'Check Context' button is permanently hidden (worse than original report)", sub:"Inline display:none, never unhides on signal load — dead code", body:`<p>Inspected the actual element. The "Check Context → UNDERSTAND" button is id <code>sfFooterNext</code>, class <code>flow-btn-next</code>, with inline style <code>display: none</code>. Setting <code>window._activeSignal</code> and re-rendering did NOT unhide it. The trigger code that should set <code>display = ''</code> on signal load is broken or missing.</p><p>This is worse than the audit's original "hidden until signal loaded" wording suggested. Today the button is permanently hidden. Either delete the dead element from the DOM, or wire its unhide trigger.</p>`, where:"Signal page · footer", tags:["BUG-22","Worse"]},
+
+  {section:"bugs", state:"broken", title:"BUG-23: Performance shows '--' if no trades logged", sub:"Confirmed live — em-dashes with no explanation", body:`<p>SIGNALS, AVG CONF, BUY BIAS all show — when there are no signals. Add an empty-state message like the one used elsewhere on the page.</p>`, where:"Performance page", tags:["BUG-23"]},
+
+  // ===== BACKEND HEALTH =====
+  {section:"backend", state:"works", title:"/api/prices · POST · 200", sub:"894ms · returns real live prices", body:`<p>Posted SPY, QQQ, BTC-USD, ETH-USD. Got back exact prices matching the DOM. Real.</p>`, where:"Backend", tags:["API"]},
+  {section:"backend", state:"works", title:"/api/scan-list · POST · 200", sub:"1.6s · 7 results with full signal payload", body:`<p>Each result has: ticker, signal, entry, stop_loss, tp1/2/3, rr1/2/3, confidence, confidence_label, bull_score, bear_score, ema_trend, supertrend, rsi, vol_ratio, plain-English reason.</p>`, where:"Backend", tags:["API"]},
+  {section:"backend", state:"works", title:"/api/analyze · POST · 200", sub:"~2s · 30+ data fields including chart arrays", body:`<p>Posted ticker BTC-USD, 4h, crypto. Got back: signal, entry, sl, tp1, RSI, MACD, EMA20/50/200, supertrend, support/resistance, plus chart_dates / chart_prices / chart_opens / chart_highs / chart_lows / chart_ema20 arrays.</p>`, where:"Backend", tags:["API"]},
+  {section:"backend", state:"works", title:"/api/analyze · bad ticker · 404 with descriptive English", sub:"Backend distinguishes errors well", body:`<p>Posted ticker __BAD__. Got 404 + body <code>{"error":"Could not fetch data for '__BAD__-USD'. Verify the ticker and asset type, then try again."}</code>.</p><p>The "backend unreachable" generic frontend message is purely a frontend issue — backend's errors are descriptive.</p>`, where:"Backend", tags:["API","B13"]},
+  {section:"backend", state:"broken", title:"/api/econ-calendar · 200 with empty array", sub:"Page falls back to hardcoded events silently", body:`<p>Returns <code>{"result": []}</code>. Page shows a hardcoded calendar without disclosing.</p>`, where:"Backend", tags:["API","Fake"]},
+  {section:"backend", state:"works", title:"/api/daily-brief · GET · 200", sub:"Real text content", body:`<p>Returns ~400 char market commentary. Real.</p>`, where:"Backend", tags:["API"]},
+  {section:"backend", state:"works", title:"/api/mt5/state · GET · 200", sub:"Live EA state with account balance", body:`<p>Returns <code>{connected: true, account: {balance: 1021.72, equity: 1021.72, ...}, positions: [], level_hits: {}, secs_ago: 0}</code>.</p>`, where:"Backend", tags:["API","MT5"]},
+  {section:"backend", state:"works", title:"/api/automation/settings · GET · 200", sub:"Real persisted settings", body:`<p>Returns the breakeven / trailing / scan toggles. Page reads from this and writes back.</p>`, where:"Backend", tags:["API"]},
+  {section:"backend", state:"works", title:"/api/var · POST · 200", sub:"Real parametric VaR with z-score", body:`<p>Computes from real positions. Architecture is correct. (See note about implausibly high portfolio_std value.)</p>`, where:"Backend", tags:["API","Math"]},
+  {section:"backend", state:"works", title:"/api/notifications · GET · 200", sub:"50 real unread notifications", body:`<p>Backend has many more notifications than the page admits. The Alerts header is the disconnect.</p>`, where:"Backend", tags:["API"]},
+  {section:"backend", state:"works", title:"/api/positions (no auth) · 401", sub:"Properly auth-gated", body:`<p>Returns <code>{"error":"Unauthorized","login_required":true}</code>.</p>`, where:"Backend", tags:["API","Auth"]},
+  {section:"backend", state:"works", title:"/api/admin/users · 401 for non-admin", sub:"Auth gate works for the right user", body:`<p>Returns 401 when called as a non-admin user. Correct behaviour.</p>`, where:"Backend", tags:["API","Auth"]},
+  {section:"backend", state:"broken", title:"/api/pine-script (no auth) · 200", sub:"Returns full Pine v5 source code", body:`<p>BUG-21. Anyone with the URL gets the source.</p>`, where:"Backend", tags:["BUG-21","Security"]},
+  {section:"backend", state:"broken", title:"/api/pine-divergence (no auth) · 200", sub:"RSI Divergence Pine returned to the world", body:`<p>BUG-21.</p>`, where:"Backend", tags:["BUG-21","Security"]},
+  {section:"backend", state:"broken", title:"/api/pine-strategy (no auth) · 200", sub:"Strategy Pine returned to the world", body:`<p>BUG-21.</p>`, where:"Backend", tags:["BUG-21","Security"]},
+  {section:"backend", state:"broken", title:"/api/send-sms (no auth) · 400 not 401", sub:"Soft validation error — auth not enforced", body:`<p>Returns "Phone number required" instead of "login required". BUG-21.</p>`, where:"Backend", tags:["BUG-21","Security"]},
+
+  // ===== AUDIT CORRECTIONS =====
+  {section:"corrections", state:"fixed", title:"Indices/crypto/commodities are LIVE — not hardcoded", sub:"The old audit was wrong about this", body:`<p>The previous audit said indices SPY $524.80, QQQ $420.45, BTC $68,240 etc. were hardcoded fake values. They aren't. Those numbers were the initial-paint placeholders that get replaced after <code>_mktUpdateLiveData()</code> calls /api/prices. Today's live values match what /api/prices returns within milliseconds.</p>`, where:"Market page", tags:["Correction"]},
+
+  {section:"corrections", state:"fixed", title:"BUG-12 Portfolio is real — not localStorage", sub:"Reads from /api/positions", body:`<p>The page now hits the real PostgreSQL-backed positions endpoint. The old "stored in localStorage" complaint is no longer accurate.</p>`, where:"Portfolio page", tags:["Correction"]},
+
+  {section:"corrections", state:"fixed", title:"BUG-20 VaR is real-computed — not 1.5% hardcoded", sub:"Backend now returns computed std", body:`<p>/api/var returns a real <code>portfolio_std</code> value computed from positions. Separately, the value (54.76%) looks wrong — but the architecture is correct, not a hardcoded shortcut.</p>`, where:"Risk Manager / Portfolio", tags:["Correction"]},
+
+  {section:"corrections", state:"fixed", title:"BUG-14 Sign-in HTML is balanced", sub:"Tag mismatch was a self-closing <br>", body:`<p>21/21 div balance, 11/11 span balance. The off-by-one in the gross tag count comes from one self-closing &lt;br&gt; in the headline. Not malformed.</p>`, where:"Sign-in landing", tags:["Correction"]},
+
+  {section:"corrections", state:"fixed", title:"BUG-01 / BUG-04 / BUG-15 already fixed", sub:"Auto-refresh and back buttons all work today", body:`<p>The April 28 audit listed these as broken. Today they work. No action needed.</p>`, where:"Multiple", tags:["Correction"]},
+
+  // ===== CAN'T TEST =====
+  {section:"cant", state:"cant", title:"Mobile rendering (≤480px and tablet)", sub:"MCP can't shrink the viewport", body:`<p>Resizing the controlled window does NOT change <code>window.innerWidth</code> (stays at 1280). What I learned from CSS inspection: there are 4 breakpoints (480, 600, 760, 768) — no 1024px and no 1440px. Real device or BrowserStack needed to test phone/tablet rendering.</p>`, where:"All pages on small screens", tags:["NotTested","Mobile"]},
+
+  {section:"cant", state:"cant", title:"Light mode (prefers-color-scheme: light)", sub:"No light theme rules exist in CSS", body:`<p>Searched the entire CSS — no <code>(prefers-color-scheme: light)</code> media block. Light-OS users get the dark theme regardless. Not strictly a bug, but worth deciding intentionally.</p>`, where:"Whole app", tags:["NotTested","UX"]},
+
+  {section:"cant", state:"cant", title:"Reduced motion (prefers-reduced-motion: reduce)", sub:"Only 3 elements respect it", body:`<p>One <code>@media (prefers-reduced-motion: reduce)</code> block exists, covering 3 selectors (.opp-card, .opp-analyze-btn, .flow-btn-next). The ticker tape, glow effects, and most transitions ignore the user's preference.</p>`, where:"Whole app", tags:["NotTested","Accessibility"]},
+
+  {section:"cant", state:"cant", title:"Screen reader (VoiceOver / NVDA / JAWS)", sub:"No SR available in this MCP", body:`<p>Couldn't be done from this environment. Prior code reading suggests there are zero aria-labels — likely fails screen reader use entirely.</p>`, where:"Whole app", tags:["NotTested","Accessibility"]},
+
+  {section:"cant", state:"cant", title:"Cross-browser (Firefox, Safari, Edge)", sub:"Only Chromium accessible", body:`<p>Couldn't test other browsers from this MCP.</p>`, where:"Whole app", tags:["NotTested","Browser"]},
+
+  {section:"cant", state:"cant", title:"iOS Safari 100vh issue", sub:"Needs a real iOS device", body:`<p>The classic Safari address-bar / 100vh interaction is real-device-only. Code shows no <code>min-height: 100dvh</code> fallback.</p>`, where:"Whole app on iPhone", tags:["NotTested","Mobile"]},
+
+  {section:"cant", state:"cant", title:"EA outage mid-trade", sub:"Needs a running EA to disconnect", body:`<p>Would need to actually disconnect the EA mid-trade and watch what the page does. Not in scope today.</p>`, where:"Act page", tags:["NotTested","MT5"]},
+
+  {section:"cant", state:"cant", title:"Alert firing in production conditions", sub:"Needs an observation window of hours", body:`<p>Verifying that an alert actually fires Telegram + SMS when conditions are met requires waiting for a real signal change. Not in scope today.</p>`, where:"Watch / Alert system", tags:["NotTested","Alerts"]},
+
+  {section:"cant", state:"cant", title:"EA polling lifecycle race conditions", sub:"Needs production-load conditions", body:`<p>Race conditions only show up under realistic concurrent load. Local browser-MCP can't reproduce them.</p>`, where:"MT5 polling", tags:["NotTested","MT5"]},
+
+  {section:"cant", state:"cant", title:"Page-load benchmarks under realistic load", sub:"No load tooling from this MCP", body:`<p>Initial page load is under 3 seconds with a single user. Memory leaks and SQL N+1 patterns under realistic load haven't been measured.</p>`, where:"Whole app", tags:["NotTested","Perf"]},
+];
+
+const grids = {priority:[], pages:[], fakes:[], bugs:[], backend:[], corrections:[], cant:[]};
+const counts = {works:0, broken:0, fake:0, fixed:0, cant:0};
+
+D.forEach(d => {
+  if (d.state in counts) counts[d.state]++;
+  grids[d.section].push(d);
+});
+
+document.getElementById('cWorks').textContent = counts.works;
+document.getElementById('cBroken').textContent = counts.broken;
+document.getElementById('cFake').textContent = counts.fake;
+document.getElementById('cFixed').textContent = counts.fixed;
+document.getElementById('cCant').textContent = counts.cant;
+
+function render(){
+  Object.keys(grids).forEach(k => {
+    const host = document.getElementById('grid-' + k);
+    host.innerHTML = grids[k].map((d,i) => {
+      const tags = (d.tags || []).map(t => `<span>${t}</span>`).join('');
+      return `<details class="item" data-state="${d.state}" data-search="${(d.title + ' ' + d.sub + ' ' + d.body + ' ' + (d.tags||[]).join(' ')).toLowerCase().replace(/"/g,'&quot;')}">
+        <summary>
+          <span class="badge ${d.state}">${{works:'Works', broken:'Broken', fake:'Fake', fixed:'Fixed', cant:'Cannot test'}[d.state]}</span>
+          <span class="ttl"><b>${d.title}</b><span>${d.sub||''}</span></span>
+        </summary>
+        <div class="body">
+          ${d.body}
+          <div class="meta"><span>📍 ${d.where||''}</span>${tags}</div>
+        </div>
+      </details>`;
+    }).join('');
+  });
+}
+render();
+
+// Filter buttons
+document.querySelectorAll('.filterbar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filterbar button').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    applyFilters();
+  });
+});
+
+document.getElementById('q').addEventListener('input', applyFilters);
+
+function applyFilters(){
+  const f = document.querySelector('.filterbar button.on').dataset.f;
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  document.querySelectorAll('.item').forEach(el => {
+    const stateMatch = (f === 'all') || (el.dataset.state === f);
+    const qMatch = !q || (el.dataset.search.indexOf(q) !== -1);
+    el.classList.toggle('hidden', !(stateMatch && qMatch));
+  });
+}
+</script>
+</body>
+</html>

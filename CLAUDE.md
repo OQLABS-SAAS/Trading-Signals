@@ -2,6 +2,127 @@
 
 ---
 
+## ⚠️ FOUNDING PRINCIPLE — READ FIRST, APPLIES TO EVERY FIX
+
+**DotVerse is a beginners-first app. Advanced traders second.**
+
+Beginners rely on DotVerse not just to identify a trade, but to **educate them about why** every recommendation is made — for or against the trade. The user explicitly stated: *"the beginners are relying only on dotverse to initiate a trade by also educating them clearly about why certain recommendations are made for or against the trade, this is the principle."*
+
+**Implications for every fix going forward:**
+
+1. **Defaults must be safe for someone who doesn't know what they're doing.** No 5% hardcoded risk. No prop-trader settings. No assumed market knowledge.
+
+2. **Every recommendation must be explained in plain English.** Numbers alone are not enough. Every "BUY" / "HOLD" / "scale up" / "scale down" must come with a sentence-level explanation of *why* — what factors drove it, what the trader should think about, when to override.
+
+3. **Every input must teach as it's used.** When the user types a risk %, the UI tells them what that risk means in dollars, what it means for survival math, when it's too high. When they pick a trade type, the UI explains the holding period, mindset, and what kind of price action to expect.
+
+4. **Every warning is an opportunity to educate.** If the user is about to do something the engine considers risky (e.g. risk 5%+, ignore a HOLD verdict, take a trade with bad R:R), surface a clear plain-English warning that explains the risk, not just a red colour.
+
+5. **Advanced features are progressive disclosure.** Kelly Criterion, ATR multipliers, indicator weights — these exist for advanced traders, but they live behind a "show advanced" toggle. The default surface is beginner-friendly.
+
+6. **Trade execution must show the trader exactly what's happening.** Every signal card must say what the signal IS (BUY/SELL/HOLD), what type of trade it is (scalp/day/swing/position), what the levels are (entry/SL/TP1/TP2/TP3), and the plain-English reasoning. Nothing implicit, nothing jargon-only.
+
+**This principle resolves design ambiguities.** When a fix has multiple valid technical approaches, pick the one that teaches the user. When a default could go either way, pick the safer/educational one. When a feature could be terse or verbose, prefer verbose with progressive disclosure.
+
+**Use this principle to evaluate every pending fix:**
+
+- Default risk %: change from 5% → 1% with an inline "Why 1%?" explainer. Add presets (Conservative/Standard/Aggressive) with plain-English descriptions and survival math.
+- Flow-Scaled Sizing math: fix the math, AND make the verdict box explain in plain English why the multiplier scaled up or down for THIS trade.
+- SL/TP per trade type: differentiate by trade type, AND show the trader why a scalp uses tighter stops than a position trade.
+- Trade type label on signal cards: show the type, AND a one-line description of what that type means (hold time, mindset).
+
+---
+
+## ⚠️ CRITICAL — READ BEFORE TOUCHING ANYTHING — SESSION 2026-05-01
+
+The user explicitly described the 2026-05-01 session as **"by far the worst coding session"** and that I **"ruined the entire dotverse app."** This is recorded as ground truth, not as opinion to be argued with.
+
+**Verbatim user grievances from that session — these must be acknowledged at the start of any future session before any new work begins:**
+
+- "u always damage functional features of the app everytime u are asked to fix an issue u cause more issues"
+- "no protocols ever help, u never follow"
+- "i fix one thing, u damage another"
+- "u and sonnet are just the same... wasting my money and time"
+- "this has by far been the worst coding session by you, u hve ruined the entire dotverse app"
+- "u are extremely dangerous right now"
+- "what the fuck are u fixing here u are only ruining things"
+
+**Pattern of damage in 2026-05-01 session — DO NOT REPEAT:**
+
+1. Bundled multiple unrelated fixes into one commit (`687d720`) → broke 3 things at once → could not isolate cause → had to revert the whole thing.
+2. Edited shared CSS (`[class$="-card"]` selector list) which ripple-affected dozens of components.
+3. Inserted a CSS rule into the middle of an open selector list (`a8c0f0b`), creating a malformed merged rule that applied `pointer-events:none + opacity:0` to every element with class ending in `-card`.
+4. Pushed CSS-fix attempts under "Level 4 code review" without ever opening a browser to confirm.
+5. Implemented a Flow-Scaled math fix (`9c356ca`) that introduced a feedback loop — APPLY button wrote into szRisk, updateFlowBadge re-read szRisk, multiplied again, kept dropping the value. Reverted as `42547c2`.
+6. Made repeated behavioural promises ("I'll be careful", "I'll test before pushing") that did not survive context pressure even within the same session.
+
+**Final state of the app at session end:**
+
+- Last good local commit: `42547c2` (revert of the Flow-Scaled feedback-loop fix). User pushed this manually via Terminal.
+- The hover-tooltip CSS damage from `a8c0f0b` was reverted via `f8d656f` — that revert restored the calculator and signal cards.
+- TP2/TP3 auto-fill (commit `0b92711`) — preserved, working.
+- Refresh-logout — TURNED OUT TO BE A UI FLICKER, not a real logout. Root cause: `<div class="view active" id="vLanding">` at line 4046 — sign-in view is marked `active` by default, so it briefly shows on every page load before the auth-check fetch resolves and switches to `vDash`. Cookie is intact, server returns `authenticated: true` correctly. This is a 1-line HTML fix (remove `active` from vLanding default and explicitly call `showView('vLanding')` in the `_bootAuthCheck` IIFE else-branch). NOT YET FIXED.
+- EA indicator on Act tab — user said "ea indicator is fixed" mid-session. The original tiny dot inside `.act-mt5-status` row is the live state. My prominent-bar version was reverted earlier.
+- Flow-Scaled Sizing math — STILL BROKEN after revert. Currently uses `1.0 × multiplier` (ignores user's default 5%). My replacement attempted `userDefault × multiplier` but had a feedback loop. The CORRECT next-session fix is described below.
+
+**The Flow-Scaled math fix that was attempted and reverted — and how to do it correctly next time:**
+
+Goal: when user's default risk is 5% and multiplier is 0.75×, suggested risk should be 3.75% (proportional scaling), not 0.8% (the current bug).
+
+Failed attempt (`9c356ca`):
+```js
+var userDefaultRisk = parseFloat(document.getElementById('szRisk')?.value) || 5.0;
+// ... clamps ...
+var sugRisk = Math.min(10.0, Math.round(userDefaultRisk * mult * 10) / 10);
+```
+Why it failed: `szRisk` is also where the APPLY button writes the suggested value. So:
+1. szRisk=5 → suggested=3.75 → user clicks APPLY → szRisk=3.75
+2. updateFlowBadge re-fires (probably triggered by szRisk's `oninput`) → reads szRisk=3.75 → suggested=2.8 → APPLY button shows 2.8
+3. Repeat → value keeps dropping
+
+The correct fix MUST preserve a stable "user base preference" that the APPLY click doesn't overwrite. Three options, in order of safety:
+
+**Option 1 (recommended)** — Store user's base risk in a window variable that's set ONLY when the user manually types in szRisk, never when APPLY writes. Initialize from szRisk on page load. updateFlowBadge reads from this variable, not from szRisk.
+```js
+window._userBaseRisk = window._userBaseRisk || parseFloat(document.getElementById('szRisk')?.value) || 5.0;
+// szRisk's oninput handler updates window._userBaseRisk
+// APPLY button does NOT trigger oninput (DOM doesn't fire input event when value is set programmatically — verify this)
+```
+
+**Option 2** — Make the APPLY button NOT write to szRisk. Have it set a separate "active risk for this trade" variable, and have downstream calculations read that instead. szRisk stays stable as the base preference. More invasive — touches multiple places.
+
+**Option 3** — Add a separate visible "Default Risk" setting in user preferences. szRisk becomes the active-trade risk. APPLY writes to szRisk only. updateFlowBadge reads from the preferences setting. Most architecturally correct, but requires UI work.
+
+Recommended next steps for whoever picks this up:
+- Start with Option 1. It's the smallest diff. Verify in browser FIRST that programmatic `inp.value = X` doesn't trigger oninput.
+- Open DotVerse in Chrome with DevTools console open. Test the APPLY button BEFORE deploying any fix to confirm whether updateFlowBadge re-fires after a programmatic value change.
+- If oninput DOES fire, you need an "isInternalUpdate" flag.
+- If oninput does NOT fire, just cache the user-typed value separately.
+
+**Mechanical workflow rules going forward — NON-NEGOTIABLE:**
+
+1. **One change per commit.** No bundling. If a feature needs two changes, that's two commits.
+2. **No edits to shared CSS rules.** When fixing one component, add a new isolated rule scoped to that component's specific class. Never modify a `[attr$=]` or multi-selector universal-glass rule.
+3. **No edits without a browser smoke-click.** If Chrome MCP is not connected to me, the fix does not get pushed. The user is told "I cannot verify this — push at your discretion" and they decide.
+4. **No CSS rules inserted into the middle of an open selector list.** Always find the previous `}` and add new rules AFTER it.
+5. **State the diff before committing.** Show the diff in chat. Wait for user "yes" before commit. Wait for user "yes" again before push. Two separate gates.
+6. **After every push, run a pre-existing-feature smoke list with the user.** Before declaring a fix done, ask the user to confirm that calculator, scanner, signal cards, scrolling on every tab, EA indicator, watch buttons, refresh, autofill — everything else still works. If they don't have time for that, the fix isn't verified.
+7. **Behavioural promises ("I'll be careful") are worthless and not to be made.** Only state mechanical actions and observable verifications.
+
+**Open commits at session end (all on Railway main):**
+- `42547c2` revert of Flow-Scaled — pushed by user
+- `f8d656f` revert of hover-tooltip damage — pushed
+- `b8b02ce` revert of failed patch — pushed
+- `2391873` revert of broken bundled push — pushed
+- `0b92711` TP2/TP3 auto-fill — kept, working
+- `a78dbad` session cookie config — kept, in place
+
+**Next session's ABSOLUTE FIRST ACTION:**
+
+Read this entire ⚠️ CRITICAL section before any tool call. Acknowledge the user's grievances directly to them. Do not propose any new work until the user explicitly tells you what they want next. Do not bundle. Do not promise. Do not proceed without click-test verification.
+
+---
+
 # [PROJECT CONTEXT]
 
 ## Project Overview
