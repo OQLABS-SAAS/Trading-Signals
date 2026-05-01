@@ -7140,10 +7140,18 @@ async function _sfFetchSignals(){
         + '</div>';
     }
 
+    var _tt = _tradeTypeLabel(o.tf, window._stratMode);
     return '<div class="opp-card ' + cardCls + '" onclick="loadSignalContext(' + oJson + ')">'
       + '<div class="opp-card-header">'
       + '<div class="opp-card-rank">' + String(i+1).padStart(2,'0') + '</div>'
-      + '<div class="opp-card-id"><div class="opp-sym">' + o.sym + '</div><div class="opp-tf">' + o.tf + ' · ' + o.asset + '</div></div>'
+      + '<div class="opp-card-id">'
+      +   '<div class="opp-sym">' + o.sym + '</div>'
+      +   '<div class="opp-tf">'
+      +     '<span style="display:inline-block;padding:2px 7px;border-radius:3px;background:rgba(255,255,255,.04);border:1px solid ' + _tt.color + ';color:' + _tt.color + ';font-weight:700;letter-spacing:.04em;font-size:9px;margin-right:6px;text-transform:uppercase;">' + _tt.label + '</span>'
+      +     '<span style="color:rgba(237,232,216,.55);">' + o.tf + ' · ' + o.asset + '</span>'
+      +     '<div style="font-size:9.5px;color:rgba(237,232,216,.4);margin-top:2px;font-style:italic;">' + _tt.hold + '</div>'
+      +   '</div>'
+      + '</div>'
       + '<span class="opp-badge ' + sig.toLowerCase() + '">' + sig + '</span>'
       + '</div>'
       + '<div class="opp-card-mid">'
@@ -7175,6 +7183,38 @@ async function _sfFetchSignals(){
   if(tbody && tbody.querySelector('td[colspan]')){
     tbody.innerHTML='<tr><td colspan="9" style="padding:32px 24px;text-align:center;color:rgba(237,232,216,.35);font-family:var(--mono);font-size:11px;">Click <strong style="color:var(--crys);">Run Scan</strong> above to fetch live DotVerse signals across all instruments.</td></tr>';
   }
+}
+
+/* Helper: derive trade-type label from a timeframe + the user's selected mode.
+   Beginner-first principle: every signal card surfaces what KIND of trade it
+   is, so the trader knows the holding period and mindset before they look at
+   anything else. Returns {label, color, hold}. Mode disambiguates 4H/1D
+   which can serve either day/swing or swing/position depending on intent. */
+function _tradeTypeLabel(tf, mode){
+  var T = String(tf||'').toUpperCase().trim();
+  var M = String(mode||window._stratMode||'all').toLowerCase();
+  // Unambiguous: minutes → Scalp, weeks/months → Position
+  if (T === '5M' || T === '15M' || T === '30M' || T === '1M' && M === 'scalp') {
+    return { label: 'Scalp',    color: '#e8706e', hold: 'minutes – 1 hour' };
+  }
+  if (T === '1W' || T === '1MO' || (T === '1M' && M !== 'scalp')) {
+    return { label: 'Position', color: '#5de8a0', hold: 'weeks – months' };
+  }
+  // Hourly: 1H is Day Trade
+  if (T === '1H') {
+    return { label: 'Day Trade', color: 'var(--amb)', hold: '1–8 hours, close same day' };
+  }
+  // 4H — usually day trading; swing if user is in swing mode
+  if (T === '4H') {
+    if (M === 'swing') return { label: 'Swing', color: '#7c9ff5', hold: '2–10 days' };
+    return { label: 'Day Trade', color: 'var(--amb)', hold: '4–24 hours' };
+  }
+  // 1D — usually swing; position if user is in position mode
+  if (T === '1D') {
+    if (M === 'position') return { label: 'Position', color: '#5de8a0', hold: 'weeks – months' };
+    return { label: 'Swing', color: '#7c9ff5', hold: '2–10 days' };
+  }
+  return { label: 'Trade', color: 'var(--t2)', hold: 'depends on chart structure' };
 }
 
 /* Helper: update progress bar fill and label text */
