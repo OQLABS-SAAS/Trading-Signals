@@ -6393,7 +6393,13 @@ function updateFlowBadge() {
   else if (vr < 0.8)  { mult -= 0.15; vrAdj = -1; }
 
   mult = Math.max(0.5, Math.min(1.75, mult));
-  mult = Math.round(mult * 4) / 4;
+  // Round to 0.05 step (was 0.25) so small partial-cancellations between
+  // factors are still reflected in the multiplier instead of being erased.
+  // Example: confluence +0.25 + volume -0.15 = +0.10 net. With 0.25 rounding
+  // this collapsed to 1.00× (FULL SIZE) and looked like the engine ignored
+  // both factors. With 0.05 rounding it stays at 1.10× — the trader sees
+  // confluence dominate as the math actually computed.
+  mult = Math.round(mult * 20) / 20;
   window._flowMult = mult;
 
   // ── Final suggested risk — Kelly when backtest-verified, otherwise scale
