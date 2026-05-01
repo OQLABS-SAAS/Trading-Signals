@@ -2304,6 +2304,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         signal = "HOLD"
         gate_note = gate_note or f"Only {total_votes} indicator{'s' if total_votes != 1 else ''} voted — need at least {MIN_VOTES_FOR_SIGNAL} for an actionable signal."
 
+    # Trade-type profile resolved up-front so it's available even on HOLD
+    # signals where the SL/TP block is skipped — the response dict at the
+    # bottom of this function still needs trade_type metadata.
+    _profile = _atr_profile_for_tf(timeframe)
+
     # Generate trade levels based on ATR
     if signal != "HOLD" and atr > 0:
         # Adaptive decimal places: cheap altcoins (< $1) need 6dp so TP levels
@@ -2316,7 +2321,6 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
         # ATR multipliers now depend on trade type (timeframe-derived).
         # See TRADE_LEVEL_PROFILES at top of file. 1H/4H Day Trade values
         # are unchanged from the previous global defaults (4/10/14/18).
-        _profile = _atr_profile_for_tf(timeframe)
         _sl_m, _t1_m, _t2_m, _t3_m = _profile["sl_mult"], _profile["tp1_mult"], _profile["tp2_mult"], _profile["tp3_mult"]
         if signal == "BUY":
             stop_loss = prnd(price - (_sl_m * atr))
