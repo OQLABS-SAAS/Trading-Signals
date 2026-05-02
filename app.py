@@ -72,6 +72,17 @@ CORS(app, supports_credentials=True)
 # This means the frontend will always see a parseable error, never "Network error".
 @app.errorhandler(Exception)
 def handle_any_exception(e):
+    # Preserve proper HTTP status codes (405 stays 405, 400 stays 400, etc.).
+    # Only truly unhandled exceptions become 500.
+    code = getattr(e, "code", None)
+    if isinstance(code, int) and 400 <= code < 600:
+        desc = getattr(e, "description", str(e))
+        resp = jsonify({"error": desc})
+        if code == 405:
+            valid = getattr(e, "valid_methods", None)
+            if valid:
+                resp.headers["Allow"] = ", ".join(sorted(valid))
+        return resp, code
     import traceback
     print(f"[flask] Unhandled exception: {traceback.format_exc()}")
     return jsonify({"error": f"Server error: {str(e)}"}), 500
