@@ -82,21 +82,35 @@ Out of scope: equity curve "goal line" — current curve is illustrative random 
 
 ---
 
-## Results — to be filled
+## Results — verified live 2026-05-02 on dot-verse.up.railway.app
 
-| # | Criterion | Method ran | Raw evidence | PASS/FAIL |
-|---|---|---|---|---|
-| 1 | persist | | | |
-| 2 | login load | | | |
-| 3 | targets panel renders | | | |
-| 4 | trades vs target | | | |
-| 5 | rr vs target | | | |
-| 6 | survives reload | | | |
-| 7 | independence | | | |
-| 8 | no KPI regression | | | |
+| # | Criterion | Raw evidence | PASS/FAIL |
+|---|---|---|---|
+| 1 | persist | Set `_pgSliders={winrate:65,rr:2.5,trades:8,annual:30}` and called `_settSaveAll()`. Subsequent `/api/settings` GET returned `perf_target_winrate=65, perf_target_rr=2.5, perf_target_trades=8, perf_target_annual=30` | PASS |
+| 2 | login load | POSTed `{winrate:72, rr:3.2, trades:11, annual:42.5}` directly to backend, removed `dv_sett_pg` from localStorage, reloaded → after F1.7 fired, `_pgSliders={"winrate":72,"rr":3.2,"trades":11,"annual":42.5}` and `localStorage.dv_sett_pg` matches | PASS |
+| 3 | targets panel renders | DOM check: `#perfTargetsCard, #perfTgtWinrate, #perfTgtRr, #perfTgtTrades, #perfTgtAnnual` all present (`card_y_w_y_r_y_t_y_a_y`). Visual screenshot confirms 4 cards rendered below the KPI overview. | PASS |
+| 4 | trades vs target | `#perfTgtTrades` textContent: `"DAILY TRADES CAP 8 0 today · under cap"` — shows target 8, actual 0 today, status "under cap" in green | PASS |
+| 5 | rr vs target | `#perfTgtRr` textContent: `"AVG R:R TARGET 2.5× actual 2.45× · below target"` — shows target 2.5×, actual 2.45× computed from real `entry/SL/TP1` on signal_history rows, status "below target" in red because 2.45 < 2.5 | PASS |
+| 6 | survives reload | After full reload, `_pgSliders` retained `{72, 3.2, 11, 42.5}` from backend | PASS |
+| 7 | independence | After `setChartTheme('obsidian')`, `_pgSliders` unchanged, `_activeChartTheme=obsidian` updated independently | PASS |
+| 8 | no KPI regression | `document.querySelectorAll('.perf-mc').length === 4` confirms 4 original tiles still render. Visual screenshot confirms SIGNALS 100, AVG CONF 58.8%, HIGH CONF 67, BUY BIAS 26% all visible | PASS |
+
+**Four-check default applied:**
+1. Multiple surfaces — DOM (5 elements), API (`/api/settings` GET round-trip), localStorage (`dv_sett_pg`), JS var (`_pgSliders`), visual screenshot
+2. Direct measure — read element textContent verbatim, no inference
+3. Cross-check siblings — F1.13 follows F1.7+F1.10b+F1.11+F1.12 pattern of POST-on-save and load-on-goDash
+4. Sparse + dense — tested with two distinct value sets (`65/2.5/8/30` and `72/3.2/11/42.5`)
+
+**All 8 criteria PASSED.** Step 29 closed.
 
 ---
 
 ## Commit log (this step)
 
-(To be appended)
+- `32875ca` F1.13: Performance targets persist + load on login + render on Performance page (with computable actual-vs-target widgets)
+  - `_settSaveAll` now POSTs all 4 `perf_target_*` fields to `/api/settings`
+  - `goDash` F1.7 block reads `perf_target_*` from response and writes to `_pgSliders` + legacy `dv_sett_pg` localStorage key
+  - `showPerformance` adds a "Your Targets" card with 4 sub-cards (winrate / rr / trades / annual)
+  - Trades card shows today's signal count vs cap with status colour
+  - R:R card computes actual avg from `entry/SL/TP1` on signal_history rows and labels above/below target
+  - Win-rate and annual cards show target only with "needs closed-trade data" / "needs portfolio P&L" notes (honest about data limits)
