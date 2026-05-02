@@ -3542,7 +3542,7 @@ def login():
         session["authenticated"] = True
         session.permanent = True
         return jsonify({"status": "ok"})
-    return jsonify({"status": "error", "message": "Incorrect password"}), 401
+    return jsonify({"status": "error", "message": "Incorrect email or password"}), 401
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
