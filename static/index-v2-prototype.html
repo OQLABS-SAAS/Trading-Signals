@@ -5191,13 +5191,16 @@ function _settSaveAll(){
   _dvWrite('dv_sett_alloc',  JSON.stringify(_settAlloc));
   _dvWrite('dv_sett_pg',     JSON.stringify(_pgSliders));
   _dvWrite('dv_sett_prc',    JSON.stringify(_prcSliders));
-  // F1.2 — also persist Asset Preferences to backend so they actually filter the
-  // Signal feed scan groups (and survive across browsers / logout). Other panels
-  // gain their backend writes in subsequent steps (24+).
+  // Persist user settings to backend so they actually take effect (and survive
+  // across browsers / logout). Each Settings sub-panel adds its keys here as
+  // its wiring step lands. F1.2 = assets_enabled. F1.3 = risk_tolerance.
   try{
     fetch('/api/settings', {method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({assets_enabled: _settAssets || []})
+      body: JSON.stringify({
+        assets_enabled: _settAssets || [],
+        risk_tolerance: _settRisk || 'aggressive'
+      })
     }).catch(function(){});
   }catch(e){}
 }
