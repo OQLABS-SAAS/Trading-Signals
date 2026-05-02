@@ -5262,21 +5262,68 @@ function _spConnections(){
     </div>
   </div>`;
 }
-function _saveConnSettings(){
+async function _saveConnSettings(){
   var key=document.getElementById('settApiKey');
   var acct=document.getElementById('settMt5Acct');
   var srv=document.getElementById('settMt5Server');
+  // Local cache (transitional — server is now source of truth)
   if(key) _dvWrite('dv_mt5_key', key.value);
   if(acct) _dvWrite('dv_mt5_acct', acct.value);
   if(srv) _dvWrite('dv_mt5_srv', srv.value);
-  if(typeof _dvToast==='function') _dvToast('MT5 settings saved','rgba(201,168,76,.12)','rgba(201,168,76,.4)');
+  // Persist to backend (encrypted at rest, per-user, F1.1)
+  try{
+    var payload = {};
+    if(key && key.value) payload.mt5_api_key = key.value;  // empty = leave unchanged
+    if(acct) payload.mt5_account = acct.value || '';
+    if(srv)  payload.mt5_broker_server = srv.value || '';
+    var r = await fetch('/api/settings', {method:'POST', credentials:'include',
+                       headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    if(key) key.value = '';  // clear secret input after save
+    if(typeof _dvToast==='function') _dvToast('MT5 settings saved','rgba(201,168,76,.12)','rgba(201,168,76,.4)');
+    _loadConnSettings();
+  }catch(e){
+    if(typeof _dvToast==='function') _dvToast('Save failed: '+(e.message||'network error'),'rgba(232,112,110,.12)','rgba(232,112,110,.4)');
+  }
 }
-function _saveTgSettings(){
+async function _saveTgSettings(){
   var tok=document.getElementById('settTgToken');
   var chat=document.getElementById('settTgChat');
   if(tok) _dvWrite('dv_tg_tok', tok.value);
   if(chat) _dvWrite('dv_tg_chat', chat.value);
-  if(typeof _dvToast==='function') _dvToast('Telegram settings saved — EA will use these on next heartbeat','rgba(93,232,160,.12)','rgba(93,232,160,.4)');
+  try{
+    var payload = {};
+    if(tok && tok.value) payload.telegram_bot_token = tok.value;  // empty = leave unchanged
+    if(chat) payload.telegram_chat_id = chat.value || '';
+    var r = await fetch('/api/settings', {method:'POST', credentials:'include',
+                       headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    if(tok) tok.value = '';  // clear secret input after save
+    if(typeof _dvToast==='function') _dvToast('Telegram settings saved — EA will use these on next heartbeat','rgba(93,232,160,.12)','rgba(93,232,160,.4)');
+    _loadConnSettings();
+  }catch(e){
+    if(typeof _dvToast==='function') _dvToast('Save failed: '+(e.message||'network error'),'rgba(232,112,110,.12)','rgba(232,112,110,.4)');
+  }
+}
+// Pulls saved Connections values from /api/settings and populates non-secret fields.
+// Secrets are NEVER returned by GET — we only show a "✓ saved" hint when configured.
+async function _loadConnSettings(){
+  try{
+    var r = await fetch('/api/settings', {credentials:'include'});
+    if(!r.ok) return;
+    var d = await r.json();
+    var acct = document.getElementById('settMt5Acct');
+    var srv  = document.getElementById('settMt5Server');
+    var chat = document.getElementById('settTgChat');
+    if(acct && typeof d.mt5_account === 'string')       acct.value = d.mt5_account;
+    if(srv  && typeof d.mt5_broker_server === 'string') srv.value  = d.mt5_broker_server;
+    if(chat && typeof d.telegram_chat_id === 'string')  chat.value = d.telegram_chat_id;
+    // Update the secret-field placeholders to indicate "currently saved"
+    var key = document.getElementById('settApiKey');
+    if(key && d.mt5_configured) key.placeholder = '✓ saved — type to replace, leave blank to keep';
+    var tok = document.getElementById('settTgToken');
+    if(tok && d.telegram_configured) tok.placeholder = '✓ saved — type to replace, leave blank to keep';
+  }catch(e){ /* silent — Connections page still usable from localStorage if backend hiccups */ }
 }
 
 function showSettings(tab){
@@ -5334,6 +5381,8 @@ function showSettings(tab){
         : null;
       _mt5ApplyConnBadge(b, d.connected, lastSeenStr);
     });
+    // F1.1 — load persisted Connections values from /api/settings
+    if (typeof _loadConnSettings === 'function') _loadConnSettings();
   }
 }
 
