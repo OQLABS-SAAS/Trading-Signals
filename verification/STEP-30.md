@@ -218,6 +218,44 @@ Account restored after test.
 
 ---
 
+## Fourth follow-up (F1.14.3 — defense-in-depth enum guard for preset/rebalance)
+
+**Honest correction:** when surfacing this gap I claimed backend "accepts any string" for `portfolio_preset` / `portfolio_rebalance`. **That was wrong.** Backend already enum-validates both at app.py L4416 and L4418. I had misread the handler.
+
+**What F1.14.3 actually protects against (defense-in-depth):**
+- Direct DB tampering (someone edits the postgres row by hand)
+- Schema migration leaving invalid values
+- Future backend regression dropping the enum check
+
+The guard wraps F1.7's per-field load with `indexOf >= 0` against the known enum so even if invalid data reaches the GET response, frontend rejects it instead of leaving the UI with no card highlighted.
+
+**Verification:**
+
+Inline mock test (since backend correctly rejects invalid POSTs, can't trigger the guard via real e2e):
+
+| Test | Input | Result |
+|---|---|---|
+| Both garbage | `{preset:'garbage',rebalance:'whatever'}` | Both rejected, defaults retained ✓ |
+| Valid preset only | `{preset:'aggressive'}` | psm→aggressive, reb unchanged ✓ |
+| Valid rebal only | `{rebalance:'monthly'}` | reb→monthly, psm unchanged ✓ |
+| Mixed valid+invalid | `{preset:'balanced',rebalance:'garbage'}` | psm→balanced, reb rejected ✓ Per-key independence |
+| Empty string | `{preset:'',rebalance:''}` | Both rejected (empty-string check) ✓ |
+| Null | `{preset:null,rebalance:null}` | Both rejected (typeof check) ✓ |
+| Wrong case | `{preset:'BALANCED'}` | Rejected (case-sensitive) — fine because backend stores lowercase ✓ |
+
+End-to-end happy path with valid values:
+- POST `{preset:'aggressive',rebalance:'monthly'}` → backend stores
+- Cleared localStorage + reload → F1.7 with guard
+- Result: `_settPsm=aggressive`, `_settReb=monthly` ✓
+
+Guard doesn't break valid input. Defense-in-depth working.
+
+**Lesson logged:** before claiming a server-side gap, READ the actual handler code carefully. F1.14.3 is still defensive-useful, but the framing in my brainstorm-result message overstated the problem.
+
+Account restored: `psm=balanced, reb=quarterly, bench=spy`.
+
+---
+
 ## Commit log (this step)
 
 - `1991cde` F1.14: Portfolio settings persist + load + Target Allocation vs Actual panel + rebalance callout (+ touched tracking)
