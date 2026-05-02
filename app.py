@@ -4322,7 +4322,7 @@ def _user_settings_to_dict(s):
         "assets_enabled":      assets,
         "risk_tolerance":      s.risk_tolerance,
         "chart_theme":         s.chart_theme or "",
-        "chart_type":          s.chart_type or "candles",
+        "chart_type":          s.chart_type or "candle",
         "grid_style":          s.grid_style or "",
         "indicator_scheme":    s.indicator_scheme or "",
         "timezone":            s.timezone or "UTC",
@@ -4390,7 +4390,7 @@ def settings_save():
             s.risk_tolerance = body["risk_tolerance"]
 
         if "chart_theme"      in body: s.chart_theme      = str(body["chart_theme"])[:32]
-        if "chart_type"       in body and body["chart_type"] in ("candles","bar","line"):
+        if "chart_type"       in body and body["chart_type"] in ("candle","bar","line","area","hollow"):
             s.chart_type = body["chart_type"]
         if "grid_style"       in body: s.grid_style       = str(body["grid_style"])[:16]
         if "indicator_scheme" in body: s.indicator_scheme = str(body["indicator_scheme"])[:16]

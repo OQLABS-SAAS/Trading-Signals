@@ -4606,8 +4606,15 @@ function goDash(u){
         _settChartTheme   = s.chart_theme;
         try{ localStorage.setItem('dvChartTheme', s.chart_theme); }catch(e){}
         try{ _dvWrite('dv_sett_theme', s.chart_theme); }catch(e){}
-        if(typeof _applyAllCharts === 'function') _applyAllCharts();
       }
+      // F1.10b — also load chart_type so default rendering type follows the user.
+      if(typeof s.chart_type === 'string' && s.chart_type){
+        _activeChartType = s.chart_type;
+        if(typeof _settChartType !== 'undefined') _settChartType = s.chart_type;
+        try{ localStorage.setItem('dvChartType', s.chart_type); }catch(e){}
+        try{ _dvWrite('dv_sett_ctype', s.chart_type); }catch(e){}
+      }
+      if(typeof _applyAllCharts === 'function') _applyAllCharts();
     });
   }catch(e){}
   try{ dvFetch('/api/signals/history?limit=30').then(function(d){ if(d&&Array.isArray(d)){ window._sigHistory=d; renderSigHistoryPanel(); } }); }catch(e){}
@@ -5724,11 +5731,23 @@ function setChartTheme(id){
 
 function setChartType(id){
   _activeChartType = id;
+  // F1.10b — keep _settChartType + legacy localStorage key in sync (mirror of F1.8 theme pattern).
+  if(typeof _settChartType !== 'undefined') _settChartType = id;
   localStorage.setItem('dvChartType', id);
+  try{ if(typeof _dvWrite === 'function') _dvWrite('dv_sett_ctype', id); }catch(e){}
   document.querySelectorAll('.cv-type-card').forEach(c=>c.classList.remove('sel'));
   const sel = document.querySelector(`.cv-type-card[onclick*="'${id}'"]`);
   if(sel) sel.classList.add('sel');
+  // F1.10b — re-render visible charts so the new series type takes effect immediately.
+  requestAnimationFrame(_applyAllCharts);
   _showToast('Chart type: ' + id.charAt(0).toUpperCase()+id.slice(1));
+  // F1.10b — auto-persist to backend.
+  try{
+    fetch('/api/settings', {method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({chart_type: id})
+    }).catch(function(){});
+  }catch(e){}
 }
 
 function setGridStyle(id){
@@ -10828,11 +10847,39 @@ function _initUndChart(sig){
     crosshair:{ mode:0 },
   });
 
-  const cs = chart.addCandlestickSeries({
-    upColor:_th.upCol, downColor:_th.dnCol,
-    borderUpColor:_th.upCol, borderDownColor:_th.dnCol,
-    wickUpColor:_th.upCol, wickDownColor:_th.dnCol,
-  });
+  // F1.10b — chart type honours the user's Chart Visuals → Default Chart Type
+  // setting. Falls back to candlestick on any unrecognised value.
+  const _ct = (typeof _activeChartType === 'string' && _activeChartType) ? _activeChartType : 'candle';
+  let cs;
+  if(_ct === 'bar'){
+    cs = chart.addBarSeries({
+      upColor:_th.upCol, downColor:_th.dnCol, thinBars:false,
+    });
+  } else if(_ct === 'line'){
+    cs = chart.addLineSeries({
+      color:_th.lineCol, lineWidth:2, lastValueVisible:true, priceLineVisible:true,
+    });
+  } else if(_ct === 'area'){
+    cs = chart.addAreaSeries({
+      lineColor:_th.upCol,
+      topColor:(_th.areaGrad && _th.areaGrad[0]) || _hex2rgba(_th.upCol, .25),
+      bottomColor:(_th.areaGrad && _th.areaGrad[1]) || _hex2rgba(_th.upCol, 0),
+      lineWidth:2, lastValueVisible:true, priceLineVisible:true,
+    });
+  } else if(_ct === 'hollow'){
+    // Up candles: transparent body, coloured border + wick. Down candles: filled.
+    cs = chart.addCandlestickSeries({
+      upColor:'rgba(0,0,0,0)', downColor:_th.dnCol,
+      borderUpColor:_th.upCol, borderDownColor:_th.dnCol,
+      wickUpColor:_th.upCol, wickDownColor:_th.dnCol,
+    });
+  } else {
+    cs = chart.addCandlestickSeries({
+      upColor:_th.upCol, downColor:_th.dnCol,
+      borderUpColor:_th.upCol, borderDownColor:_th.dnCol,
+      wickUpColor:_th.upCol, wickDownColor:_th.dnCol,
+    });
+  }
 
   const volSeries = volChart.addHistogramSeries({
     color: 'rgba(237,232,216,.3)',
@@ -10909,8 +10956,13 @@ function _initUndChart(sig){
     if(loadEl) loadEl.style.display = 'none';
     if(!bars||!bars.length){ console.warn('[chart] no bars, showing No chart data'); if(loadEl){loadEl.style.display='flex';loadEl.textContent='No chart data';} return; }
     try {
-      cs.setData(bars.map(b=>({time:b.time,open:b.open,high:b.high,low:b.low,close:b.close})));
-      console.log('[chart] cs.setData OK with', bars.length, 'candles');
+      // F1.10b — line + area series take {time,value}; OHLC series take full OHLC.
+      if(_ct === 'line' || _ct === 'area'){
+        cs.setData(bars.map(b=>({time:b.time, value:b.close})));
+      } else {
+        cs.setData(bars.map(b=>({time:b.time,open:b.open,high:b.high,low:b.low,close:b.close})));
+      }
+      console.log('[chart] cs.setData OK with', bars.length, 'bars (type=' + _ct + ')');
     } catch(e) {
       console.error('[chart] cs.setData FAILED:', e.message, 'first bar:', bars[0]);
       if(loadEl){loadEl.style.display='flex';loadEl.textContent='Chart render error: '+e.message;}
