@@ -1642,6 +1642,8 @@ button:focus-visible,a:focus-visible,[onclick]:focus-visible{
 .al-ack-btn{font-size:11px;padding:4px 12px;border-radius:6px;background:var(--s3);border:1px solid var(--bd2);color:var(--t2);cursor:pointer;}
 .al-ack-btn:hover{border-color:var(--amb);color:var(--amb);}
 .al-dis-btn{font-size:11px;padding:4px 10px;border-radius:6px;background:transparent;border:1px solid var(--bd);color:var(--t3);cursor:pointer;}
+.al-rem-btn{font-size:11px;padding:4px 10px;border-radius:6px;background:transparent;border:1px solid rgba(224,85,85,.4);color:rgba(224,85,85,.85);cursor:pointer;margin-left:auto;}
+.al-rem-btn:hover{background:rgba(224,85,85,.08);border-color:rgba(224,85,85,.7);color:rgba(224,85,85,1);}
 .al-rule-section{background:var(--s1);border:1px solid var(--bd);border-radius:8px;overflow:hidden;margin-bottom:12px;}
 .al-rule-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--bd);}
 .al-rule-title{font-size:13px;font-weight:400;}
@@ -6818,7 +6820,9 @@ async function dvLoadWatchAlerts(){
 async function removeWatch(ticker, timeframe, asset_type){
   await dvFetch('/api/watch',{method:'DELETE',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ticker,asset_type:asset_type||'',timeframe})});
-  dvLoadWatchAlerts();
+  // Refresh whichever watch UIs are currently rendered.
+  if(typeof dvLoadWatchAlerts==='function') dvLoadWatchAlerts();
+  if(document.querySelector('.al-grid')&&typeof showAlerts==='function') showAlerts();
 }
 
 // Re-render watchlist when UNDERSTAND page loads
@@ -9762,7 +9766,12 @@ async function showAlerts(){
           icon:iconSvg,
           iconBg:iconBg,
           cat:isBuy||isSell?'signal':'system',
-          msg:msg
+          msg:msg,
+          // Identifying fields used by the Remove button (escaped on render to avoid quote breakage)
+          isWatch:true,
+          watchTicker:w.ticker||'',
+          watchTimeframe:w.timeframe||'',
+          watchAssetType:w.asset_type||''
         };
       });
     }
@@ -9781,6 +9790,7 @@ async function showAlerts(){
     <div class="al-card-foot">
       ${a.unread?`<button class="al-ack-btn" onclick="this.closest('.al-card').classList.remove('unread','crit');this.style.display='none'">Acknowledge</button>`:''}
       <button class="al-dis-btn">Dismiss</button>
+      ${a.isWatch?`<button class="al-rem-btn" onclick="removeWatch('${(a.watchTicker||'').replace(/'/g,'')}','${(a.watchTimeframe||'').replace(/'/g,'')}','${(a.watchAssetType||'').replace(/'/g,'')}')" title="Stop watching this ticker">Remove</button>`:''}
     </div>
   </div>`).join('');
 
