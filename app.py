@@ -4202,6 +4202,135 @@ def automation_settings_save():
     finally:
         db.close()
 
+# ─── USER SETTINGS (per-user preferences for the 8 Settings sub-panels) ─────
+
+def _user_settings_to_dict(s):
+    """Serialise a UserSettings row to JSON for the frontend.
+    Encrypted credentials are NEVER returned in plaintext — only a flag
+    indicating whether they are configured, plus the non-secret fields."""
+    if not s:
+        return {}
+    try:    assets = json.loads(s.assets_enabled) if s.assets_enabled else []
+    except: assets = []
+    try:    alloc  = json.loads(s.portfolio_alloc) if s.portfolio_alloc else {}
+    except: alloc  = {}
+    return {
+        "assets_enabled":      assets,
+        "risk_tolerance":      s.risk_tolerance,
+        "chart_theme":         s.chart_theme or "",
+        "chart_type":          s.chart_type or "candles",
+        "grid_style":          s.grid_style or "",
+        "indicator_scheme":    s.indicator_scheme or "",
+        "timezone":            s.timezone or "UTC",
+        "alert_confidence":    s.alert_confidence,
+        "alert_price_pct":     s.alert_price_pct,
+        "alert_drawdown_pct":  s.alert_drawdown_pct,
+        "alert_loss_pct":      s.alert_loss_pct,
+        "perf_target_winrate": s.perf_target_winrate,
+        "perf_target_rr":      s.perf_target_rr,
+        "perf_target_trades":  s.perf_target_trades,
+        "perf_target_annual":  s.perf_target_annual,
+        "portfolio_alloc":     alloc,
+        "portfolio_preset":    s.portfolio_preset,
+        "portfolio_rebalance": s.portfolio_rebalance,
+        "portfolio_benchmark": s.portfolio_benchmark,
+        "mt5_configured":      bool(s.mt5_api_key_enc),
+        "mt5_account":         s.mt5_account or "",
+        "mt5_broker_server":   s.mt5_broker_server or "",
+        "telegram_configured": bool(s.telegram_bot_token_enc),
+        "telegram_chat_id":    s.telegram_chat_id or "",
+    }
+
+@app.route("/api/settings", methods=["GET"])
+@login_required
+def settings_get():
+    """Return the current user's preferences. Creates a default row on first call."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        s = db.query(UserSettings).filter_by(user_id=user_id).first()
+        if not s:
+            s = UserSettings(user_id=user_id)
+            db.add(s)
+            db.commit()
+            s = db.query(UserSettings).filter_by(user_id=user_id).first()
+        return jsonify(_user_settings_to_dict(s))
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/settings", methods=["POST"])
+@login_required
+def settings_save():
+    """Partial update — only the keys the client sends are written. Credentials
+    are encrypted before storage; sending an empty string leaves them unchanged."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body    = request.json or {}
+    db      = _DBSession()
+    try:
+        s = db.query(UserSettings).filter_by(user_id=user_id).first()
+        if not s:
+            s = UserSettings(user_id=user_id)
+            db.add(s)
+
+        if "assets_enabled" in body:
+            try:    s.assets_enabled = json.dumps(list(body["assets_enabled"]))
+            except: pass
+        if "risk_tolerance" in body and body["risk_tolerance"] in ("conservative","moderate","aggressive"):
+            s.risk_tolerance = body["risk_tolerance"]
+
+        if "chart_theme"      in body: s.chart_theme      = str(body["chart_theme"])[:32]
+        if "chart_type"       in body and body["chart_type"] in ("candles","bar","line"):
+            s.chart_type = body["chart_type"]
+        if "grid_style"       in body: s.grid_style       = str(body["grid_style"])[:16]
+        if "indicator_scheme" in body: s.indicator_scheme = str(body["indicator_scheme"])[:16]
+
+        if "timezone" in body: s.timezone = str(body["timezone"])[:64]
+
+        if "alert_confidence" in body:
+            try:    s.alert_confidence = max(0, min(100, int(body["alert_confidence"])))
+            except: pass
+        for k in ("alert_price_pct","alert_drawdown_pct","alert_loss_pct",
+                  "perf_target_rr","perf_target_annual"):
+            if k in body:
+                try:    setattr(s, k, float(body[k]))
+                except: pass
+        for k in ("perf_target_winrate","perf_target_trades"):
+            if k in body:
+                try:    setattr(s, k, int(body[k]))
+                except: pass
+
+        if "portfolio_alloc" in body:
+            try:    s.portfolio_alloc = json.dumps(dict(body["portfolio_alloc"]))
+            except: pass
+        if "portfolio_preset" in body and body["portfolio_preset"] in ("conservative","balanced","aggressive"):
+            s.portfolio_preset = body["portfolio_preset"]
+        if "portfolio_rebalance" in body and body["portfolio_rebalance"] in ("monthly","quarterly","yearly"):
+            s.portfolio_rebalance = body["portfolio_rebalance"]
+        if "portfolio_benchmark" in body: s.portfolio_benchmark = str(body["portfolio_benchmark"])[:16]
+
+        # Connections — encrypt before storing, never log. Empty string = unchanged.
+        if body.get("mt5_api_key"):        s.mt5_api_key_enc        = _enc(str(body["mt5_api_key"]))
+        if "mt5_account"        in body:   s.mt5_account            = str(body["mt5_account"])[:64]
+        if "mt5_broker_server"  in body:   s.mt5_broker_server      = str(body["mt5_broker_server"])[:128]
+        if body.get("telegram_bot_token"): s.telegram_bot_token_enc = _enc(str(body["telegram_bot_token"]))
+        if "telegram_chat_id"   in body:   s.telegram_chat_id       = str(body["telegram_chat_id"])[:64]
+
+        s.updated_at = datetime.utcnow()
+        db.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
 # ─── NOTIFICATIONS ────────────────────────────────────────────
 
 @app.route("/api/notifications", methods=["GET"])
@@ -6717,6 +6846,57 @@ class AutomationSettings(_Base):
     trailing_pips    = Column(Float,   default=50.0)
     market_alerts_on = Column(Boolean, default=True)
     updated_at       = Column(DateTime, default=datetime.utcnow)
+
+class UserSettings(_Base):
+    """Per-user application preferences. Persisted server-side so they
+    follow the user across browsers and survive logout/login. Backs the
+    Settings page sub-panels so picking a value actually has a backend effect."""
+    __tablename__ = "user_settings"
+    id                     = Column(Integer, primary_key=True, autoincrement=True)
+    user_id                = Column(String(64), unique=True, nullable=False, index=True)
+
+    # Asset Preferences sub-panel (which classes the scanner scans)
+    assets_enabled         = Column(Text, nullable=True)  # JSON array of asset class strings
+
+    # Risk Tolerance sub-panel (signal-confidence threshold)
+    risk_tolerance         = Column(String(16), nullable=False, default="aggressive")  # conservative|moderate|aggressive
+
+    # Chart Visuals sub-panel
+    chart_theme            = Column(String(32), nullable=True)
+    chart_type             = Column(String(16), nullable=True, default="candles")
+    grid_style             = Column(String(16), nullable=True)
+    indicator_scheme       = Column(String(16), nullable=True)
+
+    # Timezone & Hours sub-panel
+    timezone               = Column(String(64), nullable=False, default="UTC")
+
+    # Alert Thresholds sub-panel
+    alert_confidence       = Column(Integer, nullable=False, default=65)
+    alert_price_pct        = Column(Float,   nullable=False, default=2.0)
+    alert_drawdown_pct     = Column(Float,   nullable=False, default=10.0)
+    alert_loss_pct         = Column(Float,   nullable=False, default=5.0)
+
+    # Performance sub-panel (target tracking)
+    perf_target_winrate    = Column(Integer, nullable=False, default=55)
+    perf_target_rr         = Column(Float,   nullable=False, default=2.0)
+    perf_target_trades     = Column(Integer, nullable=False, default=5)
+    perf_target_annual     = Column(Float,   nullable=False, default=20.0)
+
+    # Portfolio sub-panel
+    portfolio_alloc        = Column(Text, nullable=True)  # JSON object: class->percent
+    portfolio_preset       = Column(String(16), nullable=False, default="balanced")
+    portfolio_rebalance    = Column(String(16), nullable=False, default="quarterly")
+    portfolio_benchmark    = Column(String(16), nullable=False, default="spy")
+
+    # Connections sub-panel — credentials encrypted at rest via _enc / _dec.
+    # Empty string in the form means "unchanged"; only non-empty values overwrite.
+    mt5_api_key_enc        = Column(Text,         nullable=True)
+    mt5_account            = Column(String(64),   nullable=True)
+    mt5_broker_server      = Column(String(128),  nullable=True)
+    telegram_bot_token_enc = Column(Text,         nullable=True)
+    telegram_chat_id       = Column(String(64),   nullable=True)
+
+    updated_at             = Column(DateTime, default=datetime.utcnow)
 
 class ScanAlert(_Base):
     """Tracks recently sent scan alerts for deduplication."""
