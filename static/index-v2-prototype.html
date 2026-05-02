@@ -5558,9 +5558,23 @@ function _applyAllCharts(){
   if(typeof _initUndChart === 'function' && window._activeSignal && document.getElementById('undChartWrap')){
     try { _initUndChart(window._activeSignal); } catch(e) { console.warn('[theme] und chart redraw failed:', e); }
   }
-  // F1.5 — clear the per-position chart-loaded guard so position charts
-  // pick up the new theme the next time their panel becomes visible.
-  document.querySelectorAll('[id^="pfchart-"]').forEach(el => { el._chartLoaded = false; });
+  // F1.5 / F1.9 — for each per-position chart: clear its load guard, and if
+  // the chart is currently visible (parent expand-row is open), wipe its old
+  // canvases and force an immediate redraw so the new theme applies without
+  // requiring the user to close and re-open the panel.
+  document.querySelectorAll('[id^="pfchart-"]').forEach(el => {
+    el._chartLoaded = false;
+    var pid = el.id.replace('pfchart-','');
+    var expandRow = document.getElementById('pfexp-' + pid);
+    var isVisible = expandRow && expandRow.style.display !== 'none';
+    if(isVisible && el._chartArgs && typeof pfLoadPosChart === 'function'){
+      try {
+        el.innerHTML = '';
+        var a = el._chartArgs;
+        pfLoadPosChart(a.id, a.ticker, a.assetType, a.entry, a.dir);
+      } catch(e) { console.warn('[theme] pfchart redraw failed:', e); }
+    }
+  });
 }
 
 function _spVisuals(){
@@ -9029,6 +9043,9 @@ function pfLoadPosChart(id,ticker,assetType,entry,dir){
   const container=document.getElementById('pfchart-'+id);
   if(!container||container._chartLoaded) return;
   container._chartLoaded=true;
+  // F1.9 — cache args so _applyAllCharts can force-redraw this chart with the
+  // current theme when the user switches theme while the panel is open.
+  container._chartArgs = {id:id, ticker:ticker, assetType:assetType, entry:entry, dir:dir};
   if(typeof LightweightCharts==='undefined'){
     container.innerHTML='<div style="color:rgba(237,232,216,.4);font-size:11px;padding:20px;text-align:center">Chart library not loaded</div>';
     return;
