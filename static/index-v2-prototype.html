@@ -4627,6 +4627,14 @@ function goDash(u){
         try{ localStorage.setItem('dvIndScheme', s.indicator_scheme); }catch(e){}
         try{ _dvWrite('dv_sett_ind', s.indicator_scheme); }catch(e){}
       }
+      // F1.13 — load Performance targets so the Performance page can render them.
+      if(typeof _pgSliders === 'object' && _pgSliders){
+        if(s.perf_target_winrate != null) _pgSliders.winrate = +s.perf_target_winrate;
+        if(s.perf_target_rr      != null) _pgSliders.rr      = +s.perf_target_rr;
+        if(s.perf_target_trades  != null) _pgSliders.trades  = +s.perf_target_trades;
+        if(s.perf_target_annual  != null) _pgSliders.annual  = +s.perf_target_annual;
+        try{ _dvWrite('dv_sett_pg', JSON.stringify(_pgSliders)); }catch(e){}
+      }
       if(typeof _applyAllCharts === 'function') _applyAllCharts();
     });
   }catch(e){}
@@ -5232,12 +5240,18 @@ function _settSaveAll(){
   // its wiring step lands. F1.2 = assets_enabled. F1.3 = risk_tolerance.
   // F1.4 = chart_theme (sourced from _activeChartTheme — the live UI selection).
   try{
+    var pg = (typeof _pgSliders === 'object' && _pgSliders) ? _pgSliders : {};
     fetch('/api/settings', {method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         assets_enabled: _settAssets || [],
         risk_tolerance: _settRisk || 'aggressive',
-        chart_theme: (typeof _activeChartTheme === 'string' ? _activeChartTheme : (_settChartTheme || 'constellation'))
+        chart_theme: (typeof _activeChartTheme === 'string' ? _activeChartTheme : (_settChartTheme || 'constellation')),
+        // F1.13 — persist Performance targets so they follow the user across devices.
+        perf_target_winrate: (pg.winrate != null ? pg.winrate : 55),
+        perf_target_rr:      (pg.rr      != null ? pg.rr      : 2.0),
+        perf_target_trades:  (pg.trades  != null ? pg.trades  : 5),
+        perf_target_annual:  (pg.annual  != null ? pg.annual  : 20.0)
       })
     }).catch(function(){});
   }catch(e){}
@@ -9810,6 +9824,29 @@ async function showPerformance(){
     </div>`;
   }).join(''):'<div style="color:var(--t3);font-size:12px;padding:12px 0;">No signals yet. Run your first analysis in the UNDERSTAND tab.</div>';
 
+  // F1.13 — compute actual values that CAN be compared to user's perf targets.
+  // Win-rate and annual-return targets aren't computable without closed-trade
+  // outcome data; we render those as static targets only.
+  var _pg = (typeof _pgSliders === 'object' && _pgSliders) ? _pgSliders : {winrate:55,rr:2,trades:5,annual:20};
+  var _today = new Date(); _today.setHours(0,0,0,0);
+  var _todayCount = data.filter(function(s){
+    if(!s.fired_at) return false;
+    var d = new Date(s.fired_at);
+    return d >= _today;
+  }).length;
+  var _rrVals = data.filter(function(s){
+    var e = parseFloat(s.entry), sl = parseFloat(s.stop_loss), tp = parseFloat(s.tp1);
+    return e>0 && sl>0 && tp>0 && e!==sl;
+  }).map(function(s){
+    var e = parseFloat(s.entry), sl = parseFloat(s.stop_loss), tp = parseFloat(s.tp1);
+    return Math.abs((tp-e)/(e-sl));
+  });
+  var _avgRR = _rrVals.length ? (_rrVals.reduce(function(a,b){return a+b;},0)/_rrVals.length) : null;
+  var _trStatusCol = _todayCount > _pg.trades ? '#e8706e' : (_todayCount === _pg.trades ? '#c9a84c' : '#5de8a0');
+  var _trStatusLbl = _todayCount > _pg.trades ? 'over cap' : (_todayCount === _pg.trades ? 'at cap' : 'under cap');
+  var _rrStatusCol = (_avgRR == null) ? 'rgba(237,232,216,.5)' : (_avgRR >= _pg.rr ? '#5de8a0' : '#e8706e');
+  var _rrStatusLbl = (_avgRR == null) ? 'no data' : (_avgRR >= _pg.rr ? 'on target' : 'below target');
+
   el.innerHTML=`
   <div class="pg-hd">
     <div class="pg-hd-left"><div class="pg-hd-title">Performance</div><div class="pg-hd-sub">${total} signals evaluated</div></div>
@@ -9820,6 +9857,35 @@ async function showPerformance(){
     <div class="perf-mc"><div class="perf-mc-lbl">AVG CONF</div><div class="perf-mc-val">${total?avgConf+'%':'—'}</div><div class="perf-mc-trend up">${total?'Across all signals':'Run your first analysis to start tracking here'}</div></div>
     <div class="perf-mc"><div class="perf-mc-lbl">HIGH CONF</div><div class="perf-mc-val">${highConfCount}</div><div class="perf-mc-trend up">${total?'CONFIRMED signals':'Run your first analysis to start tracking here'}</div></div>
     <div class="perf-mc"><div class="perf-mc-lbl">BUY BIAS</div><div class="perf-mc-val">${total?Math.round(buyCount/total*100)+'%':'—'}</div><div class="perf-mc-trend up">${total?'of directional signals':'Run your first analysis to start tracking here'}</div></div>
+  </div>
+  <!-- F1.13 — Your Targets panel: shows the 4 user-defined targets and the actual-vs-target comparisons that ARE computable from signal-history data. -->
+  <div class="perf-card" id="perfTargetsCard" style="margin-bottom:16px;">
+    <div class="perf-card-head">
+      <span class="perf-card-title">Your Targets</span>
+      <span class="perf-card-sub">From Settings → Performance · win rate &amp; annual return need closed-trade data</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:6px 0;">
+      <div id="perfTgtWinrate" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">WIN RATE TARGET</div>
+        <div style="font-family:var(--mono);font-size:22px;color:#5de8a0;margin-top:6px;">${_pg.winrate}%</div>
+        <div style="font-size:10.5px;color:rgba(237,232,216,.4);margin-top:4px;">target only — needs closed trades</div>
+      </div>
+      <div id="perfTgtRr" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">AVG R:R TARGET</div>
+        <div style="font-family:var(--mono);font-size:22px;color:#c9a84c;margin-top:6px;">${_pg.rr.toFixed(1)}×</div>
+        <div style="font-size:10.5px;color:${_rrStatusCol};margin-top:4px;">actual ${_avgRR==null?'—':_avgRR.toFixed(2)+'×'} · ${_rrStatusLbl}</div>
+      </div>
+      <div id="perfTgtTrades" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">DAILY TRADES CAP</div>
+        <div style="font-family:var(--mono);font-size:22px;color:#60a5fa;margin-top:6px;">${_pg.trades}</div>
+        <div style="font-size:10.5px;color:${_trStatusCol};margin-top:4px;">${_todayCount} today · ${_trStatusLbl}</div>
+      </div>
+      <div id="perfTgtAnnual" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">ANNUAL RETURN TARGET</div>
+        <div style="font-family:var(--mono);font-size:22px;color:#a78bfa;margin-top:6px;">${_pg.annual.toFixed(1)}%</div>
+        <div style="font-size:10.5px;color:rgba(237,232,216,.4);margin-top:4px;">target only — needs portfolio P&amp;L</div>
+      </div>
+    </div>
   </div>
   <div class="perf-body">
     <div class="perf-card">
