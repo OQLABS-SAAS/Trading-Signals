@@ -4621,6 +4621,12 @@ function goDash(u){
         try{ localStorage.setItem('dvGridStyle', s.grid_style); }catch(e){}
         try{ _dvWrite('dv_sett_grid', s.grid_style); }catch(e){}
       }
+      // F1.12 — also load indicator_scheme so RSI line colour follows the user.
+      if(typeof s.indicator_scheme === 'string' && s.indicator_scheme){
+        _activeIndicatorScheme = s.indicator_scheme;
+        try{ localStorage.setItem('dvIndScheme', s.indicator_scheme); }catch(e){}
+        try{ _dvWrite('dv_sett_ind', s.indicator_scheme); }catch(e){}
+      }
       if(typeof _applyAllCharts === 'function') _applyAllCharts();
     });
   }catch(e){}
@@ -5782,11 +5788,24 @@ function setGridStyle(id){
 function setIndScheme(id){
   _activeIndicatorScheme = id;
   localStorage.setItem('dvIndScheme', id);
+  // F1.12 — sync legacy localStorage key.
+  try{ if(typeof _dvWrite === 'function') _dvWrite('dv_sett_ind', id); }catch(e){}
   document.querySelectorAll('.cv-opt-card').forEach(c=>{ if(c.onclick?.toString().includes('setIndScheme')) c.classList.remove('sel'); });
   const sel = document.querySelector(`.cv-opt-card[onclick*="setIndScheme"][onclick*="'${id}'"]`);
   if(sel) sel.classList.add('sel');
   const prev = document.getElementById('cvIndPreview');
   if(prev) prev.innerHTML = _renderIndPreview(id);
+  // F1.12 — re-render visible charts so RSI line picks up the new scheme colour.
+  requestAnimationFrame(_applyAllCharts);
+  // F1.12 — toast confirmation, matches setChartTheme / setChartType / setGridStyle.
+  _showToast('Indicator scheme: ' + id.charAt(0).toUpperCase() + id.slice(1));
+  // F1.12 — auto-persist to backend.
+  try{
+    fetch('/api/settings', {method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({indicator_scheme: id})
+    }).catch(function(){});
+  }catch(e){}
 }
 
 function cvToggle(key, el){
@@ -10931,8 +10950,16 @@ function _initUndChart(sig){
     priceScaleId: '',
   });
 
+  // F1.12 — RSI line colour follows active Indicator Scheme. The 4 schemes
+  // mirror the swatches shown in the Settings → Chart Visuals preview.
+  var _scheme = (typeof _activeIndicatorScheme === 'string' && _activeIndicatorScheme) ? _activeIndicatorScheme : 'crystal';
+  var _rsiCol;
+  if(_scheme === 'mono')        _rsiCol = 'rgba(255,255,255,.5)';
+  else if(_scheme === 'vivid')  _rsiCol = '#a78bfa';
+  else if(_scheme === 'signal') _rsiCol = 'rgba(237,232,216,.7)';
+  else                          _rsiCol = 'rgba(167,139,250,.8)'; // crystal (default)
   const rsiLine = rsiChart.addLineSeries({
-    color: 'rgba(237,232,216,.7)',
+    color: _rsiCol,
     lineWidth: 1,
     priceFormat: { type: 'custom', formatter: v => v.toFixed(1) },
   });
