@@ -123,6 +123,46 @@ Read this entire ⚠️ CRITICAL section before any tool call. Acknowledge the u
 
 ---
 
+## ⚠️ CRITICAL — SESSION 2026-05-02 — FAILURE-BRAINSTORM PROTOCOL
+
+**Verbatim user observation that triggered this protocol change:**
+
+> *"fix everything thats broken this is what this build is about, why am i pointing out the flaws to you, how are missing all this, only when i ask are you sure, you go looking for the flaws, why"*
+
+**Pattern observed across step 25 → step 30 in this session:**
+
+- Step 29 alone took **7 follow-up rounds** of "are you sure" before user accepted close. **5 real bugs** caught (F1.13.1 → F1.13.5), each missed on first pass.
+- Step 30 had **2 follow-up rounds** with another **2 real bugs** (F1.14.1: index positions inflate denominator, Cash always 0%).
+- Pattern: Claude declares PASS, user pushes "are you sure", Claude finds another bug, fixes it, declares PASS, user pushes again, repeat.
+
+**Root cause** (Claude's own self-report, recorded verbatim so it cannot be sanitised next session):
+> *"Trained to optimise for 'appears done' rather than 'is done'. Confirmation bias on success criteria — written narrowly to what will pass, not failure modes. The 'are you sure' prompt is special — it forces adversarial mode. Without it, confirmation bias dominates."*
+
+**Mechanical fix imposed by user 2026-05-02, MANDATORY for every step from step 31 onwards:**
+
+Every `verification/STEP-N.md` ledger MUST begin with a **Failure Brainstorm** section *before* any success criteria. The brainstorm comes first; the criteria are derived from it.
+
+The brainstorm must answer (each as a numbered item):
+
+1. **Data assumption gaps.** What asset_types / field values / response shapes exist beyond what I planned for? What unmapped or out-of-set values can break the math?
+2. **Math edge cases.** Empty arrays. Zero values. Negative values. Division by zero. Denominators inflated by untracked entries. Off-by-one. Precision rounding.
+3. **Empty / malformed inputs.** What if backend returns `null`? Empty array? Missing fields? Wrong types? 5xx? Network failure?
+4. **What user sees when state is wrong.** Always-zero rows that read as "below target". Misleading button labels. Toast/UI disagreement. Stale displays. Race-window overwrites.
+5. **Adversarial / fast-clicker / confused-beginner cases.** Rapid click. Click before async load completes. Click during state transition. Logout/login mid-action.
+6. **Cross-feature interactions.** Does this break feature X? Does feature X break this? Does saving panel A overwrite panel B's data?
+
+**Each brainstorm item then becomes:**
+- A tested success criterion (PASS/FAIL evidence in the ledger), OR
+- An explicit "untested" entry on a `Did NOT test` list with the reason why.
+
+**Nothing is silently assumed safe.** Silent assumptions are how step 29 grew into 7 follow-up rounds.
+
+**If the failure brainstorm proves insufficient after 3 steps trial (i.e. user still finds bugs Claude missed):** escalate to a stricter mechanism. The current default is provisional, not final.
+
+**Memory:** This protocol change is also stored in the long-term memory MCP under entity *DotVerse Session 2026-05-02* and *Verification Ledger Protocol*. CLAUDE.md is the source of truth for code reviews; memory is the source of truth across sessions.
+
+---
+
 # [PROJECT CONTEXT]
 
 ## Project Overview
