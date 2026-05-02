@@ -256,6 +256,42 @@ Account restored: `psm=balanced, reb=quarterly, bench=spy`.
 
 ---
 
+## Fifth follow-up (F1.14.4 — chart-visuals enum guards, brainstorm caught a parallel gap outside step 30 scope)
+
+After F1.14.3 closed the preset/rebalance enum guard, applying the failure brainstorm to the broader `goDash` F1.7 block surfaced the same defense-in-depth gap for `chart_theme`, `chart_type`, `grid_style`, `indicator_scheme`:
+
+- **Backend handlers:** `chart_theme/grid_style/indicator_scheme` are str-cap only with no enum check. `chart_type` already has enum validation.
+- **F1.7 load:** all 4 only checked `typeof === 'string'`. No enum validation.
+- **Failure mode:** if invalid value reaches frontend (DB tampering, schema regression, future backend bug), `_active*` becomes garbage. Settings card `.sel` highlight breaks (no card matches). Downstream rendering still works because `_getTheme/_gridOpts/_initUndChart` branches all fall back to defaults — but UI looks broken.
+
+**Fix shipped (F1.14.4):**
+Added `_VALID_THEMES / _VALID_TYPES / _VALID_GRIDS / _VALID_SCHEMES` enum arrays inside F1.7. Each per-field load wrapped with `&& _VALID_X.indexOf(s.X) >= 0`. Garbage rejected, valid loaded.
+
+**Verification (live):**
+
+Inline mock tests, 5 scenarios covering all 4 fields:
+
+| Test | Theme | Type | Grid | Scheme | Pass |
+|---|---|---|---|---|---|
+| All garbage `{fakeTheme, pie, mesh, rainbow}` | aurora (default) | candle (default) | subtle (default) | crystal (default) | All rejected ✓ |
+| All valid `{obsidian, line, dotted, mono}` | obsidian | line | dotted | mono | All loaded ✓ |
+| Mixed: theme valid, type invalid, grid valid, scheme invalid | midnight ✓ | candle (rejected) | subtle ✓ | crystal (rejected) | Per-field independence ✓ |
+| Wrong case `{OBSIDIAN, CANDLE}` | aurora | candle | (no change) | (no change) | Case-sensitive rejected ✓ |
+| Empty + null | (no change) | (no change) | (no change) | (no change) | Both rejected ✓ |
+
+End-to-end happy path:
+- POST `{chart_theme:'midnight', chart_type:'bar', grid_style:'dotted', indicator_scheme:'vivid'}` to backend
+- Cleared 8 localStorage keys + reloaded
+- Result: all 4 values loaded correctly (`th=midnight, ty=bar, gr=dotted, sc=vivid`); localStorage synced
+
+Guards don't break valid input. Defense-in-depth working across all 4 chart-visuals enum-bound settings.
+
+**Honest scope note:** this fix is technically across F1.4 (chart visuals, steps 25-28) not Phase F portfolio (step 30). It's logged here because the failure brainstorm in step 30 surfaced it, and applying the protocol strictly means fixing it when found rather than deferring. The fix lives in the same `goDash` F1.7 function that step 30's portfolio loaders extended.
+
+Account restored: `theme=aurora, type=candle, grid=subtle, scheme=crystal`.
+
+---
+
 ## Commit log (this step)
 
 - `1991cde` F1.14: Portfolio settings persist + load + Target Allocation vs Actual panel + rebalance callout (+ touched tracking)
