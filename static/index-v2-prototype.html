@@ -9732,6 +9732,21 @@ let _alRules={priceTarget:true,stopLoss:true,conf80:true,daily:false,news:true};
 async function showAlerts(){
   const el=document.getElementById('dashContent'); if(!el) return;
   let alerts=[];
+  // Real notification counts for the header subtitle (BUG-13)
+  let unreadCount=0, requireActionCount=0;
+  try{
+    const nd=await dvFetch('/api/notifications');
+    if(nd&&Array.isArray(nd.notifications)){
+      const unread=nd.notifications.filter(function(n){return !n.read;});
+      unreadCount=unread.length;
+      // Actionable types: signal-fired alerts, risk warnings, suggestions.
+      // Informational session-open/close notifications don't require action.
+      requireActionCount=unread.filter(function(n){
+        const t=(n.type||'').toLowerCase();
+        return t==='signal'||t==='risk'||t==='suggestion'||t==='alert';
+      }).length;
+    }
+  }catch(e){}
   try{
     const wd=await dvFetch('/api/watches');
     if(wd&&Array.isArray(wd.watches)&&wd.watches.length){
@@ -9793,7 +9808,7 @@ async function showAlerts(){
 
   el.innerHTML=`
   <div class="pg-hd">
-    <div class="pg-hd-left"><div class="pg-hd-title">Alerts</div><div class="pg-hd-sub">3 unread · 2 require action</div></div>
+    <div class="pg-hd-left"><div class="pg-hd-title">Alerts</div><div class="pg-hd-sub">${unreadCount} unread · ${requireActionCount} require action</div></div>
   </div>
   <div class="al-toolbar">
     ${filterPills}
