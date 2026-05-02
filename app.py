@@ -2078,7 +2078,31 @@ def _htf_trend_bias(mtf, timeframe):
     return (htf.get("trend") or "NEUTRAL").upper()
 
 
-def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
+# ── Per-user confluence threshold (F1.3 Risk Tolerance) ──────────────────────
+# Maps the Risk Tolerance setting to the bull/bear-vote percentage a signal must
+# reach before BUY/SELL fires (instead of HOLD). Higher threshold = fewer but
+# higher-conviction signals. The default 0.65 is the legacy global value;
+# anyone without a UserSettings row keeps the existing behaviour.
+_CONFLUENCE_THRESHOLDS = {"conservative": 0.85, "moderate": 0.75, "aggressive": 0.65}
+
+def _get_user_confluence_threshold(user_id):
+    """Look up the user's Risk Tolerance and return the matching threshold.
+    Returns 0.65 on any error (no DB, no row, unknown value, exception)."""
+    if not _DBSession or not user_id:
+        return 0.65
+    try:
+        db = _DBSession()
+        try:
+            row = db.query(UserSettings).filter_by(user_id=str(user_id)).first()
+            if row and row.risk_tolerance in _CONFLUENCE_THRESHOLDS:
+                return _CONFLUENCE_THRESHOLDS[row.risk_tolerance]
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return 0.65
+
+def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=None):
     """Generate trading signal using gated template logic.
 
     Accuracy fixes (v2):
@@ -2193,10 +2217,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
     # ── Net score (kept for confidence calculation) ──
     net = bullish_count - bearish_count
 
-    # ── 3a: Confluence gate — signal requires ≥65% sub-indicator agreement ──
-    # Only indicators that actually voted (bullish OR bearish) count toward the
-    # denominator. Neutral indicators (RSI in 45-55, flat MACD) are excluded.
-    # Below 65% agreement → HOLD regardless of net score.
+    # ── 3a: Confluence gate — signal requires ≥THRESHOLD sub-indicator agreement ──
+    # Threshold is per-user from Risk Tolerance (F1.3): Conservative 0.85, Moderate
+    # 0.75, Aggressive 0.65 (legacy default). Only indicators that actually voted
+    # count toward the denominator; neutral indicators are excluded. Below the
+    # threshold → HOLD regardless of net score.
     total_votes = bullish_count + bearish_count
     if total_votes > 0:
         bull_pct = bullish_count / total_votes
@@ -2204,9 +2229,17 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None):
     else:
         bull_pct = bear_pct = 0.0
 
-    if bull_pct >= 0.65:
+    # Resolve the user_id from the explicit param or fall back to the request
+    # session. Background callers (RQ worker, etc.) without a request context
+    # silently fall back to the global 0.65 default.
+    if user_id is None:
+        try:    user_id = session.get('user_id')
+        except Exception: user_id = None
+    threshold = _get_user_confluence_threshold(user_id)
+
+    if bull_pct >= threshold:
         signal = "BUY"
-    elif bear_pct >= 0.65:
+    elif bear_pct >= threshold:
         signal = "SELL"
     else:
         signal = "HOLD"
