@@ -105,6 +105,37 @@ Out of scope: equity curve "goal line" — current curve is illustrative random 
 
 ---
 
+## Follow-up audit (after "are you sure" prompt)
+
+When pressed I flagged 3 things the original criteria didn't cover:
+1. UI Save button click flow (I had called `_settSaveAll()` from JS console, not via button)
+2. Slider drag flow (I had set `_pgSliders` directly, not via slider input)
+3. Status colour branches I didn't trigger
+
+**1. UI Save button click — VERIFIED.**
+Located the rendered button via `[...document.querySelectorAll('.sett-save-btn')].find(b => b.getAttribute('onclick').includes('_settSaveAll'))`. Set `_pgSliders={80,1.5,25,60}`. Called `saveBtn.click()`. Backend returned `perf_target_winrate=80, rr=1.5, trades=25, annual=60` — exact match. Button click triggers `_settSaveAll` which POSTs.
+
+**2. Slider drag flow — VERIFIED.**
+4 sliders (`input.pg-range`) rendered. Located winrate slider by its `oninput` attribute containing `'winrate'`. Set value=88, dispatched `Event('input', {bubbles:true})`. Result: `_pgSliders.winrate=85` (slider clamped to its max of 85, correct behaviour). Subsequent UI Save click → backend `perf_target_winrate=85`. Full slider→state→save→backend chain proven via real DOM events, not just direct JS state mutation.
+
+**3. Status colour branches — ALL TESTED.**
+
+| Branch | Conditions | Element text | Branch hit |
+|---|---|---|---|
+| Trades `<` cap (green) | `0 today, cap=8` | "8 / 0 today / under cap" | `_trStatusCol = '#5de8a0'` ✓ |
+| Trades `===` cap (amber) | `0 today, cap=0` | "0 / 0 today / at cap" | `_trStatusCol = '#c9a84c'` ✓ |
+| Trades `>` cap (red) | `0 today, cap=-1` | "-1 / 0 today / over cap" | `_trStatusCol = '#e8706e'` ✓ |
+| R:R `>=` target (green) | `actual 2.45, target 2.0` | "2.0× / actual 2.45× / on target" | `_rrStatusCol = '#5de8a0'` ✓ |
+| R:R `<` target (red) | `actual 2.45, target 5.0` | "5.0× / actual 2.45× / below target" | `_rrStatusCol = '#e8706e'` ✓ |
+
+**Empty-data R:R fallback** (`_rrVals.length === 0 → _avgRR=null → "no data" gray`) — code path verified by inspection, can't trigger live without a fresh-no-history account.
+
+**Test artifact disclosure:** my tests wrote intermediate values to the user's backend record. After verification, the account was restored to defaults `{55, 2.0, 5, 20}` via direct API POST. No residual test data.
+
+No more soft spots.
+
+---
+
 ## Commit log (this step)
 
 - `32875ca` F1.13: Performance targets persist + load on login + render on Performance page (with computable actual-vs-target widgets)
