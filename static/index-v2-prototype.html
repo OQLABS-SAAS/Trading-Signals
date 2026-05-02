@@ -5191,6 +5191,15 @@ function _settSaveAll(){
   _dvWrite('dv_sett_alloc',  JSON.stringify(_settAlloc));
   _dvWrite('dv_sett_pg',     JSON.stringify(_pgSliders));
   _dvWrite('dv_sett_prc',    JSON.stringify(_prcSliders));
+  // F1.2 — also persist Asset Preferences to backend so they actually filter the
+  // Signal feed scan groups (and survive across browsers / logout). Other panels
+  // gain their backend writes in subsequent steps (24+).
+  try{
+    fetch('/api/settings', {method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({assets_enabled: _settAssets || []})
+    }).catch(function(){});
+  }catch(e){}
 }
 
 function _spConnections(){
@@ -6992,12 +7001,22 @@ async function _sfFetchSignals(){
     // correctly (crypto -> -USD, forex -> =X, commodity -> futures map). A
     // single batch with one asset_type would mangle 4 of 6 tickers and the
     // errored rows get silently filtered, leaving an empty Signals tab.
-    const groups = [
+    const _allGroups = [
       { tickers: ['BTCUSD','ETHUSD'], asset_type: 'crypto'    },
       { tickers: ['NVDA','AAPL'],     asset_type: 'stock'     },
       { tickers: ['EURUSD'],          asset_type: 'forex'     },
       { tickers: ['XAUUSD'],          asset_type: 'commodity' }
     ];
+    // F1.2 — filter scan groups by user's Asset Preferences. The Settings UI uses
+    // ids 'stocks','crypto','forex','macro'... map them to the scan asset_type values.
+    const _UI_TO_SCAN = {stocks:'stock', crypto:'crypto', forex:'forex', macro:'commodity'};
+    const _enabledScanTypes = (typeof _settAssets !== 'undefined' && Array.isArray(_settAssets) ? _settAssets : ['stocks','crypto','forex'])
+      .map(function(id){ return _UI_TO_SCAN[id]; })
+      .filter(Boolean);
+    const _filtered = _allGroups.filter(function(g){ return _enabledScanTypes.indexOf(g.asset_type) !== -1; });
+    // Fallback to all groups if user has deselected every scannable class (avoid
+    // showing an empty Signal feed — better to scan everything than nothing).
+    const groups = _filtered.length ? _filtered : _allGroups;
     const all = await Promise.race([
       Promise.all(groups.map(function(g){
         return dvFetch('/api/scan-list', {
