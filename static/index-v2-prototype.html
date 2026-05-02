@@ -4670,11 +4670,19 @@ function goDash(u){
         });
         if(changed){ try{ _dvWrite('dv_sett_alloc', JSON.stringify(_settAlloc)); }catch(e){} }
       }
-      if(!_t.portfolio_preset && typeof s.portfolio_preset === 'string' && s.portfolio_preset){
+      // F1.14.3 — validate portfolio_preset against known enum so an invalid
+      // backend value (DB tampering, schema migration error) doesn't leave the
+      // UI with no card selected. Settings UI renders cards with id matching
+      // _settPsm; if the value isn't in the enum, no card highlights and the
+      // Portfolio header shows the raw garbage string.
+      if(!_t.portfolio_preset && typeof s.portfolio_preset === 'string' && s.portfolio_preset
+          && ['conservative','balanced','aggressive'].indexOf(s.portfolio_preset) >= 0){
         _settPsm = s.portfolio_preset;
         try{ _dvWrite('dv_sett_psm', s.portfolio_preset); }catch(e){}
       }
-      if(!_t.portfolio_rebalance && typeof s.portfolio_rebalance === 'string' && s.portfolio_rebalance){
+      // F1.14.3 — same enum-guard for portfolio_rebalance.
+      if(!_t.portfolio_rebalance && typeof s.portfolio_rebalance === 'string' && s.portfolio_rebalance
+          && ['monthly','quarterly','yearly'].indexOf(s.portfolio_rebalance) >= 0){
         _settReb = s.portfolio_rebalance;
         try{ _dvWrite('dv_sett_reb', s.portfolio_rebalance); }catch(e){}
       }
