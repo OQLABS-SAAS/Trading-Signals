@@ -144,6 +144,38 @@ No further soft spots.
 
 ---
 
+## Second follow-up (F1.14.1 — math correctness fixes)
+
+After yet another "are you sure", surfaced two real bugs in the original F1.14:
+
+**Bug 1: Index positions silently distorted displayed actuals.**
+`typeMap` mapped `index → indices`, but no `Indices` row exists in default `_settAlloc`. Index positions were added to `totalNotional` (the denominator) but never displayed, so every other class's actual % was understated proportional to the user's index exposure.
+
+**Bug 2: Cash row always showed `0%` actual.**
+Positions data has no concept of cash holdings. The Cash bucket has no asset_type that maps to it. The row would always render `target X% / actual 0% / under by X%` — misleading because the user can never act on this.
+
+**Fix shipped (`7bab9ab` F1.14.1):**
+- Built `displayedBuckets` set from `_settAlloc` labels. Skip positions whose mapped bucket isn't displayed → don't add to `totalNotional`.
+- Built `trackableBuckets` set from `typeMap` values. Bucket rows whose label isn't in this set render as `target X% / — / tracking unavailable` instead of computed against an always-zero numerator.
+
+**Verification (live):**
+
+Test 1 — Cash row honest display:
+- Default Portfolio page renders Cash as `5% / — / tracking unavailable` (dim grey) instead of misleading `under by 5%` red.
+
+Test 2 — Index positions don't dilute math:
+- Before adding index: `Forex 96.4%, Stocks 3.6%`
+- POSTed `^GSPC × 50 @ $5800` ($290k notional, asset_type='index')
+- After adding index: `Forex 96.4%, Stocks 3.6%` — **identical**
+- Without the fix, Forex would have dropped to ~40% as the index inflated `totalNotional`. It didn't. Index correctly excluded.
+- Test position deleted, account clean.
+
+Visual screenshot confirms Cash row reads "tracking unavailable" in dim grey.
+
+No further soft spots after this round.
+
+---
+
 ## Commit log (this step)
 
 - `1991cde` F1.14: Portfolio settings persist + load + Target Allocation vs Actual panel + rebalance callout (+ touched tracking)
