@@ -4647,6 +4647,12 @@ function goDash(u){
         if(s.perf_target_annual  != null) _pgSliders.annual  = +s.perf_target_annual;
         try{ _dvWrite('dv_sett_pg', JSON.stringify(_pgSliders)); }catch(e){}
       }
+      // F1.13.2 — flag a successful load. _settSaveAll uses this to decide
+      // whether to include assets_enabled / risk_tolerance in its POST body.
+      // If this flag is false (network failure, 5xx, /api/settings unavailable)
+      // those two fields are EXCLUDED from saves so the backend isn't
+      // overwritten with stale in-memory defaults.
+      window._settLoadedFromBackend = true;
       if(typeof _applyAllCharts === 'function') _applyAllCharts();
     });
   }catch(e){}
@@ -5253,18 +5259,24 @@ function _settSaveAll(){
   // F1.4 = chart_theme (sourced from _activeChartTheme — the live UI selection).
   try{
     var pg = (typeof _pgSliders === 'object' && _pgSliders) ? _pgSliders : {};
+    var body = {
+      chart_theme: (typeof _activeChartTheme === 'string' ? _activeChartTheme : (_settChartTheme || 'constellation')),
+      // F1.13 — persist Performance targets so they follow the user across devices.
+      perf_target_winrate: (pg.winrate != null ? pg.winrate : 55),
+      perf_target_rr:      (pg.rr      != null ? pg.rr      : 2.0),
+      perf_target_trades:  (pg.trades  != null ? pg.trades  : 5),
+      perf_target_annual:  (pg.annual  != null ? pg.annual  : 20.0)
+    };
+    // F1.13.2 — only POST assets_enabled / risk_tolerance if F1.7 successfully
+    // loaded them from backend. If the load failed (network error, 5xx),
+    // omit these fields so the backend isn't overwritten with stale defaults.
+    if(window._settLoadedFromBackend === true){
+      body.assets_enabled = _settAssets || [];
+      body.risk_tolerance = _settRisk || 'aggressive';
+    }
     fetch('/api/settings', {method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        assets_enabled: _settAssets || [],
-        risk_tolerance: _settRisk || 'aggressive',
-        chart_theme: (typeof _activeChartTheme === 'string' ? _activeChartTheme : (_settChartTheme || 'constellation')),
-        // F1.13 — persist Performance targets so they follow the user across devices.
-        perf_target_winrate: (pg.winrate != null ? pg.winrate : 55),
-        perf_target_rr:      (pg.rr      != null ? pg.rr      : 2.0),
-        perf_target_trades:  (pg.trades  != null ? pg.trades  : 5),
-        perf_target_annual:  (pg.annual  != null ? pg.annual  : 20.0)
-      })
+      body: JSON.stringify(body)
     }).catch(function(){});
   }catch(e){}
 }
