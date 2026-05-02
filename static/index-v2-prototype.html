@@ -5194,12 +5194,14 @@ function _settSaveAll(){
   // Persist user settings to backend so they actually take effect (and survive
   // across browsers / logout). Each Settings sub-panel adds its keys here as
   // its wiring step lands. F1.2 = assets_enabled. F1.3 = risk_tolerance.
+  // F1.4 = chart_theme (sourced from _activeChartTheme — the live UI selection).
   try{
     fetch('/api/settings', {method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         assets_enabled: _settAssets || [],
-        risk_tolerance: _settRisk || 'aggressive'
+        risk_tolerance: _settRisk || 'aggressive',
+        chart_theme: (typeof _activeChartTheme === 'string' ? _activeChartTheme : (_settChartTheme || 'constellation'))
       })
     }).catch(function(){});
   }catch(e){}
@@ -8994,18 +8996,20 @@ function pfLoadPosChart(id,ticker,assetType,entry,dir){
     container.innerHTML='<div style="color:rgba(237,232,216,.4);font-size:11px;padding:20px;text-align:center">Chart library not loaded</div>';
     return;
   }
+  // F1.4 — Portfolio chart uses solid bg; theme drives bg/grid/candle colours.
+  const _pfTh = (typeof _getTheme === 'function' ? _getTheme() : null) || {bg:'#08090e', gridCol:'rgba(237,232,216,.05)', lineCol:'rgba(237,232,216,.65)', upCol:'#3dbe6c', dnCol:'#e05555'};
   const chart=LightweightCharts.createChart(container,{
     autoSize:true,
-    layout:{background:{type:'solid',color:'#08090e'},textColor:'rgba(237,232,216,.65)'},
-    grid:{vertLines:{color:'rgba(237,232,216,.05)'},horzLines:{color:'rgba(237,232,216,.05)'}},
-    rightPriceScale:{borderColor:'rgba(237,232,216,.1)'},
-    timeScale:{borderColor:'rgba(237,232,216,.1)',timeVisible:true,secondsVisible:false},
+    layout:{background:{type:'solid',color:_pfTh.bg},textColor:_pfTh.lineCol},
+    grid:{vertLines:{color:_pfTh.gridCol},horzLines:{color:_pfTh.gridCol}},
+    rightPriceScale:{borderColor:_pfTh.gridCol},
+    timeScale:{borderColor:_pfTh.gridCol,timeVisible:true,secondsVisible:false},
     crosshair:{mode:1},
   });
   const series=chart.addCandlestickSeries({
-    upColor:'#3dbe6c',downColor:'#e05555',
-    borderUpColor:'#3dbe6c',borderDownColor:'#e05555',
-    wickUpColor:'rgba(61,190,108,.7)',wickDownColor:'rgba(224,85,85,.7)',
+    upColor:_pfTh.upCol,downColor:_pfTh.dnCol,
+    borderUpColor:_pfTh.upCol,borderDownColor:_pfTh.dnCol,
+    wickUpColor:_pfTh.upCol,wickDownColor:_pfTh.dnCol,
   });
   const now=Math.floor(Date.now()/1000);
   const interval=3600;
@@ -10720,23 +10724,29 @@ function _initUndChart(sig){
   volInner.innerHTML = '';
   rsiInner.innerHTML = '';
 
+  // F1.4 — read user's saved Chart Visuals theme. Background stays transparent
+  // here (chart sits on the app's dark gradient); theme drives line/grid/candle
+  // colours. _getTheme() falls back to 'constellation' on any mismatch.
+  const _th = (typeof _getTheme === 'function' ? _getTheme() : null) || {gridCol:'rgba(237,232,216,.05)', lineCol:'rgba(200,210,220,.65)', upCol:'#5de8a0', dnCol:'#e8706e'};
+  const _borderCol = _th.gridCol; // borders track grid for visual consistency
+
   // Main price chart
   const chart = LightweightCharts.createChart(inner, {
     width: wrap.clientWidth || wrap.parentElement?.clientWidth || 800, height: 240,
-    layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:'rgba(200,210,220,.65)', fontFamily:'IBM Plex Mono' },
-    grid:{ vertLines:{color:'rgba(237,232,216,.05)'}, horzLines:{color:'rgba(237,232,216,.05)'} },
+    layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:_th.lineCol, fontFamily:'IBM Plex Mono' },
+    grid:{ vertLines:{color:_th.gridCol}, horzLines:{color:_th.gridCol} },
     crosshair:{ mode:1 },
-    rightPriceScale:{ borderColor:'rgba(237,232,216,.1)' },
-    timeScale:{ borderColor:'rgba(237,232,216,.1)', timeVisible:true, secondsVisible:false },
+    rightPriceScale:{ borderColor:_borderCol },
+    timeScale:{ borderColor:_borderCol, timeVisible:true, secondsVisible:false },
     handleScroll:{ mouseWheel:true }, handleScale:{ mouseWheel:true },
   });
 
   // Volume chart (no time axis)
   const volChart = LightweightCharts.createChart(volInner, {
     width: wrap.clientWidth || wrap.parentElement?.clientWidth || 800, height: 60,
-    layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:'rgba(200,210,220,.4)', fontFamily:'IBM Plex Mono' },
-    grid:{ vertLines:{color:'rgba(237,232,216,.05)'}, horzLines:{color:'rgba(237,232,216,.05)'} },
-    rightPriceScale:{ borderColor:'rgba(237,232,216,.1)', visible:false },
+    layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:_th.lineCol, fontFamily:'IBM Plex Mono' },
+    grid:{ vertLines:{color:_th.gridCol}, horzLines:{color:_th.gridCol} },
+    rightPriceScale:{ borderColor:_borderCol, visible:false },
     timeScale:{ visible:false },
     handleScroll:{ mouseWheel:false }, handleScale:{ mouseWheel:false },
     crosshair:{ mode:0 },
@@ -10745,18 +10755,18 @@ function _initUndChart(sig){
   // RSI chart (no time axis)
   const rsiChart = LightweightCharts.createChart(rsiInner, {
     width: wrap.clientWidth || wrap.parentElement?.clientWidth || 800, height: 80,
-    layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:'rgba(200,210,220,.4)', fontFamily:'IBM Plex Mono' },
-    grid:{ vertLines:{color:'rgba(237,232,216,.05)'}, horzLines:{color:'rgba(237,232,216,.05)'} },
-    rightPriceScale:{ borderColor:'rgba(237,232,216,.1)' },
+    layout:{ background:{type:'solid',color:'rgba(4,5,8,0)'}, textColor:_th.lineCol, fontFamily:'IBM Plex Mono' },
+    grid:{ vertLines:{color:_th.gridCol}, horzLines:{color:_th.gridCol} },
+    rightPriceScale:{ borderColor:_borderCol },
     timeScale:{ visible:false },
     handleScroll:{ mouseWheel:false }, handleScale:{ mouseWheel:false },
     crosshair:{ mode:0 },
   });
 
   const cs = chart.addCandlestickSeries({
-    upColor:'#5de8a0', downColor:'#e8706e',
-    borderUpColor:'#5de8a0', borderDownColor:'#e8706e',
-    wickUpColor:'rgba(93,232,160,.6)', wickDownColor:'rgba(232,112,110,.6)',
+    upColor:_th.upCol, downColor:_th.dnCol,
+    borderUpColor:_th.upCol, borderDownColor:_th.dnCol,
+    wickUpColor:_th.upCol, wickDownColor:_th.dnCol,
   });
 
   const volSeries = volChart.addHistogramSeries({
