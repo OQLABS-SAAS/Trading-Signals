@@ -4707,7 +4707,13 @@ function goDash(u){
         _settReb = s.portfolio_rebalance;
         try{ _dvWrite('dv_sett_reb', s.portfolio_rebalance); }catch(e){}
       }
-      if(!_t.portfolio_benchmark && typeof s.portfolio_benchmark === 'string' && s.portfolio_benchmark){
+      // F1.14.5 — portfolio_benchmark is free-form (any ticker), so unlike the
+      // enum-bound fields we can't whitelist values. Defense-in-depth: accept
+      // only ticker-shaped strings (alphanumerics + . / ^ = -, length 1-16).
+      // Rejects HTML/script payloads if backend ever returns one, since
+      // showPortfolio's panel header concatenates this into innerHTML.
+      if(!_t.portfolio_benchmark && typeof s.portfolio_benchmark === 'string' && s.portfolio_benchmark
+          && /^[A-Za-z0-9./^=-]{1,16}$/.test(s.portfolio_benchmark)){
         _settBench = s.portfolio_benchmark;
         try{ _dvWrite('dv_sett_bench', s.portfolio_benchmark); }catch(e){}
       }
@@ -9280,7 +9286,7 @@ async function showPortfolio(){
       return '<div class="pf-card" id="pfTargetAllocCard" style="margin-bottom:18px;padding:14px 16px;">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
           '<div><span style="font-size:13px;color:rgba(237,232,216,.85);font-weight:500;">Target Allocation vs Actual</span>' +
-          '<div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:2px;">Preset: '+(_settPsm||'balanced')+' · Rebalance '+(_settReb||'quarterly')+' · Benchmark '+(String(_settBench||'spy').toUpperCase())+'</div></div>' +
+          '<div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:2px;">Preset: '+(_settPsm||'balanced')+' · Rebalance '+(_settReb||'quarterly')+' · Benchmark '+(String(_settBench||'spy').toUpperCase().replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]}))+'</div></div>' +
           (totalNotional === 0 ? '<span style="font-size:11px;color:rgba(237,232,216,.4);">No open positions</span>' : '') +
         '</div>' +
         callout +
