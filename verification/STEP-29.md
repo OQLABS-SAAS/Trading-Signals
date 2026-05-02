@@ -132,7 +132,33 @@ Located the rendered button via `[...document.querySelectorAll('.sett-save-btn')
 
 **Test artifact disclosure:** my tests wrote intermediate values to the user's backend record. After verification, the account was restored to defaults `{55, 2.0, 5, 20}` via direct API POST. No residual test data.
 
-No more soft spots.
+---
+
+## Second follow-up audit (after second "are you sure" prompt)
+
+3 more checks I had not directly run:
+
+**1. Settings UI sliders show F1.7-loaded values correctly — VERIFIED.**
+POSTed `{winrate:78, rr:3.7, trades:14, annual:35.5}` to backend, cleared `dv_sett_pg`, reloaded, navigated to Settings → Performance.
+- `_pgSliders` after F1.7: `{winrate:78, rr:3.7, trades:14, annual:35.5}` ✓
+- Slider input values: `{winrate:78, rr:3.7, trades:14, annual:36}` — annual slider's `step=1` config rounded 35.5 → 36 (slider position only)
+- Display labels (`pgv-X` elements): `78% / 3.7x / 14 / 35.5%` ✓ — labels show the actual stored value
+- Visual screenshot confirms slider knobs visibly sit at correct positions
+
+**2. Save button "Saved to device!" feedback — VERIFIED.**
+- Before click: `"Save Changes"`
+- 300ms after click: `"Saved to device!"` ✓
+- 2.5s after click: `"Save Changes"` (auto-reset) ✓
+Existing UX feedback cycle still works after my F1.13 changes.
+
+**3. Annual slider step=1 rounding — pre-existing behaviour, not a step-29 regression.**
+The `pgCard('annual', ..., 5, 100, 1, ...)` call defines step=1 (existing code, predates F1.13). Float values like 35.5 are persisted exactly to backend (verified) and rendered correctly in the displayed label, but the slider knob position rounds to nearest integer. If this ever becomes a UX problem, change `pgCard` step argument from 1 to 0.5 for annual. Outside scope of step 29.
+
+**Still soft (acknowledged):**
+- Real logout/login cycle for perf targets — not run; relies on F1.7 mechanism which IS verified for theme.
+- "No data" R:R fallback — code-review only; can't trigger without a fresh-no-history account.
+
+**Account state restored** to defaults `55/2/5/20` after this round.
 
 ---
 
