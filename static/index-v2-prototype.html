@@ -4655,11 +4655,18 @@ function goDash(u){
       // F1.14 — load Portfolio settings. portfolio_alloc translates from
       // backend object {crypto:30,...} into frontend array [{label,pct},...]
       // by matching against the existing labels in _settAlloc, preserving order.
+      // F1.14.2 — validate each value is a finite number in [0,100] before
+      // assigning. Without this, malformed backend values (string, NaN,
+      // negative, >100) propagate into _settAlloc and render as "NaN%" or
+      // distort the math.
       if(!_t.portfolio_alloc && s.portfolio_alloc && typeof s.portfolio_alloc === 'object' && Array.isArray(_settAlloc)){
         var changed = false;
         _settAlloc.forEach(function(a){
           var k = String(a.label||'').toLowerCase();
-          if(s.portfolio_alloc[k] != null){ a.pct = +s.portfolio_alloc[k]; changed = true; }
+          if(s.portfolio_alloc[k] != null){
+            var v = +s.portfolio_alloc[k];
+            if(isFinite(v) && v >= 0 && v <= 100){ a.pct = v; changed = true; }
+          }
         });
         if(changed){ try{ _dvWrite('dv_sett_alloc', JSON.stringify(_settAlloc)); }catch(e){} }
       }
