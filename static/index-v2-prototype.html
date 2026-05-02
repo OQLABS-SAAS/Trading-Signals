@@ -5260,14 +5260,13 @@ function _settSaveAll(){
   // F1.13.3 — if F1.7 didn't successfully load from backend, the in-memory
   // values may be hard-coded defaults that DON'T match the user's actual
   // saved settings. POSTing them would silently overwrite the backend with
-  // wrong values (chart_theme defaulting to 'constellation' when user had
-  // 'obsidian' saved, perf targets defaulting to 55/2/5/20 when user had
-  // higher targets, etc.). Suppress the backend save entirely in this case
-  // and tell the user. localStorage write above already preserved their
-  // local input — they can refresh and try again once F1.7 succeeds.
+  // wrong values. Suppress the backend save entirely; localStorage write
+  // above already preserved the user's local input.
+  // F1.13.4 — return false so the Save button can show "Sync failed" instead
+  // of the misleading "Saved to device!" label.
   if(window._settLoadedFromBackend !== true){
     try{ if(typeof _showToast === 'function') _showToast('Settings not synced — refresh and try again'); }catch(e){}
-    return;
+    return false;
   }
   try{
     var pg = (typeof _pgSliders === 'object' && _pgSliders) ? _pgSliders : {};
@@ -5284,6 +5283,20 @@ function _settSaveAll(){
       })
     }).catch(function(){});
   }catch(e){}
+  return true;
+}
+
+// F1.13.4 — Save button click handler. Picks label + icon based on whether
+// _settSaveAll actually POSTed to backend. Replaces the inline onclick that
+// always declared "Saved to device!" regardless of suppression.
+function _saveBtnHandler(btn, label){
+  if(!btn) return;
+  var ok = _settSaveAll();
+  var iconCheck = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+  var iconX     = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+  var iconSave  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
+  btn.innerHTML = ok ? (iconCheck + ' Saved to device!') : (iconX + ' Sync failed — refresh');
+  setTimeout(function(){ btn.innerHTML = iconSave + ' ' + label; }, 2000);
 }
 
 function _spConnections(){
@@ -5866,7 +5879,7 @@ function _showToast(msg){
   t._hide = setTimeout(()=>t.classList.remove('show'), 2200);
 }
 
-function _saveBtn(label){return `<div class="sett-save-row"><button class="sett-save-btn" onclick="_settSaveAll();var b=this;b.innerHTML='<svg width=\\'14\\' height=\\'14\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'2.5\\'><polyline points=\\'20 6 9 17 4 12\\'/></svg> Saved to device!';setTimeout(()=>b.innerHTML='<svg width=\\'14\\' height=\\'14\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'2\\'><path d=\\'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z\\'/><polyline points=\\'17 21 17 13 7 13 7 21\\'/><polyline points=\\'7 3 7 8 15 8\\'/></svg> ${label}',2000)">
+function _saveBtn(label){return `<div class="sett-save-row"><button class="sett-save-btn" onclick="_saveBtnHandler(this, '${label}')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         ${label}
       </button></div>`;}
