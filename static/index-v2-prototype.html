@@ -5683,7 +5683,11 @@ function _renderIndPreview(scheme){
 
 function setChartTheme(id){
   _activeChartTheme = id;
+  // F1.8 — keep _settChartTheme + its legacy localStorage key in sync so the
+  // two-variable inconsistency cannot drift apart on save / reload paths.
+  if(typeof _settChartTheme !== 'undefined') _settChartTheme = id;
   localStorage.setItem('dvChartTheme', id);
+  try{ if(typeof _dvWrite === 'function') _dvWrite('dv_sett_theme', id); }catch(e){}
   document.querySelectorAll('.cv-theme-card').forEach(c=>c.classList.remove('sel'));
   document.querySelectorAll('.cv-sel-dot').forEach(d=>d.classList.remove('on'));
   const sel = document.querySelector(`.cv-theme-card[onclick*="'${id}'"]`);
@@ -5693,6 +5697,15 @@ function setChartTheme(id){
   // Re-render all visible charts with new theme
   requestAnimationFrame(_applyAllCharts);
   _showToast('Chart theme: ' + (th?.name||id));
+  // F1.8 — auto-persist to backend so theme follows the user across devices
+  // without requiring them to find the Save button. Backend's POST handler
+  // accepts partial bodies, so chart_theme alone is fine.
+  try{
+    fetch('/api/settings', {method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({chart_theme: id})
+    }).catch(function(){});
+  }catch(e){}
 }
 
 function setChartType(id){
