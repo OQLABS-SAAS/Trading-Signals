@@ -5257,26 +5257,31 @@ function _settSaveAll(){
   // across browsers / logout). Each Settings sub-panel adds its keys here as
   // its wiring step lands. F1.2 = assets_enabled. F1.3 = risk_tolerance.
   // F1.4 = chart_theme (sourced from _activeChartTheme — the live UI selection).
+  // F1.13.3 — if F1.7 didn't successfully load from backend, the in-memory
+  // values may be hard-coded defaults that DON'T match the user's actual
+  // saved settings. POSTing them would silently overwrite the backend with
+  // wrong values (chart_theme defaulting to 'constellation' when user had
+  // 'obsidian' saved, perf targets defaulting to 55/2/5/20 when user had
+  // higher targets, etc.). Suppress the backend save entirely in this case
+  // and tell the user. localStorage write above already preserved their
+  // local input — they can refresh and try again once F1.7 succeeds.
+  if(window._settLoadedFromBackend !== true){
+    try{ if(typeof _showToast === 'function') _showToast('Settings not synced — refresh and try again'); }catch(e){}
+    return;
+  }
   try{
     var pg = (typeof _pgSliders === 'object' && _pgSliders) ? _pgSliders : {};
-    var body = {
-      chart_theme: (typeof _activeChartTheme === 'string' ? _activeChartTheme : (_settChartTheme || 'constellation')),
-      // F1.13 — persist Performance targets so they follow the user across devices.
-      perf_target_winrate: (pg.winrate != null ? pg.winrate : 55),
-      perf_target_rr:      (pg.rr      != null ? pg.rr      : 2.0),
-      perf_target_trades:  (pg.trades  != null ? pg.trades  : 5),
-      perf_target_annual:  (pg.annual  != null ? pg.annual  : 20.0)
-    };
-    // F1.13.2 — only POST assets_enabled / risk_tolerance if F1.7 successfully
-    // loaded them from backend. If the load failed (network error, 5xx),
-    // omit these fields so the backend isn't overwritten with stale defaults.
-    if(window._settLoadedFromBackend === true){
-      body.assets_enabled = _settAssets || [];
-      body.risk_tolerance = _settRisk || 'aggressive';
-    }
     fetch('/api/settings', {method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(body)
+      body: JSON.stringify({
+        assets_enabled: _settAssets || [],
+        risk_tolerance: _settRisk || 'aggressive',
+        chart_theme: (typeof _activeChartTheme === 'string' ? _activeChartTheme : (_settChartTheme || 'constellation')),
+        perf_target_winrate: (pg.winrate != null ? pg.winrate : 55),
+        perf_target_rr:      (pg.rr      != null ? pg.rr      : 2.0),
+        perf_target_trades:  (pg.trades  != null ? pg.trades  : 5),
+        perf_target_annual:  (pg.annual  != null ? pg.annual  : 20.0)
+      })
     }).catch(function(){});
   }catch(e){}
 }
