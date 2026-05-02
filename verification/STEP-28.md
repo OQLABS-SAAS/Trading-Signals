@@ -78,26 +78,37 @@ Adding EMA / MACD / BB lines to the chart is a feature, not wiring — explicitl
 
 ---
 
-## Results — to be filled
+## Results — verified live 2026-05-02 on dot-verse.up.railway.app
 
-| # | Criterion | Method ran | Raw evidence | PASS/FAIL | Confidence |
-|---|---|---|---|---|---|
-| 1a | crystal | | | | |
-| 1b | mono | | | | |
-| 1c | vivid | | | | |
-| 1d | signal | | | | |
-| 2 | live re-render | | | | |
-| 3 | backend persist | | | | |
-| 4 | login load | | | | |
-| 5 | var sync | | | | |
-| 6 | sel highlight | | | | |
-| 7 | toast | | | | |
-| 8 | independence | | | | |
-| 9 | settings preview | | | | |
-| 10 | regression | | | | |
+| # | Criterion | Raw evidence | PASS/FAIL |
+|---|---|---|---|
+| 1a | crystal RSI line | `168,139,250 @ 5333` + `167,139,250 @ 2749` (rgba(167,139,250,.8) blends) — purple matches spec | PASS |
+| 1b | mono RSI line | `255,255,255 @ 11514` — pure white, mono spec | PASS |
+| 1c | vivid RSI line | `167,139,250 @ 8324` — solid #a78bfa | PASS |
+| 1d | signal RSI line | `236,232,217 @ 5331` + `237,232,216 @ 2822` — cream rgba(237,232,216,.7) | PASS |
+| 2 | live re-render | Canvas count stable at 7 across all 4 schemes; `92,232,160 @ 2254` (RSI 30 line) + `232,112,110 @ 2243` (RSI 70 line) constant — proves only RSI line colour changed, level lines stayed theme-anchored | PASS |
+| 3 | backend persist | After `setIndScheme('vivid')`: backend `indicator_scheme=vivid`, `_active=vivid`, lsInd=vivid, lsSettInd=vivid | PASS |
+| 4 | login load | POST scheme=mono+theme=constellation+type=candle+grid=subtle, clear 8 localStorage keys, reload → all 4 loaded from backend: `{scheme:mono, theme:constellation, type:candle, grid:subtle}` | PASS |
+| 5 | var sync | `_activeIndicatorScheme=vivid / lsInd=vivid / lsSettInd=vivid` after `setIndScheme('vivid')` | PASS |
+| 6 | sel highlight | After `setIndScheme('signal')`: `cards=4, selCount=1, which=signal` | PASS |
+| 7 | toast | All 4 schemes fire correct text: `"Indicator scheme: Crystal" / "Mono" / "Vivid" / "Signal"` | PASS |
+| 8 | independence | Set obsidian/line/dotted/mono → all 4 stick. Switch scheme=vivid → theme/type/grid unchanged. | PASS |
+| 9 | settings preview | After clicking each scheme card, `cvIndPreview.innerHTML` contains scheme-specific colour: crystal `167,139,250`, mono `rgba(255,255,255`, vivid `#fb923c` (BB col), signal `#e8706e` (MACD col) | PASS |
+| 10 | regression | Cascade: start(mono+constellation) → theme=obsidian → type=line → grid=dotted → scheme=vivid. Each step's pixel signature matched expectation. RSI pane after vivid: scheme purple `167,139,250 @ 4157` + theme obsidian `0,255,135 / 255,67,67` (70/30 lines). Theme/type/grid/scheme all coexist. | PASS |
+
+**Four-check default applied this verification round:**
+1. Sampled multiple surfaces — RSI pane (primary) + price pane (regression) + Settings preview HTML.
+2. Directly measured — pixel hits, canvas counts, toast textContent, var values. No inference.
+3. Cross-checked siblings — toast text matches setChartTheme/setChartType/setGridStyle pattern.
+4. Sparse + dense sampling — used `j+=4` and `j+=16` across different runs.
+
+**All 10 criteria PASSED at runtime in the live browser.** Step 28 closed.
 
 ---
 
 ## Commit log (this step)
 
-(To be appended)
+- `956778b` F1.12: indicator_scheme wires to RSI line colour (+ auto-persist + login load + toast + ledger)
+  - `_initUndChart` reads `_activeIndicatorScheme` and selects rsiCol from inline 4-branch (mono/vivid/signal/crystal-default)
+  - `setIndScheme` syncs `dv_sett_ind` legacy localStorage key, calls `_applyAllCharts`, fires toast, POSTs `indicator_scheme` to `/api/settings`
+  - `goDash` F1.7 block also loads `indicator_scheme` from backend on login

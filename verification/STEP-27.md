@@ -113,8 +113,18 @@ When asked "how sure are you," I re-ran with three changes: sample every pixel (
 - Canvas-count stability now CONFIRMED directly.
 - Price-pane individual pixel evidence is weaker than originally reported but consistent with same code path as vol/rsi.
 
-**One UX inconsistency surfaced and not fixed:**
-`setGridStyle` does not call `_showToast`, while `setChartTheme` and `setChartType` do. The original `setGridStyle` also lacked a toast — pre-existing inconsistency, outside the success criteria. Flagged here, not fixed in this step.
+**Toast inconsistency — FIXED in F1.11.1.**
+
+After the user pushed back ("how sure are you"), the missing toast was added. Verified live:
+
+- 4 successive `setGridStyle()` calls each followed by reading `dvToast.textContent`:
+  - `setGridStyle('full')` → toast text = `"Grid style: Full"`
+  - `setGridStyle('dotted')` → `"Grid style: Dotted"`
+  - `setGridStyle('none')` → `"Grid style: None"`
+  - `setGridStyle('subtle')` → `"Grid style: Subtle"`
+- Screenshot of the live deployed app shows the toast rendered at the bottom of the viewport: "Grid style: Dotted" visible after `setGridStyle('dotted')` fired.
+
+Now matches the `setChartTheme` / `setChartType` pattern. UX consistency closed.
 
 ---
 
