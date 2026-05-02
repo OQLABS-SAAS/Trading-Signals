@@ -10737,6 +10737,17 @@ function _initUndChart(sig){
   // colours. _getTheme() falls back to 'constellation' on any mismatch.
   const _th = (typeof _getTheme === 'function' ? _getTheme() : null) || {gridCol:'rgba(237,232,216,.05)', lineCol:'rgba(200,210,220,.65)', upCol:'#5de8a0', dnCol:'#e8706e'};
   const _borderCol = _th.gridCol; // borders track grid for visual consistency
+  // F1.6 — convert theme hex colours to rgba so volume bars / RSI levels /
+  // entry-SL-TP price lines can use the active theme with custom alpha.
+  // Pass-through if the input is already rgba/rgb/named — keeps it safe.
+  function _hex2rgba(c, a){
+    if(!c) return 'rgba(237,232,216,'+a+')';
+    if(typeof c !== 'string' || c[0] !== '#') return c;
+    var h = c.replace('#','');
+    if(h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    var r = parseInt(h.substr(0,2),16), g = parseInt(h.substr(2,2),16), b = parseInt(h.substr(4,2),16);
+    return 'rgba('+r+','+g+','+b+','+a+')';
+  }
 
   // Main price chart
   const chart = LightweightCharts.createChart(inner, {
@@ -10791,14 +10802,14 @@ function _initUndChart(sig){
 
   rsiLine.createPriceLine({
     price: 70,
-    color: 'rgba(232,112,110,.4)',
+    color: _hex2rgba(_th.dnCol, .4),
     lineWidth: 1,
     lineStyle: LightweightCharts.LineStyle.Dashed,
     axisLabelVisible: false,
   });
   rsiLine.createPriceLine({
     price: 30,
-    color: 'rgba(93,232,160,.4)',
+    color: _hex2rgba(_th.upCol, .4),
     lineWidth: 1,
     lineStyle: LightweightCharts.LineStyle.Dashed,
     axisLabelVisible: false,
@@ -10861,12 +10872,12 @@ function _initUndChart(sig){
     }
     volSeries.setData(bars.map(b=>({
       time:b.time, value:b.volume||0,
-      color: b.close>=b.open ? 'rgba(93,232,160,.4)' : 'rgba(232,112,110,.4)'
+      color: b.close>=b.open ? _hex2rgba(_th.upCol, .4) : _hex2rgba(_th.dnCol, .4)
     })));
     const closes = bars.map(b=>b.close);
     const rsiValues = calcRSI(closes, 14);
     if(rsiValues.length) rsiLine.setData(rsiValues.map((v,i)=>({time:bars[i+14]?bars[i+14].time:bars[bars.length-1].time, value:v})));
-    if(sig){ addLine(sig.entry,'rgba(237,232,216,.7)','Entry'); addLine(sig.sl,'rgba(232,112,110,.7)','SL'); addLine(sig.tp,'rgba(93,232,160,.7)','TP1'); }
+    if(sig){ addLine(sig.entry, _th.lineCol,'Entry'); addLine(sig.sl, _hex2rgba(_th.dnCol, .7),'SL'); addLine(sig.tp, _hex2rgba(_th.upCol, .7),'TP1'); }
     chart.timeScale().fitContent();
     // Draw RSI divergence trendlines after chart renders
     requestAnimationFrame(()=>{ setTimeout(_undDrawDiv, 100); });
