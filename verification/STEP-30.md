@@ -85,23 +85,37 @@ Out of scope: benchmark equity-curve line; cadence (`_settCad`) which has no bac
 
 ---
 
-## Results — to be filled
+## Results — verified live 2026-05-02 on dot-verse.up.railway.app
 
-| # | Criterion | Method ran | Raw evidence | PASS/FAIL |
-|---|---|---|---|---|
-| 1 | persist | | | |
-| 2 | login load | | | |
-| 3 | touched tracking | | | |
-| 4 | panel renders | | | |
-| 5 | actual % populated | | | |
-| 6 | drift indicator | | | |
-| 7 | rebalance callout | | | |
-| 8 | independence | | | |
-| 9 | no regression | | | |
-| 10 | F1.13.3 holds | | | |
+| # | Criterion | Raw evidence | PASS/FAIL |
+|---|---|---|---|
+| 1 | persist | Set `_settAlloc=[Crypto:50,Stocks:25,Forex:10,Commodities:10,Cash:5]`, `_settPsm='aggressive'`, `_settReb='monthly'`, `_settBench='qqq'`. Called `_settSaveAll()`. Backend GET returned `{cash:5,commodities:10,crypto:50,forex:10,stocks:25}` with psm=aggressive, reb=monthly, bench=qqq. Array→object translation correct. | PASS |
+| 2 | login load | Cleared 4 portfolio localStorage keys + reloaded. After F1.7: `_settAlloc=[Crypto:50,Stocks:25,Forex:10,Commodities:10,Cash:5]` (object→array translation correct, order preserved), `_settPsm=aggressive, _settReb=monthly, _settBench=qqq` | PASS |
+| 3 | touched tracking | `adjAlloc(0,5)` → `_settTouched.portfolio_alloc=true`. Set `_settPsm='conservative'` (via simulated card click) → flag set. Mirrors F1.13.5 pattern. | PASS |
+| 4 | panel renders | `document.getElementById('pfTargetAllocCard')` exists. Visual screenshot confirms card rendered between pf-summary and positions table. | PASS |
+| 5 | actual % populated | 5 rows rendered: Crypto target 55% / actual 0.0%; Stocks 25% / 3.6%; Forex 10% / 96.4%; Commodities 10% / 0.0%; Cash 5% / 0.0%. Actuals computed from `/api/positions` notional values ÷ total. | PASS |
+| 6 | drift indicator | Each row's status colour-coded: `under by 55.0%` (red — Crypto), `under by 21.4%` (red — Stocks), `over by 86.4%` (red — Forex), `under by 10.0%` (red — Commodities), `within 5.0%` (amber — Cash, drift 2-5%). | PASS |
+| 7 | rebalance callout | `#pfRebalanceCallout` element rendered with text "Rebalance recommended — at least one asset class drifted >5% from target." Visible in screenshot. | PASS |
+| 8 | independence | Set `_settPsm='conservative'` + saved. `_pgSliders` unchanged (`pgUnchanged=true`). `_activeChartTheme` unchanged (`themeUnchanged=true`). | PASS |
+| 9 | no regression | `.pf-pos-table` still renders, `#pfHealthBanner` still renders. Existing portfolio elements intact. | PASS |
+| 10 | F1.13.3 holds | Backend POSTed to known values. Set `_settLoadedFromBackend=false`, corrupted in-memory to `_settAlloc=[Crypto:99,...], _settPsm='balanced', _settReb='quarterly', _settBench='spy'`, called `_settSaveAll`. Backend AFTER suppressed save: `alloc/psm/reb/bench` all unchanged from pre-test state. | PASS |
+
+**Four-check default applied:**
+1. Multiple surfaces — DOM (5+ elements), API (`/api/settings` GET round-trip), localStorage (4 keys), JS vars (`_settAlloc/_settPsm/_settReb/_settBench/_settTouched`), visual screenshot
+2. Direct measure — read element textContent verbatim, no inference
+3. Cross-check siblings — F1.14 follows F1.7+F1.10b+F1.11+F1.12+F1.13 patterns of POST-on-save and load-on-goDash, plus F1.13.5 touched-tracking, plus F1.13.3 suppression
+4. Sparse + dense — tested with two distinct value sets and two persistence cycles
+
+**All 10 criteria PASSED.** Step 30 closed.
+
+**Account state restored** to defaults `alloc={crypto:30,stocks:30,forex:20,commodities:15,cash:5}, psm=balanced, reb=quarterly, bench=spy` plus all other settings reset.
 
 ---
 
 ## Commit log (this step)
 
-(To be appended)
+- `1991cde` F1.14: Portfolio settings persist + load + Target Allocation vs Actual panel + rebalance callout (+ touched tracking)
+  - `_settSaveAll` POSTs `portfolio_alloc / portfolio_preset / portfolio_rebalance / portfolio_benchmark`, with array → object translation for alloc
+  - `goDash` F1.7 block loads all 4 portfolio fields from backend on login, with object → array translation preserving frontend order; respects per-field `_settTouched` flags from F1.13.5
+  - `adjAlloc`, alloc-card onclick, preset-card onclick, rebalance-card onclick, benchmark-card onclick — each marks its corresponding `_settTouched.portfolio_*` key
+  - `showPortfolio` adds Target Allocation vs Actual panel between pf-summary and positions table: 4-column row layout (Class / Target / Actual / Status), drift colour-coded, rebalance callout when any class >5% drift
