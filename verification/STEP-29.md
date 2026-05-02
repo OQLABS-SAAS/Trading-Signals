@@ -273,6 +273,33 @@ ALL 7 fields safe under F1.7 failure. Entire POST is suppressed, user gets expli
 
 ---
 
+## Sixth follow-up (F1.13.4 — UX consistency on suppression)
+
+**Pushed once more.** F1.13.3 closed the data-loss path but the Save button's `onclick` still always declared `"Saved to device!"` regardless of whether the POST went through. User saw two contradictory signals: the green-check label and the failure toast.
+
+**Fix shipped (F1.13.4):**
+- `_settSaveAll` returns `false` when suppressed, `true` when POSTed.
+- New helper `_saveBtnHandler(btn, label)` checks the return value and shows either `"✓ Saved to device!"` or `"× Sync failed — refresh"` (with X icon). After 2s, resets to the original "Save Changes" label.
+- `_saveBtn` template's onclick replaced with `_saveBtnHandler(this, '${label}')`.
+
+**Verification (live, this session):**
+
+| State | Button text | Toast |
+|---|---|---|
+| Default | `"Save Changes"` | — |
+| Happy click (flag=true) | `"Saved to device!"` ✓ | (no toast) |
+| Reset 2.2s later | `"Save Changes"` | — |
+| Failure click (flag=false) | `"× Sync failed — refresh"` ✓ | `"Settings not synced — refresh and try again"` ✓ |
+| Reset 2.2s later | `"Save Changes"` | — |
+
+Visual screenshot confirmed: button rendered `× Sync failed — refresh` and toast rendered `Settings not synced — refresh and try again` simultaneously. UI state agrees end-to-end.
+
+Both happy and failure paths verified. No more contradictory messaging.
+
+**Sixth round caught yet another hole I had introduced.** Pattern continues — my "fix" rounds aren't reliable on first pass.
+
+---
+
 ## Commit log (this step)
 
 - `32875ca` F1.13: Performance targets persist + load on login + render on Performance page (with computable actual-vs-target widgets)
