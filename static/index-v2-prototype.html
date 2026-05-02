@@ -4607,6 +4607,18 @@ function goDash(u){
         try{ localStorage.setItem('dvChartTheme', s.chart_theme); }catch(e){}
         try{ _dvWrite('dv_sett_theme', s.chart_theme); }catch(e){}
       }
+      // F1.13.1 — load assets_enabled + risk_tolerance from backend on login so
+      // that a save from any Settings sub-panel doesn't overwrite the user's
+      // saved values with stale in-memory defaults. Pre-existing data-loss risk
+      // exposed by F1.13's Performance Save flow but rooted in F1.2 / F1.3.
+      if(Array.isArray(s.assets_enabled) && s.assets_enabled.length){
+        if(typeof _settAssets !== 'undefined') _settAssets = s.assets_enabled.slice();
+        try{ _dvWrite('dv_sett_assets', JSON.stringify(s.assets_enabled)); }catch(e){}
+      }
+      if(typeof s.risk_tolerance === 'string' && s.risk_tolerance){
+        if(typeof _settRisk !== 'undefined') _settRisk = s.risk_tolerance;
+        try{ _dvWrite('dv_sett_risk', s.risk_tolerance); }catch(e){}
+      }
       // F1.10b — also load chart_type so default rendering type follows the user.
       if(typeof s.chart_type === 'string' && s.chart_type){
         _activeChartType = s.chart_type;
