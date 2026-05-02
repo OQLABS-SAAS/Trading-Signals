@@ -4717,6 +4717,30 @@ function goDash(u){
         _settBench = s.portfolio_benchmark;
         try{ _dvWrite('dv_sett_bench', s.portfolio_benchmark); }catch(e){}
       }
+      // F1.15 — load Alert thresholds. Backend field names map to frontend keys:
+      //   alert_confidence    → _settSliders.confidence (int, sane range 0-100)
+      //   alert_price_pct     → _settSliders.price      (float, sane range 0-100)
+      //   alert_drawdown_pct  → _settSliders.drawdown   (float, sane range 0-100)
+      //   alert_loss_pct      → _settSliders.loss       (float, sane range 0-100)
+      // Each value: NaN/non-finite/out-of-range silently rejected to prevent
+      // garbage propagating from a tampered DB or future backend regression.
+      // Touched-tracking respected per F1.13.5.
+      if(typeof _settSliders === 'object' && _settSliders){
+        var _slChanged = false;
+        function _loadSl(touchedKey, slKey, beVal){
+          if(_t[touchedKey]) return;
+          if(beVal == null) return;
+          var v = +beVal;
+          if(!isFinite(v) || v < 0 || v > 100) return;
+          _settSliders[slKey] = v;
+          _slChanged = true;
+        }
+        _loadSl('alert_confidence',   'confidence', s.alert_confidence);
+        _loadSl('alert_price_pct',    'price',      s.alert_price_pct);
+        _loadSl('alert_drawdown_pct', 'drawdown',   s.alert_drawdown_pct);
+        _loadSl('alert_loss_pct',     'loss',       s.alert_loss_pct);
+        if(_slChanged){ try{ _dvWrite('dv_sett_sliders', JSON.stringify(_settSliders)); }catch(e){} }
+      }
       // F1.13.2 — flag a successful load. _settSaveAll uses this to decide
       // whether to include assets_enabled / risk_tolerance in its POST body.
       // If this flag is false (network failure, 5xx, /api/settings unavailable)
@@ -5345,6 +5369,7 @@ function _settSaveAll(){
   }
   try{
     var pg = (typeof _pgSliders === 'object' && _pgSliders) ? _pgSliders : {};
+    var sl = (typeof _settSliders === 'object' && _settSliders) ? _settSliders : {};
     // F1.14 — translate frontend alloc array [{label,pct}] → backend object {key:pct}
     var allocObj = {};
     if(Array.isArray(_settAlloc)){
@@ -5364,7 +5389,13 @@ function _settSaveAll(){
         portfolio_alloc:      allocObj,
         portfolio_preset:     _settPsm  || 'balanced',
         portfolio_rebalance:  _settReb  || 'quarterly',
-        portfolio_benchmark:  _settBench|| 'spy'
+        portfolio_benchmark:  _settBench|| 'spy',
+        // F1.15 — Alert thresholds (frontend confidence/price/drawdown/loss
+        // map to backend alert_confidence / alert_price_pct / alert_drawdown_pct / alert_loss_pct)
+        alert_confidence:     (sl.confidence != null ? sl.confidence : 70),
+        alert_price_pct:      (sl.price      != null ? sl.price      : 2),
+        alert_drawdown_pct:   (sl.drawdown   != null ? sl.drawdown   : 10),
+        alert_loss_pct:       (sl.loss       != null ? sl.loss       : 5)
       })
     }).catch(function(){});
   }catch(e){}
@@ -6315,6 +6346,11 @@ function _spAlerts(){
 }
 function updAtSlider(key,unit,val,mn,mx){
   _settSliders[key]=parseFloat(val);
+  // F1.15 — touched tracking so F1.7 race doesn't overwrite this drag.
+  // Frontend key {confidence/price/drawdown/loss} maps to backend
+  // alert_{confidence/price_pct/drawdown_pct/loss_pct}.
+  var _bMap = {confidence:'alert_confidence', price:'alert_price_pct', drawdown:'alert_drawdown_pct', loss:'alert_loss_pct'};
+  if(_bMap[key]) window._settTouched[_bMap[key]] = true;
   const pct=((val-mn)/(mx-mn)*100).toFixed(1);
   const vEl=document.getElementById('atv-'+key);
   const fEl=document.getElementById('atf-'+key);
