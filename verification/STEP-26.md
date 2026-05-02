@@ -67,27 +67,29 @@ Out of scope (deliberately): per-position `pfchart-*` charts respecting type, Ba
 
 ---
 
-## Results — to be filled after implementation
-
-(Empty until verification runs)
+## Results — verified live 2026-05-02 on dot-verse.up.railway.app
 
 | # | Criterion | Method ran | Raw evidence | PASS/FAIL | Confidence |
 |---|---|---|---|---|---|
-| 1a | candle | | | | |
-| 1b | bar | | | | |
-| 1c | line | | | | |
-| 1d | area | | | | |
-| 1e | hollow | | | | |
-| 2 | live re-render | | | | |
-| 3 | backend persist | | | | |
-| 4 | login load | | | | |
-| 5 | var sync | | | | |
-| 6 | sel highlight | | | | |
-| 7 | independence | | | | |
-| 8 | step-25 regression | | | | |
+| 1a | candle | Sample undChartInner pixels with theme=constellation, type=candle | `93,232,160 @ 4221` (upCol exact) + `232,112,110 @ 2672` (dnCol exact). Total 7 canvases. | PASS | CONFIRMED |
+| 1b | bar | Same, type=bar | `93,232,160 @ 3937` + `232,112,110 @ 2294` — same colours, lower hit counts (thinner shapes). | PASS | CONFIRMED |
+| 1c | line | Same, type=line | `238,232,216 @ 3894` + `237,232,216 @ 964` (lineCol family dominates). **No upCol or dnCol in top 5** — proven candle-less. | PASS | CONFIRMED |
+| 1d | area | Same, type=area | `93,232,160 @ 4642` (upCol line) + alpha-blended variants `94,231,159 @ 276`, `92,231,159 @ 202` (gradient fill). | PASS | CONFIRMED |
+| 1e | hollow | Same, type=hollow | `232,112,110 @ 2672` (dnCol full — down candles still filled) + `93,232,160 @ 1834` (upCol reduced — only borders/wicks) + `0,0,0 @ 757` (transparent up bodies show black). | PASS | CONFIRMED |
+| 2 | live re-render | Cycle 5 types in sequence on same AAPL 4H data; check canvas count and colour signature per type | All 5 types produced distinct, expected pixel signatures. Canvas count stable at 7 across all types — no leak. | PASS | CONFIRMED |
+| 3 | backend persist | `setChartType('bar')` → fetch `/api/settings` | Backend returned `chart_type=bar` immediately after click. | PASS | CONFIRMED |
+| 4 | login load | POST `chart_type=area`, clear localStorage, reload, observe values | After reload, `_activeChartType=area`, `localStorage.dvChartType=area`, `localStorage.dv_sett_ctype=area`, `_settChartType=area`. All four loaded from backend within 800ms. | PASS | CONFIRMED |
+| 5 | var sync | After `setChartType('bar')`, read all 4 sources | `_active=bar / lsCType=bar / lsSettCType=bar / settVar=bar`. | PASS | CONFIRMED |
+| 6 | sel highlight | After `setChartType('bar')`, navigate to Settings → Chart Visuals, count `.cv-type-card.sel` | `cards=5, selCount=1, which=bar`. | PASS | CONFIRMED |
+| 7 | independence | Set theme=obsidian, type=line. Then set theme=aurora. Read type. | After theme=aurora, type still `line`. Theme switch did not reset type. | PASS | CONFIRMED |
+| 8 | step-25 regression | Sweep all 6 themes with type=candle; sample top 2 colours per theme; compare to spec | All 6 themes still produce their exact spec upCol/dnCol pixels (constellation `93,232,160 / 232,112,110`, minimal `74,222,128 / 248,113,113`, terminal `160,208,128 / 208,96,96`, midnight `52,211,153 / 244,114,182`, obsidian `0,255,136 / 255,68,68`, aurora `45,212,191 / 244,63,94`). | PASS | CONFIRMED |
+
+**All 12 criteria PASSED at runtime in the live browser.** Step 26 closed.
 
 ---
 
 ## Commit log (this step)
 
-(To be appended)
+- F1.10a: backend `/api/settings` accepts all 5 chart_type values (candle/bar/line/area/hollow); GET default updated `candles` → `candle`
+- F1.10b: frontend setChartType auto-persists + redraws + syncs both vars; `_initUndChart` branches series on `_activeChartType`; `_applyChartBars` switches data shape for line/area; `goDash` F1.7 block also loads chart_type
+- All shipped under one commit: `F1.10: chart_type wiring (Understand chart series + auto-persist + login load + verification ledger)`
