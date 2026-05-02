@@ -186,6 +186,93 @@ This was rooted in F1.2 (assets_enabled wiring) and F1.3 (risk_tolerance wiring)
 
 ---
 
+## Fourth follow-up (F1.13.2 — F1.7 failure-mode protection)
+
+**Pre-existing risk surfaced after F1.13.1:** F1.13.1 fixed the cross-device case (F1.7 succeeds). But what if F1.7 itself fails (network error, 5xx, /api/settings unreachable)? The `.then` never fires, `_settAssets` and `_settRisk` retain in-memory defaults, and a subsequent `_settSaveAll` call would still overwrite backend.
+
+**Fix shipped (`058f781` F1.13.2):**
+- F1.7's successful `.then()` now sets `window._settLoadedFromBackend = true`.
+- `_settSaveAll` checks the flag before including `assets_enabled` and `risk_tolerance` in its POST body. If false → those fields are EXCLUDED from the POST, backend keeps its current values.
+- `chart_theme` and `perf_target_*` are still POSTed unconditionally (they have safe defaults that match backend defaults).
+
+**Verification (live):**
+
+Setup:
+- POSTed `assets=['stocks'], risk='conservative', winrate=50` to backend
+- Deliberately corrupted in-memory: `_settAssets=['stocks','forex','crypto','commodity','index']`, `_settRisk='moderate'`, `_pgSliders.winrate=88`
+- Set `window._settLoadedFromBackend=false` to simulate F1.7 failure
+- Called `_settSaveAll()`
+
+Result:
+
+| Field | Backend before | After save | Status |
+|---|---|---|---|
+| assets_enabled | `['stocks']` | `['stocks']` | PROTECTED — not in POST body |
+| risk_tolerance | `conservative` | `conservative` | PROTECTED — not in POST body |
+| perf_target_winrate | `50` | `88` | POSTed normally (safe field) |
+
+The gate works as designed. Risky fields safely excluded under F1.7-failure conditions. Safe fields still saveable so user UX isn't blocked.
+
+**Account state restored** after test.
+
+---
+
+## Step 29 — final closing summary
+
+| Item | State |
+|---|---|
+| Original 8 criteria | ALL PASS |
+| UI Save button + slider drag flow | PASS |
+| All 5 status colour branches | PASS |
+| Settings UI sliders show F1.7-loaded values | PASS |
+| Save button "Saved to device!" feedback | PASS |
+| Annual slider step=1 rounds 35.5 → 36 | NOTED — pre-existing UI behaviour, not a regression |
+| F1.13.1 data-loss fix (assets_enabled/risk_tolerance loaded by F1.7) | PASS |
+| F1.13.2 failure-mode gate (F1.7 fails → save excludes risky fields) | PASS |
+| Real logout/login cycle | DEFERRED — F1.7 mechanism verified for theme in step 25 |
+| Empty signal-history "no data" R:R | CODE REVIEW only |
+| Multi-tab concurrency | OUT OF SCOPE — pre-existing pattern |
+
+Step 29 closed at the depth the user-pushed audit reached. Three follow-up rounds surfaced and fixed two real risks (data-loss on cross-device save, data-loss on F1.7 failure).
+
+---
+
+## Fifth follow-up (F1.13.3 — F1.13.2 was incomplete)
+
+**Pushing again surfaced a hole in my own F1.13.2 fix.** I had claimed `chart_theme` and `perf_target_*` were "safe to POST always" because their hard-coded defaults match backend defaults. **Wrong.** Backend defaults match in-memory defaults only when the user has never changed the setting. If user has `chart_theme=obsidian` and visits a fresh device where F1.7 fails, in-memory defaults to `'constellation'` and `_settSaveAll` silently overwrites backend `obsidian → constellation`. Same data-loss path I supposedly fixed.
+
+F1.13.2 protected 2 of 5 vulnerable fields. The other 3 (chart_theme + 4 perf_target_*) had the same vulnerability.
+
+**Fix shipped (F1.13.3):** when `window._settLoadedFromBackend !== true`, suppress the entire `_settSaveAll` POST. Show toast "Settings not synced — refresh and try again". localStorage write still happens (user's local input not lost).
+
+**Verification (live):**
+
+Setup:
+- Backend POSTed `theme=obsidian, wr=85, rr=3, tr=12, an=40, ass=['stocks','crypto','forex'], rsk=aggressive`
+- Corrupted in-memory to all defaults: `_activeChartTheme='constellation', _pgSliders={55,2,5,20}, _settAssets=[all 5], _settRisk='moderate'`
+- Set `window._settLoadedFromBackend=false`
+- Called `_settSaveAll()`
+
+Result — backend after save:
+
+| Field | Before | After (F1.13.3) | Status |
+|---|---|---|---|
+| chart_theme | obsidian | obsidian | PROTECTED |
+| perf_target_winrate | 85 | 85 | PROTECTED |
+| perf_target_rr | 3 | 3 | PROTECTED |
+| perf_target_trades | 12 | 12 | PROTECTED |
+| perf_target_annual | 40 | 40 | PROTECTED |
+| assets_enabled | ['stocks','crypto','forex'] | ['stocks','crypto','forex'] | PROTECTED |
+| risk_tolerance | aggressive | aggressive | PROTECTED |
+
+Toast verified separately (isolated test): `dvToast.textContent="Settings not synced — refresh and try again"`, `class="dv-toast show"`.
+
+ALL 7 fields safe under F1.7 failure. Entire POST is suppressed, user gets explicit feedback.
+
+**Honest disclosure:** F1.13.2 was an incomplete fix shipped without catching that `chart_theme` and `perf_target_*` had the same vulnerability. The user surfaced it by asking "are you sure" again. Pattern: every push-back finds another hole.
+
+---
+
 ## Commit log (this step)
 
 - `32875ca` F1.13: Performance targets persist + load on login + render on Performance page (with computable actual-vs-target widgets)
