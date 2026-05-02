@@ -300,6 +300,56 @@ Both happy and failure paths verified. No more contradictory messaging.
 
 ---
 
+## Seventh follow-up (F1.13.5 — F1.7 overwriting in-flight user input)
+
+**Pushing once more surfaced the opposite-direction data-loss path.** F1.13.1–F1.13.4 protected backend from being overwritten by stale in-memory defaults. But F1.7 itself was unconditionally overwriting **in-memory** values when its async response arrived — silently destroying any setting the user had touched during the F1.7 race window (~50–200 ms after page load).
+
+**Failure path:**
+1. Page loads. F1.7 fetch starts.
+2. User opens Settings → Performance, drags winrate slider to 88. `_pgSliders.winrate = 88`.
+3. F1.7 response arrives. Loads backend value (e.g. 65) into `_pgSliders.winrate = 65`. **User's 88 is silently overwritten.**
+4. User clicks Save → backend gets 65. Their drag is lost.
+
+**Fix shipped (`0ecf4a1` F1.13.5):**
+- Added `window._settTouched = {}` accumulator.
+- Each setter marks its field touched: `setChartTheme`, `setChartType`, `setGridStyle`, `setIndScheme`, `updPgSlider` (sets `perf_target_<key>`), `toggleSettAsset`, `selectSettRisk`.
+- F1.7's per-field load wraps each in `if (!_settTouched[FIELD])`. Touched fields preserved; untouched fields still loaded from backend.
+
+**Verification (live):**
+
+Setup:
+- Backend POSTed `chart_theme=midnight, perf_target_winrate=73`
+- Reset `window._settTouched = {}`
+- Set `_pgSliders.winrate = 42` (user's "drag") + `_activeChartTheme = 'aurora'` (stale)
+- Marked only `_settTouched.perf_target_winrate = true` (winrate touched, theme NOT)
+- Re-ran F1.7's per-field load logic against fetched `/api/settings` response
+
+Result:
+
+| Field | Backend | In-memory (corrupted) | Touched? | After F1.7 logic |
+|---|---|---|---|---|
+| `perf_target_winrate` | 73 | 42 | ✓ | **42** (preserved) |
+| `chart_theme` | midnight | aurora | ✗ | **midnight** (loaded) |
+
+Per-field selectivity confirmed: the touched flag protects the field; untouched fields still get backend values.
+
+**Account restored** to defaults `theme=aurora, perf=55/2/5/20, assets=['stocks','crypto','forex'], risk='aggressive'`.
+
+---
+
+## Step 29 — final close after seven follow-up rounds
+
+Real bugs caught and fixed across 7 rounds:
+- F1.13.1: F1.7 didn't load assets_enabled / risk_tolerance — cross-device save would overwrite backend.
+- F1.13.2: First failure-mode gate was incomplete (only protected 2 of 5 fields).
+- F1.13.3: Full failure-mode gate (suppress entire POST when F1.7 hasn't loaded).
+- F1.13.4: Save button label was misleading on suppressed save (always "Saved to device!").
+- F1.13.5: F1.7 was unconditionally overwriting in-memory user input during the race window.
+
+Step 29 is at the depth seven rounds of "are you sure" reached. If asked again, the most likely remaining gaps are: real auth cycle (deferred), empty-history "no data" (code review), and whatever I'm still unable to surface without push.
+
+---
+
 ## Commit log (this step)
 
 - `32875ca` F1.13: Performance targets persist + load on login + render on Performance page (with computable actual-vs-target widgets)
