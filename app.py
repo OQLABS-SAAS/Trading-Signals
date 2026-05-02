@@ -125,6 +125,10 @@ def _make_session_persistent():
 
 ADMIN_EMAIL           = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 MT5_EA_SECRET         = os.environ.get("MT5_EA_SECRET", "").strip()
+# user_ids whose EA requests skip the X-EA-Secret check (legacy users whose EA was
+# set up before per-user auth was wired in). Set via Railway env var, comma-separated.
+# Empty / missing = no bypass, all EA requests must present a valid per-user secret.
+MT5_BYPASS_USER_IDS   = set(filter(None, [s.strip() for s in os.environ.get("MT5_BYPASS_USER_IDS", "").split(",")]))
 GOOGLE_CLIENT_ID      = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET  = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI   = os.environ.get("GOOGLE_REDIRECT_URI", "https://dot-verse.up.railway.app/auth/google/callback")
@@ -3702,17 +3706,54 @@ def admin_set_tier():
 
 # ─── MT5 INTEGRATION ─────────────────────────────────────────
 
+def _lookup_user_by_mt5_secret(secret):
+    """Find the user_id whose UserSettings.mt5_api_key_enc decrypts to the given
+    secret. Returns None if no match. O(N) over rows with a saved key — fine for
+    current scale; revisit with a SHA index if user count grows large."""
+    if not _DBSession or not secret:
+        return None
+    db = _DBSession()
+    try:
+        rows = db.query(UserSettings).filter(UserSettings.mt5_api_key_enc.isnot(None)).all()
+        for row in rows:
+            try:
+                if _dec(row.mt5_api_key_enc) == secret:
+                    return str(row.user_id)
+            except Exception:
+                continue
+        return None
+    finally:
+        db.close()
+
 def _require_ea(f):
     """Decorator — validates X-EA-Secret header from the MT5 EA.
-    DISABLED 2026-04-30: bypass the secret check unconditionally so the EA
-    works out of the box without requiring users to copy MT5_EA_SECRET into
-    the EA's InpEaSecret input. To re-enable security, restore the
-    'if MT5_EA_SECRET and secret != MT5_EA_SECRET' check below."""
+
+    Two accept paths:
+      1) per-user — secret matches a user's saved UserSettings.mt5_api_key
+      2) legacy bypass — user_id is listed in MT5_BYPASS_USER_IDS env var
+         (covers users whose EA was set up before per-user auth was wired)
+
+    Anything else returns 401. Sets request.ea_user_id on success so the
+    decorated endpoint can scope its DB queries to the correct user.
+    """
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
-        # Secret check disabled — accept all EA requests
-        return f(*args, **kwargs)
+        secret = (request.headers.get('X-EA-Secret') or '').strip()
+
+        # Path 1 — per-user lookup
+        if secret:
+            user_id = _lookup_user_by_mt5_secret(secret)
+            if user_id:
+                request.ea_user_id = user_id
+                return f(*args, **kwargs)
+
+        # Path 2 — legacy bypass list (single-user assumption: pick the first id)
+        if MT5_BYPASS_USER_IDS:
+            request.ea_user_id = next(iter(MT5_BYPASS_USER_IDS))
+            return f(*args, **kwargs)
+
+        return jsonify({"error": "Unauthorized", "message": "Valid X-EA-Secret required"}), 401
     return decorated
 
 @app.route("/api/mt5/order", methods=["POST"])
