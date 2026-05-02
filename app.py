@@ -5688,6 +5688,7 @@ def health():
 
 # ─── Pine Script endpoint ────────────────────────────────────────────────────
 @app.route("/api/pine-script", methods=["GET"])
+@login_required
 def serve_pine_script():
     """Serve the DotVerse Pine Script v5 indicator file."""
     pine_path = os.path.join(os.path.dirname(__file__), "static", "dotverse_signals.pine")
@@ -5703,6 +5704,7 @@ def serve_pine_script():
 
 # ─── Pine RSI Divergence endpoint ───────────────────────────────────────────
 @app.route("/api/pine-divergence", methods=["GET"])
+@login_required
 def serve_pine_divergence():
     """Serve the DotVerse RSI Divergence Pine Script indicator."""
     pine_path = os.path.join(os.path.dirname(__file__), "static", "dotverse_rsi_divergence.pine")
@@ -5718,6 +5720,7 @@ def serve_pine_divergence():
 
 # ─── Pine Strategy endpoint ──────────────────────────────────────────────────
 @app.route("/api/pine-strategy", methods=["GET"])
+@login_required
 def serve_pine_strategy():
     """Serve the DotVerse Strategy Pine Script file (with automated partial closes)."""
     pine_path = os.path.join(os.path.dirname(__file__), "static", "dotverse_strategy.pine")
@@ -5733,6 +5736,7 @@ def serve_pine_strategy():
 
 # ─── On-demand SMS endpoint (dynamic recipient) ──────────────────────────────
 @app.route("/api/send-sms", methods=["POST"])
+@login_required
 def send_sms_on_demand():
     """Send a signal SMS to a specific phone number via Twilio."""
     data    = request.get_json(force=True) or {}
