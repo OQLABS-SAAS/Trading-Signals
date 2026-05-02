@@ -4601,7 +4601,12 @@ function goDash(u){
   try{
     dvFetch('/api/settings').then(function(s){
       if(!s) return;
-      if(typeof s.chart_theme === 'string' && s.chart_theme){
+      // F1.13.5 — each per-field load skips if the user has already touched
+      // that field on this page session (window._settTouched[FIELD] === true).
+      // Without this, a slider drag or theme click made during the F1.7 race
+      // window gets silently overwritten when the backend response arrives.
+      var _t = window._settTouched || {};
+      if(!_t.chart_theme && typeof s.chart_theme === 'string' && s.chart_theme){
         _activeChartTheme = s.chart_theme;
         _settChartTheme   = s.chart_theme;
         try{ localStorage.setItem('dvChartTheme', s.chart_theme); }catch(e){}
@@ -4611,40 +4616,40 @@ function goDash(u){
       // that a save from any Settings sub-panel doesn't overwrite the user's
       // saved values with stale in-memory defaults. Pre-existing data-loss risk
       // exposed by F1.13's Performance Save flow but rooted in F1.2 / F1.3.
-      if(Array.isArray(s.assets_enabled) && s.assets_enabled.length){
+      if(!_t.assets_enabled && Array.isArray(s.assets_enabled) && s.assets_enabled.length){
         if(typeof _settAssets !== 'undefined') _settAssets = s.assets_enabled.slice();
         try{ _dvWrite('dv_sett_assets', JSON.stringify(s.assets_enabled)); }catch(e){}
       }
-      if(typeof s.risk_tolerance === 'string' && s.risk_tolerance){
+      if(!_t.risk_tolerance && typeof s.risk_tolerance === 'string' && s.risk_tolerance){
         if(typeof _settRisk !== 'undefined') _settRisk = s.risk_tolerance;
         try{ _dvWrite('dv_sett_risk', s.risk_tolerance); }catch(e){}
       }
       // F1.10b — also load chart_type so default rendering type follows the user.
-      if(typeof s.chart_type === 'string' && s.chart_type){
+      if(!_t.chart_type && typeof s.chart_type === 'string' && s.chart_type){
         _activeChartType = s.chart_type;
         if(typeof _settChartType !== 'undefined') _settChartType = s.chart_type;
         try{ localStorage.setItem('dvChartType', s.chart_type); }catch(e){}
         try{ _dvWrite('dv_sett_ctype', s.chart_type); }catch(e){}
       }
       // F1.11 — also load grid_style so chart grid follows the user.
-      if(typeof s.grid_style === 'string' && s.grid_style){
+      if(!_t.grid_style && typeof s.grid_style === 'string' && s.grid_style){
         _activeGridStyle = s.grid_style;
         if(typeof _settGridStyle !== 'undefined') _settGridStyle = s.grid_style;
         try{ localStorage.setItem('dvGridStyle', s.grid_style); }catch(e){}
         try{ _dvWrite('dv_sett_grid', s.grid_style); }catch(e){}
       }
       // F1.12 — also load indicator_scheme so RSI line colour follows the user.
-      if(typeof s.indicator_scheme === 'string' && s.indicator_scheme){
+      if(!_t.indicator_scheme && typeof s.indicator_scheme === 'string' && s.indicator_scheme){
         _activeIndicatorScheme = s.indicator_scheme;
         try{ localStorage.setItem('dvIndScheme', s.indicator_scheme); }catch(e){}
         try{ _dvWrite('dv_sett_ind', s.indicator_scheme); }catch(e){}
       }
       // F1.13 — load Performance targets so the Performance page can render them.
       if(typeof _pgSliders === 'object' && _pgSliders){
-        if(s.perf_target_winrate != null) _pgSliders.winrate = +s.perf_target_winrate;
-        if(s.perf_target_rr      != null) _pgSliders.rr      = +s.perf_target_rr;
-        if(s.perf_target_trades  != null) _pgSliders.trades  = +s.perf_target_trades;
-        if(s.perf_target_annual  != null) _pgSliders.annual  = +s.perf_target_annual;
+        if(!_t.perf_target_winrate && s.perf_target_winrate != null) _pgSliders.winrate = +s.perf_target_winrate;
+        if(!_t.perf_target_rr      && s.perf_target_rr      != null) _pgSliders.rr      = +s.perf_target_rr;
+        if(!_t.perf_target_trades  && s.perf_target_trades  != null) _pgSliders.trades  = +s.perf_target_trades;
+        if(!_t.perf_target_annual  && s.perf_target_annual  != null) _pgSliders.annual  = +s.perf_target_annual;
         try{ _dvWrite('dv_sett_pg', JSON.stringify(_pgSliders)); }catch(e){}
       }
       // F1.13.2 — flag a successful load. _settSaveAll uses this to decide
@@ -5220,6 +5225,11 @@ function _dvWrite(k,v){ try{sessionStorage.setItem(k,v);}catch(e){} try{localSto
 
 var _settAssets  = (function(){ try{ var v=JSON.parse(_dvRead('dv_sett_assets')); if(Array.isArray(v)) return v; }catch(e){} return ['stocks','crypto','forex']; })();
 var _settRisk    = _dvRead('dv_sett_risk')    || 'moderate';
+// F1.13.5 — track which fields the user has touched on this page session.
+// F1.7 (load from backend on goDash) skips fields that are already touched
+// so it doesn't overwrite a slider drag / theme click made during the F1.7
+// race window. Each setter sets its own key. Reset on full page reload.
+window._settTouched = window._settTouched || {};
 var _settBench   = _dvRead('dv_sett_bench')   || 'spy';
 var _settCad     = _dvRead('dv_sett_cad')     || 'ytd';
 var _settPsm     = _dvRead('dv_sett_psm')     || 'balanced';
@@ -5773,6 +5783,7 @@ function _renderIndPreview(scheme){
 
 function setChartTheme(id){
   _activeChartTheme = id;
+  window._settTouched.chart_theme = true;  // F1.13.5
   // F1.8 — keep _settChartTheme + its legacy localStorage key in sync so the
   // two-variable inconsistency cannot drift apart on save / reload paths.
   if(typeof _settChartTheme !== 'undefined') _settChartTheme = id;
@@ -5800,6 +5811,7 @@ function setChartTheme(id){
 
 function setChartType(id){
   _activeChartType = id;
+  window._settTouched.chart_type = true;  // F1.13.5
   // F1.10b — keep _settChartType + legacy localStorage key in sync (mirror of F1.8 theme pattern).
   if(typeof _settChartType !== 'undefined') _settChartType = id;
   localStorage.setItem('dvChartType', id);
@@ -5821,6 +5833,7 @@ function setChartType(id){
 
 function setGridStyle(id){
   _activeGridStyle = id;
+  window._settTouched.grid_style = true;  // F1.13.5
   // F1.11 — sync legacy localStorage key + (if defined) any _settGridStyle var.
   try{ if(typeof _dvWrite === 'function') _dvWrite('dv_sett_grid', id); }catch(e){}
   if(typeof _settGridStyle !== 'undefined') _settGridStyle = id;
@@ -5843,6 +5856,7 @@ function setGridStyle(id){
 
 function setIndScheme(id){
   _activeIndicatorScheme = id;
+  window._settTouched.indicator_scheme = true;  // F1.13.5
   localStorage.setItem('dvIndScheme', id);
   // F1.12 — sync legacy localStorage key.
   try{ if(typeof _dvWrite === 'function') _dvWrite('dv_sett_ind', id); }catch(e){}
@@ -5924,6 +5938,7 @@ function _spAssets(){
 function toggleSettAsset(id){
   const i=_settAssets.indexOf(id);
   if(i>-1)_settAssets.splice(i,1); else _settAssets.push(id);
+  window._settTouched.assets_enabled = true;
   showSettings('assets');
 }
 
@@ -5971,7 +5986,7 @@ function _spRisk(){
   </div>
   ${_saveBtn('Save Changes')}`;
 }
-function selectSettRisk(r){ _settRisk=r; showSettings('risk'); }
+function selectSettRisk(r){ _settRisk=r; window._settTouched.risk_tolerance=true; showSettings('risk'); }
 
 // --- PERFORMANCE ---
 function _spPerf(){
@@ -6037,6 +6052,9 @@ function _spPerf(){
 }
 function updPgSlider(key,unit,val,mn,mx,col){
   _pgSliders[key]=parseFloat(val);
+  // F1.13.5 — mark this perf field touched so F1.7 won't overwrite it
+  // if the load completes after the user drags.
+  window._settTouched['perf_target_'+key] = true;
   const pct=((val-mn)/(mx-mn)*100).toFixed(1);
   const vEl=document.getElementById('pgv-'+key);
   const fEl=document.getElementById('pgf-'+key);
