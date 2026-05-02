@@ -2078,29 +2078,31 @@ def _htf_trend_bias(mtf, timeframe):
     return (htf.get("trend") or "NEUTRAL").upper()
 
 
-# ── Per-user confluence threshold (F1.3 Risk Tolerance) ──────────────────────
-# Maps the Risk Tolerance setting to the bull/bear-vote percentage a signal must
-# reach before BUY/SELL fires (instead of HOLD). Higher threshold = fewer but
-# higher-conviction signals. The default 0.65 is the legacy global value;
-# anyone without a UserSettings row keeps the existing behaviour.
+# ── Per-user Risk Tolerance settings (F1.3) ──────────────────────────────────
+# Maps the user's Risk Tolerance (Conservative/Moderate/Aggressive) to the
+# bull/bear-vote percentage required for the local confluence gate to fire
+# BUY/SELL. Higher threshold = fewer but higher-conviction signals.
+# The 'aggressive' value 0.65 is the legacy global default; users without a
+# UserSettings row keep the existing behaviour.
 _CONFLUENCE_THRESHOLDS = {"conservative": 0.85, "moderate": 0.75, "aggressive": 0.65}
 
-def _get_user_confluence_threshold(user_id):
-    """Look up the user's Risk Tolerance and return the matching threshold.
-    Returns 0.65 on any error (no DB, no row, unknown value, exception)."""
+def _get_user_risk_setting(user_id):
+    """Returns the tuple (risk_tolerance_str, confluence_threshold) for the
+    given user. Defaults to ('aggressive', 0.65) on any failure (no DB,
+    no row, unknown value, exception)."""
     if not _DBSession or not user_id:
-        return 0.65
+        return ("aggressive", 0.65)
     try:
         db = _DBSession()
         try:
             row = db.query(UserSettings).filter_by(user_id=str(user_id)).first()
             if row and row.risk_tolerance in _CONFLUENCE_THRESHOLDS:
-                return _CONFLUENCE_THRESHOLDS[row.risk_tolerance]
+                return (row.risk_tolerance, _CONFLUENCE_THRESHOLDS[row.risk_tolerance])
         finally:
             db.close()
     except Exception:
         pass
-    return 0.65
+    return ("aggressive", 0.65)
 
 def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=None):
     """Generate trading signal using gated template logic.
@@ -2231,11 +2233,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
 
     # Resolve the user_id from the explicit param or fall back to the request
     # session. Background callers (RQ worker, etc.) without a request context
-    # silently fall back to the global 0.65 default.
+    # silently fall back to the ('aggressive', 0.65) default.
     if user_id is None:
         try:    user_id = session.get('user_id')
         except Exception: user_id = None
-    threshold = _get_user_confluence_threshold(user_id)
+    user_risk, threshold = _get_user_risk_setting(user_id)
 
     if bull_pct >= threshold:
         signal = "BUY"
@@ -2243,6 +2245,12 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         signal = "SELL"
     else:
         signal = "HOLD"
+
+    # Snapshot the local-confluence-gate signal BEFORE any downstream override.
+    # Used by the Risk Tolerance gate (F1.3) below to decide whether a TV-derived
+    # signal should be trusted: Moderate users want TV BUY only when the local
+    # 7-indicator vote also said BUY (cross-confirmation).
+    local_signal = signal
 
     # ── Confidence from absolute net score ──
     if abs(net) >= 5:
@@ -2288,6 +2296,28 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
                 signal, confidence = "SELL", "HIGH"
             tv_signal_used = True
             print(f"[TV-signal] {ticker} {timeframe} -> {tv_rec_label} (score={tv_rec_all}) -> {signal}/{confidence}")
+
+    # ══════════════════════════════════════════════════════════════
+    # RISK TOLERANCE FILTER on TV signal (F1.3 step 24a2)
+    # The TV override above replaces the local confluence-gate signal with TV's
+    # 26-indicator verdict. Without this filter, Risk Tolerance would only
+    # affect non-TV cases — which is rare. This block applies the user's risk
+    # preference to the TV-derived signal:
+    #   - Aggressive: trust TV entirely (legacy behaviour)
+    #   - Moderate:   trust STRONG signals; trust regular BUY/SELL only when
+    #                 the local confluence gate independently agrees
+    #   - Conservative: trust ONLY STRONG signals; everything else -> HOLD
+    # ══════════════════════════════════════════════════════════════
+    if tv_signal_used and signal in ("BUY", "SELL") and user_risk in ("moderate", "conservative"):
+        is_strong = tv_rec_label in ("STRONG BUY", "STRONG SELL")
+        if user_risk == "conservative" and not is_strong:
+            print(f"[risk-conservative] {ticker} {timeframe} regular TV {tv_rec_label} -> HOLD")
+            signal = "HOLD"
+            confidence = "LOW"
+        elif user_risk == "moderate" and not is_strong and local_signal != signal:
+            print(f"[risk-moderate] {ticker} {timeframe} TV={tv_rec_label} but local={local_signal} -> HOLD")
+            signal = "HOLD"
+            confidence = "LOW"
 
     # ══════════════════════════════════════════════════════════════
     # GATE 1: Higher-timeframe trend filter
