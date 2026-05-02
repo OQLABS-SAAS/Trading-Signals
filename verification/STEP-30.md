@@ -292,6 +292,59 @@ Account restored: `theme=aurora, type=candle, grid=subtle, scheme=crystal`.
 
 ---
 
+## Sixth follow-up (F1.14.5 — XSS defense for portfolio_benchmark)
+
+**Brainstorm finding:** the showPortfolio panel header concatenates `_settBench` directly into innerHTML. `_settPsm` and `_settReb` are now enum-guarded so safe; `_settBench` is free-form (any ticker), so XSS-shaped strings could in principle reach innerHTML if they pass backend's 16-char str-cap.
+
+**Fix shipped (F1.14.5) — two layers:**
+
+1. **F1.7 format guard** — accept `_settBench` only when it matches `/^[A-Za-z0-9./^=-]{1,16}$/` (ticker-shaped). Rejects `<`, `>`, `"`, `'`, spaces, unicode, anything that could break HTML parsing.
+
+2. **Render-time HTML escape** — in showPortfolio's panel header, the dynamic `_settBench` insertion is now passed through a `replace(/[&<>"']/g, ...)` escape so any character that did slip through (DB tampering bypassing the format guard, or future code change) is rendered as entities.
+
+**Verification (live):**
+
+Layer 1 (format guard): 13 inline scenarios:
+
+| Input | Result | Pass |
+|---|---|---|
+| `SPY`, `^GSPC`, `EURUSD=X`, `GC=F`, `BTC-USD`, `BRK.A` | All loaded ✓ |
+| `<img onerr` | rejected (defaults to `spy`) ✓ |
+| `a"b` | rejected ✓ |
+| `spy onmouseover=` (space) | rejected ✓ |
+| 17 chars | rejected ✓ |
+| `SPY€` (unicode) | rejected ✓ |
+| Empty string | rejected ✓ |
+| Boundary 16 chars | accepted ✓ |
+
+Layer 2 (render escape): set `_settBench = '<img onerror=alert(1)>'` directly in JS (bypassing layer 1), called `showPortfolio()`, inspected DOM:
+- `imgInside = 0` — no `<img>` element rendered inside panel
+- `hasHtmlEntities = true` — innerHTML contains `&lt;` and `&gt;`
+- `hasRawImgTag = false` — no raw `<img` in HTML
+- textContent shows the payload as plain text, not parsed as HTML
+
+End-to-end happy path: POST `portfolio_benchmark='qqq'` → cleared localStorage → reload → `_settBench=qqq`, localStorage synced. ✓
+
+**Defense in depth confirmed.** Layer 1 catches the common case at load time; layer 2 catches anything that bypasses layer 1.
+
+Account restored: `bench=spy`.
+
+---
+
+## Step 30 — final close summary across SIX follow-up rounds
+
+Real bugs / gaps caught and fixed:
+- F1.7 portfolio touched-skip + Save button labels (round 1, user-prompted)
+- F1.14.1 untracked positions distort math + Cash always-zero (round 2, user-prompted)
+- F1.14.2 portfolio_alloc value validation (NaN/range guard) (round 3, **failure-brainstorm caught**)
+- F1.14.3 preset/rebalance enum guard (round 4, defense-in-depth)
+- F1.14.4 chart-visuals enum guards (theme/type/grid/scheme) (round 5, parallel scope, **failure-brainstorm caught**)
+- F1.14.5 portfolio_benchmark XSS defense (format guard + render escape) (round 6, **failure-brainstorm caught**)
+
+3 of 6 rounds caught by the failure-brainstorm protocol independently of user push. Pattern of overclaiming hasn't gone away (rounds 1+2 still required user push), but the protocol IS shifting catches earlier.
+
+---
+
 ## Commit log (this step)
 
 - `1991cde` F1.14: Portfolio settings persist + load + Target Allocation vs Actual panel + rebalance callout (+ touched tracking)
