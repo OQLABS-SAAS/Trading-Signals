@@ -4594,6 +4594,22 @@ function goDash(u){
   showView('vDash'); showMarket(); setNav('market'); startDashClock(); initTier(); _initStratMode();
   // Post-login initialisation — mirrors v1 unlockApp
   try{ _renderSessionBar(); }catch(e){}
+  // F1.7 — load saved global settings on login so chart theme (and future
+  // global prefs) apply on every device without needing localStorage. Syncs
+  // both _activeChartTheme and _settChartTheme to the same backend value to
+  // resolve the pre-existing two-variable inconsistency.
+  try{
+    dvFetch('/api/settings').then(function(s){
+      if(!s) return;
+      if(typeof s.chart_theme === 'string' && s.chart_theme){
+        _activeChartTheme = s.chart_theme;
+        _settChartTheme   = s.chart_theme;
+        try{ localStorage.setItem('dvChartTheme', s.chart_theme); }catch(e){}
+        try{ _dvWrite('dv_sett_theme', s.chart_theme); }catch(e){}
+        if(typeof _applyAllCharts === 'function') _applyAllCharts();
+      }
+    });
+  }catch(e){}
   try{ dvFetch('/api/signals/history?limit=30').then(function(d){ if(d&&Array.isArray(d)){ window._sigHistory=d; renderSigHistoryPanel(); } }); }catch(e){}
   try{ wlRender(document.getElementById('wlRows')); }catch(e){}
   try{ dvFetch('/api/notifications').then(function(d){ if(d&&Array.isArray(d.notifications)){ window._notifications=d.notifications; } }); }catch(e){}
