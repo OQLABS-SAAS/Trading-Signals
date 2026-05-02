@@ -5253,15 +5253,21 @@ def remove_watch():
         body      = request.json or {}
         ticker    = body.get("ticker", "").upper().strip()
         timeframe = body.get("timeframe", "1d").lower()
+        if not ticker:
+            return jsonify({"error": "ticker required"}), 400
         ticker  = normalise_ticker(ticker, body.get("asset_type", "stock"))
         user_id = str(session.get('user_id', 'anon'))
         key     = f"{user_id}_{ticker}_{timeframe}"
 
-        with watch_lock:
-            removed = watch_registry.pop(key, None)
+        # DB is source of truth — gunicorn workers do not share the in-memory
+        # watch_registry, so checking it alone produced false 404s.
+        db_removed = _remove_watch_from_db(ticker, timeframe, user_id)
 
-        if removed:
-            _remove_watch_from_db(ticker, timeframe, user_id)
+        # Best-effort in-memory cleanup on the worker handling this request.
+        with watch_lock:
+            watch_registry.pop(key, None)
+
+        if db_removed:
             return jsonify({"status": "removed", "key": key})
         return jsonify({"status": "not_found", "key": key}), 404
     except Exception as e:
@@ -6747,15 +6753,17 @@ def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="le
         db.close()
 
 def _remove_watch_from_db(ticker, timeframe, user_id="legacy"):
-    """Delete a watch from the database."""
-    if not _DBSession: return
+    """Delete a watch from the database. Returns True if a row was removed."""
+    if not _DBSession: return False
     db = _DBSession()
     try:
-        db.query(Watch).filter_by(user_id=user_id, ticker=ticker, timeframe=timeframe).delete()
+        deleted_count = db.query(Watch).filter_by(user_id=user_id, ticker=ticker, timeframe=timeframe).delete()
         db.commit()
+        return deleted_count > 0
     except Exception as _e:
         db.rollback()
         print(f"[watch] DB remove failed: {_e}")
+        return False
     finally:
         db.close()
 
