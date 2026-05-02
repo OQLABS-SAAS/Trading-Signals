@@ -9746,7 +9746,13 @@ async function showAlerts(){
           ?'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="'+iconColor+'" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
           :'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="'+iconColor+'" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
         const rawTime=w.last_check;
-        const timeStr=rawTime?new Date(rawTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—';
+        let timeStr='—';
+        if(rawTime){
+          const _d=new Date(rawTime);
+          // Backend returns the literal string "Pending" for unchecked watches; pass through
+          // any non-parsable string so we never render the misleading "Invalid Date".
+          timeStr=isNaN(_d.getTime())?rawTime:_d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+        }
         const msg=w.last_reason||w.live_commentary||('Watch active · '+w.ticker+' '+w.timeframe+' · '+sig);
         return {
           type:isSell?'crit':'info',
