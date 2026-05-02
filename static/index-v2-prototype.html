@@ -4652,6 +4652,29 @@ function goDash(u){
         if(!_t.perf_target_annual  && s.perf_target_annual  != null) _pgSliders.annual  = +s.perf_target_annual;
         try{ _dvWrite('dv_sett_pg', JSON.stringify(_pgSliders)); }catch(e){}
       }
+      // F1.14 — load Portfolio settings. portfolio_alloc translates from
+      // backend object {crypto:30,...} into frontend array [{label,pct},...]
+      // by matching against the existing labels in _settAlloc, preserving order.
+      if(!_t.portfolio_alloc && s.portfolio_alloc && typeof s.portfolio_alloc === 'object' && Array.isArray(_settAlloc)){
+        var changed = false;
+        _settAlloc.forEach(function(a){
+          var k = String(a.label||'').toLowerCase();
+          if(s.portfolio_alloc[k] != null){ a.pct = +s.portfolio_alloc[k]; changed = true; }
+        });
+        if(changed){ try{ _dvWrite('dv_sett_alloc', JSON.stringify(_settAlloc)); }catch(e){} }
+      }
+      if(!_t.portfolio_preset && typeof s.portfolio_preset === 'string' && s.portfolio_preset){
+        _settPsm = s.portfolio_preset;
+        try{ _dvWrite('dv_sett_psm', s.portfolio_preset); }catch(e){}
+      }
+      if(!_t.portfolio_rebalance && typeof s.portfolio_rebalance === 'string' && s.portfolio_rebalance){
+        _settReb = s.portfolio_rebalance;
+        try{ _dvWrite('dv_sett_reb', s.portfolio_rebalance); }catch(e){}
+      }
+      if(!_t.portfolio_benchmark && typeof s.portfolio_benchmark === 'string' && s.portfolio_benchmark){
+        _settBench = s.portfolio_benchmark;
+        try{ _dvWrite('dv_sett_bench', s.portfolio_benchmark); }catch(e){}
+      }
       // F1.13.2 — flag a successful load. _settSaveAll uses this to decide
       // whether to include assets_enabled / risk_tolerance in its POST body.
       // If this flag is false (network failure, 5xx, /api/settings unavailable)
@@ -5280,6 +5303,11 @@ function _settSaveAll(){
   }
   try{
     var pg = (typeof _pgSliders === 'object' && _pgSliders) ? _pgSliders : {};
+    // F1.14 — translate frontend alloc array [{label,pct}] → backend object {key:pct}
+    var allocObj = {};
+    if(Array.isArray(_settAlloc)){
+      _settAlloc.forEach(function(a){ if(a && a.label) allocObj[String(a.label).toLowerCase()] = +a.pct||0; });
+    }
     fetch('/api/settings', {method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -5289,7 +5317,12 @@ function _settSaveAll(){
         perf_target_winrate: (pg.winrate != null ? pg.winrate : 55),
         perf_target_rr:      (pg.rr      != null ? pg.rr      : 2.0),
         perf_target_trades:  (pg.trades  != null ? pg.trades  : 5),
-        perf_target_annual:  (pg.annual  != null ? pg.annual  : 20.0)
+        perf_target_annual:  (pg.annual  != null ? pg.annual  : 20.0),
+        // F1.14 — Portfolio settings
+        portfolio_alloc:      allocObj,
+        portfolio_preset:     _settPsm  || 'balanced',
+        portfolio_rebalance:  _settReb  || 'quarterly',
+        portfolio_benchmark:  _settBench|| 'spy'
       })
     }).catch(function(){});
   }catch(e){}
@@ -6039,7 +6072,7 @@ function _spPerf(){
       <span style="font-family:var(--mono);font-size:11px;padding:3px 10px;border:1px solid var(--bd2);border-radius:6px;color:var(--t3);">Web View</span>
     </div>
     <div class="sett-sect-sub">Compare your returns against a reference index or custom alpha target.</div>
-    <div class="bench-grid">${benchCards.map(b=>`<div class="bench-card${_settBench===b.id?' sel':''}" onclick="_settBench='${b.id}';showSettings('perf')"><div class="bench-name">${b.name}</div><div class="bench-desc">${b.desc}</div><div class="bench-ytd${b.ytd==='Manual'?' dim':''}">${b.ytd}</div></div>`).join('')}</div>
+    <div class="bench-grid">${benchCards.map(b=>`<div class="bench-card${_settBench===b.id?' sel':''}" onclick="_settBench='${b.id}';window._settTouched.portfolio_benchmark=true;showSettings('perf')"><div class="bench-name">${b.name}</div><div class="bench-desc">${b.desc}</div><div class="bench-ytd${b.ytd==='Manual'?' dim':''}">${b.ytd}</div></div>`).join('')}</div>
   </div>
   <div class="sett-sect">
     <div class="sett-sect-title">Review Cadence</div>
@@ -6127,7 +6160,7 @@ function _spPortfolio(){
       <div class="sett-sect-title" style="margin-bottom:0;">Position Sizing Method</div>
     </div>
     <div class="sett-sect-sub">How Dotverse calculates recommended position sizes for each signal.</div>
-    <div class="psm-grid">${psmCards.map(p=>`<div class="psm-card${_settPsm===p.id?' sel':''}" onclick="_settPsm='${p.id}';showSettings('portfolio')"><div class="psm-head"><span class="psm-name">${p.name}</span><span class="psm-tag ${p.tag}">${p.tagLabel}</span></div><div class="psm-desc">${p.desc}</div></div>`).join('')}</div>
+    <div class="psm-grid">${psmCards.map(p=>`<div class="psm-card${_settPsm===p.id?' sel':''}" onclick="_settPsm='${p.id}';window._settTouched.portfolio_preset=true;showSettings('portfolio')"><div class="psm-head"><span class="psm-name">${p.name}</span><span class="psm-tag ${p.tag}">${p.tagLabel}</span></div><div class="psm-desc">${p.desc}</div></div>`).join('')}</div>
   </div>
   <div class="sett-sect">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
@@ -6146,12 +6179,13 @@ function _spPortfolio(){
       <div class="sett-sect-title" style="margin-bottom:0;">Rebalance Trigger</div>
     </div>
     <div class="sett-sect-sub">When Dotverse prompts you to rebalance back to target allocation.</div>
-    <div class="reb-grid">${rebCards.map(r=>`<div class="reb-card${_settReb===r.id?' sel':''}" onclick="_settReb='${r.id}';showSettings('portfolio')"><div class="reb-name">${r.name}</div><div class="reb-sub">${r.sub}</div></div>`).join('')}</div>
+    <div class="reb-grid">${rebCards.map(r=>`<div class="reb-card${_settReb===r.id?' sel':''}" onclick="_settReb='${r.id}';window._settTouched.portfolio_rebalance=true;showSettings('portfolio')"><div class="reb-name">${r.name}</div><div class="reb-sub">${r.sub}</div></div>`).join('')}</div>
   </div>
   ${_saveBtn('Save Changes')}`;
 }
 function adjAlloc(i,d){
   _settAlloc[i].pct=Math.max(0,Math.min(100,_settAlloc[i].pct+d));
+  window._settTouched.portfolio_alloc = true;  // F1.14 / F1.13.5 — protect from F1.7 overwrite
   showSettings('portfolio');
 }
 function updPrcSlider(id,val,mn,mx,col){
@@ -9139,6 +9173,61 @@ async function showPortfolio(){
       <div class="pf-card"><div class="pf-card-lbl">Daily Std</div><div class="pf-card-val">${portStd}%</div></div>
       <div class="pf-card"><div class="pf-card-lbl">Positions</div><div class="pf-card-val">${positions.length}</div></div>
     </div>
+    ${(function(){
+      // F1.14 — Target Allocation vs Actual panel.
+      // _settAlloc is [{label,pct}] (Crypto, Stocks, Forex, Commodities, Cash).
+      // positions[].asset_type is one of 'stock', 'crypto', 'forex', 'commodity', 'index'.
+      // Map asset_type → bucket key matching _settAlloc labels.
+      var typeMap = {stock:'stocks', crypto:'crypto', forex:'forex', commodity:'commodities', index:'indices'};
+      var actualByBucket = {};
+      var totalNotional = 0;
+      (positions||[]).forEach(function(p){
+        var n = (parseFloat(p.entry_price)||0) * (parseFloat(p.size)||0);
+        if(n <= 0) return;
+        var bucket = typeMap[p.asset_type] || 'other';
+        actualByBucket[bucket] = (actualByBucket[bucket]||0) + n;
+        totalNotional += n;
+      });
+      var alloc = Array.isArray(_settAlloc) ? _settAlloc : [];
+      var anyDrift = false;
+      var rows = alloc.map(function(a){
+        var key = String(a.label||'').toLowerCase();
+        var actualNotional = actualByBucket[key] || 0;
+        var actualPct = totalNotional > 0 ? (actualNotional/totalNotional*100) : null;
+        var target = +a.pct || 0;
+        var drift = (actualPct == null) ? null : Math.abs(actualPct - target);
+        var status, statusCol;
+        if(actualPct == null){ status = '—'; statusCol = 'rgba(237,232,216,.4)'; }
+        else if(drift > 5){ status = (actualPct > target ? 'over' : 'under') + ' by ' + drift.toFixed(1) + '%'; statusCol = '#e8706e'; anyDrift = true; }
+        else if(drift > 2){ status = 'within ' + drift.toFixed(1) + '%'; statusCol = '#c9a84c'; }
+        else { status = 'on target'; statusCol = '#5de8a0'; }
+        var actStr = actualPct == null ? '—' : actualPct.toFixed(1) + '%';
+        return '<div style="display:grid;grid-template-columns:1fr 80px 80px 1fr;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(237,232,216,.06);">' +
+          '<span style="font-size:12px;color:rgba(237,232,216,.85);">'+a.label+'</span>' +
+          '<span style="font-family:var(--mono);font-size:12px;color:#c9a84c;text-align:right;">'+target+'%</span>' +
+          '<span style="font-family:var(--mono);font-size:12px;color:rgba(237,232,216,.85);text-align:right;">'+actStr+'</span>' +
+          '<span style="font-size:11px;color:'+statusCol+';">'+status+'</span>' +
+          '</div>';
+      }).join('');
+      var callout = anyDrift
+        ? '<div id="pfRebalanceCallout" style="background:rgba(232,112,110,.1);border:1px solid rgba(232,112,110,.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.2"><path d="M12 2L2 22h20L12 2zM12 9v6M12 18h.01"/></svg>' +
+          '<span style="font-size:12px;color:#e8706e;">Rebalance recommended — at least one asset class drifted &gt;5% from target.</span>' +
+          '</div>'
+        : '';
+      return '<div class="pf-card" id="pfTargetAllocCard" style="margin-bottom:18px;padding:14px 16px;">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
+          '<div><span style="font-size:13px;color:rgba(237,232,216,.85);font-weight:500;">Target Allocation vs Actual</span>' +
+          '<div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:2px;">Preset: '+(_settPsm||'balanced')+' · Rebalance '+(_settReb||'quarterly')+' · Benchmark '+(String(_settBench||'spy').toUpperCase())+'</div></div>' +
+          (totalNotional === 0 ? '<span style="font-size:11px;color:rgba(237,232,216,.4);">No open positions</span>' : '') +
+        '</div>' +
+        callout +
+        '<div style="display:grid;grid-template-columns:1fr 80px 80px 1fr;gap:10px;padding:6px 12px;font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:rgba(237,232,216,.4);text-transform:uppercase;border-bottom:1px solid rgba(237,232,216,.1);">' +
+          '<span>Class</span><span style="text-align:right;">Target</span><span style="text-align:right;">Actual</span><span>Status</span>' +
+        '</div>' +
+        rows +
+        '</div>';
+    })()}
     <div class="pf-body"><div class="pf-pos-card">
       <div class="pf-pos-head"><span class="pf-pos-title">Open Positions</span></div>
       <div style="overflow-x:auto;"><table class="pf-pos-table">
