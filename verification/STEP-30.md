@@ -176,6 +176,48 @@ No further soft spots after this round.
 
 ---
 
+## Third follow-up (F1.14.2 — backend value validation guard, found via failure brainstorm protocol)
+
+**Context:** This was the first time the failure-brainstorm protocol was applied. Brainstorming "Empty / malformed inputs" surfaced a real bug Claude had missed across the original step + 2 follow-ups.
+
+**Bug:** Backend `/api/settings` POST handler accepts `portfolio_alloc` as `dict(body)` — JSON-encodes whatever it receives without value validation. So a value like `"abc"` or `1000` or `-5` lands in the database. When F1.7 reads it, `+s.portfolio_alloc[k]` produces `NaN` or out-of-range numbers. These were assigned directly to `_settAlloc[i].pct` and rendered in the UI as `NaN%` or `1000%`.
+
+**Fix shipped (F1.14.2):**
+```js
+var v = +s.portfolio_alloc[k];
+if(isFinite(v) && v >= 0 && v <= 100){ a.pct = v; changed = true; }
+```
+Per-key validation: bad values silently dropped, valid values still update independently.
+
+**Verification (live):**
+
+Inline test against the guard logic, 9 scenarios:
+
+| Input | Crypto pct after | Pass |
+|---|---|---|
+| `"abc"` | 30 (unchanged) | ✓ |
+| `1000` | 30 (unchanged) | ✓ |
+| `-5` | 30 (unchanged) | ✓ |
+| `NaN` | 30 (unchanged) | ✓ |
+| `50` | 50 | ✓ |
+| `0` | 0 (boundary accepted) | ✓ |
+| `100` | 100 (boundary accepted) | ✓ |
+| `100.5` | 30 (just-out-of-range rejected) | ✓ |
+| Mixed: `{crypto:"abc",stocks:40,forex:1000,commodities:10,cash:-5}` | crypto unchanged, **stocks→40**, forex unchanged, **commodities→10**, cash unchanged | ✓ Per-key independence |
+
+End-to-end with real backend round-trip:
+- POST `{crypto:"abc",stocks:30,forex:15,commodities:10,cash:5}` to backend (backend stored "abc" as-is)
+- Cleared localStorage + reloaded
+- F1.7 fired with guard → Crypto retained valid prior value (NOT NaN); Stocks/Forex/Commodities/Cash all loaded normally
+
+**Without F1.14.2** the same test would have produced `_settAlloc.Crypto.pct = NaN`, rendering as `NaN%` on the Portfolio page.
+
+Account restored after test.
+
+**Failure-brainstorm protocol earned its first catch on the very first application.** The remaining brainstorm items (negative target via tampering, SHORT direction handling, sum>100% allocation) are documented as known limitations rather than fixes — they require either tampering or are defensible interpretations of the data.
+
+---
+
 ## Commit log (this step)
 
 - `1991cde` F1.14: Portfolio settings persist + load + Target Allocation vs Actual panel + rebalance callout (+ touched tracking)
