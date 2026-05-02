@@ -112,6 +112,38 @@ Out of scope: benchmark equity-curve line; cadence (`_settCad`) which has no bac
 
 ---
 
+## Follow-up audit (after "are you sure" prompt)
+
+When pushed, two things I claimed PASS but had not directly verified:
+
+**1. F1.7 actually skips touched portfolio fields.** Original c3 only verified the touched flag GETS SET. Not that F1.7 honours it for the 4 portfolio keys.
+
+Verification (live):
+
+| Field | Backend | In-memory (corrupted) | Touched? | After F1.7 logic |
+|---|---|---|---|---|
+| `portfolio_alloc` | `{crypto:50,stocks:25,forex:10,commodities:10,cash:5}` | `[Crypto:99,Stocks:1,Forex:0,Commodities:0,Cash:0]` | ✓ true | **preserved** at `[Crypto:99,Stocks:1,Forex:0,Commodities:0,Cash:0]` |
+| `portfolio_preset` | `aggressive` | `balanced` | ✗ false | **`aggressive`** loaded |
+| `portfolio_rebalance` | `monthly` | `quarterly` | ✗ false | **`monthly`** loaded |
+| `portfolio_benchmark` | `qqq` | `spy` | ✗ false | **`qqq`** loaded |
+
+Per-field independence verified for all 4 portfolio fields. Touched alloc protected; non-touched fields loaded from backend.
+
+**2. Save button labels on Portfolio Settings sub-panel** — F1.13.4 helper is shared across sub-panels but I had only directly verified it on Performance. Re-verified on Portfolio:
+
+| State | Button text |
+|---|---|
+| Original | `"Save Changes"` |
+| Click with `_settLoadedFromBackend=false` | `"Sync failed — refresh"` ✓ |
+| 2.2s reset | `"Save Changes"` ✓ |
+| Click with `_settLoadedFromBackend=true` | `"Saved to device!"` ✓ |
+
+F1.13.4 mechanism works regardless of which sub-panel renders the button.
+
+No further soft spots.
+
+---
+
 ## Commit log (this step)
 
 - `1991cde` F1.14: Portfolio settings persist + load + Target Allocation vs Actual panel + rebalance callout (+ touched tracking)
