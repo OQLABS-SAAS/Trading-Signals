@@ -162,6 +162,30 @@ The `pgCard('annual', ..., 5, 100, 1, ...)` call defines step=1 (existing code, 
 
 ---
 
+## Third follow-up audit (after third "are you sure" prompt)
+
+Pushing once more surfaced a real **pre-existing data-loss bug** that F1.13's Save flow could trigger. F1.7 (the goDash auto-load) was loading chart_theme / chart_type / grid_style / indicator_scheme / perf_target_* from backend — but **NOT** assets_enabled or risk_tolerance.
+
+**The failure path:** user saved `assets_enabled=['stocks']` and `risk_tolerance='conservative'` on backend. Visited on a fresh device (no localStorage). F1.7 fired but skipped these two fields. `_settAssets` defaulted to all 5 classes; `_settRisk` defaulted to `'moderate'`. User opened any Settings sub-panel (perf, chart visuals, etc.) and clicked Save → `_settSaveAll` POSTed the in-memory defaults → backend overwrote saved values with defaults. Silent data loss.
+
+**Fix shipped (`5b75bef` F1.13.1):** F1.7 now loads `assets_enabled` and `risk_tolerance` along with the other settings, syncing both legacy localStorage keys (`dv_sett_assets`, `dv_sett_risk`).
+
+**Verification (live, this session):**
+1. POSTed `{assets_enabled:['stocks'], risk_tolerance:'conservative'}` to backend
+2. Cleared `dv_sett_assets` and `dv_sett_risk` localStorage keys
+3. Reloaded
+4. After F1.7 fired: `_settAssets=['stocks']`, `_settRisk='conservative'`, both localStorage keys synced
+5. Called `_settSaveAll()` without changing anything in UI
+6. Backend GET after save: `assets_enabled=['stocks'], risk_tolerance='conservative'` — **unchanged**
+
+Without F1.13.1 step 6 would have written `['stocks','crypto','forex','commodity','index']` and `'moderate'`. The data-loss path is closed.
+
+This was rooted in F1.2 (assets_enabled wiring) and F1.3 (risk_tolerance wiring) shipping save-only without round-trip load. Catching it now means earlier panels' verification ledgers (if backfilled per the audit pass) should re-test cross-device persistence — not just same-device localStorage clear.
+
+**Account state restored** to original `assets=['stocks','crypto','forex'], risk='aggressive'` after this round.
+
+---
+
 ## Commit log (this step)
 
 - `32875ca` F1.13: Performance targets persist + load on login + render on Performance page (with computable actual-vs-target widgets)
