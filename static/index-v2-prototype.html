@@ -4606,7 +4606,21 @@ function goDash(u){
       // Without this, a slider drag or theme click made during the F1.7 race
       // window gets silently overwritten when the backend response arrives.
       var _t = window._settTouched || {};
-      if(!_t.chart_theme && typeof s.chart_theme === 'string' && s.chart_theme){
+      // F1.14.4 — defense-in-depth enum guards on chart-visuals settings.
+      // Backend handlers for chart_theme / grid_style / indicator_scheme are
+      // str-cap only (no enum check), so DB tampering or schema regression
+      // could put garbage in the GET response. Without these guards, garbage
+      // assigns into _active* and breaks Settings card .sel highlight (no
+      // card highlights when the value doesn't match any card id). Downstream
+      // rendering (_getTheme/_gridOpts/_initUndChart) already falls back to
+      // defaults, so the chart still draws — but the Settings UI looks broken.
+      // chart_type already has backend enum validation (app.py L4393).
+      var _VALID_THEMES   = ['constellation','minimal','terminal','midnight','obsidian','aurora'];
+      var _VALID_GRIDS    = ['subtle','none','dotted','full'];
+      var _VALID_SCHEMES  = ['crystal','mono','vivid','signal'];
+      var _VALID_TYPES    = ['candle','bar','line','area','hollow'];
+      if(!_t.chart_theme && typeof s.chart_theme === 'string' && s.chart_theme
+          && _VALID_THEMES.indexOf(s.chart_theme) >= 0){
         _activeChartTheme = s.chart_theme;
         _settChartTheme   = s.chart_theme;
         try{ localStorage.setItem('dvChartTheme', s.chart_theme); }catch(e){}
@@ -4625,21 +4639,28 @@ function goDash(u){
         try{ _dvWrite('dv_sett_risk', s.risk_tolerance); }catch(e){}
       }
       // F1.10b — also load chart_type so default rendering type follows the user.
-      if(!_t.chart_type && typeof s.chart_type === 'string' && s.chart_type){
+      // F1.14.4 — enum guard for defense-in-depth (backend already enum-validates,
+      // but we add the same guard layer used for theme/grid/scheme for consistency).
+      if(!_t.chart_type && typeof s.chart_type === 'string' && s.chart_type
+          && _VALID_TYPES.indexOf(s.chart_type) >= 0){
         _activeChartType = s.chart_type;
         if(typeof _settChartType !== 'undefined') _settChartType = s.chart_type;
         try{ localStorage.setItem('dvChartType', s.chart_type); }catch(e){}
         try{ _dvWrite('dv_sett_ctype', s.chart_type); }catch(e){}
       }
       // F1.11 — also load grid_style so chart grid follows the user.
-      if(!_t.grid_style && typeof s.grid_style === 'string' && s.grid_style){
+      // F1.14.4 — enum guard.
+      if(!_t.grid_style && typeof s.grid_style === 'string' && s.grid_style
+          && _VALID_GRIDS.indexOf(s.grid_style) >= 0){
         _activeGridStyle = s.grid_style;
         if(typeof _settGridStyle !== 'undefined') _settGridStyle = s.grid_style;
         try{ localStorage.setItem('dvGridStyle', s.grid_style); }catch(e){}
         try{ _dvWrite('dv_sett_grid', s.grid_style); }catch(e){}
       }
       // F1.12 — also load indicator_scheme so RSI line colour follows the user.
-      if(!_t.indicator_scheme && typeof s.indicator_scheme === 'string' && s.indicator_scheme){
+      // F1.14.4 — enum guard.
+      if(!_t.indicator_scheme && typeof s.indicator_scheme === 'string' && s.indicator_scheme
+          && _VALID_SCHEMES.indexOf(s.indicator_scheme) >= 0){
         _activeIndicatorScheme = s.indicator_scheme;
         try{ localStorage.setItem('dvIndScheme', s.indicator_scheme); }catch(e){}
         try{ _dvWrite('dv_sett_ind', s.indicator_scheme); }catch(e){}
