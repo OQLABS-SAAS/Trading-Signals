@@ -9179,19 +9179,45 @@ async function showPortfolio(){
       // positions[].asset_type is one of 'stock', 'crypto', 'forex', 'commodity', 'index'.
       // Map asset_type → bucket key matching _settAlloc labels.
       var typeMap = {stock:'stocks', crypto:'crypto', forex:'forex', commodity:'commodities', index:'indices'};
+      var alloc = Array.isArray(_settAlloc) ? _settAlloc : [];
+      // F1.14.1 — only count positions whose mapped bucket appears as a row in
+      // _settAlloc. Without this, an index position (mapped to 'indices' but no
+      // 'Indices' row exists by default) inflates totalNotional and silently
+      // under-counts every other class's actual %, making rebalance suggestions
+      // wrong. Untracked positions are excluded from the math entirely.
+      var displayedBuckets = {};
+      alloc.forEach(function(a){ displayedBuckets[String(a.label||'').toLowerCase()] = true; });
+      // F1.14.1 — buckets that have at least one asset_type mapping to them.
+      // Cash has no asset_type, so its row will be marked "tracking unavailable"
+      // instead of computed against an always-zero numerator.
+      var trackableBuckets = {};
+      Object.keys(typeMap).forEach(function(k){ trackableBuckets[typeMap[k]] = true; });
       var actualByBucket = {};
       var totalNotional = 0;
       (positions||[]).forEach(function(p){
         var n = (parseFloat(p.entry_price)||0) * (parseFloat(p.size)||0);
         if(n <= 0) return;
-        var bucket = typeMap[p.asset_type] || 'other';
+        var bucket = typeMap[p.asset_type];
+        if(!bucket || !displayedBuckets[bucket]) return; // F1.14.1 — skip untracked
         actualByBucket[bucket] = (actualByBucket[bucket]||0) + n;
         totalNotional += n;
       });
-      var alloc = Array.isArray(_settAlloc) ? _settAlloc : [];
       var anyDrift = false;
       var rows = alloc.map(function(a){
         var key = String(a.label||'').toLowerCase();
+        // F1.14.1 — if this row's bucket has no asset_type mapping (e.g. Cash),
+        // we cannot compute an actual % from positions data. Show a target-only
+        // row with an honest "tracking unavailable" status rather than an
+        // always-zero actual that would always read "under target".
+        if(!trackableBuckets[key]){
+          var target0 = +a.pct || 0;
+          return '<div style="display:grid;grid-template-columns:1fr 80px 80px 1fr;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(237,232,216,.06);">' +
+            '<span style="font-size:12px;color:rgba(237,232,216,.85);">'+a.label+'</span>' +
+            '<span style="font-family:var(--mono);font-size:12px;color:#c9a84c;text-align:right;">'+target0+'%</span>' +
+            '<span style="font-family:var(--mono);font-size:12px;color:rgba(237,232,216,.4);text-align:right;">—</span>' +
+            '<span style="font-size:11px;color:rgba(237,232,216,.4);">tracking unavailable</span>' +
+            '</div>';
+        }
         var actualNotional = actualByBucket[key] || 0;
         var actualPct = totalNotional > 0 ? (actualNotional/totalNotional*100) : null;
         var target = +a.pct || 0;
