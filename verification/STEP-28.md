@@ -106,6 +106,30 @@ Adding EMA / MACD / BB lines to the chart is a feature, not wiring — explicitl
 
 ---
 
+## Follow-up audit (after "are you sure" prompt)
+
+When pressed, I flagged 3 things that the original 10 criteria didn't cover:
+1. **Theme × scheme interaction** (only tested with constellation theme as baseline)
+2. **Toast visual** (read textContent only, no screenshot)
+3. **Settings preview rendered on screen** (HTML check only, no visual)
+
+All three closed:
+
+**1. Theme × scheme — orthogonal:** Held scheme=vivid constant, sampled RSI pane across 4 themes:
+- constellation: vivid `167,139,250 @ 8086` + theme-anchored RSI 70 `232,112,110 @ 2263`
+- obsidian: vivid `167,139,250 @ 8086` + theme RSI 70 `0,255,135 @ 2314`
+- aurora: vivid `167,139,250 @ 8108` + theme RSI 70 `245,62,95 @ 2263`
+- midnight: vivid `167,139,250 @ 8086` + theme RSI 70 `245,115,182 @ 2263`
+Vivid scheme RSI line stable to within 1% across all 4 themes. RSI 70 line correctly follows theme.
+
+**2. Toast visual:** Screenshot captured "Indicator scheme: Vivid" rendered at bottom of viewport on the live deployed app.
+
+**3. Settings preview rendered:** Screenshot of Settings → Chart Visuals → Indicator Colour Scheme section shows the Vivid card highlighted (amber border) and 5 colored swatches rendered visibly below the cards: EMA 9 (#60a5fa blue), EMA 21 (#f59e0b amber), MACD (#34d399 green), RSI (#a78bfa purple), BB (#fb923c orange). Matches Vivid spec.
+
+No remaining soft spots.
+
+---
+
 ## Commit log (this step)
 
 - `956778b` F1.12: indicator_scheme wires to RSI line colour (+ auto-persist + login load + toast + ledger)
