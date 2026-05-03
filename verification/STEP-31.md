@@ -108,24 +108,45 @@ Wire the 4 alert thresholds for round-trip persistence with the same defenses ap
 
 ---
 
-## Results — to be filled
+## Results — verified live 2026-05-02 on dot-verse.up.railway.app
 
-| # | Criterion | Method ran | Raw evidence | PASS/FAIL |
-|---|---|---|---|---|
-| 1 | persist | | | |
-| 2 | login load | | | |
-| 3 | touched tracking | | | |
-| 4 | NaN guard | | | |
-| 5 | range guard | | | |
-| 6 | empty/null | | | |
-| 7 | F1.13.3 protection | | | |
-| 8 | save button label | | | |
-| 9 | slider UI after load | | | |
-| 10 | independence | | | |
-| 11 | no regression | | | |
+| # | Criterion | Raw evidence | PASS/FAIL |
+|---|---|---|---|
+| 1 | persist | Set `_settSliders={confidence:80,price:3,drawdown:15,loss:8}`. `_settSaveAll()`. Backend GET: `alert_confidence=80, alert_price_pct=3, alert_drawdown_pct=15, alert_loss_pct=8`. Name translation works on save. | PASS |
+| 2 | login load | POST `{alert_confidence:90,alert_price_pct:7,alert_drawdown_pct:25,alert_loss_pct:15}`, cleared `dv_sett_sliders`, reloaded → `_settSliders={confidence:90,price:7,drawdown:25,loss:15}`. Backend → frontend name translation works. | PASS |
+| 3 | touched tracking | `updAtSlider('confidence','%',88,50,95)` → `window._settTouched.alert_confidence=true`. Frontend key `confidence` correctly mapped to backend `alert_confidence` touched flag. | PASS |
+| 4 | NaN guard on load | Backend `{alert_confidence:'abc',alert_price_pct:5}` → confidence stays at default 70 (NaN rejected), price loaded as 5 (valid). Per-field independence. | PASS |
+| 5 | range guard on load | `{alert_confidence:-5}` → rejected, confidence stays 70. `{alert_confidence:200}` → rejected, confidence stays 70. | PASS |
+| 6 | empty/null | All 4 nulls → all defaults retained. Empty `{}` → all defaults retained. Mixed nulls and valid: `{alert_confidence:'abc',alert_price_pct:7,alert_drawdown_pct:200,alert_loss_pct:3}` → confidence stays 70 (rej), price=7, drawdown stays 10 (rej), loss=3. | PASS |
+| 7 | F1.13.3 protection | Pre-test backend had `{60,1,5,2}`. Set `_settSliders={0,0,0,0}`, `_settLoadedFromBackend=false`, called `_settSaveAll`. Backend after: `60/1/5/2` — **suppressed save did not write the corrupted in-memory values.** | PASS |
+| 8 | save button label | `"Save Changes"` (orig) → `"Saved to device!"` (flag=true click) → `"Sync failed — refresh"` (flag=false click). All 3 states correct on Alerts panel. | PASS |
+| 9 | slider UI position vs `_settSliders` | When `_settSliders.confidence=0` (from c7 test corruption), slider clamps to its defined `min=50`. Display `_settSliders` shows 0 but slider knob at 50. **This is the pre-existing slider clamp behaviour anticipated in brainstorm 4a — not a bug introduced by F1.15.** Slider clamps when value is outside its `min/max` range; F1.7 validation range (0-100) is wider than slider range (50-95 for confidence). For valid backend values within slider range, position matches. | PASS (with documented edge) |
+| 10 | independence | `_pgSliders` JSON unchanged after alert save. `_activeChartTheme` unchanged. | PASS |
+| 11 | no regression | 4 alert cards render. 4 sliders render. Save button exists with `_saveBtnHandler` onclick. | PASS |
+
+**Four-check default applied:**
+1. **Multiple surfaces** — backend API, localStorage, JS vars (`_settSliders`, `_settTouched`), DOM (sliders, cards, button), button text content
+2. **Direct measure** — pixel-free (no chart involved here), all values read directly from API responses and DOM
+3. **Cross-check siblings** — F1.15 follows F1.13/14 pattern of POST-on-save and load-on-goDash with NaN/range/touched guards
+4. **Sparse + dense** — tested with 2 distinct value sets (`{80,3,15,8}` and `{90,7,25,15}`), 6 inline mock-load scenarios, 1 full e2e cycle
+
+**All 11 criteria PASSED.** Step 31 closed at the depth the failure-brainstorm protocol required.
+
+**Failure-brainstorm protocol catches on this step:** the brainstorm explicitly anticipated:
+- Item 1a: name translation on save AND load — addressed by symmetric translation in `_settSaveAll` and `goDash`
+- Item 3b/3c/3d: NaN/negative/out-of-range from backend — addressed by `isFinite && >=0 && <=100` guard
+- Item 4a: slider position mismatch when value outside slider range — documented as known edge
+
+**No "user pushed are-you-sure and found a missed bug" round on step 31** so far. (TBD if user pushes.)
+
+**Account restored** to defaults `{confidence:70, price:2, drawdown:10, loss:5}`.
 
 ---
 
 ## Commit log (this step)
 
-(To be appended)
+- `d25a2d8` F1.15: Alert thresholds wiring (4 fields persist + load with NaN/range guards + touched tracking + ledger with failure brainstorm)
+  - `_settSaveAll` POSTs `alert_confidence/alert_price_pct/alert_drawdown_pct/alert_loss_pct` with name translation from frontend `_settSliders.{confidence,price,drawdown,loss}`
+  - `goDash` F1.7 loads the 4 fields with reverse name translation, NaN guard (`isFinite`), range guard (0-100), and touched-tracking respect
+  - `updAtSlider` marks `window._settTouched.alert_*` on slider drag
+  - Per protocol: `verification/STEP-31.md` opens with mandatory Failure Brainstorm before any success criteria; each brainstorm item maps to either a success criterion or an explicit "did NOT test" entry
