@@ -11473,12 +11473,32 @@ function _initUndChart(sig){
 
 // ── RSI Divergence canvas overlay ────────────────────────────────────────────
 // Ports the exact divergence trendline rendering from the production app.
-// Backend returns rsi_divergence: { isBull, priceBars, priceVals, rsiBars, rsiVals, label }
+// Backend rsi_divergence shape (BUG-1-AUDIT 2026-05-02 — verified live):
+//   { type: 'bullish'|'bearish'|'hidden_bullish'|'hidden_bearish'|'none',
+//     label, strength, desc,
+//     price_pivot_bars[], price_pivot_vals[], rsi_pivot_bars[], rsi_pivots[],
+//     chart_price_pivot_bars[], chart_rsi_pivot_bars[],   // chart-window remapped
+//     confirm_bar, all[] }
+// Earlier comment in this file stated the response was already camelCase
+// (isBull, priceBars, priceVals, rsiBars, rsiVals) — that's WRONG. A backend
+// refactor renamed the fields and this function was reading undefined for all
+// of them, silently exiting and drawing zero trendlines on every chart.
+// Fix: translate at the boundary. Prefer chart_*_pivot_bars (chart-window
+// remapped, safe to index into chart_dates) over the raw bars (full series).
 function _undDrawDiv(){
   const refs = window._undChartRefs;
   const sig  = window._activeSignal;
   if(!refs||!sig||!sig.rsiDiv) return;
-  const div = sig.rsiDiv;
+  const raw  = sig.rsiDiv;
+  if(!raw || raw.type === 'none') return; // no divergence detected
+  const div = {
+    isBull:    (raw.type === 'bullish' || raw.type === 'hidden_bullish'),
+    priceBars: raw.chart_price_pivot_bars || raw.price_pivot_bars,
+    priceVals: raw.price_pivot_vals,
+    rsiBars:   raw.chart_rsi_pivot_bars   || raw.rsi_pivot_bars,
+    rsiVals:   raw.rsi_pivots,
+    label:     raw.label
+  };
   const canvasP = document.getElementById('undDivPrice');
   const canvasR = document.getElementById('undDivRsi');
   if(!canvasP||!canvasR||!refs.chart||!refs.cs) return;
