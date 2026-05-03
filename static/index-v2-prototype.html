@@ -2200,9 +2200,14 @@ hr, .divider, [class*="-sep"], [class*="-divider"] {
   transition: all .2s;
 }
 .ar-pill.active {
-  background: rgba(237,232,216,.14);
-  border-color: rgba(237,232,216,.82);
-  color: rgba(237,232,216,.82);
+  /* BUG-SCANNER-PILLS-FIX: previous active style used near-white that was
+     invisible against the dark background. Switched to brand amber for clear
+     visual differentiation when an auto-refresh interval is selected. */
+  background: rgba(201,168,76,.14);
+  border-color: rgba(201,168,76,.85);
+  color: #c9a84c;
+  box-shadow: 0 0 0 1px rgba(201,168,76,.25), 0 0 12px rgba(201,168,76,.18);
+  font-weight: 600;
 }
 .ar-pill:hover {
   border-color: rgba(237,232,216,.5);
@@ -4570,7 +4575,14 @@ function arSet(secsOrBtn, btn){
     var secs2 = parseInt(btnEl ? btnEl.dataset.interval : 0) || 0;
     var dot = document.getElementById('arDot');
     if(dot) dot.classList.toggle('show', secs2 !== 0);
-    if(secs2 === 0) return;
+    // BUG-SCANNER-PILLS-FIX: explicit toast so the user knows auto-refresh
+    // was actually configured. The pill style change alone was too subtle.
+    if(secs2 === 0){
+      try{ if(typeof _showToast === 'function') _showToast('Auto-refresh: OFF'); }catch(e){}
+      return;
+    }
+    var lbl = (btnEl && btnEl.textContent ? btnEl.textContent.trim() : (secs2+'s'));
+    try{ if(typeof _showToast === 'function') _showToast('Auto-refresh every ' + lbl + ' — scanner will rescan automatically'); }catch(e){}
     arTimer = setInterval(function(){ if(typeof scRunScan === 'function') scRunScan(); }, secs2 * 1000);
   }
 }
