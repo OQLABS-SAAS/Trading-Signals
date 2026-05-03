@@ -10823,8 +10823,12 @@ function showUnderstand(){
     var pivotLine = (pv.length === 2 && rv.length === 2)
       ? 'Price '+pv[0]+' → '+pv[1]+'  ·  RSI '+rv[0]+' → '+rv[1]
       : '';
-    var label = String(d.label || '').replace(/[<>"']/g, '');
-    var desc  = String(d.desc  || '').replace(/[<>"']/g, '');
+    // BUG-1-AUDIT-FIX-3.1: HTML-escape (entities) instead of strip — backend
+    // desc contains '<' and '>' as comparison operators in plain English
+    // ("RSI made lower low (49.8 < 61.9)"). Stripping breaks the meaning.
+    function _escHtml(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+    var label = _escHtml(d.label || '');
+    var desc  = _escHtml(d.desc  || '');
     return '<div id="undDivPanel" style="background:'+bg+';border:1px solid '+bd+';border-radius:8px;padding:10px 14px;margin-top:8px;display:flex;align-items:flex-start;gap:10px;">'
       + '<div style="width:8px;height:8px;border-radius:50%;background:'+col+';margin-top:5px;flex-shrink:0;"></div>'
       + '<div style="flex:1;min-width:0;">'
