@@ -8157,13 +8157,21 @@ function loadSignalContext(o){
   window._calcPrefill = { entry: o.entry, sl: o.sl, tp: o.tp, tp2: o.tp2, tp3: o.tp3, sym: o.sym };
   window._lastBt = null;   // reset stale backtest from previous signal
   setTimeout(function(){ undRunBacktest(true); }, 300);
-  // Auto-navigate to CONTEXT pre-trade gate
-  setNav('understand');showUnderstand();
+  // BUG-2-AUDIT-FIX (Scanner→Signals chart): fire a fresh /api/analyze via
+  // qpAnalyse so the LWC chart on Understand gets populated with chartDates /
+  // chartPrices. Without this, the abbreviated signal object has no chart
+  // data and _initUndChart falls through to the TV iframe fallback, hiding
+  // the full DotVerse chart + RSI divergence overlay. qpAnalyse handles the
+  // setNav + showUnderstand internally.
+  window._dvTF    = (o.tf || '4H').toLowerCase();
+  window._dvAsset = o.asset || 'auto';
+  qpAnalyse(o.sym, window._dvTF);
 }
 
 function loadScannerSignal(a){
+  var _tf = (_scTFFilter!=='all'?_scTFFilter.toUpperCase():'4H');
   window._activeSignal={
-    sym:a.sym, tf:(_scTFFilter!=='all'?_scTFFilter.toUpperCase():'4H'),
+    sym:a.sym, tf:_tf,
     asset:a.cls||a.asset_type||'auto',
     sig:a.sig||a.s4h||'HOLD', entry:a.entry, sl:a.sl||a.stop_loss,
     tp:a.tp||a.tp1, tp2:a.tp2, tp3:a.tp3,
@@ -8179,7 +8187,12 @@ function loadScannerSignal(a){
   window._calcPrefill={entry:a.entry,sl:a.sl||a.stop_loss,tp:a.tp||a.tp1,tp2:a.tp2,tp3:a.tp3,sym:a.sym};
   window._lastBt = null;   // reset stale backtest from previous signal
   setTimeout(function(){ undRunBacktest(true); }, 300);
-  setNav('understand');showUnderstand();
+  // BUG-2-AUDIT-FIX (Scanner→Signals chart): same pattern as loadSignalContext.
+  // Trigger a fresh analyse so chartDates/chartPrices populate and the LWC
+  // chart renders on Understand instead of the TV iframe fallback.
+  window._dvTF    = _tf.toLowerCase();
+  window._dvAsset = a.cls || a.asset_type || 'auto';
+  qpAnalyse(a.sym, window._dvTF);
 }
 
 
