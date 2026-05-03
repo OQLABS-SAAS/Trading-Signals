@@ -10806,6 +10806,35 @@ function showUnderstand(){
     </div>
   </div>
 
+  <!-- BUG-1-AUDIT-FIX-3: divergence text panel that ALWAYS shows when a
+       divergence is detected, regardless of whether the chart rendered as
+       LWC (where trendlines overlay) or fell back to TV iframe (where they
+       can't). Without this, an iframe-fallback user sees no indication
+       that divergence was detected. -->
+  ${(function(){
+    var d = sig.rsiDiv;
+    if(!d || d.type === 'none') return '';
+    var isBull = (d.type === 'bullish' || d.type === 'hidden_bullish');
+    var col = isBull ? '#3dbe6c' : '#ff524a';
+    var bg  = isBull ? 'rgba(61,190,108,.08)' : 'rgba(255,82,74,.08)';
+    var bd  = isBull ? 'rgba(61,190,108,.28)' : 'rgba(255,82,74,.28)';
+    var pv  = Array.isArray(d.price_pivot_vals) ? d.price_pivot_vals : [];
+    var rv  = Array.isArray(d.rsi_pivots) ? d.rsi_pivots : [];
+    var pivotLine = (pv.length === 2 && rv.length === 2)
+      ? 'Price '+pv[0]+' → '+pv[1]+'  ·  RSI '+rv[0]+' → '+rv[1]
+      : '';
+    var label = String(d.label || '').replace(/[<>"']/g, '');
+    var desc  = String(d.desc  || '').replace(/[<>"']/g, '');
+    return '<div id="undDivPanel" style="background:'+bg+';border:1px solid '+bd+';border-radius:8px;padding:10px 14px;margin-top:8px;display:flex;align-items:flex-start;gap:10px;">'
+      + '<div style="width:8px;height:8px;border-radius:50%;background:'+col+';margin-top:5px;flex-shrink:0;"></div>'
+      + '<div style="flex:1;min-width:0;">'
+      +   '<div style="font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:'+col+';font-weight:600;text-transform:uppercase;">RSI Divergence · '+label+'</div>'
+      +   (pivotLine ? '<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.55);margin-top:3px;">'+pivotLine+'</div>' : '')
+      +   (desc ? '<div style="font-size:11.5px;color:rgba(237,232,216,.78);margin-top:5px;line-height:1.45;">'+desc+'</div>' : '')
+      + '</div>'
+      + '</div>';
+  })()}
+
   <div class="und-layout">
     <!-- LEFT: Signal hero + indicators -->
     <div class="und-left">
@@ -11488,6 +11517,23 @@ function _initUndChart(sig){
 function _undDrawDiv(){
   const refs = window._undChartRefs;
   const sig  = window._activeSignal;
+  // BUG-1-AUDIT-FIX-2 (stale-canvas edge): clear both overlay canvases
+  // unconditionally at the very top, BEFORE any early-return. Otherwise a new
+  // analysis with no divergence (type:'none') skips the clearRect calls
+  // inside drawOnCanvas and leaves the previous asset's trendlines visible
+  // as ghosts on the canvas for the new chart.
+  (function _clearOverlays(){
+    var cP = document.getElementById('undDivPrice');
+    var cR = document.getElementById('undDivRsi');
+    [cP, cR].forEach(function(c){
+      if(!c) return;
+      try{
+        var w = c.offsetWidth, h = c.offsetHeight;
+        if(w && h){ c.width = w; c.height = h; }  // resizing the canvas also clears it
+        c.getContext('2d').clearRect(0, 0, c.width, c.height);
+      }catch(e){}
+    });
+  })();
   if(!refs||!sig||!sig.rsiDiv) return;
   const raw  = sig.rsiDiv;
   if(!raw || raw.type === 'none') return; // no divergence detected

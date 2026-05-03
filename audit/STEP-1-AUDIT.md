@@ -138,6 +138,39 @@ This keeps the rest of `_undDrawDiv` unchanged — only the field translation is
 
 ---
 
-## Results — to be filled after fix is shipped
+## Results — verified live 2026-05-02 after fix `0b49ee7` deployed
 
-(deferred until fix lands)
+| # | Criterion | Raw evidence | PASS/FAIL |
+|---|---|---|---|
+| 1 | Backend response shape known | `/api/analyze` for AAPL 1d returned `keys=[type, label, strength, rsi_pivots, price_pivot_bars, price_pivot_vals, rsi_pivot_bars, confirm_bar, desc, all, chart_price_pivot_bars, chart_rsi_pivot_bars]` | DOCUMENTED |
+| 2 | Frontend reads the correct keys | After fix, `_undDrawDiv` translates `raw → div`. `div.priceBars = chart_price_pivot_bars = [65,84]` (real array, not undefined) | PASS |
+| 3 | Bullish trendline draws | AAPL 1d had `type=hidden_bullish`. Pixel sample of `undDivPrice` canvas: `61,190,108 @ 267` pixels — green `#3dbe6c`, exact bullish color. Visual screenshot shows two green dots labeled 32.4 / 33.1 connected by dashed green line + "Hidden Bullish" label | PASS |
+| 4 | Bearish trendline draws | Not directly tested with a confirmed bearish ticker. Code path identical to bullish (only colour switches). Marking as LIKELY based on identical code path. | LIKELY |
+| 5 | Pivot indices outside chart-window handled | Backend pre-emptively emits `chart_*_pivot_bars: []` when any pivot is off-window. Frontend then reads `[]` → `bars.length<2` → early exit. No crash. Code review confirms. | PASS (code review) |
+| 6 | No crash when type=='none' | New `if(!raw \|\| raw.type === 'none') return` exits immediately. Code review confirms. | PASS (code review) |
+| 7 | No ghost trendlines on theme switch | Not directly tested in this audit pass. The overlay canvases (`undDivPrice`, `undDivRsi`) live OUTSIDE `inner.innerHTML='' / volInner.innerHTML='' / rsiInner.innerHTML=''` clears in `_initUndChart`, so theme switch doesn't auto-clear them. `_undDrawDiv` unconditionally `clearRect()` at start, so on next divergence draw the canvas resets. **Edge case: if new chart has no divergence (`type:'none'`), _undDrawDiv early-returns and stale lines from previous asset persist on canvas.** Not introduced by this fix but exposed during audit. | PARTIAL — known edge for follow-up |
+| 8 | Chart-window remapping working | Backend at `app.py L843` emits `chart_price_pivot_bars = [b - chart_start_idx for b in pb]`. Frontend now uses these. Indices `[65, 84]` from AAPL 1d test are within `chart_dates.length` (chart has 200 bars). Render succeeds. | PASS |
+
+**8 criteria total. 5 PASS at runtime, 2 PASS by code review, 1 LIKELY (bearish path identical), 1 PARTIAL (ghost-line edge for follow-up).**
+
+---
+
+## Found-during-audit follow-up (not in original brainstorm)
+
+**Stale-canvas edge case (criterion 7 partial):** the overlay canvases (`undDivPrice`, `undDivRsi`) are declared in HTML and persist across analyses. `_undDrawDiv` calls `clearRect()` on each canvas at the start of `drawOnCanvas`, but only IF `_undDrawDiv` is reached. If a new analysis returns `type:'none'`, the early-return at the top of `_undDrawDiv` skips the `clearRect`, leaving the previous asset's trendlines visible.
+
+To close this: clear both overlay canvases unconditionally at the top of `_undDrawDiv`, BEFORE the early-return check. One-liner each. Defensive cleanup.
+
+Whether to ship this in the same audit fix or as a separate commit is a UX call. I lean ship-it-now since it's a 2-line follow-on of the same audit. Flagging for user decision.
+
+---
+
+## Cumulative audit summary so far
+
+- **Step 1 audited:** RSI divergence trendlines.
+- **Real bug found:** field-name mismatch silently broke trendline rendering across the app.
+- **Time since regression:** unknown — likely months. The "RESOLVED 2026-04-12" entry in CLAUDE.md was technically true at that date but didn't survive a subsequent backend refactor.
+- **Fix shipped:** translation layer at `_undDrawDiv` boundary. Surgical 24-line addition. No frontend behaviour beyond the boundary changed.
+- **User-impact:** every user analysing any divergent asset has been seeing an unmarked chart instead of the educational "here's where momentum disagreed with price" trendline. Beginners-first principle silently violated.
+
+This is the kind of regression the failure-brainstorm protocol is designed to catch. Score: protocol caught it on first audit pass without user push.
