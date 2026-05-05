@@ -4606,6 +4606,7 @@ function goDash(u){
   showView('vDash'); showMarket(); setNav('market'); startDashClock(); initTier(); _initStratMode();
   // Post-login initialisation — mirrors v1 unlockApp
   try{ _renderSessionBar(); }catch(e){}
+  _refreshForexRates(); // fire-and-forget — pre-warms cross-pair pip conversion cache
   // F1.7 — load saved global settings on login so chart theme (and future
   // global prefs) apply on every device without needing localStorage. Syncs
   // both _activeChartTheme and _settChartTheme to the same backend value to
@@ -11873,6 +11874,48 @@ function _getUserBaseRisk(){
   }catch(e){}
   return 1.0;
 }
+
+// ── Forex cross-pair USD conversion rates ─────────────────────────────
+// Cross pairs (EURJPY, GBPJPY, AUDJPY, EURGBP etc.) produce pip values in
+// the counter currency. To show USD pip values, we need live conversion
+// rates. Fetched once on app init from /api/prices, with sensible defaults
+// for the pre-fetch window.
+window._forexUsdRates = {USDCAD:1.35,USDCHF:0.90,USDJPY:150,USDINR:83,
+                          USDCNH:7.2,USDMXN:17,EURUSD:1.08,GBPUSD:1.27,
+                          AUDUSD:0.67,NZDUSD:0.61};
+function _forexUsdRate(counter){
+  // Returns the multiplier to convert pip value from counter currency to USD.
+  // For counter=JPY: 1 pip = 0.01 JPY * 100k = 1000 JPY. USD value = 1000 / USDJPY
+  // For counter=GBP: 1 pip = 0.0001 GBP * 100k = 10 GBP. USD value = 10 * GBPUSD
+  var r=window._forexUsdRates||{};
+  switch(counter){
+    case 'USD': return 1;
+    case 'JPY': return r.USDJPY ? 1/r.USDJPY : 1/150;
+    case 'GBP': return r.GBPUSD || 1.27;
+    case 'EUR': return r.EURUSD || 1.08;
+    case 'CHF': return r.USDCHF ? 1/r.USDCHF : 1/0.9;
+    case 'AUD': return r.AUDUSD || 0.67;
+    case 'NZD': return r.NZDUSD || 0.61;
+    case 'CAD': return r.USDCAD ? 1/r.USDCAD : 1/1.35;
+    case 'INR': return r.USDINR ? 1/r.USDINR : 1/83;
+    case 'CNH': return r.USDCNH ? 1/r.USDCNH : 1/7.2;
+    case 'MXN': return r.USDMXN ? 1/r.USDMXN : 1/17;
+    default: return 1;
+  }
+}
+async function _refreshForexRates(){
+  try{
+    var r=await dvFetch('/api/prices',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tickers:['EURUSD','GBPUSD','USDJPY','AUDUSD','NZDUSD',
+        'USDCAD','USDCHF','USDINR','USDCNH','USDMXN']})});
+    if(r&&typeof r==='object'){
+      Object.keys(r).forEach(function(k){
+        var t=k.toUpperCase(); var p=parseFloat(r[k]);
+        if(isFinite(p)&&p>0){ window._forexUsdRates[t]=p; }
+      });
+    }
+  }catch(e){ /* keep defaults */ }
+}
 function szRiskRestore(){
   try{
     var stored = parseFloat(localStorage.getItem('dotverse_default_risk'));
@@ -12691,7 +12734,20 @@ function szCalc(){
 
   if(assetType==='forex'){
     const isUSDBase=ticker.startsWith('USD')&&!ticker.endsWith('USD');
-    const pipValPerLot=isUSDBase?(pipSize/(entry||1))*contractSize:pipSize*contractSize;
+    const isUSDQuote=ticker.endsWith('USD');
+    let pipValPerLot;
+    if(isUSDBase){
+      pipValPerLot=(pipSize/(entry||1))*contractSize;
+    } else if(!isUSDQuote){
+      // Cross pair (e.g. EURJPY, GBPJPY, AUDJPY, EURGBP): pip value is in
+      // counter currency. Convert to USD using cached rates — fall back to
+      // sensible defaults if rates haven't loaded yet.
+      var counter=ticker.slice(-3);
+      var convRate=_forexUsdRate(counter);
+      pipValPerLot=pipSize*contractSize*convRate;
+    } else {
+      pipValPerLot=pipSize*contractSize;
+    }
     lots=moneyAtRisk/(slPips*pipValPerLot);
     posSize=lots*contractSize;
     posVal=posSize*(assetPrice||entry);
