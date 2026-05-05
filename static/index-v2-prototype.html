@@ -6707,11 +6707,15 @@ function updateFlowBadge() {
     if (btTrades >= 30) {
       var p = bt.win_rate / 100;
       var q = 1 - p;
-      // Prefer explicit avg_win_r / avg_loss_r; fall back to avg_rr
-      var b = (bt.avg_win_r > 0 && bt.avg_loss_r > 0)
-              ? (bt.avg_win_r / bt.avg_loss_r)
-              : (bt.avg_rr || 2.0);
-      if (b > 0) {
+      // Kelly requires real realised win/loss ratio from backtest trades.
+      // avg_win_r and avg_loss_r are computed from actual trade outcomes;
+      // if either is missing or zero, the b parameter is unreliable and
+      // Kelly is skipped — no fabricated fallback.
+      var b = null;
+      if (bt.avg_win_r > 0 && bt.avg_loss_r > 0) {
+        b = bt.avg_win_r / bt.avg_loss_r;
+      }
+      if (b !== null && b > 0) {
         var fullKelly = p - q / b;
         var halfKelly = fullKelly / 2;
         if (halfKelly > 0) {
