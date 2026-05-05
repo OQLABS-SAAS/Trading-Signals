@@ -6123,13 +6123,13 @@ def landing_stats():
                 return jsonify({
                     "total_signals": total,
                     "accuracy_pct": acc_pct,
-                    "source": "live — signal_history table"
+                    "confirmed_count": confirmed,
                 })
             finally:
                 db.close()
-        return jsonify({"total_signals": None, "accuracy_pct": None, "source": "database not available"})
+        return jsonify({"total_signals": None, "accuracy_pct": None, "confirmed_count": None})
     except Exception as e:
-        return jsonify({"total_signals": None, "accuracy_pct": None, "source": f"error: {e}"})
+        return jsonify({"total_signals": None, "accuracy_pct": None, "confirmed_count": None, "error": str(e)})
 
 
 # ─── Pine Script endpoint ────────────────────────────────────────────────────
