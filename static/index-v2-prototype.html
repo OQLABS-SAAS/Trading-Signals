@@ -10449,30 +10449,30 @@ async function showNews(){
     cat:categoryMap[a.category]||'macro', catLabel:(a.category||'MACRO').toUpperCase(),
     h:a.headline||'', time:_timeAgo(a.datetime||0), sent:sentMap[a.sentiment]||'neut'
   }));
-  if(!featuredNews.length) featuredNews=[{cat:'macro',catLabel:'INFO',h:'No news articles available',body:'Check back later — news feed updates every 10 minutes.',src:'DotVerse',time:'',sent:'neut'}];
+  if(!featuredNews.length && _newsFilter==='all') featuredNews=[{cat:'macro',catLabel:'INFO',h:'No news articles available',body:'Check back later — news feed updates every 10 minutes.',src:'DotVerse',time:'',sent:'neut'}];
   if(!listNews.length) listNews=[];
-  const filtered=_newsFilter==='all'?listNews:listNews.filter(n=>n.cat===_newsFilter);
-  const filteredFeat=_newsFilter==='all'?featuredNews:featuredNews.filter(n=>n.cat===_newsFilter);
-  const catPills=newsCats.map(c=>`<button class="news-filter-pill${_newsFilter===c.k?' on':''}" onclick="_newsFilter='${c.k}';showNews()">${c.l}</button>`).join('');
+  var filtered=_newsFilter==='all'?listNews:listNews.filter(function(n){return n.cat===_newsFilter;});
+  var filteredFeat=_newsFilter==='all'?featuredNews:featuredNews.filter(function(n){return n.cat===_newsFilter;});
+  var catPills=newsCats.map(function(c){return '<button class="news-filter-pill' + (_newsFilter===c.k?' on':'') + '" onclick="_newsFilter=\''+c.k+'\';showNews()">' + c.l + '</button>';}).join('');
 
-  const featCards=(filteredFeat.length?filteredFeat:featuredNews).map(n=>`<div class="news-feat">
-    <div class="news-feat-cat ${n.cat}">${n.catLabel}</div>
-    <div class="news-feat-h">${n.h}</div>
-    <div class="news-feat-body">${n.body}</div>
+  var featCards=filteredFeat.length ? filteredFeat.map(function(n){return '<div class="news-feat">
+    <div class="news-feat-cat ' + n.cat + '">' + n.catLabel + '</div>
+    <div class="news-feat-h">' + n.h + '</div>
+    <div class="news-feat-body">' + n.body + '</div>
     <div class="news-feat-foot">
-      <span class="news-feat-src">${n.src}</span>
+      <span class="news-feat-src">' + n.src + '</span>
       <span style="color:var(--t3);font-size:11px;">·</span>
-      <span class="news-feat-time">${n.time}</span>
-      <span class="news-sent ${n.sent}">${n.sent.charAt(0).toUpperCase()+n.sent.slice(1)}</span>
+      <span class="news-feat-time">' + n.time + '</span>
+      <span class="news-sent ' + n.sent + '">' + (n.sent.charAt(0).toUpperCase()+n.sent.slice(1)) + '</span>
     </div>
-  </div>`).join('');
+  </div>';}).join('') : '<div style="color:rgba(237,232,216,.4);padding:16px;text-align:center;font-size:12px;">No articles for this category — try a different filter.</div>';
 
-  const listRows=filtered.map(n=>`<div class="news-list-row">
-    <div class="news-list-cat"><span class="news-feat-cat ${n.cat}" style="font-size:9.5px;padding:1px 7px;">${n.catLabel}</span></div>
-    <span class="news-list-h">${n.h}</span>
-    <span class="news-sent ${n.sent}" style="font-size:10px;padding:1px 7px;flex-shrink:0;">${n.sent.charAt(0).toUpperCase()+n.sent.slice(1)}</span>
-    <span class="news-list-time">${n.time} ago</span>
-  </div>`).join('');
+  var listRows=filtered.length ? filtered.map(function(n){return '<div class="news-list-row">
+    <div class="news-list-cat"><span class="news-feat-cat ' + n.cat + '" style="font-size:9.5px;padding:1px 7px;">' + n.catLabel + '</span></div>
+    <span class="news-list-h">' + n.h + '</span>
+    <span class="news-sent ' + n.sent + '" style="font-size:10px;padding:1px 7px;flex-shrink:0;">' + (n.sent.charAt(0).toUpperCase()+n.sent.slice(1)) + '</span>
+    <span class="news-list-time">' + n.time + ' ago</span>
+  </div>';}).join('') : '<div style="color:rgba(237,232,216,.35);padding:8px;text-align:center;font-size:11px;">No articles in this category.</div>';
 
   const tickers=[
     {sym:'BTC',cnt:'12 stories',sent:'bull'},{sym:'NVDA',cnt:'8 stories',sent:'bull'},
