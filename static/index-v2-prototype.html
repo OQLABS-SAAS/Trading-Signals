@@ -4781,7 +4781,7 @@ function goDash(u){
   }
 }
 function _initStratMode(){
-  const saved = window._stratMode || 'scalp';
+  const saved = window._stratMode || 'all';
   const btn = document.getElementById('sm-'+saved);
   if(btn){ document.querySelectorAll('.strat-pill').forEach(p=>p.classList.remove('active')); btn.classList.add('active'); }
   const hints = { scalp:'15m – 1H · intraday entries', day:'1H – 4H · close same day', swing:'4H – 1D · hold 2–10 days', position:'1D – 1W · hold weeks / months' };
@@ -8620,7 +8620,7 @@ function _mktRenderCockpit(){
   if(lblEl)   lblEl.textContent = sessLabel + ' · ' + new Date().toUTCString().slice(17,22) + ' UTC';
 
   const eventRisk = (utcHr>=12&&utcHr<=14)||(utcHr>=7&&utcHr<=8);
-  const curMode = window._stratMode || 'scalp';
+  const curMode = window._stratMode || 'all';
 
   const modes = [
     { id:'scalp',    label:'Scalp',       tf:'15m – 1H',
@@ -8866,12 +8866,12 @@ async function _mktFetchTopSignals(){
 
   /* Fetch + minimum 2.5s display — run both in parallel */
   let results = [];
-  const minWait = new Promise(function(r){ setTimeout(r, 2500); });
+  const minWait = new Promise(function(r){ setTimeout(r, 800); });
   const fetchData = (async function(){
     try {
       const res = await Promise.race([
         dvFetch('/api/scan-list', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ tickers: tickers, timeframe: '4H', asset_types: ['crypto','crypto','crypto','equity','equity','forex','commodity'] })}),
-        new Promise(function(r){ setTimeout(function(){ r(null); }, 10000); })
+        new Promise(function(r){ setTimeout(function(){ r(null); }, 5000); })
       ]);
       if(res && res.results) return res.results.filter(function(r){ return r.signal && !r.error; });
     } catch(e){ /* silent */ }
