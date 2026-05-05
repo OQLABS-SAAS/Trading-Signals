@@ -4795,9 +4795,9 @@ function _loadLandingStats(){
     var s=document.getElementById('landStatSignals');
     var a=document.getElementById('landStatAccuracy');
     var src=document.getElementById('landStatSource');
-    if(d.total_signals!=null){
+    if(d.total_signals!=null && isFinite(d.total_signals)){
       if(s) s.textContent = d.total_signals.toLocaleString();
-      if(a) a.textContent = d.accuracy_pct!=null ? d.accuracy_pct+'%' : '—';
+      if(a) a.textContent = d.accuracy_pct!=null && isFinite(d.accuracy_pct) ? d.accuracy_pct+'%' : '—';
       if(src) src.textContent = d.source||'live';
     } else {
       if(s) s.textContent = 'Live';
@@ -9074,12 +9074,12 @@ function mktToggleRow(rowId, rowEl){
 async function _loadFearGreed(){
   try{
     var r = await dvFetch('/api/fear-greed');
-    if(!r || r.value == null) return;
+    if(!r || r.value == null || isNaN(r.value)) return;
     var val = document.getElementById('mktFearGreedVal');
     var pin = document.getElementById('mktFearGreedPin');
     var lbl = document.getElementById('mktFearGreedLbl');
     if(val){ val.textContent = r.value; val.style.color = r.classification === 'Fear' ? '#e8706e' : r.classification === 'Greed' ? '#5de8a0' : 'rgba(237,232,216,.82)'; }
-    if(pin) pin.style.left = Math.min(100, Math.max(0, r.value)) + '%';
+    if(pin) pin.style.left = Math.min(100, Math.max(0, isFinite(r.value) ? r.value : 50)) + '%';
     if(lbl) lbl.textContent = 'Fear & Greed Index' + (r.classification ? ' · ' + r.classification : '');
   }catch(e){}
 }
@@ -9091,8 +9091,10 @@ async function _loadSectors(){
     r.sectors.forEach(function(s, i){
       var bar = document.getElementById('mktSectorBar'+i);
       var val = document.getElementById('mktSectorVal'+i);
-      var pct = s.change_pct != null ? Math.round((s.change_pct + 3) / 6 * 100) : 0;
-      var displayPct = s.change_pct != null ? (s.change_pct>=0?'+':'')+s.change_pct.toFixed(1)+'%' : '—';
+      var chg = parseFloat(s.change_pct);
+      if(!isFinite(chg)) chg = null;
+      var pct = chg != null ? Math.min(100, Math.max(0, Math.round((chg + 3) / 6 * 100))) : 0;
+      var displayPct = chg != null ? (chg>=0?'+':'')+chg.toFixed(1)+'%' : '—';
       if(bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
       if(val) val.textContent = displayPct;
     });

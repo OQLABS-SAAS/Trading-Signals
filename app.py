@@ -6027,8 +6027,12 @@ def sector_performance():
             if len(hist) >= 2:
                 prev_close = float(hist["Close"].iloc[-2])
                 curr_price = float(hist["Close"].iloc[-1])
-                chg = round((curr_price - prev_close) / prev_close * 100, 2)
-                sectors.append({"name": name, "etf": etf, "change_pct": chg})
+                import math
+                if prev_close > 0 and not math.isnan(curr_price) and not math.isnan(prev_close):
+                    chg = round((curr_price - prev_close) / prev_close * 100, 2)
+                    sectors.append({"name": name, "etf": etf, "change_pct": chg if math.isfinite(chg) else None})
+                else:
+                    sectors.append({"name": name, "etf": etf, "change_pct": None})
             else:
                 sectors.append({"name": name, "etf": etf, "change_pct": None})
         except Exception:
