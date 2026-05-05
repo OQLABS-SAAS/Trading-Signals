@@ -8406,22 +8406,22 @@ function showMarket(){
     </div>`;
   }).join('');
 
-  /* ── Sector bars ── */
+  /* ── Sector bars — placeholder until live fetch ── */
   const sectors=[
-    {n:'Technology', v:72, col:'#c9a84c',  glow:'rgba(201,168,76,.4)'},
-    {n:'Healthcare', v:58, col:'#62f29d',  glow:'rgba(98,242,157,.35)'},
-    {n:'Financials', v:64, col:'rgba(237,232,216,.82)', glow:'rgba(237,232,216,.26)'},
-    {n:'Consumer',   v:51, col:'rgba(237,232,216,.55)', glow:'rgba(237,232,216,.22)'},
-    {n:'Energy',     v:44, col:'rgba(237,232,216,.38)',glow:'rgba(237,232,216,.15)'},
-    {n:'Real Estate',v:39, col:'#f07070',  glow:'rgba(240,112,112,.35)'},
+    {n:'Technology', v:'—', col:'#c9a84c',  glow:'rgba(201,168,76,.4)'},
+    {n:'Healthcare', v:'—', col:'#62f29d',  glow:'rgba(98,242,157,.35)'},
+    {n:'Financials', v:'—', col:'rgba(237,232,216,.82)', glow:'rgba(237,232,216,.26)'},
+    {n:'Consumer',   v:'—', col:'rgba(237,232,216,.55)', glow:'rgba(237,232,216,.22)'},
+    {n:'Energy',     v:'—', col:'rgba(237,232,216,.38)',glow:'rgba(237,232,216,.15)'},
+    {n:'Real Estate',v:'—', col:'#f07070',  glow:'rgba(240,112,112,.35)'},
   ];
-  const sectorBars=sectors.map(s=>`
+  const sectorBars=sectors.map((s,i)=>`
     <div class="mkt-bar-row">
       <div class="mkt-bar-lbl">${s.n}</div>
       <div class="mkt-bar-track">
-        <div class="mkt-bar-fill" style="width:${s.v}%;background:${s.col};--mkt-bar-glow:${s.glow};box-shadow:0 0 8px ${s.glow};"></div>
+        <div class="mkt-bar-fill" id="mktSectorBar${i}" style="width:0%;background:${s.col};--mkt-bar-glow:${s.glow};box-shadow:0 0 8px ${s.glow};transition:width .6s ease-out;"></div>
       </div>
-      <div class="mkt-bar-val">${s.v}</div>
+      <div class="mkt-bar-val" id="mktSectorVal${i}">${s.v}</div>
     </div>`).join('');
 
   /* ── Economic calendar ── */
@@ -8625,7 +8625,7 @@ function showMarket(){
     });
   });
   /* Fetch live signals — fires after DOM is painted */
-  setTimeout(function(){ _mktFetchTopSignals(); _mktRenderCockpit(); _mktUpdateLiveData(); _loadFearGreed(); }, 50);
+  setTimeout(function(){ _mktFetchTopSignals(); _mktRenderCockpit(); _mktUpdateLiveData(); _loadFearGreed(); _loadSectors(); }, 50);
 }
 
 function _mktRenderCockpit(){
@@ -9081,6 +9081,21 @@ async function _loadFearGreed(){
     if(val){ val.textContent = r.value; val.style.color = r.classification === 'Fear' ? '#e8706e' : r.classification === 'Greed' ? '#5de8a0' : 'rgba(237,232,216,.82)'; }
     if(pin) pin.style.left = Math.min(100, Math.max(0, r.value)) + '%';
     if(lbl) lbl.textContent = 'Fear & Greed Index' + (r.classification ? ' · ' + r.classification : '');
+  }catch(e){}
+}
+
+async function _loadSectors(){
+  try{
+    var r = await dvFetch('/api/sectors');
+    if(!r || !Array.isArray(r.sectors)) return;
+    r.sectors.forEach(function(s, i){
+      var bar = document.getElementById('mktSectorBar'+i);
+      var val = document.getElementById('mktSectorVal'+i);
+      var pct = s.change_pct != null ? Math.round((s.change_pct + 3) / 6 * 100) : 0;
+      var displayPct = s.change_pct != null ? (s.change_pct>=0?'+':'')+s.change_pct.toFixed(1)+'%' : '—';
+      if(bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+      if(val) val.textContent = displayPct;
+    });
   }catch(e){}
 }
 
@@ -10409,26 +10424,33 @@ async function showAlerts(){
 // NEWS PAGE
 // ══════════════════════════════════════════════════════════════
 var _newsFilter='all';
-function showNews(){
+async function showNews(){
   const el=document.getElementById('dashContent'); if(!el) return;
-  const newsCats=[
-    {k:'all',l:'All'},{k:'macro',l:'Macro'},{k:'crypto',l:'Crypto'},{k:'equity',l:'Equities'},{k:'forex',l:'Forex'}
-  ];
-  const featuredNews=[
-    {cat:'macro',catLabel:'MACRO',h:'Fed holds rates — signals 2 cuts possible in H2 2026',body:'Federal Reserve chair Jerome Powell held the federal funds rate at 5.25–5.50% on Thursday, noting that while inflation has cooled, the committee wants more confidence before cutting. Markets rallied on the "2 cuts" language.',src:'Reuters',time:'1h ago',sent:'bull'},
-    {cat:'crypto',catLabel:'CRYPTO',h:'Bitcoin ETF inflows hit $1.2B this week — institutional demand accelerating',body:'Spot Bitcoin ETFs recorded their highest weekly inflows since March, with BlackRock\'s IBIT alone absorbing $640M. On-chain data shows long-term holders accumulating, with exchange balances at 5-year lows.',src:'CoinDesk',time:'2h ago',sent:'bull'},
-    {cat:'equity',catLabel:'EQUITY',h:'NVIDIA beats Q1 earnings by 18% — data center revenue up 427% YoY',body:'NVIDIA reported revenue of $26B versus estimates of $22.1B, driven by explosive data center demand. CEO Jensen Huang guided Q2 above consensus, sending shares up 9% in after-hours.',src:'Bloomberg',time:'3h ago',sent:'bull'},
-  ];
-  const listNews=[
-    {cat:'forex',catLabel:'FOREX',h:'GBP/USD extends losses on BoE dovish tone',time:'30m',sent:'bear'},
-    {cat:'macro',catLabel:'MACRO',h:'US jobless claims rise slightly — labour market cooling',time:'45m',sent:'neut'},
-    {cat:'equity',catLabel:'EQUITY',h:'Tesla unveils robotaxi — stock up 4% pre-market',time:'1h',sent:'bull'},
-    {cat:'crypto',catLabel:'CRYPTO',h:'Ethereum Dencun upgrade reduces L2 fees by 90%',time:'2h',sent:'bull'},
-    {cat:'macro',catLabel:'MACRO',h:'China PMI misses expectations — risk-off sentiment grows',time:'3h',sent:'bear'},
-    {cat:'forex',catLabel:'FOREX',h:'EUR/USD holds 1.08 support despite weak German data',time:'4h',sent:'neut'},
-    {cat:'equity',catLabel:'EQUITY',h:'Apple supplier TSMC raises full-year guidance',time:'5h',sent:'bull'},
-    {cat:'macro',catLabel:'MACRO',h:'ECB keeps rates unchanged — inflation at 2.2%',time:'6h',sent:'neut'},
-  ];
+
+  // Fetch live news — no hardcoded fallback
+  var articles=[];
+  try{ var nd=await dvFetch('/api/news'); if(nd&&Array.isArray(nd.articles)) articles=nd.articles; }catch(e){}
+  // Format relative time
+  function _timeAgo(ts){
+    var diff=Math.floor((Date.now()/1000 - ts) / 3600);
+    if(diff<1) return 'just now'; if(diff<24) return diff+'h ago';
+    return Math.floor(diff/24)+'d ago';
+  }
+  var categoryMap={stocks:'equity',forex:'forex',crypto:'crypto',macro:'macro',general:'macro'};
+  var sentMap={bullish:'bull', bearish:'bear', neutral:'neut'};
+
+  const newsCats=[{k:'all',l:'All'},{k:'macro',l:'Macro'},{k:'crypto',l:'Crypto'},{k:'equity',l:'Equities'},{k:'forex',l:'Forex'}];
+  var featuredNews=articles.slice(0,3).map(a=>({
+    cat:categoryMap[a.category]||'macro', catLabel:(a.category||'MACRO').toUpperCase(),
+    h:a.headline||'', body:a.summary||'', src:a.source||'',
+    time:_timeAgo(a.datetime||0), sent:sentMap[a.sentiment]||'neut'
+  }));
+  var listNews=articles.slice(3).map(a=>({
+    cat:categoryMap[a.category]||'macro', catLabel:(a.category||'MACRO').toUpperCase(),
+    h:a.headline||'', time:_timeAgo(a.datetime||0), sent:sentMap[a.sentiment]||'neut'
+  }));
+  if(!featuredNews.length) featuredNews=[{cat:'macro',catLabel:'INFO',h:'No news articles available',body:'Check back later — news feed updates every 10 minutes.',src:'DotVerse',time:'',sent:'neut'}];
+  if(!listNews.length) listNews=[];
   const filtered=_newsFilter==='all'?listNews:listNews.filter(n=>n.cat===_newsFilter);
   const filteredFeat=_newsFilter==='all'?featuredNews:featuredNews.filter(n=>n.cat===_newsFilter);
   const catPills=newsCats.map(c=>`<button class="news-filter-pill${_newsFilter===c.k?' on':''}" onclick="_newsFilter='${c.k}';showNews()">${c.l}</button>`).join('');

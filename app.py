@@ -5887,7 +5887,34 @@ CB_RATES_DATA = [
 @app.route("/api/econ-calendar", methods=["GET"])
 @login_required
 def econ_calendar():
-    """Proxy TradingView economic calendar — avoids browser CORS."""
+    """Economic calendar from Finnhub (primary) with TradingView fallback."""
+    fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if fh_key:
+        try:
+            from_dt = datetime.utcnow().strftime("%Y-%m-%d")
+            to_dt   = (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%d")
+            r = requests.get(
+                "https://finnhub.io/api/v1/calendar/economic",
+                params={"from": from_dt, "to": to_dt, "token": fh_key},
+                timeout=8
+            )
+            if r.status_code == 200:
+                events = r.json().get("economicCalendar", [])
+                impact_map = {"High": 3, "Medium": 2, "Low": 1}
+                result = []
+                for ev in events[:10]:  # top 10 most impactful
+                    result.append({
+                        "date": ev.get("date", ""),
+                        "title": ev.get("event", ev.get("title", "")),
+                        "country": (ev.get("country", "") or "").upper(),
+                        "importance": impact_map.get(ev.get("impact", ""), 2),
+                        "estimate": ev.get("forecast"),
+                        "previous": ev.get("previous"),
+                    })
+                return jsonify({"result": result})
+        except Exception as e:
+            print(f"[econ] Finnhub failed: {e}")
+    # Fallback to TradingView
     try:
         now     = datetime.utcnow()
         from_dt = now.strftime("%Y-%m-%dT00:00:00Z")
@@ -5904,6 +5931,116 @@ def econ_calendar():
         return jsonify({"result": []})
     except Exception as e:
         return jsonify({"result": [], "error": str(e)})
+
+@app.route("/api/news", methods=["GET"])
+@login_required
+def news_feed():
+    """News from Finnhub (stocks/forex) + CryptoCompare (crypto).
+    Cached in Redis for 10 minutes."""
+    asset_class = request.args.get("asset_class", "all")
+    cache_key = f"news:{asset_class}"
+    try:
+        if _redis_client:
+            cached = _redis_client.get(cache_key)
+            if cached:
+                return jsonify(json.loads(cached))
+    except Exception:
+        pass
+
+    articles = []
+    fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+
+    # Finnhub — stocks / general market news
+    if fh_key and asset_class in ("all", "stocks", "equity", "forex"):
+        try:
+            r = requests.get("https://finnhub.io/api/v1/news",
+                           params={"category": "general", "token": fh_key}, timeout=8)
+            if r.status_code == 200:
+                for a in r.json()[:8]:
+                    articles.append({
+                        "headline": a.get("headline", ""),
+                        "summary": a.get("summary", "")[:200],
+                        "source": a.get("source", ""),
+                        "url": a.get("url", ""),
+                        "image": a.get("image", ""),
+                        "datetime": a.get("datetime", 0),
+                        "category": "stocks",
+                        "sentiment": "neutral",
+                    })
+        except Exception as e:
+            print(f"[news] Finnhub error: {e}")
+
+    # CryptoCompare — crypto news (free, no key)
+    if asset_class in ("all", "crypto"):
+        try:
+            r = requests.get("https://min-api.cryptocompare.com/data/v2/news/?lang=EN",
+                           headers={"User-Agent": "DotVerse/1.0"}, timeout=8)
+            if r.status_code == 200:
+                for a in r.json().get("Data", [])[:8]:
+                    articles.append({
+                        "headline": a.get("title", ""),
+                        "summary": a.get("body", "")[:200],
+                        "source": a.get("source", ""),
+                        "url": a.get("url", ""),
+                        "image": a.get("imageurl", ""),
+                        "datetime": a.get("published_on", 0),
+                        "category": "crypto",
+                        "sentiment": "neutral",
+                    })
+        except Exception as e:
+            print(f"[news] CryptoCompare error: {e}")
+
+    result = {"articles": sorted(articles, key=lambda a: a.get("datetime", 0), reverse=True)}
+    try:
+        if _redis_client:
+            _redis_client.setex(cache_key, 600, json.dumps(result))
+    except Exception:
+        pass
+    return jsonify(result)
+
+@app.route("/api/sectors", methods=["GET"])
+@login_required
+def sector_performance():
+    """Sector performance from sector ETF prices via /api/prices-style fetch.
+    Cached in Redis for 5 minutes."""
+    cache_key = "sectors:latest"
+    try:
+        if _redis_client:
+            cached = _redis_client.get(cache_key)
+            if cached:
+                return jsonify(json.loads(cached))
+    except Exception:
+        pass
+
+    sector_etfs = {
+        "Technology": "XLK", "Financials": "XLF", "Healthcare": "XLV",
+        "Energy": "XLE", "Real Estate": "XLRE", "Industrials": "XLI",
+        "Consumer Disc": "XLY", "Consumer Staples": "XLP",
+        "Utilities": "XLU", "Materials": "XLB",
+    }
+    sectors = []
+    for name, etf in sector_etfs.items():
+        try:
+            # Use yfinance for quick price fetch
+            ticker = yf.Ticker(etf)
+            hist = ticker.history(period="2d")
+            if len(hist) >= 2:
+                prev_close = float(hist["Close"].iloc[-2])
+                curr_price = float(hist["Close"].iloc[-1])
+                chg = round((curr_price - prev_close) / prev_close * 100, 2)
+                sectors.append({"name": name, "etf": etf, "change_pct": chg})
+            else:
+                sectors.append({"name": name, "etf": etf, "change_pct": None})
+        except Exception:
+            sectors.append({"name": name, "etf": etf, "change_pct": None})
+
+    result = {"sectors": sectors}
+    try:
+        if _redis_client:
+            _redis_client.setex(cache_key, 300, json.dumps(result))
+    except Exception:
+        pass
+    return jsonify(result)
 
 
 @app.route("/api/daily-brief", methods=["GET"])
