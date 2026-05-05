@@ -5935,6 +5935,36 @@ def health():
     return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat(),
                     "watches": len(watch_registry)})
 
+@app.route("/api/fear-greed")
+def fear_greed():
+    """Crypto Fear & Greed Index from Alternative.me — free, no API key.
+    Cached in Redis for 1 hour."""
+    import requests as _rq
+    cache_key = "fng:latest"
+    try:
+        if _redis_client:
+            cached = _redis_client.get(cache_key)
+            if cached:
+                return jsonify(json.loads(cached))
+    except Exception:
+        pass
+    try:
+        resp = _rq.get("https://api.alternative.me/fng/?limit=1", timeout=5)
+        data = resp.json().get("data", [{}])[0]
+        result = {
+            "value": int(data.get("value", 50)),
+            "classification": data.get("value_classification", "Neutral"),
+            "source": "alternative.me"
+        }
+        try:
+            if _redis_client:
+                _redis_client.setex(cache_key, 3600, json.dumps(result))
+        except Exception:
+            pass
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"value": None, "classification": "unavailable", "error": str(e)})
+
 @app.route("/api/stats")
 def landing_stats():
     """Public aggregate stats for the landing page. No auth required —

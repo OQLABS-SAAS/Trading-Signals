@@ -4285,6 +4285,7 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
       <div id="qpTfRow" style="display:flex;gap:4px;flex-wrap:wrap;">
         <button class="qp-tf" data-tf="15m" onclick="qpSetTF('15m',this)" style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">15M</button>
         <button class="qp-tf" data-tf="1h"  onclick="qpSetTF('1h',this)"  style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">1H</button>
+        <button class="qp-tf" data-tf="30m" onclick="qpSetTF('30m',this)" style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">30M</button>
         <button class="qp-tf" data-tf="4h"  onclick="qpSetTF('4h',this)"  style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(201,168,76,.18);border:1px solid rgba(201,168,76,.45);color:rgba(201,168,76,.95);border-radius:4px;cursor:pointer;letter-spacing:.04em;">4H</button>
         <button class="qp-tf" data-tf="1d"  onclick="qpSetTF('1d',this)"  style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">1D</button>
         <button class="qp-tf" data-tf="1w"  onclick="qpSetTF('1w',this)"  style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">1W</button>
@@ -8542,10 +8543,10 @@ function showMarket(){
       <!-- Fear & Greed -->
       <div style="border-top:1px solid rgba(237,232,216,.06);">
         <div class="mkt-fear-gauge">
-          <div class="mkt-fear-val" style="color:rgba(237,232,216,.82);">47</div>
-          <div class="mkt-fear-lbl">Fear &amp; Greed Index</div>
+          <div class="mkt-fear-val" id="mktFearGreedVal" style="color:rgba(237,232,216,.82);">—</div>
+          <div class="mkt-fear-lbl" id="mktFearGreedLbl">Fear &amp; Greed Index</div>
           <div class="mkt-fear-bar">
-            <div class="mkt-fear-pin" style="left:47%;"></div>
+            <div class="mkt-fear-pin" id="mktFearGreedPin" style="left:50%;"></div>
           </div>
           <div class="mkt-fear-scale">
             <span>Fear</span><span>Neutral</span><span>Greed</span>
@@ -8624,7 +8625,7 @@ function showMarket(){
     });
   });
   /* Fetch live signals — fires after DOM is painted */
-  setTimeout(function(){ _mktFetchTopSignals(); _mktRenderCockpit(); _mktUpdateLiveData(); }, 50);
+  setTimeout(function(){ _mktFetchTopSignals(); _mktRenderCockpit(); _mktUpdateLiveData(); _loadFearGreed(); }, 50);
 }
 
 function _mktRenderCockpit(){
@@ -9068,6 +9069,19 @@ function mktToggleRow(rowId, rowEl){
   exp.style.display = isOpen ? 'none' : 'block';
   var arrow = rowEl ? rowEl.querySelector('.mkt-row-arrow') : null;
   if(arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
+}
+
+async function _loadFearGreed(){
+  try{
+    var r = await dvFetch('/api/fear-greed');
+    if(!r || r.value == null) return;
+    var val = document.getElementById('mktFearGreedVal');
+    var pin = document.getElementById('mktFearGreedPin');
+    var lbl = document.getElementById('mktFearGreedLbl');
+    if(val){ val.textContent = r.value; val.style.color = r.classification === 'Fear' ? '#e8706e' : r.classification === 'Greed' ? '#5de8a0' : 'rgba(237,232,216,.82)'; }
+    if(pin) pin.style.left = Math.min(100, Math.max(0, r.value)) + '%';
+    if(lbl) lbl.textContent = 'Fear & Greed Index' + (r.classification ? ' · ' + r.classification : '');
+  }catch(e){}
 }
 
 // Navigate to UNDERSTAND with this symbol ready to analyse
