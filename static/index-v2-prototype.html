@@ -8901,17 +8901,17 @@ async function _mktFetchTopSignals(){
     return [];
   })();
 
-  /* Fallback if API slow/unavailable */
-  const mktFallback = [
-    {ticker:'BTC/USD', signal:'BUY',  timeframe:'4H', rr1:'2.8', confidence:'HIGH', confidence_label:'CONFIRMED'},
-    {ticker:'NVDA',    signal:'BUY',  timeframe:'1D', rr1:'3.1', confidence:'HIGH', confidence_label:'CONFIRMED'},
-    {ticker:'XAUUSD',  signal:'BUY',  timeframe:'4H', rr1:'2.5', confidence:'HIGH', confidence_label:'CONFIRMED'},
-    {ticker:'EURUSD',  signal:'SELL', timeframe:'1H', rr1:'2.3', confidence:'MEDIUM', confidence_label:'LIKELY'},
-    {ticker:'ETH/USD', signal:'BUY',  timeframe:'4H', rr1:'2.4', confidence:'MEDIUM', confidence_label:'LIKELY'},
-  ];
-
   const fetched = await Promise.all([fetchData, minWait]);
-  results = (fetched[0] && fetched[0].length > 0) ? fetched[0] : mktFallback;
+  if (fetched[0] && fetched[0].length > 0) {
+    results = fetched[0];
+  } else {
+    clearInterval(prog);
+    if(fill){ fill.style.width = '100%'; fill.style.transition = 'width .2s ease-out'; }
+    const progRow2 = list.querySelector('#mktBtBar');
+    if(progRow2) progRow2.closest('div').remove();
+    list.innerHTML = '<div style="font-size:12px;color:rgba(237,232,216,.45);padding:16px 8px;text-align:center;font-family:var(--mono);">Data temporarily unavailable — retrying shortly.<br><button onclick="showMarket()" style="margin-top:10px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:var(--amb);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:var(--mono);font-size:11px;">Retry</button></div>';
+    return;
+  }
 
   clearInterval(prog);
   if(fill){ fill.style.width = '100%'; fill.style.transition = 'width .2s ease-out'; }
