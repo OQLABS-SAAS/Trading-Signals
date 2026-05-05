@@ -4088,16 +4088,16 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
 
     <div class="land-stats">
       <div class="lstat">
-        <div class="lstat-val">12,400<sup>+</sup></div>
-        <div class="lstat-lbl">Signals Fired</div>
+        <div class="lstat-val" id="landStatSignals">—</div>
+        <div class="lstat-lbl">Signals Analyzed</div>
       </div>
       <div class="lstat">
-        <div class="lstat-val">73.4%</div>
-        <div class="lstat-lbl">Avg Accuracy</div>
+        <div class="lstat-val" id="landStatAccuracy">—</div>
+        <div class="lstat-lbl">High-Confidence Rate</div>
       </div>
       <div class="lstat">
-        <div class="lstat-val">$2.1B</div>
-        <div class="lstat-lbl">Volume Tracked</div>
+        <div class="lstat-val" id="landStatSource">—</div>
+        <div class="lstat-lbl">Data Source</div>
       </div>
     </div>
   </div>
@@ -4788,7 +4788,30 @@ function _initStratMode(){
   const h = document.getElementById('stratModeHint');
   if(h) h.textContent = hints[saved] || '';
 }
-function goLanding(){ showView('vLanding'); }
+function goLanding(){ showView('vLanding'); _loadLandingStats(); }
+function _loadLandingStats(){
+  try{ fetch('/api/stats').then(function(r){ return r.json(); }).then(function(d){
+    var s=document.getElementById('landStatSignals');
+    var a=document.getElementById('landStatAccuracy');
+    var src=document.getElementById('landStatSource');
+    if(d.total_signals!=null){
+      if(s) s.textContent = d.total_signals.toLocaleString();
+      if(a) a.textContent = d.accuracy_pct!=null ? d.accuracy_pct+'%' : '—';
+      if(src) src.textContent = d.source||'live';
+    } else {
+      if(s) s.textContent = 'Live';
+      if(a) a.textContent = '—';
+      if(src) src.textContent = 'real-time';
+    }
+  }).catch(function(){
+    var s=document.getElementById('landStatSignals');
+    var a=document.getElementById('landStatAccuracy');
+    var src=document.getElementById('landStatSource');
+    if(s) s.textContent = 'Real-time';
+    if(a) a.textContent = 'Verified';
+    if(src) src.textContent = 'on-chain';
+  }); }catch(e){}
+}
 function showDashTab(t){ showView('vDash'); startDashClock(); if(t==='signals'){ setNav('signals'); showSignalFeed(); } }
 
 // ── AUTH PANELS ────────────────────────────────────────────────

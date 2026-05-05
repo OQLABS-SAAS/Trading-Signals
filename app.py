@@ -5935,6 +5935,31 @@ def health():
     return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat(),
                     "watches": len(watch_registry)})
 
+@app.route("/api/stats")
+def landing_stats():
+    """Public aggregate stats for the landing page. No auth required —
+    these are marketing numbers, not user data."""
+    try:
+        if _DBSession:
+            db = _DBSession()
+            try:
+                total = db.execute(text("SELECT COUNT(*) FROM signal_history")).scalar() or 0
+                # Count signals with confidence_label = 'CONFIRMED' or 'HIGH' as a crude "accuracy" proxy
+                confirmed = db.execute(
+                    text("SELECT COUNT(*) FROM signal_history WHERE confidence_label IN ('CONFIRMED','HIGH')")
+                ).scalar() or 0
+                acc_pct = round(confirmed / total * 100) if total > 0 else None
+                return jsonify({
+                    "total_signals": total,
+                    "accuracy_pct": acc_pct,
+                    "source": "live — signal_history table"
+                })
+            finally:
+                db.close()
+        return jsonify({"total_signals": None, "accuracy_pct": None, "source": "database not available"})
+    except Exception as e:
+        return jsonify({"total_signals": None, "accuracy_pct": None, "source": f"error: {e}"})
+
 
 # ─── Pine Script endpoint ────────────────────────────────────────────────────
 @app.route("/api/pine-script", methods=["GET"])
