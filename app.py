@@ -6466,8 +6466,8 @@ def backtest_route():
             sym = ticker_n.upper().replace("-USD","").replace("-USDT","").replace("/","")
             sym = sym + "USDT" if not sym.endswith("USDT") and not sym.endswith("BTC") else sym
             r_bin = requests.get("https://api.binance.com/api/v3/klines",
-                                 params={"symbol": sym, "interval": interval, "limit": 1000},
-                                 timeout=(5, 15))
+                                  params={"symbol": sym, "interval": interval, "limit": 500},
+                                  timeout=(5, 10))
             if r_bin.status_code == 200:
                 klines = r_bin.json()
                 dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
@@ -6536,9 +6536,8 @@ def backtest_route():
     if not prices_hist:
         try:
             cfg = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
-            # Extended periods to maximise bar count → more trades found → 30+ sample gate hit more reliably
-            # yfinance hard limits: 5m/15m/30m max 60d, 1h max 730d
-            period_map = {"5m":"60d","15m":"60d","30m":"60d","1h":"730d","4h":"730d","1d":"5y","1w":"10y","1mo":"max"}
+            # Reduced periods for Railway — 5y download + computation exceeds 30s timeout
+            period_map = {"5m":"60d","15m":"60d","30m":"60d","1h":"180d","4h":"1y","1d":"1y","1w":"5y","1mo":"10y"}
             df_bt = safe_download(ticker_n, period=period_map.get(timeframe,"1y"),
                                   interval=cfg["interval"], progress=False, auto_adjust=True)
             if "resample" in cfg and not df_bt.empty:
