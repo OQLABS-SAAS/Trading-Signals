@@ -6623,7 +6623,14 @@ async function qpAnalyse(presetTicker, presetTf) {
 }
 async function dvRunAnalyze(){
   const inp=document.getElementById('dvTickerInput');
-  const sym=(inp?.value||'BTC').trim().toUpperCase();
+  const qpInp=document.getElementById('qpTickerInput');
+  var sym = (inp?.value||'').trim();
+  // Use Quick Analyse custom input value if Understand input is stale
+  if (!sym && qpInp) sym = qpInp.value.trim();
+  if (!sym) sym = 'BTC';
+  sym = sym.toUpperCase();
+  // Mirror Quick Analyse input to Understand input so next click works
+  if (qpInp && qpInp.value.trim() && inp) inp.value = qpInp.value.trim().toUpperCase();
   const spin=document.getElementById('dvSpin');if(spin)spin.classList.add('active');
   const btn=document.querySelector('.dv-analyze-btn');if(btn){btn.disabled=true;btn.textContent='Analysing…';}
   const data=await dvFetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -7690,6 +7697,7 @@ async function _sfFetchSignals(){
       + '</div></div></div>'
       + (btBadge ? '<div style="padding:0 14px 4px;">' + btBadge + (tfHint||'') + '</div>' : '')
       + '<div class="opp-reason">' + o.reason + '</div>'
+      + ((o.confLbl==='HYPOTHESIS'||o.confLbl==='LOW'||(o.conf||0)<70)?'<div style="padding:0 14px;margin-top:6px;font-size:9px;color:rgba(201,168,76,.8);font-family:var(--mono);">⚠ Lower confidence · consider smaller position</div>':'')
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
       + '</div></div>';
