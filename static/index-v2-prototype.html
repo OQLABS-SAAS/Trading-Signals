@@ -7646,6 +7646,22 @@ async function _sfFetchSignals(){
         + '</div>';
     }
 
+    // TF comparison — check if another TF has better WR for same ticker
+    var tfHint = '';
+    if(o._btWr != null){
+      var bestOther = null;
+      displayOpps.forEach(function(other){
+        if(other.sym === o.sym && other.tf !== o.tf && other._btWr != null && other._btWr > o._btWr && (!bestOther || other._btWr > bestOther._btWr)){
+          bestOther = other;
+        }
+      });
+      if(bestOther){
+        tfHint = '<div style="margin-top:4px;font-size:9px;color:rgba(201,168,76,.7);font-family:var(--mono);">'
+          + 'Try ' + bestOther.tf + ' → ' + bestOther._btWr + '% WR (vs ' + o._btWr + '% on ' + o.tf + ')'
+          + '</div>';
+      }
+    }
+
     var _tt = _tradeTypeLabel(o.tf, window._stratMode);
     return '<div class="opp-card ' + cardCls + '" onclick="loadSignalContext(' + oJson + ')">'
       + '<div class="opp-card-header">'
@@ -7674,7 +7690,7 @@ async function _sfFetchSignals(){
       + '<div class="opp-level-item"><span class="opp-lbl">SL</span><span class="opp-val red">' + (o.sl||'--') + '</span></div>'
       + '<div class="opp-level-item"><span class="opp-lbl">TP</span><span class="opp-val grn">' + (o.tp||'--') + '</span></div>'
       + '</div></div></div>'
-      + (btBadge ? '<div style="padding:0 14px 4px;">' + btBadge + '</div>' : '')
+      + (btBadge ? '<div style="padding:0 14px 4px;">' + btBadge + (tfHint||'') + '</div>' : '')
       + '<div class="opp-reason">' + o.reason + '</div>'
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
