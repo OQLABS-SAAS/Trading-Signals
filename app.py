@@ -3838,6 +3838,7 @@ def _require_ea(f):
     return decorated
 
 @app.route("/api/mt5/order", methods=["POST"])
+@require_tier('pro')
 @login_required
 def mt5_submit_order():
     """User submits a trade order — saved as pending, EA picks it up."""
@@ -4180,6 +4181,7 @@ def mt5_get_state():
     })
 
 @app.route("/api/mt5/orders", methods=["GET"])
+@require_tier('pro')
 @login_required
 def mt5_get_orders():
     """Frontend reads order history for current user."""
@@ -4213,6 +4215,7 @@ def mt5_get_orders():
         db.close()
 
 @app.route("/api/mt5/cancel/<int:order_id>", methods=["POST"])
+@require_tier('pro')
 @login_required
 def mt5_cancel_order(order_id):
     """User cancels a pending order before EA picks it up."""
@@ -4238,6 +4241,7 @@ def mt5_cancel_order(order_id):
         db.close()
 
 @app.route("/api/mt5/close", methods=["POST"])
+@require_tier('pro')
 @login_required
 def mt5_close_position():
     """User taps Trade Manager button — queues a close order for the EA to execute."""
@@ -4605,6 +4609,7 @@ def keys_add():
         db.close()
 
 @app.route("/api/telegram-status", methods=["GET"])
+@require_tier('pro')
 @login_required
 def telegram_status():
     """Return whether Telegram is configured (does not expose the token)."""
@@ -4743,6 +4748,7 @@ def telegram_webhook():
 
 
 @app.route("/api/telegram/setup-webhook", methods=["GET"])
+@require_tier('pro')
 @login_required
 def telegram_setup_webhook():
     """One-time call to register the DotVerse webhook URL with Telegram."""
@@ -6328,6 +6334,7 @@ def landing_stats():
 
 # ─── Pine Script endpoint ────────────────────────────────────────────────────
 @app.route("/api/pine-script", methods=["GET"])
+@require_tier('pro')
 @login_required
 def serve_pine_script():
     """Serve the DotVerse Pine Script v5 indicator file."""
@@ -6344,6 +6351,7 @@ def serve_pine_script():
 
 # ─── Pine RSI Divergence endpoint ───────────────────────────────────────────
 @app.route("/api/pine-divergence", methods=["GET"])
+@require_tier('pro')
 @login_required
 def serve_pine_divergence():
     """Serve the DotVerse RSI Divergence Pine Script indicator."""
@@ -6360,6 +6368,7 @@ def serve_pine_divergence():
 
 # ─── Pine Strategy endpoint ──────────────────────────────────────────────────
 @app.route("/api/pine-strategy", methods=["GET"])
+@require_tier('pro')
 @login_required
 def serve_pine_strategy():
     """Serve the DotVerse Strategy Pine Script file (with automated partial closes)."""
@@ -6376,6 +6385,7 @@ def serve_pine_strategy():
 
 # ─── On-demand SMS endpoint (dynamic recipient) ──────────────────────────────
 @app.route("/api/send-sms", methods=["POST"])
+@require_tier('pro')
 @login_required
 def send_sms_on_demand():
     """Send a signal SMS to a specific phone number via Twilio."""
@@ -6414,6 +6424,7 @@ def send_sms_on_demand():
 
 # ─── STRATEGY BACKTEST ───────────────────────────────────────
 @app.route("/api/backtest", methods=["POST"])
+@require_tier('pro')
 @login_required
 def backtest_route():
     """Simulate the current signal's TP/SL strategy on historical price data.
@@ -7672,6 +7683,7 @@ def signal_history_get():
 # ─── 5b: PARAMETRIC VaR ──────────────────────────────────────
 
 @app.route("/api/var", methods=["POST"])
+@require_tier('pro')
 @login_required
 def portfolio_var():
     """
@@ -7766,6 +7778,7 @@ _STRESS_SHOCKS = {
 }
 
 @app.route("/api/stress", methods=["POST"])
+@require_tier('pro')
 @login_required
 def stress_test():
     """
@@ -7822,6 +7835,7 @@ def stress_test():
 # ─── 5d: CROSS-ASSET CORRELATION DASHBOARD ───────────────────
 
 @app.route("/api/correlation", methods=["POST"])
+@require_tier('pro')
 @login_required
 def correlation_matrix():
     """
