@@ -10482,15 +10482,12 @@ async function showNews(){
     '<span class="news-list-time">'+n.time+' ago</span>'+
   '</div>';}).join('') : '<div style="color:rgba(237,232,216,.35);padding:8px;text-align:center;font-size:11px;">No articles in this category.</div>';
 
-  const tickers=[
-    {sym:'BTC',cnt:'12 stories',sent:'bull'},{sym:'NVDA',cnt:'8 stories',sent:'bull'},
-    {sym:'SPY',cnt:'6 stories',sent:'bull'},{sym:'GBP/USD',cnt:'4 stories',sent:'bear'},
-    {sym:'AAPL',cnt:'3 stories',sent:'bull'},
-  ];
-  const calItems=[
-    {t:'09:30',e:'US NFP',imp:'#f07070'},{t:'10:00',e:'ISM PMI',imp:'#b8814a'},
-    {t:'14:00',e:'Fed Speech',imp:'#b8814a'},{t:'16:30',e:'UK PMI',imp:'#62f29d'},
-  ];
+  // Most Mentioned — extracted from article headlines
+  var tickerCount={};
+  articles.forEach(function(a){var h=a.headline||'';var syms=h.match(/[A-Z]{2,5}/g)||[];syms.forEach(function(s){tickerCount[s]=(tickerCount[s]||0)+1;});});
+  var tickers=Object.entries(tickerCount).sort(function(a,b){return b[1]-a[1];}).slice(0,5).map(function(e){return {sym:e[0],cnt:e[1]+' stories',sent:'neut'};});
+  if(!tickers.length) tickers=[{sym:'—',cnt:'loading',sent:'neut'}];
+  // Economic Calendar section removed — duplicate of Market page data
 
   el.innerHTML=`
   <div class="pg-hd">
@@ -10511,14 +10508,10 @@ async function showNews(){
           <span class="news-sent ${t.sent}" style="font-size:10.5px;padding:2px 8px;">${t.sent.charAt(0).toUpperCase()+t.sent.slice(1)}</span>
         </div>`).join('')}
       </div>
-      <div class="news-sidebar-card">
-        <div class="news-sb-head">Today's Calendar</div>
-        ${calItems.map(c=>`<div class="news-cal-row">
-          <span class="news-cal-time">${c.t}</span>
-          <span class="news-cal-event">${c.e}</span>
-          <div class="news-cal-imp" style="background:${c.imp};"></div>
-        </div>`).join('')}
-      </div>
+       <div class="news-sidebar-card">
+         <div class="news-sb-head">Economic Calendar</div>
+         <div style="color:rgba(237,232,216,.35);font-size:11px;padding:8px 0;text-align:center;">Visit Market → Economic Calendar for live events</div>
+       </div>
     </div>
   </div>`;
 }
