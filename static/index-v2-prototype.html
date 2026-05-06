@@ -7333,6 +7333,26 @@ function showSignalFeed(){
 window._btScanCache = window._btScanCache || {};
 
 function _sfUpdateMetrics(opps){
+  var set=function(id,v){var e=document.getElementById(id);if(e)e.textContent=v;};
+  var total=opps?opps.length:0;
+  set('sfMetricVal0', String(total));
+  set('sfMetricSub0', total>0 ? total+' active signals' : 'scanning…');
+  if(opps&&opps.length){
+    var confs=opps.map(function(o){return parseInt(o.conf)||0;}).filter(function(v){return v>0;});
+    var avg=confs.length?Math.round(confs.reduce(function(a,b){return a+b;},0)/confs.length):null;
+    set('sfMetricVal1', avg!=null?avg+'%':'—');
+    set('sfMetricSub1', 'Above 65% confluence gate');
+    var rrs=opps.map(function(o){return parseFloat(o.rr)||0;}).filter(function(v){return v>0;});
+    var avgRR=rrs.length?Math.round(rrs.reduce(function(a,b){return a+b;},0)/rrs.length*10)/10:null;
+    set('sfMetricVal3', avgRR!=null?'1:'+avgRR:'—');
+    set('sfMetricSub3', 'After 0.2% fee deduction');
+  }
+  var bt=window._btScanCache?._global||null;
+  set('sfMetricVal2', bt&&bt.win_rate!=null?bt.win_rate+'%':'—');
+  set('sfMetricSub2', bt&&bt.win_rate!=null?(bt.total_trades||bt.sample_size||'?')+' signals evaluated':'run backtest for win rate');
+}
+
+function _sfUpdateMetrics(opps){
   var _set=function(id,v){var e=document.getElementById(id);if(e)e.textContent=v;};
   // Metric 0: Live Opportunities — count of actionable signals
   var total=opps?opps.length:0;
@@ -7703,7 +7723,9 @@ async function _sfFetchSignals(){
   }).join('');
 
   const listNow = document.getElementById('sfOppsList');
-  if(listNow) listNow.innerHTML = '<div class="opp-list">' + oppCards + '</div>';
+   if(listNow) listNow.innerHTML = '<div class="opp-list">' + oppCards + '</div>';
+  // Update metric cards with real data
+  _sfUpdateMetrics(verifiedOpps);
 
   /* ── Scanner tab: leave empty — user clicks "Run Scan" to populate ── */
   var tbody = document.getElementById('scTableBody');
@@ -7909,7 +7931,7 @@ function _sfRender(){
     <div class="sf-mc-ico" style="background:${m.bg}">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${m.stroke}" stroke-width="2">${m.ico}</svg>
     </div>
-    <div class="sf-mc-r"><div class="sf-mc-lbl">${m.lbl}</div><div class="sf-mc-val">${m.val}</div><div class="sf-mc-sub">${m.sub}</div></div>
+    <div class="sf-mc-r"><div class="sf-mc-lbl">${m.lbl}</div><div class="sf-mc-val" id="sfMetricVal${i}">${m.val}</div><div class="sf-mc-sub" id="sfMetricSub${i}">${m.sub}</div></div>
     <svg style="position:absolute;bottom:8px;right:10px;opacity:.3;" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.7)" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
   </div>`).join('');
   window._sfMetricDetails=metrics.map(m=>m.detail);
