@@ -10239,15 +10239,31 @@ async function showPerformance(){
   </div>`;
 
   requestAnimationFrame(()=>{
-    // equity curve
+    // equity curve — use real backtest data if available, else illustrative
     const cv=document.getElementById('perfEqChart'); if(cv){
       const dpr=window.devicePixelRatio||1;
       const W=cv.offsetWidth||480,H=160;
       cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+'px';cv.style.height=H+'px';
       const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);
-      const n=90,pad={l:8,r:8,t:8,b:16};
-      let p1=0,p2=0;const d1=[],d2=[];
-      for(let i=0;i<n;i++){p1+=(Math.random()-.42)*.9;d1.push(p1);p2+=(Math.random()-.49)*.6;d2.push(p2);}
+      const pad={l:8,r:8,t:8,b:16};
+      var d1=[],d2=[],n=90;
+      var useReal=false;
+      // Use real equity curve from backtest if available
+      var bt=window._lastBt;
+      if(bt&&Array.isArray(bt.equity_curve)&&bt.equity_curve.length>=2){
+        useReal=true;
+        var eq=bt.equity_curve;
+        // Downsample to ~90 points if needed
+        var step=Math.max(1,Math.floor(eq.length/90));
+        for(var i=0;i<eq.length;i+=step){d1.push(eq[i]);}
+        n=d1.length;
+        // Benchmark line: $10k flat for comparison
+        for(var i=0;i<n;i++){d2.push(10000);}
+      } else {
+        // Fallback: illustrative random walk
+        var p1=0,p2=0;
+        for(var i=0;i<n;i++){p1+=(Math.random()-.42)*.9;d1.push(p1);p2+=(Math.random()-.49)*.6;d2.push(p2);}
+      }
       const allV=[...d1,...d2],minV=Math.min(...allV),maxV=Math.max(...allV),rngV=maxV-minV||1;
       const toX=i=>pad.l+i*(W-pad.l-pad.r)/(n-1);
       const toY=v=>pad.t+(1-(v-minV)/rngV)*(H-pad.t-pad.b);
@@ -10262,31 +10278,17 @@ async function showPerformance(){
       ctx.beginPath();d2.forEach((_,i)=>{i===0?ctx.moveTo(toX(i),toY(d2[i])):ctx.lineTo(toX(i),toY(d2[i]));});ctx.stroke();
       ctx.setLineDash([]);
     }
-    // monthly bars
+    // monthly bars — show empty state until real trade history exists
     const cv2=document.getElementById('perfMonthChart'); if(cv2){
       const dpr=window.devicePixelRatio||1;
       const W=cv2.offsetWidth||240,H=180;
       cv2.width=W*dpr;cv2.height=H*dpr;cv2.style.width=W+'px';cv2.style.height=H+'px';
       const ctx=cv2.getContext('2d');ctx.scale(dpr,dpr);
-      const months=['Oct','Nov','Dec','Jan','Feb','Mar','Apr'];
-      const vals=[3200,8400,-1200,5600,12800,9400,8291];
-      const maxA=Math.max(...vals.map(Math.abs));
-      const bw=26,gap=8,padX=12,padY=16;
-      const zeroY=H/2+padY;
-      months.forEach((m,i)=>{
-        const x=padX+i*(bw+gap);
-        const bh=Math.abs(vals[i])/maxA*(H/2-padY-8);
-        const up=vals[i]>=0;
-        ctx.fillStyle=up?'rgba(98,242,157,.7)':'rgba(240,112,112,.6)';
-        ctx.fillRect(x,up?zeroY-bh:zeroY,bw,bh);
-        ctx.fillStyle='rgba(240,240,248,.3)';ctx.font='9px Inter,sans-serif';ctx.textAlign='center';
-        ctx.fillText(m,x+bw/2,H-4);
-        const lbl=(vals[i]>0?'+':'')+Math.round(vals[i]/1000)+'K';
-        ctx.fillStyle=up?'rgba(98,242,157,.8)':'rgba(240,112,112,.7)';
-        ctx.fillText(lbl,x+bw/2,up?zeroY-bh-3:zeroY+bh+10);
-      });
-      ctx.strokeStyle='rgba(255,255,255,.04)';ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(padX-4,zeroY);ctx.lineTo(W-padX+4,zeroY);ctx.stroke();
+      ctx.fillStyle='rgba(237,232,216,.04)';ctx.fillRect(0,0,W,H);
+      ctx.fillStyle='rgba(237,232,216,.35)';ctx.font='11px sans-serif';ctx.textAlign='center';
+      ctx.fillText('Monthly P&L will populate as trades close',W/2,H/2-6);
+      ctx.fillStyle='rgba(237,232,216,.2)';ctx.font='9px sans-serif';
+      ctx.fillText('Run backtest on the Signals tab to see real equity data',W/2,H/2+12);
     }
   });
 }
