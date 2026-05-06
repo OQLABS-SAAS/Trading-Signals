@@ -6047,6 +6047,157 @@ def sector_performance():
     return jsonify(result)
 
 
+@app.route("/api/new-listings", methods=["GET"])
+@login_required
+def new_listings():
+    """IPO stocks + trending coins listed <30 days ago, piped through
+    DotVerse's signal engine. Only returns actionable BUY/SELL signals
+    with confidence >= MEDIUM. Cached in Redis for 4 hours."""
+    import math as _m
+    cache_key = "new_listings:v1"
+    try:
+        if _redis_client:
+            cached = _redis_client.get(cache_key)
+            if cached:
+                return jsonify(json.loads(cached))
+    except Exception:
+        pass
+
+    listings = []
+    fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+
+    # ── Stocks: Finnhub IPO calendar (last 30 days) ──
+    if fh_key:
+        try:
+            from_dt = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+            to_dt   = datetime.utcnow().strftime("%Y-%m-%d")
+            r = requests.get("https://finnhub.io/api/v1/calendar/ipo",
+                           params={"from": from_dt, "to": to_dt, "token": fh_key}, timeout=10)
+            if r.status_code == 200:
+                for ipo in r.json().get("ipoCalendar", [])[:8]:
+                    sym = (ipo.get("symbol") or "").strip().upper()
+                    if not sym or len(sym) > 10:
+                        continue
+                    listings.append({
+                        "ticker": sym,
+                        "name": ipo.get("name", sym),
+                        "asset_type": "stock",
+                        "listing_price": float(ipo.get("price") or 0),
+                        "exchange": ipo.get("exchange", ""),
+                        "listed_date": ipo.get("date", ""),
+                    })
+        except Exception as e:
+            print(f"[new-listings] Finnhub IPO error: {e}")
+
+    # ── Crypto: CoinGecko trending coins → filter by genesis_date ──
+    try:
+        r = requests.get("https://api.coingecko.com/api/v3/search/trending",
+                        headers={"User-Agent": "DotVerse/1.0"}, timeout=10)
+        if r.status_code == 200:
+            seen = set()
+            for item in r.json().get("coins", [])[:15]:
+                coin = item.get("item", {})
+                cid = coin.get("id", "")
+                sym = (coin.get("symbol") or "").upper()
+                if not sym or sym in seen:
+                    continue
+                seen.add(sym)
+                # Fetch detail for genesis_date
+                try:
+                    rd = requests.get(f"https://api.coingecko.com/api/v3/coins/{cid}",
+                                    params={"localization": "false", "tickers": "false",
+                                            "community_data": "false", "developer_data": "false"},
+                                    headers={"User-Agent": "DotVerse/1.0"}, timeout=8)
+                    if rd.status_code == 200:
+                        detail = rd.json()
+                        gen = detail.get("genesis_date") or ""
+                        if gen:
+                            gen_dt = datetime.strptime(gen, "%Y-%m-%d")
+                            days_old = (datetime.utcnow() - gen_dt).days
+                            if 0 <= days_old <= 30:
+                                mcap = detail.get("market_data", {}).get("market_cap", {}).get("usd") or 0
+                                listings.append({
+                                    "ticker": sym + "USD",
+                                    "name": coin.get("name", sym),
+                                    "asset_type": "crypto",
+                                    "listing_price": 0,
+                                    "exchange": "CoinGecko",
+                                    "listed_date": gen,
+                                    "days_old": days_old,
+                                    "market_cap": mcap,
+                                })
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[new-listings] CoinGecko error: {e}")
+
+    if not listings:
+        return jsonify({"listings": [], "note": "No new listings found — check back in a few hours"})
+
+    # ── Signal engine: analyse each listing ──
+    results = []
+    tf_configs = [("1d", "1d", "3mo")]  # (timeframe, interval, period) for analysis
+
+    for li in listings[:10]:
+        ticker = li["ticker"]
+        atype = li["asset_type"]
+        try:
+            df = safe_download(ticker, period="3mo", interval="1d")
+            if df.empty and atype == "crypto":
+                df = fetch_binance_ohlcv(ticker, interval="1d", period="3mo")
+            if df.empty or len(df) < 51:
+                print(f"[new-listings] {ticker}: insufficient bars ({len(df)}) — skipping")
+                continue
+
+            ind = calculate_indicators(df, "1d", atype)
+            sig = get_analysis(ticker, atype, ind, "1d")
+            if sig.get("signal") not in ("BUY", "SELL"):
+                continue
+            conf = sig.get("confidence_label", "")
+            if conf not in ("CONFIRMED", "LIKELY", "HIGH"):
+                continue
+
+            # Momentum score: % gain since listing × volume factor
+            curr_price = sig.get("entry") or ind.get("price") or 0
+            list_price = li.get("listing_price") or 0
+            pct_gain = ((curr_price - list_price) / list_price * 100) if list_price > 0 else 0
+            vol_ratio = ind.get("vol_ratio") or 1.0
+            momentum = min(100, round(abs(pct_gain) * (_m.log(1 + max(0.5, vol_ratio)))))
+            days_old = li.get("days_old") or 0
+
+            results.append({
+                "ticker": ticker,
+                "name": li["name"],
+                "asset_type": atype,
+                "exchange": li.get("exchange", ""),
+                "signal": sig["signal"],
+                "entry": sig.get("entry"),
+                "stop_loss": sig.get("stop_loss"),
+                "tp1": sig.get("tp1"),
+                "confidence": sig.get("confidence"),
+                "confidence_label": conf,
+                "momentum": momentum,
+                "price": curr_price,
+                "listing_price": list_price,
+                "gain_pct": round(pct_gain, 1),
+                "days_old": days_old,
+                "summary": sig.get("summary", "")[:120],
+            })
+        except Exception as e:
+            print(f"[new-listings] {ticker} analysis failed: {e}")
+
+    results.sort(key=lambda r: r["momentum"], reverse=True)
+    top = results[:4]
+
+    final = {"listings": top}
+    try:
+        if _redis_client:
+            _redis_client.setex(cache_key, 14400, json.dumps(final))
+    except Exception:
+        pass
+    return jsonify(final)
+
+
 @app.route("/api/daily-brief", methods=["GET"])
 @login_required
 def daily_brief():
