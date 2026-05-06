@@ -4235,11 +4235,11 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
       <span class="dsb-coll-lbl">Collapse</span>
     </button>
     <div class="dsb-user" onclick="goLanding()">
-      <div class="user-av">MC</div>
-      <div>
-        <div class="user-name">Marcus Chen</div>
-        <div class="user-role">Trader</div>
-      </div>
+       <div class="user-av" id="sidebarUserAv">MC</div>
+       <div>
+         <div class="user-name" id="sidebarUserName">Marcus Chen</div>
+         <div class="user-role" id="sidebarUserRole">Trader</div>
+       </div>
       <svg class="user-out" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
     </div>
   </aside>
@@ -4613,6 +4613,10 @@ async function doLogin(){
 }
 function goDash(u){
   showView('vDash'); showMarket(); setNav('market'); startDashClock(); initTier(); _initStratMode();
+  // Update sidebar user info from auth response
+  if(u && u.name){ var sn=document.getElementById('sidebarUserName'); if(sn) sn.textContent=u.name;
+    var sa=document.getElementById('sidebarUserAv'); if(sa) sa.textContent=u.name.split(' ').map(function(n){return n[0];}).join('').toUpperCase().substring(0,2);
+    var sr=document.getElementById('sidebarUserRole'); if(sr) sr.textContent=u.role||'Trader'; }
   // Post-login initialisation — mirrors v1 unlockApp
   try{ _renderSessionBar(); }catch(e){}
   _refreshForexRates(); // fire-and-forget — pre-warms cross-pair pip conversion cache
@@ -6600,6 +6604,9 @@ async function qpAnalyse(presetTicker, presetTf) {
   let sym = presetTicker || (inp?.value || '').trim();
   if (!sym && tickSel && tickSel.value) sym = tickSel.value;
   sym = (sym || '').toUpperCase();
+  // Crypto tickers need -USD suffix for proper backend normalization
+  var assetNow = (assetSel && assetSel.value) || window._dvAsset || 'crypto';
+  if (assetNow === 'crypto' && !sym.includes('/') && !sym.includes('-') && !sym.endsWith('USD')) sym += 'USD';
   if (!sym) {
     if (inp) inp.focus();
     if (typeof _dvToast === 'function') _dvToast('Pick a ticker from the dropdown or type one','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
