@@ -6160,22 +6160,44 @@ def new_listings():
         except Exception as e:
             print(f"[new-listings] Finnhub IPO error: {e}")
 
-    # ── Crypto: CoinGecko trending coins → filter by genesis_date ──
+    # ── Crypto: DexScreener new tokens (primary — free, no key, real-time)
+    # Falls back to CoinGecko trending if DexScreener unavailable.
+    try:
+        rd = requests.get("https://api.dexscreener.com/token-profiles/latest/v1",
+                         headers={"User-Agent": "DotVerse/1.0"}, timeout=10)
+        if rd.status_code == 200:
+            ds_tokens = rd.json()
+            seen_ds = set()
+            for token in ds_tokens[:10]:
+                sym = (token.get("tokenAddress","") or "")[:10].upper()
+                desc = (token.get("description","") or "")[:50]
+                if not sym or sym in seen_ds: continue
+                seen_ds.add(sym)
+                listings.append({
+                    "ticker": sym + "USD", "name": sym, "asset_type": "crypto",
+                    "listing_price": 0, "exchange": "DexScreener",
+                    "listed_date": "", "days_old": 0, "market_cap": 0,
+                    "type_label": "NEW PAIR",
+                })
+    except Exception as e:
+        print(f"[new-listings] DexScreener: {e}")
+
+    # ── CoinGecko trending (fallback) ──
     try:
         r = requests.get("https://api.coingecko.com/api/v3/search/trending",
                         headers={"User-Agent": "DotVerse/1.0"}, timeout=10)
         if r.status_code == 200:
             seen = set()
-            for item in r.json().get("coins", [])[:15]:
+            for item in r.json().get("coins", [])[:8]:
                 coin = item.get("item", {})
                 cid = coin.get("id", "")
                 sym = (coin.get("symbol") or "").upper()
                 if not sym or sym in seen:
                     continue
                 seen.add(sym)
-                # Rate-limit guard: CoinGecko free tier allows ~10-30 calls/min
+                # Rate-limit guard: CoinGecko free tier ~10-30 calls/min. 2s between calls.
                 import time as _time
-                _time.sleep(1.5)
+                _time.sleep(2)
                 # Fetch detail — filter by market cap, not genesis_date.
                 # Trending coins are rarely "new" (<30d). Instead, surface
                 # "emerging" coins: low market cap or unranked = trade opportunity.
