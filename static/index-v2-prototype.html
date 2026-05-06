@@ -4663,6 +4663,11 @@ function goDash(u){
       if(!_t.risk_tolerance && typeof s.risk_tolerance === 'string' && s.risk_tolerance){
         if(typeof _settRisk !== 'undefined') _settRisk = s.risk_tolerance;
         try{ _dvWrite('dv_sett_risk', s.risk_tolerance); }catch(e){}
+        // Wire to Size tab default risk %
+        var riskMap = {conservative:1, moderate:2, aggressive:5};
+        var riskPct = riskMap[s.risk_tolerance] || 2;
+        try { localStorage.setItem('dotverse_default_risk', String(riskPct)); } catch(e) {}
+        if (typeof window._userBaseRisk !== 'undefined') window._userBaseRisk = riskPct;
       }
       // F1.10b — also load chart_type so default rendering type follows the user.
       // F1.14.4 — enum guard for defense-in-depth (backend already enum-validates,
@@ -4962,7 +4967,7 @@ function renderSignup(){
       </div>
       <p style="font-size:12px;font-weight:400;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);margin-bottom:6px;">Signal Notifications</p>
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:4px 12px;margin-bottom:20px;">
-        <div class="toggle-row"><span class="toggle-lbl">Email alerts for high-confidence signals (80%+)</span><button class="toggle-sw on" onclick="this.classList.toggle('on')"></button></div>
+        <div class="toggle-row"><span class="toggle-lbl">Email alerts for high-confidence signals (${_settSliders.confidence}%+)</span><button class="toggle-sw on" onclick="this.classList.toggle('on')"></button></div>
         <div class="toggle-row"><span class="toggle-lbl">Push notifications for triggered signals</span><button class="toggle-sw on" onclick="this.classList.toggle('on')"></button></div>
         <div class="toggle-row"><span class="toggle-lbl">SMS for critical risk alerts</span><button class="toggle-sw" onclick="this.classList.toggle('on')"></button></div>
       </div>
@@ -6131,7 +6136,16 @@ function _spRisk(){
   </div>
   ${_saveBtn('Save Changes')}`;
 }
-function selectSettRisk(r){ _settRisk=r; window._settTouched.risk_tolerance=true; showSettings('risk'); }
+function selectSettRisk(r){
+  _settRisk=r;
+  window._settTouched.risk_tolerance=true;
+  // Wire to Size tab: map risk profile → default risk %
+  var riskMap = {conservative:1, moderate:2, aggressive:5};
+  var riskPct = riskMap[r] || 2;
+  try { localStorage.setItem('dotverse_default_risk', String(riskPct)); } catch(e) {}
+  if (typeof window._userBaseRisk !== 'undefined') window._userBaseRisk = riskPct;
+  showSettings('risk');
+}
 
 // --- PERFORMANCE ---
 function _spPerf(){
@@ -6272,7 +6286,7 @@ function _spPortfolio(){
       <div class="sett-sect-title" style="margin-bottom:0;">Position Sizing Method</div>
     </div>
     <div class="sett-sect-sub">How Dotverse calculates recommended position sizes for each signal.</div>
-    <div class="psm-grid">${psmCards.map(p=>`<div class="psm-card${_settPsm===p.id?' sel':''}" onclick="_settPsm='${p.id}';window._settTouched.portfolio_preset=true;showSettings('portfolio')"><div class="psm-head"><span class="psm-name">${p.name}</span><span class="psm-tag ${p.tag}">${p.tagLabel}</span></div><div class="psm-desc">${p.desc}</div></div>`).join('')}</div>
+    <div class="psm-grid">${psmCards.map(p=>`<div class="psm-card${_settPsm===p.id?' sel':''}" onclick="_settPsm='${p.id}';window._settTouched.portfolio_preset=true;var rpm={conservative:1,balanced:2,aggressive:5};try{localStorage.setItem('dotverse_default_risk',String(rpm['${p.id}']||2))}catch(e){};showSettings('portfolio')"><div class="psm-head"><span class="psm-name">${p.name}</span><span class="psm-tag ${p.tag}">${p.tagLabel}</span></div><div class="psm-desc">${p.desc}</div></div>`).join('')}</div>
   </div>
   <div class="sett-sect">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
@@ -10225,7 +10239,7 @@ async function showPerformance(){
     <div class="pg-hd-left"><div class="pg-hd-title">Performance</div><div class="pg-hd-sub">${total} signals evaluated</div></div>
     <div class="pg-hd-right"><span class="pg-tag live">Live</span></div>
   </div>
-  <div style="font-size:10px;color:rgba(237,232,216,.35);margin:-8px 0 12px;line-height:1.5;">Your trading track record — signal history, equity curve, and monthly breakdown. Run backtests on the Signals tab to populate real data.</div>
+  <div style="font-size:10px;color:rgba(237,232,216,.35);margin:-8px 0 12px;line-height:1.5;">Your trading track record · signal history, equity curve, and monthly breakdown. Benchmark: ${_settBench==='spy'?'S&P 500':_settBench==='nq100'?'NASDAQ 100':_settBench==='btc'?'BTC':'Custom'}. Run backtests on the Signals tab to populate real data.</div>
   <div class="perf-overview">
     <div class="perf-mc"><div class="perf-mc-lbl">SIGNALS</div><div class="perf-mc-val">${total}</div><div class="perf-mc-trend up">${total?`${buyCount} BUY · ${sellCount} SELL · ${holdCount} HOLD`:'Run your first analysis to start tracking here'}</div></div>
     <div class="perf-mc"><div class="perf-mc-lbl">AVG CONF</div><div class="perf-mc-val">${total?avgConf+'%':'—'}</div><div class="perf-mc-trend up">${total?'Across all signals':'Run your first analysis to start tracking here'}</div></div>
@@ -10421,11 +10435,12 @@ async function showAlerts(){
     </div>
   </div>`).join('');
 
+  const _sl = (typeof _settSliders === 'object' && _settSliders) ? _settSliders : {confidence:70, price:2, drawdown:10, loss:5};
   const rules=[
     {key:'priceTarget',name:'Price target reached',cond:'Position hits TP1/2/3'},
-    {key:'stopLoss',name:'Stop-loss approaching',cond:'Within 0.5× ATR of stop'},
-    {key:'conf80',name:'High confidence signal',cond:'New signal ≥ 80% confidence'},
-    {key:'daily',name:'Daily PnL limit',cond:'Loss exceeds −$2,000/day'},
+    {key:'stopLoss',name:'Stop-loss approaching',cond:'Within '+_sl.price+'% of stop'},
+    {key:'conf80',name:'High confidence signal',cond:'New signal ≥ '+_sl.confidence+'% confidence'},
+    {key:'daily',name:'Daily PnL limit',cond:'Loss exceeds −$'+_sl.loss+'/day (per '+(_settTz||'New York')+' timezone)'},
     {key:'news',name:'Major news event',cond:'High-impact event in 30 min'},
   ];
   const ruleRows=rules.map(r=>`<div class="al-rule-row">
