@@ -10354,6 +10354,9 @@ async function showPerformance(){
 // ══════════════════════════════════════════════════════════════
 let _alFilter='all';
 let _alRules={priceTarget:true,stopLoss:true,conf80:true,daily:false,news:true};
+// Load persisted rules from localStorage
+try{var _saved=JSON.parse(localStorage.getItem('dv_alert_rules'));if(_saved&&typeof _saved==='object')Object.assign(_alRules,_saved);}catch(e){}
+function _persistAlRules(){try{localStorage.setItem('dv_alert_rules',JSON.stringify(_alRules));}catch(e){}}
 async function showAlerts(){
   const el=document.getElementById('dashContent'); if(!el) return;
   let alerts=[];
@@ -10438,7 +10441,7 @@ async function showAlerts(){
   const ruleRows=rules.map(r=>`<div class="al-rule-row">
     <span class="al-rule-name">${r.name}</span>
     <span class="al-rule-cond">${r.cond}</span>
-    <div class="al-rule-toggle ${_alRules[r.key]?'on':''}" onclick="_alRules['${r.key}']=!_alRules['${r.key}'];showAlerts()"></div>
+    <div class="al-rule-toggle ${_alRules[r.key]?'on':''}" onclick="_alRules['${r.key}']=!_alRules['${r.key}'];_persistAlRules();showAlerts()"></div>
   </div>`).join('');
 
   const filterPills=['all','signal','risk','system'].map(f=>`<button class="al-filter-pill${_alFilter===f?' on':''}" onclick="_alFilter='${f}';showAlerts()">${f.charAt(0).toUpperCase()+f.slice(1)}</button>`).join('');
@@ -15230,22 +15233,11 @@ function renderBtStratPanel() {
 
 
 // ── AUTOMATIONS TAB ───────────────────────────────────────────────────────────
-var _autoSettings = {
-  // Trade Protection (per new trade defaults)
-  breakeven:      true,   // move SL to entry after TP1
-  trailing:       true,   // trail stop as price moves
-  // Auto-Entry
-  autoScan:       false,  // auto-open from scanner
-  minConfidence:  75,     // minimum signal confidence %
-  maxTrades:      3,      // max simultaneous open trades
-  assetFilter:    'all',  // all | forex | crypto | stocks | commodities
-  // Smart Exit
-  autoTP1:        true,   // auto-take 50% at TP1
-  autoTP2:        false,  // auto-take 30% at TP2
-  autoTP3:        false,  // auto-close all at TP3
-  timeStop:       false,  // exit if no movement after X hours
-  timeStopHours:  24,
-  weekendClose:   true,   // close all before Friday close
+var _autoSettings = JSON.parse((function(){try{return localStorage.getItem('dv_auto_settings')||'null';}catch(e){return 'null';}})()) || {
+  breakeven: true, trailing: true, autoScan: false, minConfidence: 75, maxTrades: 3,
+  assetFilter: 'all', autoTP1: true, autoTP2: false, autoTP3: false,
+  timeStop: false, timeStopHours: 24, weekendClose: true,
+};
   // Circuit Breakers
   dailyLossLimit: true,
   dailyLossMax:   3,      // % of account
@@ -15275,6 +15267,7 @@ function _autoPersist(){
 
 function _autoToggleSettings(key, val, elId) {
   _autoSettings[key] = val;
+  try{ localStorage.setItem('dv_auto_settings', JSON.stringify(_autoSettings)); }catch(e){}
   _autoUpdateActBanner();
   _autoPersist();
 }
