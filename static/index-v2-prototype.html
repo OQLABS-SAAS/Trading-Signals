@@ -7315,40 +7315,41 @@ function showSignalFeed(){
 window._btScanCache = window._btScanCache || {};
 
 function _sfUpdateMetrics(opps){
+  var _set=function(id,v){var e=document.getElementById(id);if(e)e.textContent=v;};
   // Metric 0: Live Opportunities — count of actionable signals
   var total=opps?opps.length:0;
   var countByClass={};
   if(opps) opps.forEach(function(o){var c=o.asset_type||'other';countByClass[c]=(countByClass[c]||0)+1;});
-  _s('sfMetricVal0', total||'—');
-  _s('sfMetricSub0', total+' active signals from scan');
+  _set('sfMetricVal0', total||'—');
+  _set('sfMetricSub0', total+' active signals from scan');
 
   // Metric 1: Avg Confidence
   if(opps&&opps.length){
     var confVals=opps.map(function(o){return parseInt(o.confidence)||0;}).filter(function(v){return v>0;});
     var avgConf=confVals.length?Math.round(confVals.reduce(function(a,b){return a+b;},0)/confVals.length):null;
-    _s('sfMetricVal1', avgConf!=null?avgConf+'%':'—');
-    _s('sfMetricSub1', 'Above 65% confluence gate');
+    _set('sfMetricVal1', avgConf!=null?avgConf+'%':'—');
+    _set('sfMetricSub1', 'Above 65% confluence gate');
   } else {
-    _s('sfMetricVal1','—'); _s('sfMetricSub1','loading…');
+    _set('sfMetricVal1','—'); _set('sfMetricSub1','loading…');
   }
 
   // Metric 2: Win Rate — from backtest cache or signal quality
   var bt=window._btScanCache?._global||null;
   if(bt&&bt.win_rate!=null){
-    _s('sfMetricVal2', bt.win_rate+'%');
-    _s('sfMetricSub2',(bt.total_trades||bt.sample_size||'?')+' signals evaluated');
+    _set('sfMetricVal2', bt.win_rate+'%');
+    _set('sfMetricSub2',(bt.total_trades||bt.sample_size||'?')+' signals evaluated');
   } else {
-    _s('sfMetricVal2','—'); _s('sfMetricSub2','run backtest for win rate');
+    _set('sfMetricVal2','—'); _set('sfMetricSub2','run backtest for win rate');
   }
 
   // Metric 3: Avg R:R
   if(opps&&opps.length){
     var rrVals=opps.map(function(o){return parseFloat(o.rr1||o.rr)||0;}).filter(function(v){return v>0;});
     var avgRR=rrVals.length?Math.round(rrVals.reduce(function(a,b){return a+b;},0)/rrVals.length*10)/10:null;
-    _s('sfMetricVal3', avgRR!=null?'1:'+avgRR:'—');
-    _s('sfMetricSub3','After 0.2% fee deduction');
+    _set('sfMetricVal3', avgRR!=null?'1:'+avgRR:'—');
+    _set('sfMetricSub3','After 0.2% fee deduction');
   } else {
-    _s('sfMetricVal3','—'); _s('sfMetricSub3','loading…');
+    _set('sfMetricVal3','—'); _set('sfMetricSub3','loading…');
   }
 }
 
@@ -10483,11 +10484,11 @@ async function showNews(){
   '</div>';}).join('') : '<div style="color:rgba(237,232,216,.35);padding:8px;text-align:center;font-size:11px;">No articles in this category.</div>';
 
   // Most Mentioned — extracted from article headlines, filtered to known ticker patterns
-  var knownSyms=['BTC','ETH','SOL','BNB','XRP','DOGE','AAPL','NVDA','TSLA','SPY','MSFT','AMZN','GOOGL','META','EURUSD','GBPUSD','USDJPY','AUDUSD','GOLD','OIL','NFLX','AMD','INTC','UBER','PYPL','ORCL','ADBE'];
+  var knownSyms=['BTC','ETH','SOL','BNB','XRP','DOGE','AAPL','NVDA','TSLA','SPY','MSFT','AMZN','GOOGL','META','EURUSD','GBPUSD','USDJPY','AUDUSD','NFLX','AMD','INTC','UBER','PYPL','ORCL','ADBE'];
   var tickerCount={};
   articles.forEach(function(a){var h=(a.headline||'').toUpperCase();knownSyms.forEach(function(s){if(h.indexOf(s)>=0) tickerCount[s]=(tickerCount[s]||0)+1;});});
-  var tickers=Object.entries(tickerCount).sort(function(a,b){return b[1]-a[1];}).slice(0,5).map(function(e){return {sym:e[0],cnt:e[1]+' stories',sent:'neut'};});
-  if(!tickers.length) tickers=[{sym:'—',cnt:'no tickers found',sent:'neut'}];
+  var tickers=Object.entries(tickerCount).sort(function(a,b){return b[1]-a[1];}).slice(0,5).map(function(e){return {sym:e[0],cnt:e[1]+' stories'};});
+  if(!tickers.length) tickers=[{sym:'—',cnt:'no tickers found'}];
   // Economic Calendar section removed — duplicate of Market page data
 
   el.innerHTML=`
@@ -10503,11 +10504,10 @@ async function showNews(){
     <div>
       <div class="news-sidebar-card">
         <div class="news-sb-head">Most Mentioned</div>
-        ${tickers.map(t=>`<div class="news-ticker-row" onclick="mktAnalyseSym('${t.sym}')" title="Analyse ${t.sym} signals">
-          <span class="news-ticker-sym">${t.sym}</span>
-          <span class="news-ticker-count">${t.cnt}</span>
-          <span class="news-sent ${t.sent}" style="font-size:10.5px;padding:2px 8px;">${t.sent.charAt(0).toUpperCase()+t.sent.slice(1)}</span>
-        </div>`).join('')}
+         ${tickers.map(t=>'<div class="news-ticker-row" onclick="mktAnalyseSym(\''+t.sym+'\')" title="Analyse '+t.sym+' signals">'+
+           '<span class="news-ticker-sym">'+t.sym+'</span>'+
+           '<span class="news-ticker-count">'+t.cnt+'</span>'+
+         '</div>').join('')}
       </div>
        <div class="news-sidebar-card">
          <div class="news-sb-head">Economic Calendar</div>
