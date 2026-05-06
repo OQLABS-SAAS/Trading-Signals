@@ -4529,6 +4529,16 @@ function sfExpandMetric(idx){
   }
 }
 
+function btExpandStat(idx){
+  var panel=document.getElementById('btStatExpand');
+  if(!panel) return;
+  var details=window._btStatDetails||[];
+  if(window._btStatIdx===idx){panel.style.display='none';window._btStatIdx=-1;return;}
+  window._btStatIdx=idx;
+  panel.style.display='block';
+  panel.innerHTML='<div style="color:rgba(237,232,216,.7);font-size:11px;line-height:1.6;">'+details[idx]+'</div>';
+}
+
 let _arTimer = null, _arSecs = 0, _arActive = 0;
 let arTimer = null; // scanner-section auto-refresh timer
 /*
@@ -11824,17 +11834,22 @@ async function undRunBacktest(silent){
   const pnl    = data.total_pnl_pct!=null?((data.total_pnl_pct>=0?'+':'')+data.total_pnl_pct.toFixed(2)+'%'):'—';
   const pnlCol = data.total_pnl_pct>=0?'rgba(93,232,160,.9)':'rgba(224,85,85,.85)';
 
-  const statCells = [
-    ['Win Rate',wrStr,wrc],
-    ['Trades',String(trades),'rgba(200,210,230,.85)'],
-    ['Total P&L',pnl,pnlCol],
-    ['Profit Factor',String(pf),parseFloat(pf)>=1.5?'rgba(93,232,160,.9)':parseFloat(pf)>=1?'rgba(201,168,76,.9)':'rgba(224,85,85,.75)'],
-    ['Max Drawdown',dd,'rgba(224,85,85,.7)'],
-    ['Avg R:R','1:'+rr,'rgba(237,232,216,.85)'],
-  ].map(([l,v,c])=>`<div style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.09);border-radius:7px;padding:9px;text-align:center;">
-    <div style="font-size:9px;color:var(--t3);letter-spacing:.4px;text-transform:uppercase;margin-bottom:5px;">${l}</div>
-    <div style="font-family:var(--mono);font-size:15px;font-weight:600;color:${c}">${v}</div>
-  </div>`).join('');
+  // Expandable stat boxes with beginner-friendly explanations
+  var btStats = [
+    {l:'Win Rate',v:wrStr,c:wrc,detail:'Win Rate = how often the signal was correct. '+(wrStr||'—')+' means '+(wr?wr:'?')+' out of 100 trades hit TP1 before SL. Above 50% is good. Below 45% needs caution.'},
+    {l:'Trades',v:String(trades),c:'rgba(200,210,230,.85)',detail:'Total trades = how many times the strategy triggered. More trades (>100) = more statistically reliable. Less than 30 = small sample, take with caution.'},
+    {l:'Total P&L',v:pnl,c:pnlCol,detail:'Total P&L = cumulative profit or loss if you took every trade. Positive = profitable. Includes 0.2% fee per trade.'},
+    {l:'Profit Factor',v:String(pf),c:parseFloat(pf)>=1.5?'rgba(93,232,160,.9)':parseFloat(pf)>=1?'rgba(201,168,76,.9)':'rgba(224,85,85,.75)',detail:'Profit Factor = gross profits / gross losses. Above 1.5 is strong. Above 1.0 = profitable. Below 1.0 = losing strategy.'},
+    {l:'Max Drawdown',v:dd,c:'rgba(224,85,85,.7)',detail:'Max Drawdown = biggest peak-to-trough drop. Tells you how much pain to expect. Smaller is better.'},
+    {l:'Avg R:R',v:'1:'+rr,c:'rgba(237,232,216,.85)',detail:'Avg R:R = reward earned vs risk taken. At '+wrStr+' win rate with 1:'+rr+' R:R, expected value is ~'+(wr!=null&&rr!=null?(wr/100*rr - (100-wr)/100).toFixed(2):'—')+'R per trade.'}
+  ];
+  window._btStatDetails = btStats.map(function(s){return s.detail;});
+  var btStatIdx = -1;
+  var statCells = btStats.map(function(s,i){
+    return '<div class="sf-mc" style="cursor:pointer;" onclick="btExpandStat('+i+')" title="Click for details">'+
+      '<div class="sf-mc-r" style="text-align:center;"><div class="sf-mc-lbl" style="text-align:center;">'+s.l+'</div><div class="sf-mc-val" style="text-align:center;color:'+s.c+'">'+s.v+'</div></div>'+
+    '</div>';
+  }).join('');
 
   // Trade list (last 10)
   const tradeList = Array.isArray(data.trades) && data.trades.length
@@ -11891,6 +11906,7 @@ if shortCond
     Strategy Report · ${sig.sym} · ${sig.tf}
   </div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">${statCells}</div>
+  <div id="btStatExpand" style="display:none;background:rgba(201,168,76,.04);border:1px solid rgba(201,168,76,.16);border-radius:8px;padding:14px 18px;margin-top:8px;"></div>
   ${(()=>{
     const wf = data.walkforward;
     if (!wf) return '';
@@ -11921,9 +11937,9 @@ if shortCond
         <div style="font-size:10px;font-weight:600;color:rgba(237,232,216,.6);letter-spacing:.4px;text-transform:uppercase;">ATR Research Script</div>
         <div style="font-size:9px;color:var(--t3);margin-top:2px;">Paste into TradingView Pine Editor → Strategy Tester · Historical only · Not for live trades</div>
       </div>
-      <button onclick="(function(){navigator.clipboard.writeText(${JSON.stringify(atrtPine)}).then(()=>_dvToast('Research script copied','rgba(237,232,216,.15)','rgba(237,232,216,.35)')).catch(()=>{})})()" style="padding:4px 10px;font-family:var(--mono);font-size:9px;background:rgba(237,232,216,.08);border:1px solid rgba(237,232,216,.2);color:rgba(237,232,216,.8);border-radius:4px;cursor:pointer;flex-shrink:0;">Copy</button>
+      <button id="btCopyPineBtn" onclick="navigator.clipboard.writeText(document.getElementById('btPineCode').textContent).then(function(){if(typeof _dvToast==='function')_dvToast('Research script copied','rgba(237,232,216,.15)','rgba(237,232,216,.35)')}).catch(function(){})" style="padding:4px 10px;font-family:var(--mono);font-size:9px;background:rgba(237,232,216,.08);border:1px solid rgba(237,232,216,.2);color:rgba(237,232,216,.8);border-radius:4px;cursor:pointer;flex-shrink:0;">Copy</button>
     </div>
-    <pre style="font-family:var(--mono);font-size:9.5px;line-height:1.65;color:rgba(237,232,216,.5);white-space:pre;overflow-x:auto;max-height:160px;overflow-y:auto;margin:0;">${atrtPine.replace(/</g,'&lt;')}</pre>
+    <pre id="btPineCode" style="font-family:var(--mono);font-size:9.5px;line-height:1.65;color:rgba(237,232,216,.5);white-space:pre;overflow-x:auto;max-height:160px;overflow-y:auto;margin:0;">' + atrtPine.replace(/</g,'&lt;') + '</pre>
   </div>`;
 }
 
