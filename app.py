@@ -4286,11 +4286,39 @@ def mt5_close_position():
 @app.route("/api/mt5/trailing", methods=["POST"])
 @login_required
 def mt5_set_trailing():
-    """Set trailing stop on an MT5 position. Acknowledged here; EA polls /api/mt5/state for execution."""
+    """Set trailing stop on an MT5 position. Saved to DB as pending; EA picks it up on next poll."""
     body   = request.json or {}
     ticket = body.get("ticket")
     pips   = body.get("pips", 20)
-    return jsonify({"status": "ok", "ticket": ticket, "pips": pips})
+    if not ticket:
+        return jsonify({"error": "ticket required"}), 400
+    user_id = str(session.get("user_id"))
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    try:
+        db = _DBSession()
+        try:
+            order = MT5Order(
+                user_id      = user_id,
+                symbol       = "AUTO",
+                order_type   = "TRAILING",
+                volume       = 0,
+                price        = float(pips),
+                action       = "trailing",
+                close_ticket = int(ticket),
+                status       = "pending",
+                comment      = f"Trailing stop {pips} pips",
+            )
+            db.add(order)
+            db.commit()
+            return jsonify({"status": "ok", "ticket": ticket, "pips": pips, "order_id": order.id})
+        except Exception as e:
+            db.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ─── AUTOMATION SETTINGS ─────────────────────────────────────
 
