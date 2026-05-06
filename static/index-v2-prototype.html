@@ -4164,7 +4164,7 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
       <div class="nav-item" data-nav="signals" onclick="setNav('signals');showSignalFeed();">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         <span><span>Signal</span><span class="nav-desc">Find your next trade</span></span>
-        <span class="nav-badge">10</span>
+        <span class="nav-badge" id="navSignalBadge">—</span>
       </div>
       <div class="nav-item" data-nav="scanner" onclick="setNav('signals');showSignalFeed();setTimeout(()=>sfShowTab('scanner'),60);" style="padding-left:28px;">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -7323,6 +7323,7 @@ function showSignalFeed(){
   el.innerHTML=_sfRender();
   setTimeout(()=>document.addEventListener('click',_sfOutsideClick,{once:true}),10);
   setTimeout(function(){ _sfFetchSignals(); }, 50);
+  if(typeof loadSigHistory === 'function') setTimeout(loadSigHistory, 100);
 }
 
 /* ── Backtest scan cache: {key → {data, ts}} — 30-min TTL ── */
@@ -7333,6 +7334,8 @@ function _sfUpdateMetrics(opps){
   var total=opps?opps.length:0;
   set('sfMetricVal0', String(total));
   set('sfMetricSub0', total>0 ? total+' active signals' : 'scanning…');
+  var badge=document.getElementById('navSignalBadge');
+  if(badge) badge.textContent = total>0 ? String(total) : '—';
   if(opps&&opps.length){
     var confs=opps.map(function(o){return parseInt(o.conf)||0;}).filter(function(v){return v>0;});
     var avg=confs.length?Math.round(confs.reduce(function(a,b){return a+b;},0)/confs.length):null;
@@ -7852,7 +7855,7 @@ function _sfRender(){
   /* scanAssets + scanRows — populated by _sfFetchSignals() after backtest wait */
 
   const metrics=[
-    {ico:'<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',stroke:'rgba(237,232,216,.8)',bg:'rgba(237,232,216,.07)',val:'10',lbl:'Live Opportunities',sub:'Updated every 15 min',
+    {ico:'<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',stroke:'rgba(237,232,216,.8)',bg:'rgba(237,232,216,.07)',val:'—',lbl:'Live Opportunities',sub:'scanning…',
      detail:`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px;">
        <div style="text-align:center;"><div style="font-size:18px;font-weight:600;font-family:var(--mono);color:var(--amb);">4</div><div style="font-size:10px;color:var(--mut);margin-top:2px;">Crypto</div></div>
        <div style="text-align:center;"><div style="font-size:18px;font-weight:600;font-family:var(--mono);color:rgba(237,232,216,.85);">3</div><div style="font-size:10px;color:var(--mut);margin-top:2px;">Stocks</div></div>
@@ -7860,14 +7863,14 @@ function _sfRender(){
        <div style="text-align:center;"><div style="font-size:18px;font-weight:600;font-family:var(--mono);color:rgba(96,165,250,.85);">1</div><div style="font-size:10px;color:var(--mut);margin-top:2px;">Index</div></div>
      </div>
      <div style="font-size:10px;color:var(--mut);line-height:1.7;">Top signals this session: <span style="color:var(--amb);">BTC/USD BUY 4H</span> · <span style="color:var(--amb);">ETH/USD BUY 4H</span> · <span style="color:rgba(232,112,110,.85);">SPY SELL 1D</span>. Signals below 65% confluence gate are excluded from this count.</div>`},
-    {ico:'<circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>',stroke:'rgba(93,232,160,.8)',bg:'rgba(93,232,160,.07)',val:'73.4%',lbl:'Avg Confidence',sub:'Above 65% confluence gate',
+    {ico:'<circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>',stroke:'rgba(93,232,160,.8)',bg:'rgba(93,232,160,.07)',val:'—',lbl:'Avg Confidence',sub:'Above 65% confluence gate',
      detail:`<div style="margin-bottom:12px;">
        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:10px;color:var(--amb);font-weight:600;font-family:var(--mono);min-width:60px;">HIGH ≥80%</span><div style="flex:1;height:6px;border-radius:3px;background:rgba(237,232,216,.08);"><div style="height:100%;border-radius:3px;background:rgba(201,168,76,.7);width:40%;"></div></div><span style="font-size:10px;font-family:var(--mono);color:var(--mut);min-width:24px;text-align:right;">4</span></div>
        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:10px;color:rgba(237,232,216,.7);font-weight:600;font-family:var(--mono);min-width:60px;">MED 65–79%</span><div style="flex:1;height:6px;border-radius:3px;background:rgba(237,232,216,.08);"><div style="height:100%;border-radius:3px;background:rgba(237,232,216,.4);width:60%;"></div></div><span style="font-size:10px;font-family:var(--mono);color:var(--mut);min-width:24px;text-align:right;">6</span></div>
        <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:10px;color:rgba(237,232,216,.35);font-weight:600;font-family:var(--mono);min-width:60px;">EXCLUDED</span><div style="flex:1;height:6px;border-radius:3px;background:rgba(237,232,216,.08);"><div style="height:100%;border-radius:3px;background:rgba(237,232,216,.15);width:20%;"></div></div><span style="font-size:10px;font-family:var(--mono);color:var(--mut);min-width:24px;text-align:right;">3</span></div>
      </div>
      <div style="font-size:10px;color:var(--mut);line-height:1.7;">Confidence = % of indicators agreeing on direction. DotVerse only shows signals with ≥65% agreement. The higher the confidence, the more indicators align — a CONFIRMED 80%+ signal is the strongest entry.</div>`},
-    {ico:'<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',stroke:'rgba(93,232,160,.8)',bg:'rgba(93,232,160,.07)',val:'71.8%',lbl:'Win Rate (7D)',sub:'43 signals evaluated',
+    {ico:'<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',stroke:'rgba(93,232,160,.8)',bg:'rgba(93,232,160,.07)',val:'—',lbl:'Win Rate (7D)',sub:'run backtest for win rate',
      detail:`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;text-align:center;">
        <div><div style="font-size:20px;font-weight:600;font-family:var(--mono);color:var(--grn);">31</div><div style="font-size:10px;color:var(--mut);margin-top:2px;">Wins</div></div>
        <div><div style="font-size:20px;font-weight:600;font-family:var(--mono);color:var(--red);">12</div><div style="font-size:10px;color:var(--mut);margin-top:2px;">Losses</div></div>
@@ -7875,7 +7878,7 @@ function _sfRender(){
      </div>
      <div style="height:8px;border-radius:4px;background:rgba(237,232,216,.08);overflow:hidden;margin-bottom:10px;"><div style="height:100%;border-radius:4px;background:linear-gradient(90deg,rgba(93,232,160,.7),rgba(93,232,160,.4));width:71.8%;transition:width .6s;"></div></div>
      <div style="font-size:10px;color:var(--mut);line-height:1.7;">This week is running <span style="color:var(--grn);">+4.6% above</span> the 30-day average. Win rate counts signals that hit TP1 before SL. Crypto sessions show the highest hit rate this week.</div>`},
-    {ico:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',stroke:'rgba(201,168,76,.75)',bg:'rgba(201,168,76,.06)',val:'1:2.6',lbl:'Avg Risk/Reward',sub:'After 0.2% fee deduction',
+    {ico:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',stroke:'rgba(201,168,76,.75)',bg:'rgba(201,168,76,.06)',val:'—',lbl:'Avg Risk/Reward',sub:'After 0.2% fee deduction',
      detail:`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;text-align:center;">
        <div><div style="font-size:14px;font-weight:600;font-family:var(--mono);color:var(--red);">$100</div><div style="font-size:10px;color:var(--mut);margin-top:2px;">Risk per trade</div></div>
        <div><div style="font-size:14px;font-weight:600;font-family:var(--mono);color:var(--amb);">$260</div><div style="font-size:10px;color:var(--mut);margin-top:2px;">Avg reward</div></div>
@@ -7997,17 +8000,7 @@ function _sfRender(){
         Market Scanner
       </div>
       <div class="opp-section-sub">Full DotVerse 65% confluence analysis across all instruments · click row for full signal</div>
-      <button id="arBar" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:0 4px;font-family:var(--mono,monospace);font-size:12px;color:rgba(237,232,216,.6);">
-  <span style="margin-right:4px;">AUTO</span>
-  <button class="ar-pill active" onclick="arSet(this)" data-interval="0">OFF</button>
-  <button class="ar-pill" onclick="arSet(this)" data-interval="15">15s</button>
-  <button class="ar-pill" onclick="arSet(this)" data-interval="30">30s</button>
-  <button class="ar-pill" onclick="arSet(this)" data-interval="60">1m</button>
-  <button class="ar-pill" onclick="arSet(this)" data-interval="300">5m</button>
-  <button class="ar-pill" onclick="arSet(this)" data-interval="900">15m</button>
-  <span id="arDot" style="margin-left:4px;"></span>
-</div>
-<button id="runScanBtn" onclick="scRunScan()" style="font-size:11px;font-weight:700;padding:8px 20px;background:var(--crys);color:#07080c;border:none;border-radius:7px;cursor:pointer;font-family:var(--mono);display:flex;align-items:center;gap:7px;flex-shrink:0;">
+      <button id="runScanBtn" onclick="scRunScan()" style="font-size:11px;font-weight:700;padding:8px 20px;background:var(--crys);color:#07080c;border:none;border-radius:7px;cursor:pointer;font-family:var(--mono);display:flex;align-items:center;gap:7px;flex-shrink:0;">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         Run Scan
       </button>
