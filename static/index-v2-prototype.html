@@ -10519,10 +10519,14 @@ async function showNews(){
     '<span class="news-list-time">'+n.time+' ago</span>'+
   '</div>';}).join('') : '<div style="color:rgba(237,232,216,.35);padding:8px;text-align:center;font-size:11px;">No articles in this category.</div>';
 
-  // Most Mentioned — extracted from article headlines, filtered to known ticker patterns
-  var knownSyms=['BTC','ETH','SOL','BNB','XRP','DOGE','AAPL','NVDA','TSLA','SPY','MSFT','AMZN','GOOGL','META','EURUSD','GBPUSD','USDJPY','AUDUSD','NFLX','AMD','INTC','UBER','PYPL','ORCL','ADBE'];
+  // Most Mentioned — extracted from article headlines
+  var knownSyms=['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','DOT','AVAX','LINK','MATIC','LTC','ATOM','NEAR','ARB','APT','INJ','SUI','AAPL','NVDA','TSLA','SPY','MSFT','AMZN','GOOGL','META','NFLX','AMD','INTC','UBER','PYPL','ORCL','ADBE','JPM','BAC','XOM','DIS','COIN','CRM','SHOP','EURUSD','GBPUSD','USDJPY','AUDUSD','EURJPY','GBPJPY','USDCAD','USDCHF','NZDUSD','GOLD','OIL','XAU','WTI'];
   var tickerCount={};
   articles.forEach(function(a){var h=(a.headline||'').toUpperCase();knownSyms.forEach(function(s){if(h.indexOf(s)>=0) tickerCount[s]=(tickerCount[s]||0)+1;});});
+  // If no tickers matched, extract any 2-5 char uppercase sequences from headlines
+  if(Object.keys(tickerCount).length===0){
+    articles.forEach(function(a){var h=(a.headline||'').toUpperCase();var syms=h.match(/[A-Z]{2,5}/g)||[];syms.forEach(function(s){tickerCount[s]=(tickerCount[s]||0)+1;});});
+  }
   var tickers=Object.entries(tickerCount).sort(function(a,b){return b[1]-a[1];}).slice(0,5).map(function(e){return {sym:e[0],cnt:e[1]+' stories'};});
   if(!tickers.length) tickers=[{sym:'—',cnt:'no tickers found'}];
   // Economic Calendar section removed — duplicate of Market page data
@@ -10780,12 +10784,12 @@ function showUnderstand(){
   function _mtfSig(l){const d=mtfRaw[l]||mtfRaw[l.toLowerCase()]||{};return d.trend||d.signal||null;}
   function _mtfRsi(l){const d=mtfRaw[l]||mtfRaw[l.toLowerCase()]||{};return d.rsi!=null?Number(d.rsi).toFixed(0):null;}
   const mtf=[
-    {tf:'15M',sig:_mtfSig('15M')||_mtfSig('15m')||(isBuy?'BUY':'SELL'),rsi:_mtfRsi('15M')},
-    {tf:'1H', sig:_mtfSig('1H') ||_mtfSig('1h') ||(isBuy?'BUY':'SELL'),rsi:_mtfRsi('1H')},
-    {tf:'4H', sig:_mtfSig('4H') ||_mtfSig('4h') ||sig.sig,             rsi:_mtfRsi('4H')},
-    {tf:'1D', sig:_mtfSig('1D') ||_mtfSig('1d') ||(isBuy?'BUY':'HOLD'),rsi:_mtfRsi('1D')},
-    {tf:'1W', sig:_mtfSig('1W') ||_mtfSig('1w') ||'HOLD',              rsi:_mtfRsi('1W')},
-    {tf:'1M', sig:_mtfSig('1M') ||_mtfSig('1mo')||'HOLD',              rsi:_mtfRsi('1M')},
+    {tf:'15M',sig:_mtfSig('15M')||_mtfSig('15m')||'—',rsi:_mtfRsi('15M')},
+    {tf:'1H', sig:_mtfSig('1H') ||_mtfSig('1h') ||'—',rsi:_mtfRsi('1H')},
+    {tf:'4H', sig:_mtfSig('4H') ||_mtfSig('4h') ||sig.sig,rsi:_mtfRsi('4H')},
+    {tf:'1D', sig:_mtfSig('1D') ||_mtfSig('1d') ||'—',rsi:_mtfRsi('1D')},
+    {tf:'1W', sig:_mtfSig('1W') ||_mtfSig('1w') ||'—',rsi:_mtfRsi('1W')},
+    {tf:'1M', sig:_mtfSig('1M') ||_mtfSig('1mo')||'—',rsi:_mtfRsi('1M')},
   ];
   const mtfHtml = mtf.map(m=>`
     <div class="und-mtf-cell" style="cursor:pointer" onclick="dvSetTFByLabel('${m.tf}')" title="Switch to ${m.tf}">
