@@ -6102,7 +6102,12 @@ def new_listings():
                 if not sym or sym in seen:
                     continue
                 seen.add(sym)
-                # Fetch detail for genesis_date
+                # Rate-limit guard: CoinGecko free tier allows ~10-30 calls/min
+                import time as _time
+                _time.sleep(1.5)
+                # Fetch detail — filter by market cap, not genesis_date.
+                # Trending coins are rarely "new" (<30d). Instead, surface
+                # "emerging" coins: low market cap or unranked = trade opportunity.
                 try:
                     rd = requests.get(f"https://api.coingecko.com/api/v3/coins/{cid}",
                                     params={"localization": "false", "tickers": "false",
@@ -6110,22 +6115,21 @@ def new_listings():
                                     headers={"User-Agent": "DotVerse/1.0"}, timeout=8)
                     if rd.status_code == 200:
                         detail = rd.json()
-                        gen = detail.get("genesis_date") or ""
-                        if gen:
-                            gen_dt = datetime.strptime(gen, "%Y-%m-%d")
-                            days_old = (datetime.utcnow() - gen_dt).days
-                            if 0 <= days_old <= 30:
-                                mcap = detail.get("market_data", {}).get("market_cap", {}).get("usd") or 0
-                                listings.append({
-                                    "ticker": sym + "USD",
-                                    "name": coin.get("name", sym),
-                                    "asset_type": "crypto",
-                                    "listing_price": 0,
-                                    "exchange": "CoinGecko",
-                                    "listed_date": gen,
-                                    "days_old": days_old,
-                                    "market_cap": mcap,
-                                })
+                        mcap = detail.get("market_data", {}).get("market_cap", {}).get("usd") or 0
+                        mcap_rank = detail.get("market_cap_rank") or 99999
+                        # Emerging: mcap < $100M or unranked (very new / micro-cap)
+                        if mcap > 0 and mcap < 100_000_000 or (mcap_rank is None or mcap_rank > 500):
+                            listings.append({
+                                "ticker": sym + "USD",
+                                "name": coin.get("name", sym),
+                                "asset_type": "crypto",
+                                "listing_price": 0,
+                                "exchange": "CoinGecko",
+                                "listed_date": "",
+                                "days_old": 0,
+                                "market_cap": mcap,
+                                "type_label": "EMERGING",
+                            })
                 except Exception:
                     pass
     except Exception as e:
