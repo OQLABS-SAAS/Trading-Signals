@@ -5873,13 +5873,15 @@ def get_prices():
                     if len(df_t) >= 2:
                         p  = float(df_t["Close"].iloc[-1])
                         p0 = float(df_t["Close"].iloc[-2])
-                        results[ticker] = {"price": round(p, 4), "chg": round((p / p0 - 1) * 100, 2)}
+                        hi = float(df_t["High"].max()) if "High" in df_t.columns else p
+                        lo = float(df_t["Low"].min()) if "Low" in df_t.columns else p
+                        results[ticker] = {"price": round(p, 4), "chg": round((p / p0 - 1) * 100, 2), "high": round(hi, 4), "low": round(lo, 4)}
                     elif len(df_t) == 1:
-                        results[ticker] = {"price": round(float(df_t["Close"].iloc[-1]), 4), "chg": 0.0}
+                        results[ticker] = {"price": round(float(df_t["Close"].iloc[-1]), 4), "chg": 0.0, "high": round(float(df_t["Close"].iloc[-1]), 4), "low": round(float(df_t["Close"].iloc[-1]), 4)}
                     else:
-                        results[ticker] = {"price": None, "chg": None}
+                        results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
                 except Exception:
-                    results[ticker] = {"price": None, "chg": None}
+                    results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
 
         except Exception:
             # Fallback: fetch individually if batch fails
@@ -5890,13 +5892,15 @@ def get_prices():
                     df = df.dropna(subset=["Close"])
                     if len(df) >= 2:
                         p, p0 = float(df["Close"].iloc[-1]), float(df["Close"].iloc[-2])
-                        results[ticker] = {"price": round(p, 4), "chg": round((p / p0 - 1) * 100, 2)}
+                        hi = float(df["High"].max()) if "High" in df.columns else p
+                        lo = float(df["Low"].min()) if "Low" in df.columns else p
+                        results[ticker] = {"price": round(p, 4), "chg": round((p / p0 - 1) * 100, 2), "high": round(hi, 4), "low": round(lo, 4)}
                     elif len(df) == 1:
-                        results[ticker] = {"price": round(float(df["Close"].iloc[-1]), 4), "chg": 0.0}
+                        results[ticker] = {"price": round(float(df["Close"].iloc[-1]), 4), "chg": 0.0, "high": round(float(df["Close"].iloc[-1]), 4), "low": round(float(df["Close"].iloc[-1]), 4)}
                     else:
-                        results[ticker] = {"price": None, "chg": None}
+                        results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
                 except Exception:
-                    results[ticker] = {"price": None, "chg": None}
+                    results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
 
         # ── TradingView fallback for any tickers still missing prices ──
         missing = [t for t in tickers if not results.get(t, {}).get("price")]

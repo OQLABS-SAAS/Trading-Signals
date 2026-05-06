@@ -8428,8 +8428,8 @@ function showMarket(){
     </div>
     <div id="${rowId}" style="display:none;padding:10px 14px 12px;border-bottom:1px solid rgba(255,255,255,.03);background:rgba(201,168,76,.03);">
       <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px;">
-        <div><div style="font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px;">24h High</div><div style="font-family:var(--mono);font-size:12px;color:rgba(93,232,160,.85);">${m.price.replace('$','')} <span style="font-size:9px;color:rgba(93,232,160,.5);">+0.4%</span></div></div>
-        <div><div style="font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px;">24h Low</div><div style="font-family:var(--mono);font-size:12px;color:rgba(224,85,85,.75);">${m.price.replace('$','')} <span style="font-size:9px;color:rgba(224,85,85,.5);">−0.6%</span></div></div>
+        <div><div style="font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px;">24h High</div><div style="font-family:var(--mono);font-size:12px;color:rgba(93,232,160,.85);" id="mkhi-${m.sym}">—</div></div>
+        <div><div style="font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px;">24h Low</div><div style="font-family:var(--mono);font-size:12px;color:rgba(224,85,85,.75);" id="mklo-${m.sym}">—</div></div>
         <div><div style="font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px;">Change</div><div style="font-family:var(--mono);font-size:12px;color:${m.up?'rgba(93,232,160,.85)':'rgba(224,85,85,.75)'};">${m.chg}</div></div>
         <div><div style="font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px;">Trend</div><div style="font-size:11px;color:${m.up?'rgba(93,232,160,.8)':'rgba(224,85,85,.7)'};">${m.up?'↑ Bullish':'↓ Bearish'}</div></div>
       </div>
@@ -8472,7 +8472,7 @@ function showMarket(){
       ? `rgba(52,199,89,${.12+intensity*.52})`
       : `rgba(255,59,48,${.12+intensity*.52})`;
     const textCol = isUp ? '#5de8a0' : '#e8706e';
-    return `<div class="mkt-heat-cell" id="mkheat-${h.sym}" onclick="mktAnalyseSym('${h.sym}')" title="${h.sym}: ${h.chg>0?'+':''}${h.chg}% today — click to run signal analysis (may differ from price change)" style="background:${bgCol};">
+    return `<div class="mkt-heat-cell" id="mkheat-${h.sym}" onclick="mktAnalyseSym('${h.sym}')" title="${h.sym}: ${h.chg>0?'+':''}${h.chg}% today · click to analyse" style="background:${bgCol};">
       <div class="mkt-heat-sym">${h.sym}</div>
       <div class="mkt-heat-val" style="color:${textCol};">${h.chg>0?'+':''}${h.chg}%</div>
     </div>`;
@@ -8546,7 +8546,7 @@ function showMarket(){
     <div class="mkt-cond-dot"></div>
     <div class="mkt-cond-label">${condLabel}</div>
     <div class="mkt-cond-desc">${condDesc}</div>
-    <button class="mkt-cond-cta" onclick="applyCondFilter('${condCls}');setNav('signals');showSignalFeed();">${condSignals} → SIGNAL</button>
+    <button class="mkt-cond-cta" onclick="applyCondFilter('${condCls}');setNav('signals');showSignalFeed();"><span id="mktCondSigCount">${condSignals}</span> → SIGNAL</button>
   </div>`;
 
   el.innerHTML=`
@@ -8972,6 +8972,8 @@ async function _mktFetchTopSignals(){
     badge.style.color = active.length > 0 ? '#5de8a0' : 'rgba(237,232,216,.6)';
     badge.style.borderColor = active.length > 0 ? 'rgba(93,232,160,.3)' : 'rgba(237,232,216,.2)';
   }
+  var ccEl = document.getElementById('mktCondSigCount');
+  if (ccEl) ccEl.textContent = active.length + ' signals match';
 
   if(active.length === 0){
     list.innerHTML = '<div style="font-size:12px;color:rgba(237,232,216,.4);padding:12px 2px;">No strong signals right now — check back later or scan manually.</div>';
@@ -9057,6 +9059,11 @@ async function _mktUpdateLiveData(){
       const chEl=document.getElementById('mkch-'+disp);
       if(prEl) prEl.textContent=(disp==='BTC'||disp==='ETH'||disp==='XAU'||disp==='SOL'||disp==='WTI'||disp==='XAG'?'$':'')+pStr;
       if(chEl){chEl.textContent=chgStr;chEl.className='mkt-row-chg '+(isUp?'up':'dn');}
+      // Expandable row: 24h high / low
+      const hiEl=document.getElementById('mkhi-'+disp);
+      const loEl=document.getElementById('mklo-'+disp);
+      if(hiEl && d.high != null) hiEl.textContent=(disp==='BTC'||disp==='ETH'||disp==='XAU'||disp==='SOL'||disp==='WTI'||disp==='XAG'?'$':'')+_fmt(d.high);
+      if(loEl && d.low != null) loEl.textContent=(disp==='BTC'||disp==='ETH'||disp==='XAU'||disp==='SOL'||disp==='WTI'||disp==='XAG'?'$':'')+_fmt(d.low);
       // Heatmap
       const htEl=document.getElementById('mkheat-'+disp);
       if(htEl){
@@ -9125,7 +9132,7 @@ async function _loadFearGreed(){
 async function _loadSectors(){
   try{
     var r = await dvFetch('/api/sectors');
-    if(!r || !Array.isArray(r.sectors)) return;
+    if(!r || !Array.isArray(r.sectors)) { _sectorFail(); return; }
     r.sectors.forEach(function(s, i){
       var bar = document.getElementById('mktSectorBar'+i);
       var val = document.getElementById('mktSectorVal'+i);
@@ -9136,7 +9143,13 @@ async function _loadSectors(){
       if(bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
       if(val) val.textContent = displayPct;
     });
-  }catch(e){}
+  }catch(e){ _sectorFail(); }
+}
+function _sectorFail(){
+  for(var i=0;i<6;i++){
+    var v=document.getElementById('mktSectorVal'+i);
+    if(v) v.textContent = '—';
+  }
 }
 
 // Navigate to UNDERSTAND with this symbol ready to analyse
@@ -9150,10 +9163,10 @@ function mktAnalyseSym(sym, assetType){
   window._activeSignal = {
     sym: sym,
     asset: asset,
-    sig: null,   // no signal yet — UNDERSTAND will show "Analysing..."
+    sig: 'Analysing…',
     entry: null, sl: null, tp: null,
-    conf: 0, confLbl: 'HYPOTHESIS',
-    reason: 'Select a timeframe and run analysis',
+    conf: 0, confLbl: 'WAIT',
+    reason: 'Running DotVerse analysis on ' + sym + '…',
     tf: '4H'
   };
   window._calcPrefill = { sym: sym };
