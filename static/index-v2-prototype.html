@@ -11745,8 +11745,8 @@ async function undRunBacktest(silent){
     content.innerHTML='<div style="color:var(--t3);font-size:11px;padding:8px 0;">Running backtest…</div>';
   }
 
-  // 15-second timeout — backtest scans historical data, needs more time
-  const _btTimeout = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 15000); });
+  // 30-second timeout — backtest scans 500+ bars across multiple data sources
+  const _btTimeout = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 30000); });
   const data = await Promise.race([
     dvFetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -11757,10 +11757,10 @@ async function undRunBacktest(silent){
   ]);
 
   if(!data){
-    // Backtest timed out — set _lastBt so Flow badge doesn't hang on "computing…"
+    // Backtest failed or timed out across all data sources
     if(window._lastBt === null) window._lastBt = {};
     if(typeof updateFlowBadge === 'function') updateFlowBadge();
-    if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest timed out after 15s — try a higher timeframe or tickers with more history.</div>';
+    if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest unavailable — Railway data sources may be rate-limited. Try a higher timeframe or run again in a minute.</div>';
     return;
   }
 
