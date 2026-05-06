@@ -10482,11 +10482,12 @@ async function showNews(){
     '<span class="news-list-time">'+n.time+' ago</span>'+
   '</div>';}).join('') : '<div style="color:rgba(237,232,216,.35);padding:8px;text-align:center;font-size:11px;">No articles in this category.</div>';
 
-  // Most Mentioned — extracted from article headlines
+  // Most Mentioned — extracted from article headlines, filtered to known ticker patterns
+  var knownSyms=['BTC','ETH','SOL','BNB','XRP','DOGE','AAPL','NVDA','TSLA','SPY','MSFT','AMZN','GOOGL','META','EURUSD','GBPUSD','USDJPY','AUDUSD','GOLD','OIL','NFLX','AMD','INTC','UBER','PYPL','ORCL','ADBE'];
   var tickerCount={};
-  articles.forEach(function(a){var h=a.headline||'';var syms=h.match(/[A-Z]{2,5}/g)||[];syms.forEach(function(s){tickerCount[s]=(tickerCount[s]||0)+1;});});
+  articles.forEach(function(a){var h=(a.headline||'').toUpperCase();knownSyms.forEach(function(s){if(h.indexOf(s)>=0) tickerCount[s]=(tickerCount[s]||0)+1;});});
   var tickers=Object.entries(tickerCount).sort(function(a,b){return b[1]-a[1];}).slice(0,5).map(function(e){return {sym:e[0],cnt:e[1]+' stories',sent:'neut'};});
-  if(!tickers.length) tickers=[{sym:'—',cnt:'loading',sent:'neut'}];
+  if(!tickers.length) tickers=[{sym:'—',cnt:'no tickers found',sent:'neut'}];
   // Economic Calendar section removed — duplicate of Market page data
 
   el.innerHTML=`
