@@ -6194,11 +6194,13 @@ def new_listings():
     top = results[:4]
 
     final = {"listings": top}
-    try:
-        if _redis_client:
-            _redis_client.setex(cache_key, 14400, json.dumps(final))
-    except Exception:
-        pass
+    # Only cache non-empty results — empty cache blocks real data for 4h
+    if top:
+        try:
+            if _redis_client:
+                _redis_client.setex(cache_key, 14400, json.dumps(final))
+        except Exception:
+            pass
     return jsonify(final)
 
 
