@@ -154,6 +154,24 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
+def require_tier(minimum):
+    """Decorator — blocks API calls unless user's tier meets the minimum.
+    Tiers: free(0) < pro(1) < elite(2). Returns 402 Payment Required."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            tier = session.get("user_tier", "free")
+            tiers = {"free": 0, "pro": 1, "elite": 2}
+            if tiers.get(tier, 0) < tiers.get(minimum, 0):
+                return jsonify({
+                    "error": "Upgrade required",
+                    "required_tier": minimum,
+                    "current_tier": tier
+                }), 402
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
 def _get_current_user():
     """Return the current User ORM object from session, or None."""
     user_id = session.get("user_id")
