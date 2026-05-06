@@ -7314,6 +7314,44 @@ function showSignalFeed(){
 /* ── Backtest scan cache: {key → {data, ts}} — 30-min TTL ── */
 window._btScanCache = window._btScanCache || {};
 
+function _sfUpdateMetrics(opps){
+  // Metric 0: Live Opportunities — count of actionable signals
+  var total=opps?opps.length:0;
+  var countByClass={};
+  if(opps) opps.forEach(function(o){var c=o.asset_type||'other';countByClass[c]=(countByClass[c]||0)+1;});
+  _s('sfMetricVal0', total||'—');
+  _s('sfMetricSub0', total+' active signals from scan');
+
+  // Metric 1: Avg Confidence
+  if(opps&&opps.length){
+    var confVals=opps.map(function(o){return parseInt(o.confidence)||0;}).filter(function(v){return v>0;});
+    var avgConf=confVals.length?Math.round(confVals.reduce(function(a,b){return a+b;},0)/confVals.length):null;
+    _s('sfMetricVal1', avgConf!=null?avgConf+'%':'—');
+    _s('sfMetricSub1', 'Above 65% confluence gate');
+  } else {
+    _s('sfMetricVal1','—'); _s('sfMetricSub1','loading…');
+  }
+
+  // Metric 2: Win Rate — from backtest cache or signal quality
+  var bt=window._btScanCache?._global||null;
+  if(bt&&bt.win_rate!=null){
+    _s('sfMetricVal2', bt.win_rate+'%');
+    _s('sfMetricSub2',(bt.total_trades||bt.sample_size||'?')+' signals evaluated');
+  } else {
+    _s('sfMetricVal2','—'); _s('sfMetricSub2','run backtest for win rate');
+  }
+
+  // Metric 3: Avg R:R
+  if(opps&&opps.length){
+    var rrVals=opps.map(function(o){return parseFloat(o.rr1||o.rr)||0;}).filter(function(v){return v>0;});
+    var avgRR=rrVals.length?Math.round(rrVals.reduce(function(a,b){return a+b;},0)/rrVals.length*10)/10:null;
+    _s('sfMetricVal3', avgRR!=null?'1:'+avgRR:'—');
+    _s('sfMetricSub3','After 0.2% fee deduction');
+  } else {
+    _s('sfMetricVal3','—'); _s('sfMetricSub3','loading…');
+  }
+}
+
 async function _sfFetchSignals(){
   const list  = document.getElementById('sfOppsList');
   const fill  = document.getElementById('sfBtFill');
@@ -7613,6 +7651,7 @@ async function _sfFetchSignals(){
 
   const listNow = document.getElementById('sfOppsList');
   if(listNow) listNow.innerHTML = '<div class="opp-list">' + oppCards + '</div>';
+  _sfUpdateMetrics(verifiedOpps);
 
   /* ── Scanner tab: leave empty — user clicks "Run Scan" to populate ── */
   var tbody = document.getElementById('scTableBody');
@@ -7812,15 +7851,15 @@ function _sfRender(){
        <div><div style="font-size:14px;font-weight:600;font-family:var(--mono);color:var(--grn);">$160</div><div style="font-size:10px;color:var(--mut);margin-top:2px;">Net edge</div></div>
      </div>
      <div style="font-size:10px;color:var(--mut);line-height:1.7;">Best RR this session: <span style="color:var(--amb);">ETH/USD 1:3.8</span>. At 71.8% win rate with 1:2.6 avg RR, the expected value per trade is <span style="color:var(--grn);">+$145</span> per $100 risked — a strong edge. Minimum viable RR at this win rate is 1:0.4.</div>`},
-  ];
-  window._sfMetricActive=-1;
-  const metricsHtml=metrics.map((m,i)=>`<div class="sf-mc" style="cursor:pointer;" onclick="sfExpandMetric(${i})" title="Click for details">
-    <div class="sf-mc-ico" style="background:${m.bg}">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${m.stroke}" stroke-width="2">${m.ico}</svg>
-    </div>
-    <div class="sf-mc-r"><div class="sf-mc-lbl">${m.lbl}</div><div class="sf-mc-val">${m.val}</div><div class="sf-mc-sub">${m.sub}</div></div>
-    <svg style="position:absolute;bottom:8px;right:10px;opacity:.3;" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.7)" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-  </div>`).join('');
+   ];
+   window._sfMetricActive=-1;
+   const metricsHtml=metrics.map((m,i)=>'<div class="sf-mc" style="cursor:pointer;" onclick="sfExpandMetric('+i+')" title="Click for details">'+
+     '<div class="sf-mc-ico" style="background:'+m.bg+'">'+
+       '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="'+m.stroke+'" stroke-width="2">'+m.ico+'</svg>'+
+     '</div>'+
+     '<div class="sf-mc-r"><div class="sf-mc-lbl">'+m.lbl+'</div><div class="sf-mc-val" id="sfMetricVal'+i+'">—</div><div class="sf-mc-sub" id="sfMetricSub'+i+'">loading…</div></div>'+
+     '<svg style="position:absolute;bottom:8px;right:10px;opacity:.3;" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.7)" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>'+
+   '</div>').join('');
   window._sfMetricDetails=metrics.map(m=>m.detail);
 
   return `
