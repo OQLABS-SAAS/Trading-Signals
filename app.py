@@ -8159,13 +8159,20 @@ def _run_backtest_job(ticker, asset_type, timeframe, signal, entry, stop_loss, t
         avg_win = round(sum(wins)/len(wins), 2) if wins else 0
         avg_los = round(sum(losses)/len(losses), 2) if losses else 1
         equity = [10000.0]
+        peak = 10000.0; max_dd = 0.0; max_dd_pct = 0.0
         for t in trades:
-            equity.append(equity[-1] + t["PnL"] * 100)
+            eq = equity[-1] + t["PnL"] * 100
+            equity.append(eq)
+            if eq > peak: peak = eq
+            dd = peak - eq; dd_pct = dd / peak * 100 if peak > 0 else 0
+            if dd > max_dd: max_dd = dd; max_dd_pct = dd_pct
+        total_pnl = equity[-1] - 10000.0 if equity else 0
 
         result = {
             "win_rate": wr, "total_trades": len(trades), "sample_size": len(trades),
             "avg_win_r": avg_win, "avg_loss_r": avg_los,
             "profit_factor": round(sum(wins)/(sum(losses) or 1), 2),
+            "max_dd_pct": round(max_dd_pct, 1), "total_pnl_pct": round(total_pnl/100, 1),
             "sharpe": 0, "equity_curve": equity,
             "elapsed_s": round(_time.time() - _t0, 1),
         }
