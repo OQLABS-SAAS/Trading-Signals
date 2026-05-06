@@ -11745,8 +11745,8 @@ async function undRunBacktest(silent){
     content.innerHTML='<div style="color:var(--t3);font-size:11px;padding:8px 0;">Running backtest…</div>';
   }
 
-  // 8-second timeout — if backtest doesn't respond, fall back to signal quality mode
-  const _btTimeout = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 8000); });
+  // 15-second timeout — backtest scans historical data, needs more time
+  const _btTimeout = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 15000); });
   const data = await Promise.race([
     dvFetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -11757,11 +11757,10 @@ async function undRunBacktest(silent){
   ]);
 
   if(!data){
-    // Backtest unavailable or timed out — set _lastBt to empty object (not null)
-    // so updateFlowBadge() falls back to signal quality mode instead of showing "computing..." forever
+    // Backtest timed out — set _lastBt so Flow badge doesn't hang on "computing…"
     if(window._lastBt === null) window._lastBt = {};
     if(typeof updateFlowBadge === 'function') updateFlowBadge();
-    if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest unavailable — check Railway connection</div>';
+    if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest timed out after 15s — try a higher timeframe or tickers with more history.</div>';
     return;
   }
 
