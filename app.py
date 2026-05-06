@@ -5903,8 +5903,17 @@ def econ_calendar():
                 impact_map = {"High": 3, "Medium": 2, "Low": 1}
                 result = []
                 for ev in events[:10]:  # top 10 most impactful
+                    raw_date = ev.get("date", "") or ""
+                    time_str = "--:--"
+                    if raw_date:
+                        try:
+                            dt = datetime.strptime(raw_date[:19], "%Y-%m-%d %H:%M:%S")
+                            time_str = dt.strftime("%H:%M")
+                        except Exception:
+                            pass
                     result.append({
-                        "date": ev.get("date", ""),
+                        "date": raw_date,
+                        "time": time_str,
                         "title": ev.get("event", ev.get("title", "")),
                         "country": (ev.get("country", "") or "").upper(),
                         "importance": impact_map.get(ev.get("impact", ""), 2),
