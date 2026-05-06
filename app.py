@@ -5904,13 +5904,23 @@ def econ_calendar():
                 result = []
                 for ev in events[:10]:  # top 10 most impactful
                     raw_date = ev.get("date", "") or ""
-                    time_str = "--:--"
-                    if raw_date:
-                        try:
-                            dt = datetime.strptime(raw_date[:19], "%Y-%m-%d %H:%M:%S")
-                            time_str = dt.strftime("%H:%M")
-                        except Exception:
-                            pass
+                    raw_hour = ev.get("hour", "") or ""
+                    time_str = raw_hour if raw_hour else "--:--"
+                    if time_str == "--:--" and raw_date:
+                        # Fall back to parsing 'date' field if 'hour' is empty
+                        for fmt in [
+                            "%Y-%m-%d %H:%M:%S",
+                            "%Y-%m-%dT%H:%M:%SZ",
+                            "%Y-%m-%dT%H:%M:%S",
+                            "%Y-%m-%dT%H:%M:%S.000Z",
+                            "%Y-%m-%d %H:%M:%S UTC",
+                        ]:
+                            try:
+                                dt = datetime.strptime(raw_date, fmt)
+                                time_str = dt.strftime("%H:%M")
+                                break
+                            except ValueError:
+                                continue
                     result.append({
                         "date": raw_date,
                         "time": time_str,
