@@ -7348,45 +7348,6 @@ function _sfUpdateMetrics(opps){
   set('sfMetricSub2', bt&&bt.win_rate!=null?(bt.total_trades||bt.sample_size||'?')+' signals evaluated':'run backtest for win rate');
 }
 
-function _sfUpdateMetrics(opps){
-  var _set=function(id,v){var e=document.getElementById(id);if(e)e.textContent=v;};
-  // Metric 0: Live Opportunities — count of actionable signals
-  var total=opps?opps.length:0;
-  var countByClass={};
-  if(opps) opps.forEach(function(o){var c=o.asset_type||'other';countByClass[c]=(countByClass[c]||0)+1;});
-  _set('sfMetricVal0', String(total));
-  _set('sfMetricSub0', total>0 ? total+' active signals from scan' : 'scanning…');
-
-  // Metric 1: Avg Confidence
-  if(opps&&opps.length){
-    var confVals=opps.map(function(o){return parseInt(o.conf)||0;}).filter(function(v){return v>0;});
-    var avgConf=confVals.length?Math.round(confVals.reduce(function(a,b){return a+b;},0)/confVals.length):null;
-    _set('sfMetricVal1', avgConf!=null?avgConf+'%':'—');
-    _set('sfMetricSub1', 'Above 65% confluence gate');
-  } else {
-    _set('sfMetricVal1','—'); _set('sfMetricSub1','loading…');
-  }
-
-  // Metric 2: Win Rate — from backtest cache or signal quality
-  var bt=window._btScanCache?._global||null;
-  if(bt&&bt.win_rate!=null){
-    _set('sfMetricVal2', bt.win_rate+'%');
-    _set('sfMetricSub2',(bt.total_trades||bt.sample_size||'?')+' signals evaluated');
-  } else {
-    _set('sfMetricVal2','—'); _set('sfMetricSub2','run backtest for win rate');
-  }
-
-  // Metric 3: Avg R:R
-  if(opps&&opps.length){
-    var rrVals=opps.map(function(o){return parseFloat(o.rr)||0;}).filter(function(v){return v>0;});
-    var avgRR=rrVals.length?Math.round(rrVals.reduce(function(a,b){return a+b;},0)/rrVals.length*10)/10:null;
-    _set('sfMetricVal3', avgRR!=null?'1:'+avgRR:'—');
-    _set('sfMetricSub3','After 0.2% fee deduction');
-  } else {
-    _set('sfMetricVal3','—'); _set('sfMetricSub3','loading…');
-  }
-}
-
 async function _sfFetchSignals(){
   const list  = document.getElementById('sfOppsList');
   const fill  = document.getElementById('sfBtFill');
@@ -8561,6 +8522,9 @@ function showMarket(){
   /* ── Top signals — fetched live, rendered by _mktFetchTopSignals() after render ── */
 
   /* ── Market conditions chip ── */
+  const bullCount = crypto.filter(m=>m.up).length + indices.filter(m=>m.up).length;
+  const totalCount = crypto.length + indices.length;
+  let condCls, condLabel, condDesc, condSignals;
   if(bullCount/totalCount >= 0.6){
     condCls='trending';
     condLabel='TRENDING CONDITIONS';
