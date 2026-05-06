@@ -11739,22 +11739,43 @@ async function undRunBacktest(silent){
     content.innerHTML='<div style="color:var(--t3);font-size:11px;padding:8px 0;">Running backtest…</div>';
   }
 
-  // 30-second timeout — backtest scans 500+ bars across multiple data sources
-  const _btTimeout = new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 30000); });
-  const data = await Promise.race([
-    dvFetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        ticker:sig.sym, asset_type:sig.asset||'auto', timeframe:sig.tf||'4H',
-        signal:sig.sig, entry:sig.entry, stop_loss:sig.sl, tp1:sig.tp, tp2:sig.tp2, tp3:sig.tp3
-      })}),
-    _btTimeout
-  ]);
+  // Enqueue backtest via RQ worker — runs off the main thread, no timeout
+  if(!silent){
+    panel.style.display='block';
+    content.innerHTML='<div style="color:var(--t3);font-size:11px;padding:8px 0;">Backtest queued on worker — this may take 30–60s…</div>';
+  }
+
+  var enq = await dvFetch('/api/backtest/enqueue',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      ticker:sig.sym, asset_type:sig.asset||'auto', timeframe:sig.tf||'4H',
+      signal:sig.sig, entry:sig.entry, stop_loss:sig.sl, tp1:sig.tp, tp2:sig.tp2, tp3:sig.tp3
+    })});
+  if(!enq || !enq.job_id){
+    if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest worker unavailable — Railway RQ service may be down.</div>';
+    return;
+  }
+
+  // Poll for result — up to 20 attempts (60s)
+  var data = null;
+  for(var poll=0; poll<20; poll++){
+    await new Promise(function(r){setTimeout(r, 3000);});
+    var pollRes = await dvFetch('/api/backtest/result/'+enq.job_id);
+    if(pollRes && pollRes.status==='finished' && pollRes.result){
+      data = pollRes.result;
+      if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest complete — processing results…</div>';
+      break;
+    }
+    if(pollRes && pollRes.status==='failed'){
+      if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest failed: '+(pollRes.error||'worker error')+'</div>';
+      return;
+    }
+    if(poll===5 && !silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Still running — scanning 500+ bars of historical data…</div>';
+  }
 
   if(!data){
-    // Backtest failed or timed out across all data sources
     if(window._lastBt === null) window._lastBt = {};
     if(typeof updateFlowBadge === 'function') updateFlowBadge();
-    if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest unavailable — Railway data sources may be rate-limited. Try a higher timeframe or run again in a minute.</div>';
+    if(!silent) content.innerHTML='<div style="color:var(--t3);font-size:11px;">Backtest timed out after 60s — try a higher timeframe or run again.</div>';
     return;
   }
 

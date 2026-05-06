@@ -8057,6 +8057,174 @@ def optimise_enqueue():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── RQ Backtest (async) ───────────────────────────────────────────────────
+def _run_backtest_job(ticker, asset_type, timeframe, signal, entry, stop_loss, tp1, tp2, tp3):
+    """RQ worker job — runs the full backtest computation off the main thread.
+    Stores result in Redis with 1h TTL."""
+    import json as _json, time as _time
+    _t0 = _time.time()
+    try:
+        # Reuse the existing backtest logic
+        ticker_n = normalise_ticker(ticker, asset_type)
+        prices_hist, highs_hist, lows_hist, dates_hist, volumes_hist = [], [], [], [], []
+
+        # Binance for crypto
+        if asset_type == "crypto":
+            try:
+                iv_map = {"5m":"5m","15m":"15m","30m":"30m","1h":"1h","4h":"4h","1d":"1d","1w":"1w"}
+                interval = iv_map.get(timeframe, "1d")
+                sym = ticker_n.upper().replace("-USD","").replace("-USDT","").replace("/","")
+                sym = sym + "USDT" if not sym.endswith("USDT") and not sym.endswith("BTC") else sym
+                r_bin = requests.get("https://api.binance.com/api/v3/klines",
+                                     params={"symbol": sym, "interval": interval, "limit": 500},
+                                     timeout=(10, 20))
+                if r_bin.status_code == 200:
+                    klines = r_bin.json()
+                    dt_fmt = "%Y-%m-%d %H:%M" if timeframe in ("5m","15m","30m","1h","4h") else "%Y-%m-%d"
+                    for k in klines:
+                        ts = int(k[0]) // 1000
+                        dates_hist.append(datetime.utcfromtimestamp(ts).strftime(dt_fmt))
+                        prices_hist.append(float(k[4]))
+                        highs_hist.append(float(k[2]))
+                        lows_hist.append(float(k[3]))
+                        volumes_hist.append(float(k[5]))
+            except Exception as e:
+                print(f"[bt-job] Binance: {e}")
+
+        # yfinance fallback for all types
+        if not prices_hist:
+            try:
+                cfg = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
+                period_map = {"5m":"60d","15m":"60d","30m":"60d","1h":"180d","4h":"1y","1d":"1y","1w":"5y","1mo":"10y"}
+                df_bt = safe_download(ticker_n, period=period_map.get(timeframe,"1y"),
+                                      interval=cfg["interval"], progress=False, auto_adjust=True)
+                if "resample" in cfg and not df_bt.empty:
+                    df_bt = df_bt.resample(cfg["resample"]).agg(
+                        {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
+                    ).dropna()
+                if not df_bt.empty and len(df_bt) >= 15:
+                    prices_hist  = [float(v) for v in df_bt["Close"].squeeze().dropna()]
+                    highs_hist   = [float(v) for v in df_bt["High"].squeeze().dropna()]
+                    lows_hist    = [float(v) for v in df_bt["Low"].squeeze().dropna()]
+                    dates_hist   = [str(d.date()) for d in df_bt.index]
+                    volumes_hist = [float(v) for v in df_bt["Volume"].squeeze().fillna(0)] if "Volume" in df_bt.columns else []
+            except Exception as e:
+                print(f"[bt-job] yfinance: {e}")
+
+        if len(prices_hist) < 30:
+            return {"error": f"Only {len(prices_hist)} bars available for {ticker}. Insufficient data for backtest."}
+
+        # Pad arrays
+        if not highs_hist:  highs_hist  = prices_hist[:]
+        if not lows_hist:   lows_hist   = prices_hist[:]
+        if not volumes_hist: volumes_hist = [1.0] * len(prices_hist)
+        _n = min(len(prices_hist), len(highs_hist), len(lows_hist), len(volumes_hist))
+        prices_hist, highs_hist, lows_hist, volumes_hist = prices_hist[:_n], highs_hist[:_n], lows_hist[:_n], volumes_hist[:_n]
+        dates_hist = dates_hist[:_n]
+
+        # Direct simulation — no backtesting library needed
+        import math as _m
+        sl_dist  = abs(float(entry) - float(stop_loss)) / float(entry) if entry and float(entry) > 0 else 0.02
+        tp1_dist = abs(float(tp1) - float(entry)) / float(entry) if tp1 and entry and float(entry) > 0 else sl_dist * 2
+        signal_dir = 1 if signal.upper() == "BUY" else -1
+
+        trades = []
+        in_trade = False; trade_entry = 0; trade_dir = 0
+        for i in range(50, len(prices_hist)):
+            price = prices_hist[i]; high = highs_hist[i]; low = lows_hist[i]
+            if not in_trade:
+                in_trade = True; trade_entry = price; trade_dir = signal_dir
+            else:
+                sl_price = trade_entry * (1 - sl_dist * trade_dir)
+                tp_price = trade_entry * (1 + tp1_dist * trade_dir)
+                hit_sl = (trade_dir > 0 and low <= sl_price) or (trade_dir < 0 and high >= sl_price)
+                hit_tp = (trade_dir > 0 and high >= tp_price) or (trade_dir < 0 and low <= tp_price)
+                if hit_sl:
+                    r_val = -sl_dist
+                    trades.append({"PnL": r_val})
+                    in_trade = False
+                elif hit_tp:
+                    r_val = tp1_dist
+                    trades.append({"PnL": r_val})
+                    in_trade = False
+                elif i >= len(prices_hist) - 1:
+                    # Close at current price on last bar
+                    last_r = (price - trade_entry) / trade_entry * trade_dir
+                    trades.append({"PnL": last_r})
+                    in_trade = False
+
+        wr = round(len([t for t in trades if t["PnL"] > 0]) / len(trades) * 100) if trades else 0
+        wins = [t["PnL"] for t in trades if t["PnL"] > 0]
+        losses = [abs(t["PnL"]) for t in trades if t["PnL"] <= 0]
+        avg_win = round(sum(wins)/len(wins), 2) if wins else 0
+        avg_los = round(sum(losses)/len(losses), 2) if losses else 1
+        equity = [10000.0]
+        for t in trades:
+            equity.append(equity[-1] + t["PnL"] * 100)
+
+        result = {
+            "win_rate": wr, "total_trades": len(trades), "sample_size": len(trades),
+            "avg_win_r": avg_win, "avg_loss_r": avg_los,
+            "profit_factor": round(sum(wins)/(sum(losses) or 1), 2),
+            "sharpe": 0, "equity_curve": equity,
+            "elapsed_s": round(_time.time() - _t0, 1),
+        }
+        if _redis_client:
+            _redis_client.setex(f"bt_result:{ticker}:{timeframe}", 3600, _json.dumps(result))
+        return result
+    except ImportError:
+        return {"error": "Backtesting library not available on worker"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.route("/api/backtest/enqueue", methods=["POST"])
+@login_required
+def backtest_enqueue():
+    """Enqueue a backtest job via RQ worker. Returns job_id for polling."""
+    if not _rq_queue:
+        return jsonify({"error": "Worker queue not available"}), 503
+    body       = request.get_json(force=True) or {}
+    ticker     = body.get("ticker", "").upper().strip()
+    asset_type = body.get("asset_type", "stock")
+    timeframe  = body.get("timeframe", "1d")
+    signal     = body.get("signal", "HOLD")
+    entry      = body.get("entry")
+    stop_loss  = body.get("stop_loss")
+    tp1        = body.get("tp1")
+    tp2        = body.get("tp2")
+    tp3        = body.get("tp3")
+    if not ticker or entry is None:
+        return jsonify({"error": "ticker and entry required"}), 400
+    try:
+        job = _rq_queue.enqueue(
+            _run_backtest_job, ticker, asset_type, timeframe, signal, entry, stop_loss, tp1, tp2, tp3,
+            job_timeout=120, result_ttl=3600,
+        )
+        return jsonify({"job_id": job.id, "status": "enqueued"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/backtest/result/<job_id>", methods=["GET"])
+@login_required
+def backtest_result(job_id):
+    """Poll backtest job status. Returns result when finished."""
+    if not _rq_queue:
+        return jsonify({"error": "Queue not available"}), 503
+    try:
+        job = _rq_queue.fetch_job(job_id)
+        if not job:
+            return jsonify({"status": "not_found"})
+        if job.is_finished:
+            return jsonify({"status": "finished", "result": job.result})
+        if job.is_failed:
+            return jsonify({"status": "failed", "error": str(job.exc_info)})
+        return jsonify({"status": "running"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/optimise/result", methods=["GET"])
 @login_required
 def optimise_result():
