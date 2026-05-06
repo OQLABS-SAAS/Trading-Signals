@@ -6460,7 +6460,7 @@ function selectSettTz(tz){ _settTz=tz; showSettings('timezone'); }
 function _initTzClocks(){}
 
 // ── SIGNAL FEED ────────────────────────────────────────────────
-let _sfFilter={asset:'all',dir:'all',status:'all',conf:'all',sort:'confidence'};
+let _sfFilter={asset:'all',dir:'all',status:'all',conf:'all',sort:'confidence',verified:false};
 let _sfSortOpen=false;
 const _sfSignals=[
   {sym:'AMZN',   cls:'equity', dir:'long', status:'active',   conf:84, entry:'182.40',target:'198.00',stop:'176.50',curr:'183.20',chg:'+0.44',rr:'2.64',eta:'5–8 days',
@@ -6684,6 +6684,7 @@ async function dvRunAnalyze(){
   }
 }
 window._condFilter = null;
+window._sfVerifiedOnly = false;
 
 // ── Watchlist ─────────────────────────────────────────────────────────────
 function wlGet(){ return JSON.parse(localStorage.getItem('dv_watchlist')||'[]'); }
@@ -7606,7 +7607,19 @@ async function _sfFetchSignals(){
     ? verifiedOpps.filter(window._condFilter.filterFn)
     : verifiedOpps.slice(0, 8);
 
-  const oppCards = visibleOpps.map(function(o, i){
+  // Verified Only filter — show only signals with ≥45% backtest win rate
+  const displayOpps = window._sfVerifiedOnly
+    ? visibleOpps.filter(function(o){return o._btWr != null && o._btWr >= 45;})
+    : visibleOpps;
+
+  if(window._sfVerifiedOnly && displayOpps.length === 0 && visibleOpps.length > 0){
+    // Shown verified signals exist, but none passed the WR filter
+    var listNow2 = document.getElementById('sfOppsList');
+    if(listNow2) listNow2.innerHTML = '<div style="color:rgba(237,232,216,.4);font-size:12px;padding:16px;text-align:center;font-family:var(--mono);">No signals above 45% win rate.<br>Toggle off <strong style="color:var(--amb);">Verified Only</strong> to see all signals.</div>';
+    return;
+  }
+
+  const oppCards = displayOpps.map(function(o, i){
     const sig  = o.sig || 'HOLD';
     const cc   = confColor(sig);
     const circ = Math.round((o.conf || 0) / 100 * 144.5);
@@ -7893,6 +7906,10 @@ function _sfRender(){
       <button class="ar-btn" onclick="arSet(900,this)">15m</button>
       <div class="ar-sep"></div>
       <span class="ar-status" id="arStatus"></span>
+    </div>
+
+    <div style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button id="sfVerifiedToggle" onclick="window._sfVerifiedOnly=!window._sfVerifiedOnly;document.getElementById('sfVerifiedToggle').style.background=window._sfVerifiedOnly?'rgba(93,232,160,.12)':'transparent';document.getElementById('sfVerifiedToggle').style.borderColor=window._sfVerifiedOnly?'rgba(93,232,160,.4)':'rgba(200,210,230,.25)';showSignalFeed();" style="padding:5px 12px;font-family:var(--mono);font-size:10px;font-weight:600;background:transparent;border:1px solid rgba(200,210,230,.25);color:rgba(200,210,230,.8);border-radius:5px;cursor:pointer;letter-spacing:.04em;transition:all .15s;">⚡ Verified Only · ≥45% WR</button>
     </div>
 
     <!-- Strategy Mode toggle — active pill set from window._stratMode so it survives re-renders -->
@@ -10963,7 +10980,7 @@ function showUnderstand(){
           </svg>
           <div>
             <div style="font-size:13px;font-weight:500;color:${sigCol}">${sig.confLbl||'CONFIRMED'}</div>
-            <div style="font-size:10.5px;color:var(--t3);margin-top:2px;">Confluence confidence score</div>
+            <div style="font-size:10.5px;color:var(--t3);margin-top:2px;">Confluence = indicator agreement, not win rate</div>
           </div>
         </div>
         <!-- Engine context badges (commits 1-7 — surface engine state) -->
