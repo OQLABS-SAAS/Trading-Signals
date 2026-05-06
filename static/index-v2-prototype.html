@@ -7320,12 +7320,12 @@ function _sfUpdateMetrics(opps){
   var total=opps?opps.length:0;
   var countByClass={};
   if(opps) opps.forEach(function(o){var c=o.asset_type||'other';countByClass[c]=(countByClass[c]||0)+1;});
-  _set('sfMetricVal0', total||'—');
-  _set('sfMetricSub0', total+' active signals from scan');
+  _set('sfMetricVal0', String(total));
+  _set('sfMetricSub0', total>0 ? total+' active signals from scan' : 'scanning…');
 
   // Metric 1: Avg Confidence
   if(opps&&opps.length){
-    var confVals=opps.map(function(o){return parseInt(o.confidence)||0;}).filter(function(v){return v>0;});
+    var confVals=opps.map(function(o){return parseInt(o.conf)||0;}).filter(function(v){return v>0;});
     var avgConf=confVals.length?Math.round(confVals.reduce(function(a,b){return a+b;},0)/confVals.length):null;
     _set('sfMetricVal1', avgConf!=null?avgConf+'%':'—');
     _set('sfMetricSub1', 'Above 65% confluence gate');
@@ -7344,7 +7344,7 @@ function _sfUpdateMetrics(opps){
 
   // Metric 3: Avg R:R
   if(opps&&opps.length){
-    var rrVals=opps.map(function(o){return parseFloat(o.rr1||o.rr)||0;}).filter(function(v){return v>0;});
+    var rrVals=opps.map(function(o){return parseFloat(o.rr)||0;}).filter(function(v){return v>0;});
     var avgRR=rrVals.length?Math.round(rrVals.reduce(function(a,b){return a+b;},0)/rrVals.length*10)/10:null;
     _set('sfMetricVal3', avgRR!=null?'1:'+avgRR:'—');
     _set('sfMetricSub3','After 0.2% fee deduction');
