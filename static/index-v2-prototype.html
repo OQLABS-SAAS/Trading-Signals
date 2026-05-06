@@ -7407,12 +7407,16 @@ async function _sfFetchSignals(){
     // Fallback to all groups if user has deselected every scannable class (avoid
     // showing an empty Signal feed — better to scan everything than nothing).
     const groups = _filtered.length ? _filtered : _allGroups;
+    // Scan multiple timeframes per group — a weak 4H signal might be a strong 1D signal
+    const _scanTfs = ['1h','4h','1d'];
     const all = await Promise.race([
-      Promise.all(groups.map(function(g){
-        return dvFetch('/api/scan-list', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: _activeTf })
+      Promise.all(groups.flatMap(function(g){
+        return _scanTfs.map(function(tf){
+          return dvFetch('/api/scan-list', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: tf })
+          });
         });
       })),
       new Promise(function(r){ setTimeout(function(){ r(null); }, 45000); })
@@ -7443,6 +7447,10 @@ async function _sfFetchSignals(){
             volRatio:  r.vol_ratio  || 1.0
           };
         });
+      // Deduplicate: multi-TF scan produces multiple entries per ticker. Keep highest confidence.
+      var deduped={};
+      rawOpps.forEach(function(o){var k=o.sym;if(!deduped[k]||o.conf>deduped[k].conf)deduped[k]=o;});
+      rawOpps=Object.values(deduped);
     }
   } catch(e){ /* silent */ }
 
@@ -10538,8 +10546,9 @@ async function showNews(){
        <div class="news-sidebar-card">
          <div class="news-sb-head">Economic Calendar</div>
          <div style="color:rgba(237,232,216,.35);font-size:11px;padding:8px 0;text-align:center;">Visit Market → Economic Calendar for live events</div>
-       </div>
-    </div>
+          </div>
+        </div>
+        <div style="font-size:9.5px;color:rgba(201,168,76,.6);margin-top:6px;line-height:1.5;">A different timeframe may show stronger signals for this ticker. DotVerse scans 1H · 4H · 1D — look for CONFIRMED or higher WR on other timeframes.</div>
   </div>`;
 }
 
