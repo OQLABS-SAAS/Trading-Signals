@@ -8341,6 +8341,106 @@ def optimise_result():
     return jsonify({"status": "not_found",
                     "message": "No result yet. Enqueue a job first via POST /api/optimise"})
 
+# ══════════════════════════════════════════════════════════════
+# VERDICT — Multi-Agent AI Analysis (TradingAgents via OpenRouter)
+# ══════════════════════════════════════════════════════════════
+
+import hashlib as _hl
+import math as _math
+
+VERDICT_CONFIG = {
+    "llm_provider": "openrouter",
+    "deep_think_llm": "deepseek/deepseek-v4-pro",
+    "quick_think_llm": "meta-llama/llama-3.3-70b-instruct:free",
+    "backend_url": "https://openrouter.ai/api/v1",
+    "max_debate_rounds": 1,
+    "max_risk_discuss_rounds": 1,
+    "data_cache_dir": "/tmp/ta_cache",
+    "results_dir": "/tmp/ta_results",
+    "checkpoint_enabled": False,
+}
+
+TA_AVAILABLE = False
+try:
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+    TA_AVAILABLE = True
+except Exception as e:
+    print(f"[verdict] TradingAgents not available: {e}")
+
+def _run_verdict_job(ticker, trade_date_str):
+    """Runs TradingAgents deep analysis. Called by RQ worker."""
+    if not TA_AVAILABLE:
+        return {"error": "TradingAgents not installed — requires Python 3.10+", "status": "unavailable"}
+    try:
+        config = VERDICT_CONFIG.copy()
+        ta = TradingAgentsGraph(debug=False, config=config)
+        _, decision = ta.propagate(ticker, trade_date_str)
+        return {"ticker": ticker, "verdict": decision, "status": "complete"}
+    except Exception as e:
+        return {"error": str(e), "status": "failed"}
+
+@app.route("/api/verdict", methods=["POST"])
+@login_required
+def verdict_enqueue():
+    """Enqueue a TradingAgents analysis job via RQ worker."""
+    if not _rq_queue:
+        return jsonify({"error": "Worker queue not available"}), 503
+    body   = request.get_json(force=True) or {}
+    ticker = body.get("ticker", "").strip()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+
+    # Check Redis cache (1-hour TTL)
+    cache_key = "verdict:" + ticker + ":" + (body.get("timeframe","4H")).lower()
+    if _redis_client:
+        try:
+            cached = _redis_client.get(cache_key)
+            if cached:
+                return jsonify(json.loads(cached))
+        except Exception:
+            pass
+
+    # Check TA availability
+    if not TA_AVAILABLE:
+        return jsonify({"error": "TradingAgents not available on this server", "status": "unavailable"}), 503
+
+    trade_date = body.get("date") or datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        job = _rq_queue.enqueue(
+            _run_verdict_job, ticker, trade_date,
+            job_timeout=180, result_ttl=3600,
+        )
+        return jsonify({"job_id": job.id, "status": "enqueued"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/verdict/result/<job_id>", methods=["GET"])
+@login_required
+def verdict_result(job_id):
+    """Poll verdict job status."""
+    if not _rq_queue:
+        return jsonify({"error": "Queue not available"}), 503
+    try:
+        job = _rq_queue.fetch_job(job_id)
+        if not job:
+            return jsonify({"status": "not_found"})
+        if job.is_finished:
+            result = job.result
+            # Cache in Redis if successful
+            if result and result.get("status") == "complete":
+                cache_key = "verdict:" + result.get("ticker","") + ":4h"
+                if _redis_client:
+                    try:
+                        _redis_client.setex(cache_key, 3600, json.dumps(result))
+                    except Exception:
+                        pass
+            return jsonify({"status": "finished", "result": result})
+        if job.is_failed:
+            return jsonify({"status": "failed", "error": str(job.exc_info)})
+        return jsonify({"status": "running"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

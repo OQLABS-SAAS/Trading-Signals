@@ -12270,6 +12270,58 @@ function showVerdict(){
   const rr = sig.rr || '—'; const conf = sig.conf || '—'; const confLbl = sig.confLbl || 'LIKELY';
   const isBuy = (sig.sig||'BUY') === 'BUY';
 
+  // ── Live API integration ──
+  _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy);
+  _vFetchLive(sig);
+}
+
+function _vFetchLive(sig){
+  if (!sig.sym) return;
+  // Attempt live analysis in background; renders mock first, replaces on success
+  var ticker = (sig.sym || '').replace('/','').replace('-','');
+  if (!ticker) return;
+  dvFetch('/api/verdict', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ticker:ticker, timeframe:sig.tf||'4H'})
+  }).then(function(r){
+    if (!r || r.error || r.status==='unavailable') return;
+    if (r.job_id) _vPollResult(r.job_id, sig);
+  }).catch(function(){});
+}
+function _vPollResult(jobId, sig){
+  var polls = 0, maxPolls = 30;
+  var iv = setInterval(function(){
+    polls++;
+    if (polls > maxPolls){ clearInterval(iv); return; }
+    dvFetch('/api/verdict/result/'+jobId).then(function(r){
+      if (!r) return;
+      if (r.status === 'finished' && r.result && r.result.verdict){
+        clearInterval(iv);
+        _vRenderLive(sig, r.result.verdict);
+      }
+      if (r.status === 'failed') clearInterval(iv);
+    }).catch(function(){ clearInterval(iv); });
+  }, 2000);
+}
+function _vRenderLive(sig, verdict){
+  // Replace the hero reason with live verdict text
+  var heroEl = document.querySelector('.verdict-hero');
+  if (!heroEl) return;
+  var reasonEl = heroEl.querySelector('div:last-child');
+  if (!reasonEl) return;
+  var decision = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || 'Analysis complete');
+  reasonEl.innerHTML = '<div style="font-size:12px;color:var(--t2);line-height:1.75">'+decision.replace(/\n/g,'<br>')+'</div>';
+  // Replace preview banner
+  var banner = document.querySelector('.verdict-hero').previousElementSibling;
+  if (banner && banner.textContent.indexOf('Preview')>-1){
+    banner.style.background = 'rgba(93,232,160,.06)';
+    banner.style.borderColor = 'rgba(93,232,160,.2)';
+    banner.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><polyline points="20 6 9 17 4 12"/></svg><span><strong style="color:var(--grn)">Live Analysis Complete.</strong> DeepSeek V4 + Llama 3.3 70B via OpenRouter. The verdict above reflects the actual multi-agent debate output.</span>';
+  }
+}
+
+function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy){
+
   el.innerHTML = `<div class="sf-page-head">
     <div class="sf-page-title">Verdict</div>
     <div class="sf-breadcrumb">MARKET › SIGNAL › UNDERSTAND › <em>VERDICT</em> › SIZE › ACT</div>
