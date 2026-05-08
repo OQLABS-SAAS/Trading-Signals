@@ -12278,16 +12278,17 @@ function showVerdict(){
 
 function _vFetchLive(sig){
   if (!sig.sym) return;
-  // Attempt live analysis in background; renders mock first, replaces on success
   var ticker = (sig.sym || '').replace('/','').replace('-','');
   if (!ticker) return;
   dvFetch('/api/verdict', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ticker:ticker, timeframe:sig.tf||'4H'})
   }).then(function(r){
-    if (!r || r.error || r.status==='unavailable') return;
-    if (r.job_id) _vPollResult(r.job_id, sig);
-  }).catch(function(){});
+    if (!r) { _vShowBanner('error','Could not reach the analysis server. Check your connection and try again.'); return; }
+    if (r.status==='unavailable') { _vShowBanner('error','TradingAgents could not start. This usually means Python 3.10+ is not available on the server. Check Railway deploy logs for package install errors.'); return; }
+    if (r.error) { _vShowBanner('error','Server error: '+r.error); return; }
+    if (r.job_id) { _vShowBanner('loading','Analysis running — 8 agents studying the market…'); _vPollResult(r.job_id, sig); }
+  }).catch(function(e){ _vShowBanner('error','Network error reaching the analysis server.'); });
 }
 function _vPollResult(jobId, sig){
   var polls = 0, maxPolls = 30;
@@ -12305,20 +12306,33 @@ function _vPollResult(jobId, sig){
   }, 2000);
 }
 function _vRenderLive(sig, verdict){
-  // Replace the hero reason with live verdict text
+  var decision = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || 'Analysis complete');
+  var heroEl = document.querySelector('.verdict-hero');
+  if (heroEl){
+    var reasonEl = heroEl.querySelector('div:last-child');
+    if (reasonEl) reasonEl.innerHTML = '<div style="font-size:12px;color:var(--t2);line-height:1.75">'+decision.replace(/\n/g,'<br>')+'</div>';
+  }
+  _vShowBanner('live','Live Analysis Complete. DeepSeek V4 + Llama 3.3 70B via OpenRouter. The verdict above reflects the actual multi-agent debate output.');
+}
+function _vShowBanner(status, msg){
   var heroEl = document.querySelector('.verdict-hero');
   if (!heroEl) return;
-  var reasonEl = heroEl.querySelector('div:last-child');
-  if (!reasonEl) return;
-  var decision = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || 'Analysis complete');
-  reasonEl.innerHTML = '<div style="font-size:12px;color:var(--t2);line-height:1.75">'+decision.replace(/\n/g,'<br>')+'</div>';
-  // Replace preview banner
-  var banner = document.querySelector('.verdict-hero').previousElementSibling;
-  if (banner && banner.textContent.indexOf('Preview')>-1){
-    banner.style.background = 'rgba(93,232,160,.06)';
-    banner.style.borderColor = 'rgba(93,232,160,.2)';
-    banner.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><polyline points="20 6 9 17 4 12"/></svg><span><strong style="color:var(--grn)">Live Analysis Complete.</strong> DeepSeek V4 + Llama 3.3 70B via OpenRouter. The verdict above reflects the actual multi-agent debate output.</span>';
+  var banner = heroEl.previousElementSibling;
+  if (!banner || !banner.textContent) return;
+  var bg, bd, icon, color;
+  if (status === 'error'){
+    bg='rgba(232,112,110,.06)'; bd='rgba(232,112,110,.2)'; color='#e8706e';
+    icon='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+  } else if (status === 'loading'){
+    bg='rgba(201,168,76,.06)'; bd='rgba(201,168,76,.2)'; color='var(--gold)';
+    icon='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+  } else {
+    bg='rgba(93,232,160,.06)'; bd='rgba(93,232,160,.2)'; color='#5de8a0';
+    icon='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><polyline points="20 6 9 17 4 12"/></svg>';
   }
+  banner.style.background = bg;
+  banner.style.borderColor = bd;
+  banner.innerHTML = icon+'<span><strong style="color:'+color+'">'+(status==='error'?'Error':status==='loading'?'Analysing…':'Live')+'.</strong> '+msg+'</span>';
 }
 
 function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy){
