@@ -12420,7 +12420,7 @@ function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy)
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         <span><strong style="color:var(--gold)">Risk Team:</strong> 10% total exposure acceptable with \$500 daily cap. Escalating strategy means worst-case loss is \$80 on Trade 1. Trailing stop on trades 1-3 activates after \$85,000 — protecting profits. <strong>Your automations make this safer than a manual trade.</strong></span>
       </div>
-      <button onclick="setNav('size');showSize()" style="margin-top:14px;padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open 5 Trades in Size</button>
+      <button onclick="_vPreloadSize();" style="margin-top:14px;padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open 5 Trades in Size</button>
     </div>
   </div>
 
@@ -12447,7 +12447,7 @@ function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy)
 
   <div class="flow-footer">
     <div class="flow-footer-left"><div class="flow-footer-step">Step 4 of 6 · VERDICT</div><div class="flow-footer-msg">Multi-agent analysis complete — ready to size your position</div></div>
-    <div class="flow-footer-right"><button class="flow-btn-next" onclick="setNav('size');showSize()">Size Position →</button></div>
+    <div class="flow-footer-right"><button class="flow-btn-next" onclick="_vPreloadSize()">Size Position →</button></div>
   </div>`;
   setTimeout(_vBuildLadder, 50);
 }
@@ -12474,6 +12474,25 @@ function _vBuildLadder(){
     html += '<div class="verdict-trade-card"><div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">TRADE '+(i+1)+'</div><div style="font-family:var(--mono);font-size:16px;font-weight:600;color:var(--gold);margin-bottom:3px">'+risks[i].toFixed(1)+'%</div><div style="font-size:8px;color:var(--red);font-family:var(--mono)">-\$'+loss+'</div><div style="font-size:8px;color:var(--grn);font-family:var(--mono);margin-top:2px">+\$'+gain+'</div></div>';
   }
   el.innerHTML = html;
+}
+function _vPreloadSize(){
+  var sig = window._activeSignal || {};
+  var entry = parseFloat(String(sig.entry||'0').replace(/,/g,'')) || 0;
+  var baseSL = parseFloat(String(sig.sl||'0').replace(/,/g,'')) || 0;
+  var tp = parseFloat(String(sig.tp||'0').replace(/,/g,'')) || 0;
+  window._verdictPlan = {
+    positions: 5,
+    strategy: 'escalating',
+    sym: sig.sym || '',
+    tf: sig.tf || '4H',
+    entry: entry,
+    risks: [0.8, 1.2, 1.5, 2.0, 2.5],
+    stops: [baseSL, baseSL+50, baseSL+100, baseSL+150, baseSL+200],
+    tps: [tp, tp, tp, tp, tp],
+    trailing: ['0.5x ATR after +1.5R', '0.5x ATR after +1.5R', '0.5x ATR after +1.5R', '0.75x ATR after +1.5R', '0.75x ATR after +1.5R'],
+    tpSplit: [50, 30, 20]
+  };
+  setNav('size'); showSize();
 }
 function _vChat(q){
   if(!q||!q.trim()) return;
@@ -12523,9 +12542,21 @@ function showSize(){
         <span>R:R <strong style="color:rgba(237,232,216,.88);">1:${sig.rr||'—'}</strong></span>
       </div>
     </div>
-    <button class="sz-clear-btn" onclick="window._activeSignal=null;window._calcPrefill=null;showSize()">Clear</button>
+    <button class="sz-clear-btn" onclick="window._activeSignal=null;window._calcPrefill=null;window._verdictPlan=null;showSize()">Clear</button>
     <button onclick="setNav('verdict');showVerdict()" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:5px;color:var(--gold);font-size:10px;font-family:var(--mono);cursor:pointer;padding:4px 10px;white-space:nowrap">Verdict</button>
   </div>`:'<div class="sz-no-signal">No signal loaded — enter your trade prices manually below or pick a signal from <span style="color:var(--crys);cursor:pointer;" onclick="setNav(\'signals\');showSignalFeed()">SIGNAL</span>.</div>'}
+  ${(typeof window._verdictPlan === 'object' && window._verdictPlan && window._verdictPlan.positions) ? (function(p){
+    var rows='', totalRisk=0;
+    for(var i=0;i<p.positions;i++){
+      totalRisk += p.risks[i];
+      rows += '<div style="text-align:center;flex:1;min-width:70px"><div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">#'+(i+1)+'</div><div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--gold)">'+p.risks[i].toFixed(1)+'%</div><div style="font-size:8px;color:var(--red);font-family:var(--mono)">SL '+p.stops[i].toLocaleString()+'</div><div style="font-size:8px;color:var(--grn);font-family:var(--mono);margin-top:1px">TP '+p.tps[i].toLocaleString()+'</div><div style="font-size:7px;color:rgba(201,168,76,.6);font-family:var(--mono);margin-top:2px">'+p.trailing[i]+'</div></div>';
+    }
+    return '<div style="margin-bottom:14px;border-radius:10px;border:1px solid rgba(93,232,160,.2);background:rgba(93,232,160,.04);padding:14px 16px">'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg><span style="font-size:11px;font-weight:500;color:var(--grn)">Verdict Plan Loaded · '+p.strategy+' · '+p.positions+' positions</span><span style="margin-left:auto;font-size:9px;color:var(--t3);font-family:var(--mono)">Total: '+totalRisk.toFixed(1)+'% risk</span></div>'+
++      '<div style="display:flex;gap:8px;overflow-x:auto">'+rows+'</div>'+
++      '<div style="margin-top:10px;font-size:9px;color:var(--t3);line-height:1.5">Risk % per trade, stop losses, and trailing stops preloaded from the Verdict analysis. The Risk Team has reviewed your Automations. Adjust any value below — the calculator updates live.</div>'+
++      '</div>';
+  })(window._verdictPlan) : ''}
 
   <div class="sz-layout">
 
