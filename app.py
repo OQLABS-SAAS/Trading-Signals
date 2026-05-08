@@ -8461,9 +8461,8 @@ import threading as _th
 def _start_rq_thread():
     import time as _t; _t.sleep(3)
     try:
-    from rq import Worker, Queue, Connection
-    if _rq_queue:
-        _rq_conn.delete('rq:queue:default')  # clear stuck jobs from old worker
+        from rq import Worker, Queue, Connection
+        if _rq_queue:
             with Connection(_rq_conn):
                 w = Worker([Queue('default', connection=_rq_conn)])
                 print("[worker] RQ worker thread running")
