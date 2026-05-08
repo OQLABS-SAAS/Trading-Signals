@@ -8361,11 +8361,25 @@ VERDICT_CONFIG = {
 }
 
 TA_AVAILABLE = False
+TA_ERROR = ""
 try:
     from tradingagents.graph.trading_graph import TradingAgentsGraph
     TA_AVAILABLE = True
 except Exception as e:
+    TA_ERROR = str(e)
     print(f"[verdict] TradingAgents not available: {e}")
+
+@app.route("/api/verdict/status", methods=["GET"])
+def verdict_status():
+    """Public diagnostic — no auth required."""
+    import sys
+    return jsonify({
+        "ta_available": TA_AVAILABLE,
+        "ta_error": TA_ERROR or None,
+        "python_version": sys.version,
+        "openrouter_key_configured": bool(os.environ.get("OPENROUTER_API_KEY", "").strip()),
+        "rq_queue_available": _rq_queue is not None
+    })
 
 def _run_verdict_job(ticker, trade_date_str):
     """Runs TradingAgents deep analysis. Called by RQ worker."""
