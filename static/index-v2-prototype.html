@@ -12276,6 +12276,17 @@ function showVerdict(){
   // Analysis runs only when user clicks "Run Analysis" button
 }
 
+function _vRunAnalysis(){
+  var sig = window._activeSignal || {};
+  if (!sig.sym) return;
+  if (window._verdictRunning) return;
+  window._verdictRunning = true;
+  var btn = document.getElementById('verdictRunBtn');
+  if (btn){ btn.disabled = true; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Running…'; }
+  var main = document.getElementById('verdictMain');
+  if (main) main.innerHTML = '<div style="padding:40px 20px;text-align:center"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" style="margin-bottom:16px;animation:pulse 1.5s infinite"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><div style="font-size:14px;font-weight:400;font-family:var(--syne);margin-bottom:8px">Analysing '+sig.sym+'…</div><div style="font-size:10px;color:var(--t3);line-height:1.8">8 agents are studying the market data, debating the trade, and reviewing your Automations.<br>This takes 60–90 seconds.</div></div>';
+  _vFetchLive(sig);
+}
 function _vFetchLive(sig){
   if (!sig.sym) return;
   var ticker = (sig.sym || '').replace('/','').replace('-','');
@@ -12306,13 +12317,19 @@ function _vPollResult(jobId, sig){
   }, 2000);
 }
 function _vRenderLive(sig, verdict){
-  var decision = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || 'Analysis complete');
-  var heroEl = document.querySelector('.verdict-hero');
-  if (heroEl){
-    var reasonEl = heroEl.querySelector('div:last-child');
-    if (reasonEl) reasonEl.innerHTML = '<div style="font-size:12px;color:var(--t2);line-height:1.75">'+decision.replace(/\n/g,'<br>')+'</div>';
+  var decision = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || JSON.stringify(verdict));
+  var main = document.getElementById('verdictMain');
+  var results = document.getElementById('verdictResults');
+  if (main) main.style.display = 'none';
+  if (results){
+    results.style.display = 'block';
+    results.innerHTML = '<div style="background:rgba(9,11,16,.8);border:1px solid rgba(237,232,216,.1);border-radius:12px;padding:24px;margin-bottom:20px">'+
+      '<div style="font-family:var(--syne);font-size:16px;font-weight:400;color:var(--t1);margin-bottom:16px;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Analysis Complete</div>'+
+      '<div style="font-size:12px;color:var(--t2);line-height:1.9">'+decision.replace(/\n/g,'<br>')+'</div>'+
+      '</div>'+
+      '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
   }
-  _vShowBanner('live','Live Analysis Complete. DeepSeek V4 + Llama 3.3 70B via OpenRouter. The verdict above reflects the actual multi-agent debate output.');
+  _vShowBanner('live','Live Analysis Complete. DeepSeek V4 + Llama 3.3 70B via OpenRouter.');
 }
 function _vShowBanner(status, msg){
   var heroEl = document.querySelector('.verdict-hero');
