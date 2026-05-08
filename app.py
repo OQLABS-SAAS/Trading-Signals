@@ -8371,15 +8371,73 @@ except Exception as e:
 
 @app.route("/api/verdict/status", methods=["GET"])
 def verdict_status():
-    """Public diagnostic — no auth required."""
+    """Public diagnostic — no auth required.
+
+    Reports whether the worker process is actually alive and how deep the queue
+    is. This is the single curl I want to be able to run to know "can verdict
+    jobs run right now or not".
+    """
     import sys
+    workers_alive = 0
+    queue_depth   = None
+    queue_failed  = None
+    if _rq_queue:
+        try:
+            from rq import Worker as _RQWorker
+            workers_alive = _RQWorker.count(connection=_rq_conn)
+            queue_depth   = _rq_queue.count
+            from rq.registry import FailedJobRegistry as _FJR
+            queue_failed  = _FJR(queue=_rq_queue).count
+        except Exception as _qe:
+            workers_alive = -1   # marker: query failed
     return jsonify({
         "ta_available": TA_AVAILABLE,
         "ta_error": TA_ERROR or None,
         "python_version": sys.version,
         "openrouter_key_configured": bool(os.environ.get("OPENROUTER_API_KEY", "").strip()),
-        "rq_queue_available": _rq_queue is not None
+        "rq_queue_available": _rq_queue is not None,
+        "rq_workers_alive":   workers_alive,
+        "rq_queue_depth":     queue_depth,
+        "rq_queue_failed":    queue_failed,
     })
+
+@app.route("/api/verdict/queue/clear", methods=["POST"])
+@login_required
+def verdict_queue_clear():
+    """Admin only — drains the RQ queue + failed registry.
+
+    The handoff-2026-05-08 noted that old slow jobs from a prior config (with
+    15 LLM debate rounds) were stuck at the head of the FIFO queue, blocking
+    every new verdict request. This endpoint exists so we can flush them
+    without touching Redis directly. Idempotent. Reports counts for verification.
+    """
+    user = _get_current_user()
+    if not user or getattr(user, "role", "") != "admin":
+        return jsonify({"error": "admin only"}), 403
+    if not _rq_queue:
+        return jsonify({"error": "queue not initialised"}), 503
+    cleared_pending = 0
+    cleared_failed  = 0
+    try:
+        cleared_pending = _rq_queue.count
+        _rq_queue.empty()
+    except Exception as _e:
+        return jsonify({"error": f"queue.empty failed: {_e}"}), 500
+    try:
+        from rq.registry import FailedJobRegistry as _FJR
+        fjr = _FJR(queue=_rq_queue)
+        cleared_failed = fjr.count
+        for _jid in list(fjr.get_job_ids()):
+            try: fjr.remove(_jid, delete_job=True)
+            except Exception: pass
+    except Exception:
+        pass
+    return jsonify({
+        "ok": True,
+        "cleared_pending": cleared_pending,
+        "cleared_failed":  cleared_failed,
+    })
+
 
 def _run_verdict_job(ticker, trade_date_str):
     """Runs TradingAgents deep analysis. Called by RQ worker."""
@@ -8456,22 +8514,13 @@ def verdict_result(job_id):
         return jsonify({"error": str(e)}), 500
 
 
-# Start RQ worker in background thread at module level (runs with gunicorn)
-import threading as _th
-def _start_rq_thread():
-    import time as _t; _t.sleep(3)
-    try:
-        from rq import Worker, Queue, Connection
-        if _rq_queue:
-            with Connection(_rq_conn):
-                w = Worker([Queue('default', connection=_rq_conn)])
-                print("[worker] RQ worker thread running")
-                w.work()
-    except Exception as e:
-        print(f"[worker] Failed: {e}")
-if not os.environ.get("RQ_WORKER_STARTED") and _rq_queue:
-    os.environ["RQ_WORKER_STARTED"] = "1"
-    _th.Thread(target=_start_rq_thread, daemon=True).start()
+# NOTE on the RQ worker:
+# The previous in-process daemon-thread approach (running rq Worker.work() as a
+# thread inside gunicorn) is fundamentally fragile because rq's default Worker
+# forks a child process per job and fork() inside a Python thread under the GIL
+# can deadlock or corrupt gunicorn's state. It also dies if a job exceeds
+# gunicorn's --timeout. The worker now runs as a separate process started by
+# start.sh — see Procfile and run_worker.py.
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
