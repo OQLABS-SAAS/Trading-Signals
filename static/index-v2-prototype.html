@@ -12238,6 +12238,9 @@ function szRiskTeach(){
    ══════════════════════════════════════════════════════════════ */
 function showVerdict(){
   const el=document.getElementById('dashContent'); if(!el) return;
+  // Clear any stale polling from previous Verdict visit
+  if (window._verdictPollInterval) { clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; }
+  window._verdictRunning = false;
   const sig = window._activeSignal || {};
   const hasSignal = sig.sym && sig.sig && sig.sig !== 'Analysing…';
 
@@ -12302,8 +12305,10 @@ function _vFetchLive(sig){
   }).catch(function(e){ _vShowBanner('error','Network error reaching the analysis server.'); });
 }
 function _vPollResult(jobId, sig){
-  var polls = 0, maxPolls = 30;
-  var iv = setInterval(function(){
+  var polls = 0, maxPolls = 90;
+  // Store on window so tab changes don't kill the interval
+  if (window._verdictPollInterval) clearInterval(window._verdictPollInterval);
+  window._verdictPollInterval = setInterval(function(){
     polls++;
     if (polls > maxPolls){ clearInterval(iv); return; }
     dvFetch('/api/verdict/result/'+jobId).then(function(r){

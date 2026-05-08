@@ -8351,10 +8351,10 @@ import math as _math
 VERDICT_CONFIG = {
     "llm_provider": "openrouter",
     "deep_think_llm": "deepseek/deepseek-v4-pro",
-    "quick_think_llm": "meta-llama/llama-3.3-70b-instruct:free",
+    "quick_think_llm": "deepseek/deepseek-v4-pro",
     "backend_url": "https://openrouter.ai/api/v1",
-    "max_debate_rounds": 1,
-    "max_risk_discuss_rounds": 1,
+    "max_debate_rounds": 0,
+    "max_risk_discuss_rounds": 0,
     "data_cache_dir": "/tmp/ta_cache",
     "results_dir": "/tmp/ta_results",
     "checkpoint_enabled": False,
@@ -8455,6 +8455,23 @@ def verdict_result(job_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# Start RQ worker in background thread at module level (runs with gunicorn)
+import threading as _th
+def _start_rq_thread():
+    import time as _t; _t.sleep(3)
+    try:
+        from rq import Worker, Queue, Connection
+        if _rq_queue:
+            with Connection(_rq_conn):
+                w = Worker([Queue('default', connection=_rq_conn)])
+                print("[worker] RQ worker thread running")
+                w.work()
+    except Exception as e:
+        print(f"[worker] Failed: {e}")
+if not os.environ.get("RQ_WORKER_STARTED") and _rq_queue:
+    os.environ["RQ_WORKER_STARTED"] = "1"
+    _th.Thread(target=_start_rq_thread, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
