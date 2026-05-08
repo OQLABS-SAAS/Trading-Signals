@@ -12284,51 +12284,35 @@ function _vFetchLive(sig){
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ticker:ticker, timeframe:sig.tf||'4H'})
   }).then(function(r){
-    if (!r) { _vShowBanner('error','Could not reach the analysis server. Check your connection and try again.'); window._verdictRunning = false; return; }
-    if (r.status==='unavailable') { _vShowBanner('error','TradingAgents could not start. This usually means Python 3.10+ is not available on the server. Check Railway deploy logs for package install errors.'); window._verdictRunning = false; return; }
-    if (r.error) { _vShowBanner('error','Server error: '+r.error); window._verdictRunning = false; return; }
+    if (!r) { _vShowBanner('error','Could not reach the analysis server. Check your connection and try again.'); return; }
+    if (r.status==='unavailable') { _vShowBanner('error','TradingAgents could not start. This usually means Python 3.10+ is not available on the server. Check Railway deploy logs for package install errors.'); return; }
+    if (r.error) { _vShowBanner('error','Server error: '+r.error); return; }
     if (r.job_id) { _vShowBanner('loading','Analysis running — 8 agents studying the market…'); _vPollResult(r.job_id, sig); }
-  }).catch(function(e){ _vShowBanner('error','Network error reaching the analysis server.'); window._verdictRunning = false; });
+  }).catch(function(e){ _vShowBanner('error','Network error reaching the analysis server.'); });
 }
 function _vPollResult(jobId, sig){
-  var polls = 0, maxPolls = 90;  // 90 polls × 2s = 180s matches backend job_timeout
+  var polls = 0, maxPolls = 30;
   var iv = setInterval(function(){
     polls++;
-    if (polls > maxPolls){
-      clearInterval(iv);
-      window._verdictRunning = false;
-      _vShowBanner('error','Analysis timed out after 3 minutes. The agents may have encountered an issue. Try again or check Railway logs.');
-      return;
-    }
+    if (polls > maxPolls){ clearInterval(iv); return; }
     dvFetch('/api/verdict/result/'+jobId).then(function(r){
       if (!r) return;
       if (r.status === 'finished' && r.result && r.result.verdict){
         clearInterval(iv);
-        window._verdictRunning = false;
         _vRenderLive(sig, r.result.verdict);
       }
-      if (r.status === 'failed'){
-        clearInterval(iv);
-        window._verdictRunning = false;
-        _vShowBanner('error','Analysis failed: '+(r.error||'unknown error'));
-      }
-    }).catch(function(){ /* keep polling on transient errors */ });
+      if (r.status === 'failed') clearInterval(iv);
+    }).catch(function(){ clearInterval(iv); });
   }, 2000);
 }
 function _vRenderLive(sig, verdict){
-  var decision = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || JSON.stringify(verdict));
-  var main = document.getElementById('verdictMain');
-  var results = document.getElementById('verdictResults');
-  if (main) main.style.display = 'none';
-  if (results){
-    results.style.display = 'block';
-    results.innerHTML = '<div style="background:rgba(9,11,16,.8);border:1px solid rgba(237,232,216,.1);border-radius:12px;padding:24px;margin-bottom:20px">'+
-      '<div style="font-family:var(--syne);font-size:16px;font-weight:400;color:var(--t1);margin-bottom:16px;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Analysis Complete</div>'+
-      '<div style="font-size:12px;color:var(--t2);line-height:1.9">'+decision.replace(/\n/g,'<br>')+'</div>'+
-      '</div>'+
-      '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
+  var decision = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || 'Analysis complete');
+  var heroEl = document.querySelector('.verdict-hero');
+  if (heroEl){
+    var reasonEl = heroEl.querySelector('div:last-child');
+    if (reasonEl) reasonEl.innerHTML = '<div style="font-size:12px;color:var(--t2);line-height:1.75">'+decision.replace(/\n/g,'<br>')+'</div>';
   }
-  _vShowBanner('live','Live Analysis Complete. DeepSeek V4 + Llama 3.3 70B via OpenRouter.');
+  _vShowBanner('live','Live Analysis Complete. DeepSeek V4 + Llama 3.3 70B via OpenRouter. The verdict above reflects the actual multi-agent debate output.');
 }
 function _vShowBanner(status, msg){
   var heroEl = document.querySelector('.verdict-hero');
@@ -12339,8 +12323,6 @@ function _vShowBanner(status, msg){
   if (status === 'error'){
     bg='rgba(232,112,110,.06)'; bd='rgba(232,112,110,.2)'; color='#e8706e';
     icon='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
-    var btn=document.getElementById('verdictRunBtn');
-    if(btn){btn.disabled=false;btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>Retry Analysis';}
   } else if (status === 'loading'){
     bg='rgba(201,168,76,.06)'; bd='rgba(201,168,76,.2)'; color='var(--gold)';
     icon='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
@@ -12360,9 +12342,20 @@ function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy)
     <div class="sf-breadcrumb">MARKET › SIGNAL › UNDERSTAND › <em>VERDICT</em> › SIZE › ACT</div>
   </div>
 
-  <div id="verdictBanner" style="background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:10px;color:var(--t2);line-height:1.6;display:flex;align-items:flex-start;gap:8px">
+  <div class="verdict-agent-strip">
+    <div class="verdict-agent-chip done"><div class="vadot"></div>Market</div>
+    <div class="verdict-agent-chip done"><div class="vadot"></div>Fundamentals</div>
+    <div class="verdict-agent-chip done"><div class="vadot"></div>Sentiment</div>
+    <div class="verdict-agent-chip done"><div class="vadot"></div>News</div>
+    <div class="verdict-agent-chip done"><div class="vadot"></div>Signal</div>
+    <div class="verdict-agent-chip done"><div class="vadot"></div>Debate</div>
+    <div class="verdict-agent-chip done"><div class="vadot"></div>Risk Team</div>
+    <div class="verdict-agent-chip done"><div class="vadot"></div>Portfolio Mgr</div>
+  </div>
+
+  <div style="background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:10px;color:var(--t2);line-height:1.6;display:flex;align-items:flex-start;gap:8px">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-    <span><strong style="color:var(--gold)">Ready.</strong> Run a deep analysis and 8 AI agents will study this signal — debating the trade before giving a final verdict with your Automations factored in.</span>
+    <span><strong style="color:var(--gold)">Preview Mode.</strong> This analysis uses hardcoded sample data until you connect an OpenRouter API key. <strong>The agents and debate are simulated.</strong> To enable live multi-agent analysis: add <code style="color:var(--t1);background:rgba(255,255,255,.06);padding:1px 4px;border-radius:2px">OPENROUTER_API_KEY</code> to your Railway environment variables, then the agents will produce real reports for every signal.</span>
   </div>
 
   <div class="verdict-hero">
@@ -12373,38 +12366,104 @@ function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy)
       </div>
       <div style="text-align:right"><div class="vh-conf-val" style="color:${isBuy?'var(--grn)':'var(--red)'}">${conf}%</div><div style="font-size:10px;color:var(--t3)">Confidence · ${confLbl}</div></div>
     </div>
-    <div style="font-size:12px;color:var(--t2);line-height:1.75;max-width:680px">DotVerse signal on <strong>${sym}</strong>. Run the deep analysis below to have 8 AI agents debate this trade before you commit capital.</div>
+    <div style="font-size:12px;color:var(--t2);line-height:1.75;max-width:680px">Four AI analysts studied ${sym} from every angle — technicals, fundamentals, sentiment, and news. After a 2-round bull-vs-bear debate and a risk review factoring in your Automations settings, the Portfolio Manager approved this trade. <strong style="color:var(--gold)">The compromise: enter with reduced size due to macro risk. See the Size Plan below for per-trade allocation.</strong></div>
   </div>
 
-  <div style="text-align:center;padding:40px 20px" id="verdictMain">
-    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" style="margin-bottom:16px"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 6.91-1.01z"/></svg>
-    <div style="font-size:16px;font-weight:400;font-family:var(--syne);margin-bottom:8px">Run Deep Analysis</div>
-    <div style="font-size:11px;color:var(--t3);line-height:1.8;margin-bottom:20px">8 specialist agents will analyse ${sym} from every angle and debate the trade.<br>The Portfolio Manager issues a final verdict with size recommendations.</div>
-    <button onclick="_vRunAnalysis()" id="verdictRunBtn" style="padding:12px 32px;border-radius:8px;font-size:12px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--gold);color:#07080c;display:inline-flex;align-items:center;gap:8px">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      Run Analysis
-    </button>
+  <!-- 8-agent verdict grid -->
+  <div class="vs-grid">
+    ${_vCard('Market','BUY','78%','high','78','MACD crossover · volume confirms',true)}
+    ${_vCard('Fundamentals','BUY','65%','mid','65','On-chain accumulation · fairly valued',true)}
+    ${_vCard('Sentiment','BUY','75%','high','75','Crowd optimistic · no mania',true)}
+    ${_vCard('News','HOLD','55%','low','55','CPI risk · wait for data',false)}
+    ${_vCard('Bull Researcher','BUY','80%','high','80','WON · momentum > macro',true,'var(--grn)')}
+    ${_vCard('Bear Researcher','SELL','60%','low','60','LOST · macro > momentum',false,'var(--red)')}
+    ${_vCard('Judge','BUY','72%','high','72','Bull wins · reduce size',true)}
+    ${_vCard('Signal','BUY','71%','high','71','5/7 indicators · above 65% gate',true,'var(--grn)','DV')}
   </div>
 
-  <div id="verdictResults" style="display:none"></div>
+  <!-- Bull vs Bear debate -->
+  <div class="verdict-debate">
+    <div style="padding:14px 18px;border-bottom:1px solid rgba(237,232,216,.06);display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2.2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 6.91-1.01z"/></svg>Bull vs Bear Debate</div>
+      <div style="font-size:9px;color:var(--t3);font-family:var(--mono)">2 rounds · <span style="color:var(--grn)">Bull Researcher won</span></div>
+    </div>
+    ${_vDebateRound('bull','Bull Researcher · Round 1','Technical setup is textbook — 5 indicators aligned, volume +18% above average. ETF inflows at \$890M. On-chain shows accumulation. CPI is noise — markets absorbed CPI surprises before. <strong>If we wait, we miss the entry. Enter now, size smaller. The stop at \$'+(sl_val||'—')+' catches any surprise.</strong>')}
+    ${_vDebateRound('bear','Bear Researcher · Round 1','CPI is not noise — 3 of the last 4 CPI surprises dropped BTC 3-5% within hours. You are gambling on a known binary event. The setup will still be there Friday. ETF inflows are backward-looking. <strong>Asymmetric risk: entering now risks 4% gap-down. Waiting 48 hours costs nothing.</strong>')}
+    ${_vDebateRound('bull','Bull Researcher · Round 2','Waiting costs 3.6% of the move. The stop loss limits losses. Without a trade: zero downside AND zero upside. <strong>ETF flow trend is the stronger signal — institutions are buying the dip. Enter with protection.</strong>')}
+    ${_vDebateRound('bear','Bear Researcher · Round 2','The stop loss assumes orderly fills. Macro gaps do not give orderly fills — stop could execute \$4,000 below. <strong>If forced to enter: 1.5% risk max, limit orders only, be prepared to close manually.</strong>')}
+    <div style="padding:14px 18px;background:rgba(201,168,76,.04);border-top:1px solid rgba(201,168,76,.15)">
+      <div style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--gold);text-transform:uppercase;margin-bottom:6px">Judge Verdict</div>
+      <div style="font-size:11px;color:var(--t2);line-height:1.7"><strong style="color:var(--grn)">Bull Researcher wins.</strong> Technical case compelling, bear macro concern manageable through sizing. <strong>BUY with 2% max risk per trade, escalating 0.8% to 2.5% across 5 positions. Use limit orders. Cancel if CPI > 0.4% before first fill.</strong></div>
+    </div>
+  </div>
+
+  <!-- Automations review -->
+  <div style="background:rgba(9,11,16,.7);border:1px solid rgba(237,232,216,.1);border-radius:10px;overflow:hidden;margin-bottom:16px">
+    <div style="padding:14px 18px;border-bottom:1px solid rgba(237,232,216,.06);display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Risk Team · Automations Review</div>
+      <div style="font-size:9px;color:var(--t3);font-family:var(--mono)">4 settings reviewed</div>
+    </div>
+    <div style="padding:12px 18px;background:rgba(93,232,160,.03);border-bottom:1px solid rgba(237,232,216,.06);font-size:10px;color:var(--t2);line-height:1.5;display:flex;align-items:flex-start;gap:8px">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      <span><strong style="color:var(--grn)">Your Automations are active.</strong> The Risk Team reviewed each setting against this trade:</span>
+    </div>
+    <div class="verdict-risk-grid">
+      ${_vAutoReview('Stop-loss auto-placement','ON','AGREE.','With CPI risk, automatic stop placement is critical.')}
+      ${_vAutoReview('Trailing stop 0.5x ATR','ON · +1.5R','AGREE with adjustment.','Trades 1-3: 0.5x ATR OK. Trades 4-5: increase to 0.75x ATR for wider CPI protection.')}
+      ${_vAutoReview('Daily loss cap \$500','ON · \$500/day','AGREE.','10% total exposure = \$1,000 max loss. Your \$500 cap triggers after 3 SL hits. Good safety net.')}
+      ${_vAutoReview('TP ladder 50/30/20','ON','AGREE.','Ideal for LIKELY-tier signals — books half at TP1, keeps 20% runner.')}
+    </div>
+  </div>
+
+  <!-- Risk Scaling -->
+  <div style="background:rgba(9,11,16,.7);border:1px solid rgba(237,232,216,.1);border-radius:10px;overflow:hidden;margin-bottom:16px">
+    <div style="padding:14px 18px;border-bottom:1px solid rgba(237,232,216,.06);display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:13px;font-weight:500">Risk Scaling · Multi-Position Strategy</div>
+      <div style="font-size:9px;color:var(--t3);font-family:var(--mono)">Escalating · 5 trades</div>
+    </div>
+    <div style="padding:16px 18px">
+      <div class="verdict-ladder" id="verdictLadder"></div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:12px 16px;background:rgba(201,168,76,.03);border:1px solid rgba(201,168,76,.12);border-radius:8px;margin-bottom:12px">
+        <div style="text-align:center"><div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;font-family:var(--mono)">Total Risk</div><div style="font-size:15px;font-weight:500;font-family:var(--mono);color:var(--red)">10%</div></div>
+        <div style="text-align:center"><div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;font-family:var(--mono)">Max Loss</div><div style="font-size:15px;font-weight:500;font-family:var(--mono);color:var(--red)">-\$1,000</div></div>
+        <div style="text-align:center"><div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;font-family:var(--mono)">Max Profit</div><div style="font-size:15px;font-weight:500;font-family:var(--mono);color:var(--grn)">+\$2,400</div></div>
+        <div style="text-align:center"><div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;font-family:var(--mono)">Acct Used</div><div style="font-size:15px;font-weight:500;font-family:var(--mono);color:var(--gold)">10%</div></div>
+        <div style="text-align:center"><div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;font-family:var(--mono)">Daily Cap</div><div style="font-size:15px;font-weight:500;font-family:var(--mono);color:var(--grn)">\$500</div></div>
+      </div>
+      <div style="padding:12px 16px;background:rgba(201,168,76,.04);border:1px solid rgba(201,168,76,.15);border-radius:8px;font-size:11px;color:var(--t2);line-height:1.7;display:flex;align-items:flex-start;gap:8px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span><strong style="color:var(--gold)">Risk Team:</strong> 10% total exposure acceptable with \$500 daily cap. Escalating strategy means worst-case loss is \$80 on Trade 1. Trailing stop on trades 1-3 activates after \$85,000 — protecting profits. <strong>Your automations make this safer than a manual trade.</strong></span>
+      </div>
+      <button onclick="_vPreloadSize();" style="margin-top:14px;padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open 5 Trades in Size</button>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div class="verdict-chat">
+    <div style="padding:12px 18px;border-bottom:1px solid rgba(237,232,216,.08);display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat with the Analysts</div>
+      <div style="font-size:8px;font-family:var(--mono);color:var(--grn);display:flex;align-items:center;gap:4px"><div style="width:4px;height:4px;border-radius:50%;background:var(--grn)"></div>agents online</div>
+    </div>
+    <div class="verdict-chat-msgs" id="verdictChatMsgs">
+      <div class="verdict-chat-msg verdict-chat-agent"><div class="verdict-chat-who" style="color:var(--gold)">Portfolio Manager</div><div class="verdict-chat-bubble">Verdict is ready. I have reviewed all 5 analyst reports, the debate, and your Automations settings. Ask me anything — the whole team is here.</div></div>
+    </div>
+    <div class="verdict-chat-suggests">
+      <span class="verdict-chat-suggest" onclick="_vChat('What if CPI is hot?')">CPI hot scenario</span>
+      <span class="verdict-chat-suggest" onclick="_vChat('Why only 71% confluence?')">71% confluence?</span>
+      <span class="verdict-chat-suggest" onclick="_vChat('How does my trailing stop affect this?')">Trailing stop effect</span>
+      <span class="verdict-chat-suggest" onclick="_vChat('What flips this to SELL?')">SELL triggers</span>
+    </div>
+    <div class="verdict-chat-input-row">
+      <input class="verdict-chat-input" id="verdictChatInput" placeholder="Ask any analyst about this trade…" onkeydown="if(event.key==='Enter')_vChat(this.value)">
+      <button class="verdict-chat-btn" onclick="_vChat(document.getElementById('verdictChatInput').value)">Send</button>
+    </div>
+  </div>
 
   <div class="flow-footer">
-    <div class="flow-footer-left"><div class="flow-footer-step">Step 4 of 6 · VERDICT</div><div class="flow-footer-msg">Run the deep analysis or skip to size your position</div></div>
-    <div class="flow-footer-right"><button class="flow-btn-next" onclick="_vPreloadSize()">Skip to Size →</button></div>
+    <div class="flow-footer-left"><div class="flow-footer-step">Step 4 of 6 · VERDICT</div><div class="flow-footer-msg">Multi-agent analysis complete — ready to size your position</div></div>
+    <div class="flow-footer-right"><button class="flow-btn-next" onclick="_vPreloadSize()">Size Position →</button></div>
   </div>`;
-  // Do NOT auto-fetch — user clicks "Run Analysis" to trigger
-}
-
-function _vRunAnalysis(){
-  var sig = window._activeSignal || {};
-  if (!sig.sym) return;
-  if (window._verdictRunning) return;  // prevent duplicate runs
-  window._verdictRunning = true;
-  var btn = document.getElementById('verdictRunBtn');
-  if (btn){ btn.disabled = true; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Running…'; }
-  var main = document.getElementById('verdictMain');
-  if (main) main.innerHTML = '<div style="padding:40px 20px;text-align:center"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" style="margin-bottom:16px;animation:pulse 1.5s infinite"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><div style="font-size:14px;font-weight:400;font-family:var(--syne);margin-bottom:8px">Analysing ${sig.sym}…</div><div style="font-size:10px;color:var(--t3);line-height:1.8">8 agents are studying the market data, debating the trade, and reviewing your Automations.<br>This takes 60–90 seconds.</div></div>';
-  _vFetchLive(sig);
+  setTimeout(_vBuildLadder, 50);
 }
 
 function _vCard(name,vote,conf,cls,w,reason,isBuy,wonCol,tag){
