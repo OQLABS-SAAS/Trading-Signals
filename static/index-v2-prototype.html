@@ -11838,10 +11838,10 @@ function _dvToast(msg,bg,bd){
 }
 async function undRunBacktest(silent){
   const sig=window._activeSignal;
-  if(!sig||!sig.sym){ if(!silent) alert('Run an analysis first'); return; }
+  if(!sig||!sig.sym){ if(!silent) _dvToast('Run an analysis first','rgba(201,168,76,.15)','rgba(201,168,76,.3)'); return; }
   // HOLD signals have no directional conviction — no backtest to run
   if((sig.sig||'').toUpperCase()==='HOLD'){
-    if(!silent) alert('No trade signal to backtest. Signal is HOLD — wait for a BUY or SELL before backtesting.');
+    if(!silent) _dvToast('No backtest on HOLD — wait for a BUY or SELL signal first','rgba(201,168,76,.15)','rgba(201,168,76,.3)');
     return;
   }
   // Skip backtest if any required level is missing/invalid — backend rejects with 400
@@ -11851,7 +11851,7 @@ async function undRunBacktest(silent){
   const _t = parseFloat(String(sig.tp||'').replace(/,/g,''));
   if(!isFinite(_e) || !isFinite(_s) || !isFinite(_t) || _e<=0 || _s<=0 || _t<=0){
     console.log('[backtest] skipped — entry/sl/tp incomplete', {entry:sig.entry, sl:sig.sl, tp:sig.tp});
-    if(!silent) alert('Backtest needs entry, stop loss, and take profit. Run a full analysis first.');
+    if(!silent) _dvToast('Backtest needs entry, stop loss, and take profit — run a full analysis first','rgba(201,168,76,.15)','rgba(201,168,76,.3)');
     return;
   }
   const panel=document.getElementById('undBtPanel'),content=document.getElementById('undBtContent');
@@ -12287,7 +12287,13 @@ function _vRunAnalysis(){
   var btn = document.getElementById('verdictRunBtn');
   if (btn){ btn.disabled = true; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Running…'; }
   var main = document.getElementById('verdictMain');
-  if (main) main.innerHTML = '<div style="padding:40px 20px;text-align:center"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" style="margin-bottom:16px;animation:pulse 1.5s infinite"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><div style="font-size:14px;font-weight:400;font-family:var(--syne);margin-bottom:8px">Analysing '+sig.sym+'…</div><div style="font-size:10px;color:var(--t3);line-height:1.8">8 agents are studying the market data, debating the trade, and reviewing your Automations.<br>This takes 60–90 seconds.</div></div>';
+  if (main) main.innerHTML = '<div style="padding:36px 20px 28px;text-align:center"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" style="margin-bottom:14px;animation:pulse 1.5s infinite"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><div style="font-size:14px;font-weight:400;font-family:var(--syne);margin-bottom:6px">Analysing '+sig.sym+'…</div><div style="font-size:10px;color:var(--t3);line-height:1.8;margin-bottom:24px">8 specialist agents are studying market data, debating the trade, and reviewing your Automations.</div>'
+    + '<div style="max-width:420px;margin:0 auto 8px">'
+    + '<div style="display:flex;justify-content:space-between;font-size:9px;font-family:var(--mono);color:var(--t3);margin-bottom:6px"><span id="verdictProgressLabel">Initialising…</span><span id="verdictProgressPct">0%</span></div>'
+    + '<div style="height:4px;background:rgba(237,232,216,.08);border-radius:2px;overflow:hidden"><div id="verdictProgressFill" style="height:100%;width:0%;background:linear-gradient(90deg,rgba(201,168,76,.6),var(--gold));border-radius:2px;transition:width .8s ease"></div></div>'
+    + '</div>'
+    + '<div id="verdictAgentList" style="max-width:420px;margin:16px auto 0;text-align:left;font-size:9px;font-family:var(--mono);color:var(--t3);line-height:2"></div>'
+    + '</div>';
   _vFetchLive(sig);
 }
 function _vFetchLive(sig){
@@ -12306,12 +12312,51 @@ function _vFetchLive(sig){
     else { _vShowBanner('error', 'Unexpected server response. Try again.'); }
   }).catch(function(e){ _vShowBanner('error','Network error reaching the analysis server.'); });
 }
+var _verdictStages = [
+  { at:  0, pct:  4, label: 'Queueing job on analysis worker…' },
+  { at:  3, pct: 12, label: 'Agent 1 · Market Analyst — reading price action' },
+  { at:  8, pct: 22, label: 'Agent 2 · Fundamentals Analyst — reviewing financials' },
+  { at: 13, pct: 32, label: 'Agent 3 · News Analyst — scanning recent headlines' },
+  { at: 18, pct: 42, label: 'Agent 4 · Sentiment Analyst — gauging market mood' },
+  { at: 23, pct: 52, label: 'Agent 5 · Technical Analyst — running indicators' },
+  { at: 28, pct: 61, label: 'Agent 6 · Bull Researcher — building the BUY case' },
+  { at: 34, pct: 70, label: 'Agent 7 · Bear Researcher — building the SELL case' },
+  { at: 40, pct: 79, label: 'Agent 8 · Risk Manager — reviewing the trade plan' },
+  { at: 46, pct: 88, label: 'Portfolio Manager — drafting final verdict…' },
+  { at: 55, pct: 94, label: 'Agents debating trade… almost done' },
+];
+function _vUpdateProgress(polls){
+  var stage = _verdictStages[0];
+  for (var i = 0; i < _verdictStages.length; i++){
+    if (polls >= _verdictStages[i].at) stage = _verdictStages[i];
+    else break;
+  }
+  var fill = document.getElementById('verdictProgressFill');
+  var label = document.getElementById('verdictProgressLabel');
+  var pct = document.getElementById('verdictProgressPct');
+  var list = document.getElementById('verdictAgentList');
+  if (fill) fill.style.width = stage.pct + '%';
+  if (label) label.textContent = stage.label;
+  if (pct) pct.textContent = stage.pct + '%';
+  if (list && polls > 0){
+    var agentNum = Math.min(polls < 3 ? 0 : Math.floor((polls - 3) / 6) + 1, 8);
+    var completedAgents = [];
+    var agentNames = ['Market Analyst','Fundamentals Analyst','News Analyst','Sentiment Analyst','Technical Analyst','Bull Researcher','Bear Researcher','Risk Manager'];
+    for (var a = 0; a < agentNum && a < 8; a++){
+      completedAgents.push('<span style="color:rgba(93,232,160,.6)">✓</span> <span style="color:var(--t2)">' + agentNames[a] + '</span>');
+    }
+    if (polls >= 46) completedAgents.push('<span style="color:rgba(201,168,76,.8)">↻</span> <span style="color:var(--gold)">Portfolio Manager deliberating…</span>');
+    list.innerHTML = completedAgents.join('<br>');
+  }
+}
 function _vPollResult(jobId, sig){
   var polls = 0, maxPolls = 90;
   // Store on window so tab changes don't kill the interval
   if (window._verdictPollInterval) clearInterval(window._verdictPollInterval);
+  _vUpdateProgress(0);
   window._verdictPollInterval = setInterval(function(){
     polls++;
+    _vUpdateProgress(polls);
     if (polls > maxPolls){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; return; }
     dvFetch('/api/verdict/result/'+jobId).then(function(r){
       if (!r) return;
