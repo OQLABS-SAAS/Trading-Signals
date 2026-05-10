@@ -8349,10 +8349,9 @@ import hashlib as _hl
 import math as _math
 
 VERDICT_CONFIG = {
-    "llm_provider": "openrouter",
-    "deep_think_llm": "deepseek/deepseek-v4-pro",
-    "quick_think_llm": "deepseek/deepseek-v4-pro",
-    "backend_url": "https://openrouter.ai/api/v1",
+    "llm_provider": "deepseek",
+    "deep_think_llm": "deepseek-v4-pro",
+    "quick_think_llm": "deepseek-v4-flash",
     "max_debate_rounds": 0,
     "max_risk_discuss_rounds": 0,
     "data_cache_dir": "/tmp/ta_cache",
@@ -8394,7 +8393,7 @@ def verdict_status():
         "ta_available": TA_AVAILABLE,
         "ta_error": TA_ERROR or None,
         "python_version": sys.version,
-        "openrouter_key_configured": bool(os.environ.get("OPENROUTER_API_KEY", "").strip()),
+        "deepseek_key_configured": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
         "rq_queue_available": _rq_queue is not None,
         "rq_workers_alive":   workers_alive,
         "rq_queue_depth":     queue_depth,
