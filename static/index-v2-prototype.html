@@ -2299,6 +2299,7 @@ body.tier-trader [data-tier="pro"]{display:none!important;}
 .ar-sep{width:1px;height:14px;background:var(--bd);margin:0 4px;}
 .ar-status{font-size:9.5px;font-family:var(--mono);color:var(--t3);}
 @keyframes arSpin{to{transform:rotate(360deg)}}
+@keyframes dvSpinAnim{to{transform:rotate(360deg)}}
 .ar-spinner{display:inline-block;width:10px;height:10px;border:1.5px solid rgba(237,232,216,.18);border-top-color:rgba(237,232,216,.8);border-radius:50%;animation:arSpin .8s linear infinite;vertical-align:middle;margin-right:4px;}
 
 /* ── Scanner table ── */
@@ -7469,8 +7470,6 @@ function _sfUpdateMetrics(opps){
 
 async function _sfFetchSignals(){
   const list  = document.getElementById('sfOppsList');
-  const fill  = document.getElementById('sfBtFill');
-  const lbl   = document.getElementById('sfBtLbl');
   if(!list) return;
 
   /* ── Trade mode → timeframe mapping ──
@@ -7485,8 +7484,14 @@ async function _sfFetchSignals(){
   const confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
 
   /* ── Phase 1: Scan for live signals ── */
-  _sfSetProgress(fill, lbl, 5, 'Scanning 6 markets for live signals — takes 20–30s…');
-  if(list) list.innerHTML = '<div style="padding:48px 20px;text-align:center;font-family:var(--mono);font-size:12px;color:rgba(237,232,216,.35);">Running DotVerse analysis on BTC, ETH, NVDA, AAPL, EUR/USD, Gold…<br><br>This takes 20–30 seconds. Hang tight.</div>';
+  // Always use getElementById here — sfBtFill/sfBtLbl are now outside sfOppsList
+  // and therefore survive any list.innerHTML replacement below.
+  _sfSetProgress(null, null, 5, 'Scanning markets for live signals — takes 20–30s…');
+  if(list) list.innerHTML = '<div style="padding:36px 20px;text-align:center">'
+    + '<div style="width:32px;height:32px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 14px"></div>'
+    + '<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Running DotVerse analysis on BTC, ETH, NVDA, AAPL, EUR/USD, Gold…</div>'
+    + '<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.3);margin-top:6px;">This takes 20–30 seconds. Hang tight.</div>'
+    + '</div>';
 
   let rawOpps = null;
   try {
@@ -7575,7 +7580,7 @@ async function _sfFetchSignals(){
       + '<div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.7);line-height:1.55;margin-bottom:16px;max-width:520px;margin-left:auto;margin-right:auto;">' + _diag + '</div>'
       + '<button onclick="_sfFetchSignals()" style="padding:8px 22px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--crys2);border:1px solid var(--crys-bord);color:var(--crys);border-radius:5px;cursor:pointer;">Retry Scan</button>'
       + '</div>';
-    _sfSetProgress(fill, lbl, 0, '');
+    _sfSetProgress(null, null, 0, '');
     return;
   }
 
@@ -7584,7 +7589,7 @@ async function _sfFetchSignals(){
   const actionable = rawOpps.filter(function(o){ return (o.sig==='BUY'||o.sig==='SELL') && o.entry && o.sl && o.tp; });
   const holdOpps   = rawOpps.filter(function(o){ return o.sig==='HOLD' || !o.entry || !o.sl || !o.tp; });
 
-  _sfSetProgress(fill, lbl, 25, 'Running 8-signal backtest engine · ' + actionable.length + ' signal(s)…');
+  _sfSetProgress(null, null, 25, 'Running 8-signal backtest engine · ' + actionable.length + ' signal(s)…');
 
   const NOW = Date.now();
   // Cache TTL is timeframe-relative — a 1H signal cached for 29 minutes is half-expired.
@@ -7640,7 +7645,7 @@ async function _sfFetchSignals(){
     return { opp: o, bt: null };  // null bt = failed, exclude
   }));
 
-  _sfSetProgress(fill, lbl, 78, 'Applying DotVerse quality gate · Computing Kelly criterion…');
+  _sfSetProgress(null, null, 78, 'Applying DotVerse quality gate · Computing Kelly criterion…');
   await new Promise(function(r){ setTimeout(r, 300); });
 
   /* ── Phase 3: Apply quality gate — only show backtest-verified signals ── */
@@ -7691,8 +7696,11 @@ async function _sfFetchSignals(){
     verifiedOpps.push(Object.assign({}, o, { _btVerified: false }));
   });
 
-  _sfSetProgress(fill, lbl, 100, '');
+  _sfSetProgress(null, null, 100, '');
   await new Promise(function(r){ setTimeout(r, 120); });
+  // Hide the progress bar now that results are ready
+  var _btBar = document.getElementById('sfBtBar');
+  if(_btBar) _btBar.style.display = 'none';
 
   window._rmOpps = verifiedOpps;
 
@@ -8067,14 +8075,14 @@ function _sfRender(){
       </div>
       <div class="opp-section-sub">AI-ranked by confluence score · all pass 65% gate · click to analyse</div>
     </div>
-    <div id="sfOppsList">
-      <div style="display:flex;align-items:center;gap:10px;padding:18px 0 10px;">
-        <div id="sfBtBar" style="flex:1;height:3px;border-radius:2px;background:rgba(237,232,216,.1);overflow:hidden;">
-          <div id="sfBtFill" style="height:100%;width:0%;background:linear-gradient(90deg,#d4870a,#f0b952);border-radius:2px;transition:width .28s ease-out;"></div>
-        </div>
-        <span id="sfBtLbl" style="font-size:10px;font-family:var(--mono);color:rgba(237,232,216,.5);white-space:nowrap;">DotVerse is backtesting signals before populating…</span>
+    <!-- Progress bar lives OUTSIDE sfOppsList so list.innerHTML replacements don't detach it -->
+    <div id="sfBtBar" style="display:flex;align-items:center;gap:10px;padding:10px 0 8px;">
+      <div style="flex:1;height:3px;border-radius:2px;background:rgba(237,232,216,.1);overflow:hidden;">
+        <div id="sfBtFill" style="height:100%;width:0%;background:linear-gradient(90deg,#d4870a,#f0b952);border-radius:2px;transition:width .28s ease-out;"></div>
       </div>
+      <span id="sfBtLbl" style="font-size:10px;font-family:var(--mono);color:rgba(237,232,216,.5);white-space:nowrap;">DotVerse is scanning signals…</span>
     </div>
+    <div id="sfOppsList"></div>
 
     <!-- Signal history log -->
     <div class="und-card" style="margin-top:20px;margin-bottom:4px;">
