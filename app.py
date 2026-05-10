@@ -8456,9 +8456,10 @@ def verdict_queue_clear():
     })
 
 
-def _extract_verdict_structure(verdict_text, ticker):
+def _extract_verdict_structure(verdict_text, state, ticker):
     """
-    Post-processes the raw TradingAgents verdict into structured trade plan fields.
+    Post-processes the raw TradingAgents verdict into structured trade plan fields
+    including per-agent cards built from the LangGraph state reports.
     Uses deepseek-chat (fast, cheap ~1-2s) to extract JSON from the raw text.
     Returns None if extraction fails — callers must handle gracefully.
     """
@@ -8468,7 +8469,25 @@ def _extract_verdict_structure(verdict_text, ticker):
     try:
         import openai as _oai
         client = _oai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-        raw = str(verdict_text)[:4000]
+        raw = str(verdict_text)[:3000]
+
+        # Build per-agent context from LangGraph state (truncated to keep prompt tight)
+        def _snip(text, n=300):
+            t = str(text or "").strip()
+            return t[:n] + "…" if len(t) > n else t
+
+        debate = state.get("investment_debate_state", {}) if state else {}
+        agent_ctx = (
+            f"[Market Analyst] {_snip(state.get('market_report','') if state else '')}\n"
+            f"[Sentiment Analyst] {_snip(state.get('sentiment_report','') if state else '')}\n"
+            f"[News Researcher] {_snip(state.get('news_report','') if state else '')}\n"
+            f"[Fundamentals Researcher] {_snip(state.get('fundamentals_report','') if state else '')}\n"
+            f"[Bull Researcher] {_snip(debate.get('bull_history',''))}\n"
+            f"[Bear Researcher] {_snip(debate.get('bear_history',''))}\n"
+            f"[Research Manager] {_snip(state.get('investment_plan','') if state else '')}\n"
+            f"[Risk Team] {_snip(state.get('final_trade_decision','') if state else '')}\n"
+        )
+
         resp = client.chat.completions.create(
             model="deepseek-chat",
             messages=[{
@@ -8483,16 +8502,29 @@ def _extract_verdict_structure(verdict_text, ticker):
                     '"positions":3,'
                     '"risk_ladder":[0.5,1.0,1.5],'
                     '"tp_r_multiples":[1.5,2.5,3.5],'
-                    '"trailing":["0.5x ATR after +1.5R","0.5x ATR after +1.5R","0.75x ATR after +2R"]}\n\n'
+                    '"trailing":["0.5x ATR after +1.5R","0.5x ATR after +1.5R","0.75x ATR after +2R"],'
+                    '"agents":['
+                    '{"name":"Market Analyst","vote":"BUY","argument":"1-2 sentence summary of their key finding"},'
+                    '{"name":"Sentiment Analyst","vote":"BUY","argument":"..."},'
+                    '{"name":"News Researcher","vote":"HOLD","argument":"..."},'
+                    '{"name":"Fundamentals Researcher","vote":"BUY","argument":"..."},'
+                    '{"name":"Bull Researcher","vote":"BUY","argument":"..."},'
+                    '{"name":"Bear Researcher","vote":"SELL","argument":"..."},'
+                    '{"name":"Research Manager","vote":"BUY","argument":"..."},'
+                    '{"name":"Risk Team","vote":"BUY","argument":"..."}'
+                    ']}\n\n'
                     "Rules: positions=3-5 (HIGH=5,MEDIUM=4,LOW=3). "
                     "risk_ladder must sum ≤8%. Start small (0.5-1%), scale up. "
                     "tp_r_multiples: TP as multiples of initial R. TP1 min 1.5R. "
-                    "HOLD: positions=1, risk_ladder=[0.5], trailing=['manual'], tp_r_multiples=[1.5].\n\n"
-                    f"ANALYSIS:\n{raw}"
+                    "HOLD: positions=1, risk_ladder=[0.5], trailing=['manual'], tp_r_multiples=[1.5].\n"
+                    "For agents: vote must match each agent's actual stance from their report. "
+                    "argument must be 1-2 plain English sentences from their specific report.\n\n"
+                    f"FINAL VERDICT:\n{raw}\n\n"
+                    f"AGENT REPORTS:\n{agent_ctx}"
                 )
             }],
             response_format={"type": "json_object"},
-            max_tokens=500,
+            max_tokens=900,
             temperature=0.1,
         )
         return json.loads(resp.choices[0].message.content)
@@ -8532,8 +8564,8 @@ def _run_verdict_job(ticker, trade_date_str):
     try:
         config = VERDICT_CONFIG.copy()
         ta = TradingAgentsGraph(debug=False, config=config)
-        _, decision = ta.propagate(ticker, trade_date_str)
-        structured = _extract_verdict_structure(decision, ticker)
+        state, decision = ta.propagate(ticker, trade_date_str)
+        structured = _extract_verdict_structure(decision, state, ticker)
         return {"ticker": ticker, "verdict": decision, "structured": structured, "status": "complete"}
     except Exception as e:
         return {"error": str(e), "status": "failed"}
@@ -8611,6 +8643,88 @@ def verdict_result(job_id):
         if job.is_failed:
             return jsonify({"status": "failed", "error": str(job.exc_info)})
         return jsonify({"status": "running"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/verdict/chat", methods=["POST"])
+@login_required
+def verdict_chat():
+    """
+    Answer a follow-up question about a completed verdict using DeepSeek.
+    Body: { job_id: str, question: str, ticker: str }
+    Returns: { answer: str }
+    """
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        return jsonify({"error": "AI not configured on this server"}), 503
+
+    body     = request.get_json(force=True) or {}
+    job_id   = body.get("job_id", "").strip()
+    question = body.get("question", "").strip()
+    ticker   = body.get("ticker", "").strip()
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    # Retrieve verdict context: try job result first, then Redis cache
+    verdict_text   = ""
+    agents_context = ""
+    try:
+        if job_id and _rq_queue:
+            job = _rq_queue.fetch_job(job_id)
+            if job and job.is_finished and job.result:
+                r = job.result
+                verdict_text = str(r.get("verdict", ""))[:3000]
+                s = r.get("structured") or {}
+                agents = s.get("agents", [])
+                if agents:
+                    agents_context = "Agent votes:\n" + "\n".join(
+                        f"- {a.get('name','?')} ({a.get('vote','?')}): {a.get('argument','')}"
+                        for a in agents
+                    )
+    except Exception:
+        pass
+
+    if not verdict_text and ticker and _redis_client:
+        try:
+            cached = _redis_client.get(f"verdict:{ticker}:4h")
+            if cached:
+                r = json.loads(cached)
+                verdict_text = str(r.get("verdict", ""))[:3000]
+        except Exception:
+            pass
+
+    context_block = f"TICKER: {ticker}\n\n"
+    if verdict_text:
+        context_block += f"VERDICT:\n{verdict_text}\n\n"
+    if agents_context:
+        context_block += agents_context + "\n\n"
+
+    try:
+        import openai as _oai
+        client = _oai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a trading analyst team answering follow-up questions about a completed trade verdict. "
+                        "Be direct, specific, and educational — the user may be a beginner. "
+                        "Reference the actual verdict data when relevant. "
+                        "Keep answers under 120 words. Use plain English. No markdown headers."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"{context_block}QUESTION: {question}"
+                }
+            ],
+            max_tokens=250,
+            temperature=0.4,
+        )
+        answer = resp.choices[0].message.content.strip()
+        return jsonify({"answer": answer})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
