@@ -6720,10 +6720,26 @@ async function dvRunAnalyze(){
   if (inp) inp.value = sym;
   const spin=document.getElementById('dvSpin');if(spin)spin.classList.add('active');
   const btn=document.querySelector('.dv-analyze-btn');if(btn){btn.disabled=true;btn.textContent='Analysing…';}
+  // Show loading overlay in the main content area
+  var _loadOverlay = document.getElementById('analyzeLoadOverlay');
+  if(!_loadOverlay){
+    _loadOverlay = document.createElement('div');
+    _loadOverlay.id = 'analyzeLoadOverlay';
+    _loadOverlay.style.cssText = 'position:fixed;inset:0;z-index:8000;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(7,8,12,.72);backdrop-filter:blur(4px);gap:16px';
+    _loadOverlay.innerHTML = '<div style="width:48px;height:48px;border-radius:50%;border:3px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite"></div>'
+      + '<div style="font-family:var(--mono);font-size:12px;color:var(--gold)">Analysing '+sym+'…</div>'
+      + '<div id="analyzeLoadTicker" style="font-family:var(--mono);font-size:10px;color:var(--t3)">Fetching market data and running indicators</div>';
+    document.body.appendChild(_loadOverlay);
+  } else {
+    _loadOverlay.style.display='flex';
+    var tl=document.getElementById('analyzeLoadTicker');
+    if(tl) tl.textContent='Fetching market data and running indicators for '+sym;
+  }
   const data=await dvFetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ticker:sym,asset_type:_dvAsset||'auto',timeframe:_dvTF||'4h'})});
   if(spin)spin.classList.remove('active');
   if(btn){btn.disabled=false;btn.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Analyse';}
+  if(_loadOverlay) _loadOverlay.style.display='none';
   if(data&&data.signal){
     window._activeSignal={
       sym:data.ticker||sym, tf:(_dvTF||'4h').toUpperCase(), asset:_dvAsset||data.asset_type||'auto',
@@ -12464,6 +12480,31 @@ function _vRenderLive(sig, verdict, structured){
       + '</div>';
   }
 
+  // Build agent cards grid from structured data
+  var agentCardsHtml = '';
+  var agents = s.agents || [];
+  if (agents.length > 0) {
+    var cardItems = '';
+    for (var ai = 0; ai < agents.length; ai++) {
+      var ag = agents[ai];
+      var agVote = (ag.vote || 'HOLD').toUpperCase();
+      var agCol = agVote === 'BUY' ? '#5de8a0' : agVote === 'SELL' ? '#e8706e' : '#c9a84c';
+      var agBg  = agVote === 'BUY' ? 'rgba(93,232,160,.04)' : agVote === 'SELL' ? 'rgba(232,112,110,.04)' : 'rgba(201,168,76,.04)';
+      var agBd  = agVote === 'BUY' ? 'rgba(93,232,160,.18)' : agVote === 'SELL' ? 'rgba(232,112,110,.18)' : 'rgba(201,168,76,.18)';
+      cardItems += '<div style="background:'+agBg+';border:1px solid '+agBd+';border-radius:8px;padding:12px 14px;min-width:0">'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
+        + '<span style="font-size:10px;font-weight:700;color:var(--t1);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">'+ag.name+'</span>'
+        + '<span style="padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;font-family:var(--mono);background:'+agCol+'22;color:'+agCol+'">'+agVote+'</span>'
+        + '</div>'
+        + '<div style="font-size:10px;color:rgba(237,232,216,.7);line-height:1.6">'+(ag.argument||'')+'</div>'
+        + '</div>';
+    }
+    agentCardsHtml = '<div style="margin-bottom:14px">'
+      + '<div style="font-size:9px;font-weight:700;color:var(--t3);letter-spacing:.07em;text-transform:uppercase;margin-bottom:8px">8 Agent Debate</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+cardItems+'</div>'
+      + '</div>';
+  }
+
   results.style.display = 'block';
   results.innerHTML =
     '<div style="background:rgba(9,11,16,.8);border:1px solid rgba(237,232,216,.1);border-radius:12px;padding:24px;margin-bottom:16px">'
@@ -12478,6 +12519,8 @@ function _vRenderLive(sig, verdict, structured){
     + '<div style="font-size:13px;color:rgba(237,232,216,.82);line-height:1.75;margin-bottom:14px">'
     + (s.summary ? s.summary : decisionText.replace(/\n/g,'<br>').substring(0,1200))
     + '</div>'
+    // Agent cards
+    + agentCardsHtml
     // Risk Team box
     + (s.risk_team_notes
       ? '<div style="padding:10px 14px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:7px;margin-bottom:14px">'
@@ -12629,22 +12672,36 @@ function _vChat(q){
   if(!q||!q.trim()) return;
   var msgs=document.getElementById('verdictChatMsgs'), inp=document.getElementById('verdictChatInput');
   if(!msgs) return;
-  msgs.innerHTML += '<div class="verdict-chat-msg verdict-chat-user"><div class="verdict-chat-bubble">'+q+'</div></div>';
-  if(inp) inp.value='';
+  msgs.innerHTML += '<div class="verdict-chat-msg verdict-chat-user"><div class="verdict-chat-bubble">'+q.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div></div>';
+  if(inp){ inp.value=''; inp.disabled=true; }
   var tid='vc-'+Date.now();
-  msgs.innerHTML += '<div class="verdict-chat-msg verdict-chat-agent" id="'+tid+'"><div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble" style="opacity:.5">Analysing...</div></div>';
+  msgs.innerHTML += '<div class="verdict-chat-msg verdict-chat-agent" id="'+tid+'"><div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble" style="opacity:.5">Thinking…</div></div>';
   msgs.scrollTop=msgs.scrollHeight;
-  var resp;
-  if(q.toLowerCase().indexOf('cpi')>-1||q.toLowerCase().indexOf('hot')>-1) resp = '<strong style="color:#e8706e">If CPI > 0.4%:</strong> bear case activates. BTC historically drops 3-5% within 6 hours. Your stop protects you but expect slippage. <strong style="color:#c9a84c">Reduce Trade 5 to 0.5% risk or wait until 08:35 ET to enter.</strong>';
-  else if(q.toLowerCase().indexOf('confluence')>-1||q.toLowerCase().indexOf('71')>-1) resp = '71% means 5 of 7 DotVerse indicators voted BUY. <strong style="color:#5de8a0">EMA, MACD, Supertrend, Volume, and MTF Trend all agreed.</strong> RSI and Bollinger Bands were neutral. Above 80% = CONFIRMED. Below 65% = not shown. <strong style="color:#c9a84c">71% is LIKELY tier — strong enough to trade, but size conservatively.</strong>';
-  else if(q.toLowerCase().indexOf('trailing')>-1||q.toLowerCase().indexOf('trail')>-1) resp = 'Your trailing stop at 0.5x ATR after +1.5R <strong style="color:#5de8a0">is the safest automation you have.</strong> Once BTC hits \$85,000, the stop auto-trails below the highest price. <strong>Trades 1-3 get trailing stops. Trades 4-5 are manual</strong> because they start with higher risk and should be monitored directly.';
-  else if(q.toLowerCase().indexOf('sell')>-1||q.toLowerCase().indexOf('flip')>-1) resp = '<strong style="color:#e8706e">VERDICT changes to SELL if:</strong> (1) BTC drops below \$79,000 on 4H close, (2) CPI > 0.5%, (3) ETF outflows > \$500M this week, (4) RSI drops below 50 on 4H. <strong style="color:#5de8a0">Currently NONE of these conditions are met.</strong>';
-  else resp = 'The Risk Team recommends escalating risk because <strong style="color:#c9a84c">the first trade tests the waters.</strong> If Trade 1 succeeds, conviction increases and you scale in. If Trade 1 fails at the stop, total loss = 0.8% — barely a scratch. <strong style="color:#5de8a0">The ladder approach turns one trade into a managed campaign.</strong>';
-  setTimeout(function(){
+  var sig = window._activeSignal || {};
+  var ticker = (sig.sym||'').replace('/','').replace('-','');
+  dvFetch('/api/verdict/chat',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      job_id: window._verdictPrewarmJobId || '',
+      question: q,
+      ticker: ticker
+    })
+  }).then(function(r){
     var el2=document.getElementById(tid);
-    if(el2){el2.innerHTML='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble">'+resp+'</div>';}
+    if(!el2) return;
+    if(r && r.answer){
+      el2.innerHTML='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble">'+r.answer.replace(/\n/g,'<br>')+'</div>';
+    } else {
+      var errMsg = (r && r.error) ? r.error : 'Could not get a response. Try again.';
+      el2.innerHTML='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble" style="color:var(--red)">'+errMsg+'</div>';
+    }
     if(msgs) msgs.scrollTop=msgs.scrollHeight;
-  },800);
+    if(inp) inp.disabled=false;
+  }).catch(function(){
+    var el2=document.getElementById(tid);
+    if(el2) el2.innerHTML='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble" style="color:var(--red)">Network error. Try again.</div>';
+    if(inp) inp.disabled=false;
+  });
 }
 
 function showSize(){
