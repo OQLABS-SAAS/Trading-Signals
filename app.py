@@ -8462,7 +8462,7 @@ def _build_fallback_structured(state, decision):
     when _extract_verdict_structure fails or DEEPSEEK_API_KEY is missing.
     Guaranteed to return a non-None dict with agents[] always populated.
     """
-    def _snip(text, n=240):
+    def _snip(text, n=600):
         t = str(text or "").strip()
         if not t or t.lower() in ("none", ""):
             return "Report not available for this analysis run."
@@ -8578,7 +8578,7 @@ def _extract_verdict_structure(verdict_text, state, ticker, signal_ctx=None):
                     '"tp_r_multiples":[1.5,2.5,3.5],'
                     '"trailing":["0.5x ATR after +1.5R","0.5x ATR after +1.5R","0.75x ATR after +2R"],'
                     '"agents":['
-                    '{"name":"Market Analyst","vote":"BUY","argument":"1-2 sentence summary of their key finding"},'
+                    '{"name":"Market Analyst","vote":"BUY","argument":"4-6 sentences with their specific findings, data points, and reasoning"},'
                     '{"name":"Sentiment Analyst","vote":"BUY","argument":"..."},'
                     '{"name":"News Researcher","vote":"HOLD","argument":"..."},'
                     '{"name":"Fundamentals Researcher","vote":"BUY","argument":"..."},'
@@ -8593,14 +8593,14 @@ def _extract_verdict_structure(verdict_text, state, ticker, signal_ctx=None):
                     "If DotVerse signal is provided, calibrate tp_r_multiples against actual SL distance. "
                     "HOLD: positions=1, risk_ladder=[0.5], trailing=['manual'], tp_r_multiples=[1.5].\n"
                     "For agents: vote must match each agent's actual stance from their report. "
-                    "argument must be 1-2 plain English sentences from their specific report.\n\n"
+                    "argument must be 4-6 sentences of detailed analysis from their specific report — include the key data points, reasoning, and specific concerns or supporting evidence they raised. Do not summarise. Quote specific findings.\n\n"
                     f"FINAL VERDICT:\n{raw}\n\n"
                     f"AGENT REPORTS:\n{agent_ctx}"
                     f"{signal_block}"
                 )
             }],
             response_format={"type": "json_object"},
-            max_tokens=900,
+            max_tokens=2000,
             temperature=0.1,
         )
         return json.loads(resp.choices[0].message.content)

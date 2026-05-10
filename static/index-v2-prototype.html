@@ -6797,7 +6797,13 @@ async function dvRunAnalyze(){
     window._verdictChatHistory = [];         // clear chat history for new signal
     window._verdictAutoReviewCache = null;   // clear auto-review cache
     window._verdictSignalAssessmentCache = null; // clear signal assessment cache
-    showUnderstand();
+    // Only navigate to Understand if the user isn't on a different tab already.
+    // If they're on Backtest, Size, Portfolio etc. — update the signal silently
+    // without wiping their current tab. They see fresh data next time they visit Understand.
+    var _currentNav = document.querySelector('.nav-item.active')?.dataset.nav || 'understand';
+    if (_currentNav === 'understand' || _currentNav === 'signals' || !_currentNav) {
+      showUnderstand();
+    }
     // Auto-run backtest silently to populate win rate badge (non-blocking)
     setTimeout(function(){ undRunBacktest(true); }, 300);
     // Pre-warm Verdict job so it's ready when user navigates there
@@ -12948,6 +12954,9 @@ function _vPreloadSize(){
     trailing: trailing,
     tpSplit: [50, 30, 20]
   };
+  // Sync the Size tab ladder to the agent-assigned percentages so
+  // szLadderRows shows the same numbers as the Verdict position plan.
+  window._szLadder = riskLadder.slice(0, positions);
   setNav('size'); showSize();
   // After showSize() renders, fill szRisk with first-position risk % from the
   // verdict ladder and trigger recalculation so the user sees live numbers.
@@ -13042,9 +13051,9 @@ function showSize(){
     }
     return '<div style="margin-bottom:14px;border-radius:10px;border:1px solid rgba(93,232,160,.2);background:rgba(93,232,160,.04);padding:14px 16px">'+
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg><span style="font-size:11px;font-weight:500;color:var(--grn)">Verdict Plan Loaded · '+p.strategy+' · '+p.positions+' positions</span><span style="margin-left:auto;font-size:9px;color:var(--t3);font-family:var(--mono)">Total: '+totalRisk.toFixed(1)+'% risk</span></div>'+
-+      '<div style="display:flex;gap:8px;overflow-x:auto">'+rows+'</div>'+
-+      '<div style="margin-top:10px;font-size:9px;color:var(--t3);line-height:1.5">Risk % per trade, stop losses, and trailing stops preloaded from the Verdict analysis. The Risk Team has reviewed your Automations. Adjust any value below — the calculator updates live.</div>'+
-+      '</div>';
+      '<div style="display:flex;gap:8px;overflow-x:auto">'+rows+'</div>'+
+      '<div style="margin-top:10px;font-size:9px;color:var(--t3);line-height:1.5">Risk % per trade, stop losses, and trailing stops preloaded from the Verdict analysis. The Risk Team has reviewed your Automations. Adjust any value below — the calculator updates live.</div>'+
+      '</div>';
   })(window._verdictPlan) : ''}
 
   <div class="sz-layout">
