@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DotVerse Trading Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+:root {
+  --bg:     #08080f;
+  --bg2:    #0f0f1a;
+  --bg3:    #161624;
+  --bg4:    #1c1c2e;
+  --bg5:    #21213a;
+  --border: rgba(255,255,255,0.06);
+  --border2:rgba(255,255,255,0.11);
+  --text:   #dde1ee;
+  --text2:  #7a7fa8;
+  --text3:  #454570;
+  --green:  #00d282;
+  --red:    #ff3c4a;
+  --blue:   #4da8ff;
+  --orange: #ffaa00;
+  --purple: #b47cff;
+  --teal:   #00c9c9;
+  --gold:   #ffd700;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'DM Sans', system-ui, sans-serif;
+}
+body { background:var(--bg); color:var(--text); font-family:var(--sans); height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+/* ── HEADER ─────────────────────────────────────────────────────────────── */
+.hdr {
+  display:flex; align-items:center; gap:10px; padding:7px 14px;
+  background:var(--bg2); border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.hdr-dot { width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); }
+.hdr-badge { font-size:9px; font-weight:700; letter-spacing:.08em; color:var(--blue); background:rgba(77,168,255,.13); padding:2px 7px; border-radius:3px; font-family:var(--mono); }
+.hdr-ticker { font-size:20px; font-weight:700; letter-spacing:-.02em; font-family:var(--mono); }
+.hdr-tf { font-size:9px; font-weight:600; color:var(--text2); background:var(--bg4); padding:2px 7px; border-radius:3px; letter-spacing:.05em; }
+.hdr-price { font-size:18px; font-weight:600; font-family:var(--mono); }
+.hdr-chg { font-size:12px; font-weight:700; padding:2px 9px; border-radius:4px; color:var(--green); background:rgba(0,210,130,.1); font-family:var(--mono); }
+.hdr-sep { width:1px; height:20px; background:var(--border2); }
+.hdr-stat { font-size:10px; color:var(--text2); display:flex; flex-direction:column; gap:1px; }
+.hdr-stat b { color:var(--text); font-weight:600; font-family:var(--mono); font-size:11px; }
+.hdr-right { margin-left:auto; display:flex; align-items:center; gap:8px; }
+.hdr-pill { font-size:9px; font-weight:700; letter-spacing:.05em; padding:3px 9px; border-radius:20px; }
+.hdr-pill.live { color:var(--green); border:1px solid rgba(0,210,130,.25); background:rgba(0,210,130,.07); }
+
+/* ── SIGNAL BAR ─────────────────────────────────────────────────────────── */
+.sig-bar { display:flex; align-items:center; gap:5px; padding:4px 10px; background:var(--bg3); border-bottom:1px solid var(--border); flex-shrink:0; }
+.sig-lbl { font-size:9px; font-weight:700; letter-spacing:.07em; color:var(--text3); text-transform:uppercase; margin-right:2px; }
+.chip { font-size:9px; font-weight:700; letter-spacing:.05em; padding:2px 8px; border-radius:3px; cursor:default; font-family:var(--mono); }
+.chip.bull  { color:var(--green);  background:rgba(0,210,130,.1);  border:1px solid rgba(0,210,130,.2); }
+.chip.bear  { color:var(--red);    background:rgba(255,60,74,.09); border:1px solid rgba(255,60,74,.18); }
+.chip.neu   { color:var(--text2);  background:rgba(255,255,255,.04); border:1px solid var(--border); }
+.chip.warn  { color:var(--orange); background:rgba(255,170,0,.09); border:1px solid rgba(255,170,0,.2); }
+.hint { margin-left:auto; font-size:9px; color:var(--text3); }
+
+/* ── MAIN LAYOUT ─────────────────────────────────────────────────────────── */
+.main { flex:1; display:flex; overflow:hidden; min-height:0; }
+
+/* Chart column */
+.chart-col { flex:1; display:flex; flex-direction:column; padding:6px 4px 6px 6px; gap:3px; min-height:0; }
+.pane-row { display:flex; flex-direction:column; min-height:0; }
+.pane-lbl { font-size:8px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.1em; padding:1px 2px 3px; flex-shrink:0; font-family:var(--mono); }
+.chart-pane { position:relative; border-radius:5px; overflow:hidden; background:var(--bg2); border:1px solid var(--border); flex:1; min-height:0; }
+.ov { position:absolute; top:0; left:0; pointer-events:none; border-radius:5px; }
+.legend { position:absolute; top:5px; left:6px; z-index:10; display:flex; gap:7px; align-items:center; }
+.leg { display:flex; align-items:center; gap:3px; font-size:9px; color:var(--text2); font-family:var(--mono); }
+.leg-ln { width:9px; height:2px; border-radius:1px; }
+
+/* ── SIGNAL PANEL (right) ─────────────────────────────────────────────────── */
+.sig-panel { width:234px; flex-shrink:0; background:var(--bg2); border-left:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
+.sp-tabs { display:flex; border-bottom:1px solid var(--border); flex-shrink:0; }
+.sp-tab { flex:1; padding:7px 0; font-size:9px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; text-align:center; color:var(--text3); cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; }
+.sp-tab.active { color:var(--blue); border-bottom-color:var(--blue); }
+.sp-body { flex:1; overflow-y:auto; padding:0; }
+.sp-body::-webkit-scrollbar { width:3px; } .sp-body::-webkit-scrollbar-thumb { background:var(--bg5); border-radius:3px; }
+
+/* Active signal card */
+.active-card { margin:8px; border-radius:6px; overflow:hidden; border:1px solid var(--border2); background:var(--bg3); }
+.ac-hdr { display:flex; align-items:center; justify-content:space-between; padding:8px 10px; }
+.ac-type { font-size:10px; font-weight:700; letter-spacing:.06em; font-family:var(--mono); }
+.ac-date { font-size:8px; color:var(--text2); font-family:var(--mono); }
+.ac-price-row { display:flex; align-items:baseline; gap:6px; padding:6px 10px 4px; border-top:1px solid var(--border); }
+.ac-price-main { font-size:18px; font-weight:700; font-family:var(--mono); }
+.ac-price-lbl  { font-size:9px; color:var(--text2); }
+.ac-rows { border-top:1px solid var(--border); }
+.ac-row { display:flex; justify-content:space-between; align-items:center; padding:4px 10px; border-bottom:1px solid rgba(255,255,255,.03); }
+.ac-row:last-child { border-bottom:none; }
+.ac-lbl { font-size:9px; color:var(--text2); }
+.ac-val { font-size:10px; font-weight:600; font-family:var(--mono); }
+.ac-val.green  { color:var(--green); }
+.ac-val.red    { color:var(--red); }
+.ac-val.blue   { color:var(--blue); }
+.ac-val.orange { color:var(--orange); }
+.ac-val.gold   { color:var(--gold); }
+.ac-val.purple { color:var(--purple); }
+.ac-val.teal   { color:var(--teal); }
+.rr-bar { height:3px; border-radius:2px; margin:0 10px 8px; background:var(--bg5); overflow:hidden; }
+.rr-fill { height:100%; border-radius:2px; background:linear-gradient(90deg,var(--red),var(--green)); }
+
+/* Signal log */
+.sig-section { padding:4px 8px 2px; font-size:8px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--text3); border-bottom:1px solid var(--border); }
+.sig-log-item { display:flex; align-items:stretch; padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.03); cursor:pointer; transition:background .1s; gap:8px; }
+.sig-log-item:hover { background:var(--bg3); }
+.sli-bar { width:2px; border-radius:2px; flex-shrink:0; }
+.sli-body { flex:1; min-width:0; }
+.sli-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; }
+.sli-type { font-size:9px; font-weight:700; letter-spacing:.05em; font-family:var(--mono); }
+.sli-time { font-size:8px; color:var(--text3); font-family:var(--mono); }
+.sli-details { font-size:9px; color:var(--text2); line-height:1.5; font-family:var(--mono); }
+.sli-details span { color:var(--text); font-weight:600; }
+
+/* ── SIGNAL TOOLTIP (floating over chart) ────────────────────────────────── */
+#sig-tooltip {
+  position:fixed; z-index:1000; pointer-events:none;
+  background:var(--bg4); border:1px solid var(--border2); border-radius:7px;
+  min-width:200px; box-shadow:0 8px 32px rgba(0,0,0,.6);
+  display:none; overflow:hidden;
+}
+.tt-hdr { display:flex; align-items:center; justify-content:space-between; padding:7px 10px; }
+.tt-type { font-size:10px; font-weight:700; letter-spacing:.06em; font-family:var(--mono); }
+.tt-time { font-size:8px; color:var(--text2); font-family:var(--mono); }
+.tt-row  { display:flex; justify-content:space-between; padding:3px 10px; border-top:1px solid rgba(255,255,255,.04); font-size:9px; }
+.tt-lbl  { color:var(--text2); }
+.tt-val  { font-weight:600; font-family:var(--mono); }
+.tt-val.green  { color:var(--green); }
+.tt-val.red    { color:var(--red); }
+.tt-val.blue   { color:var(--blue); }
+.tt-val.orange { color:var(--orange); }
+.tt-val.gold   { color:var(--gold); }
+.tt-val.purple { color:var(--purple); }
+.tt-val.teal   { color:var(--teal); }
+.tt-pb { height:3px; }
+
+/* ── INFO BAR ─────────────────────────────────────────────────────────────── */
+.info-bar { display:flex; gap:14px; padding:4px 12px; background:var(--bg2); border-top:1px solid var(--border); font-size:9px; color:var(--text2); flex-shrink:0; align-items:center; font-family:var(--mono); }
+.ii b { color:var(--text); font-weight:600; }
+.up { color:var(--green); } .dn { color:var(--red); }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<div class="hdr">
+  <div class="hdr-dot"></div>
+  <span class="hdr-badge">STOCK</span>
+  <span class="hdr-ticker">AAPL</span>
+  <span class="hdr-tf">4H</span>
+  <div class="hdr-sep"></div>
+  <span class="hdr-price">$183.42</span>
+  <span class="hdr-chg">▲ 1.37%</span>
+  <div class="hdr-sep"></div>
+  <div class="hdr-stat"><span>H</span><b>$185.10</b></div>
+  <div class="hdr-stat"><span>L</span><b>$180.92</b></div>
+  <div class="hdr-stat"><span>Vol</span><b>28.4M</b></div>
+  <div class="hdr-stat"><span>ATR</span><b>$2.14</b></div>
+  <div class="hdr-right">
+    <span class="hdr-pill live">● LIVE</span>
+  </div>
+</div>
+
+<!-- ── SIGNAL BAR ── -->
+<div class="sig-bar">
+  <span class="sig-lbl">Active:</span>
+  <span class="chip bull">▲ RSI BULL DIV</span>
+  <span class="chip bull">▲ EMA CROSS</span>
+  <span class="chip warn">◆ RSI 42</span>
+  <span class="chip bear">▼ MACD BEAR</span>
+  <span class="chip neu">◉ BB MID</span>
+  <span class="hint">Hover markers for signal data · Scroll ← → · Ctrl+scroll zoom</span>
+</div>
+
+<div class="main">
+  <!-- ── CHART COLUMN ── -->
+  <div class="chart-col">
+    <div class="pane-row" style="flex:5;">
+      <div class="pane-lbl">Price — AAPL · 4H · Candlestick</div>
+      <div class="chart-pane" id="pricePane">
+        <div id="priceChart" style="width:100%;height:100%;"></div>
+        <canvas class="ov" id="priceOv"></canvas>
+        <div class="legend">
+          <div class="leg"><div class="leg-ln" style="background:#4da8ff;"></div>EMA20</div>
+          <div class="leg"><div class="leg-ln" style="background:#b47cff;"></div>EMA50</div>
+          <div class="leg"><div class="leg-ln" style="background:rgba(255,170,0,.5);"></div>BB</div>
+        </div>
+      </div>
+    </div>
+    <div class="pane-row" style="flex:2;">
+      <div class="pane-lbl">RSI (14) · Divergences overlaid</div>
+      <div class="chart-pane" id="rsiPane">
+        <div id="rsiChart" style="width:100%;height:100%;"></div>
+        <canvas class="ov" id="rsiOv"></canvas>
+      </div>
+    </div>
+    <div class="pane-row" style="flex:1.3;">
+      <div class="pane-lbl">Volume</div>
+      <div class="chart-pane">
+        <div id="volChart" style="width:100%;height:100%;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SIGNAL PANEL ── -->
+  <div class="sig-panel">
+    <div class="sp-tabs">
+      <div class="sp-tab active">Active</div>
+      <div class="sp-tab" id="tabLog">Log</div>
+      <div class="sp-tab" id="tabInd">Indicators</div>
+    </div>
+    <div class="sp-body" id="spBody">
+      <!-- populated by JS -->
+    </div>
+  </div>
+</div>
+
+<div class="info-bar">
+  <div class="ii">RSI <b id="iRsi">42.8</b></div>
+  <div class="ii">EMA20 <b>$181.20</b></div>
+  <div class="ii">EMA50 <b>$178.65</b></div>
+  <div class="ii">BB <b>$188.4 / $174.1</b></div>
+  <div class="ii">ATR <b>$2.14</b></div>
+  <div class="ii">MACD <b class="dn">▼ -0.42</b></div>
+  <div class="ii" style="margin-left:auto;">1D <b class="up">+1.37%</b></div>
+  <div class="ii">1W <b class="dn">-0.8%</b></div>
+  <div class="ii">1M <b class="up">+4.2%</b></div>
+</div>
+
+<!-- ── FLOATING TOOLTIP ── -->
+<div id="sig-tooltip"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// TIME CONVERSION — fixed "AprDD HH:MM" parsing
+// ══════════════════════════════════════════════════════════════════════════════
+function toTimeVal(s) {
+  if (!s) return null;
+  s = String(s);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (typeof s === 'number') return s;
+  // "Apr08 16:00" → split → "Apr 08 2026 16:00:00"
+  const m = s.match(/^([A-Za-z]{3})(\d{2})\s+(\d{2}:\d{2})$/);
+  if (m) {
+    const d = new Date(`${m[1]} ${m[2]} ${new Date().getFullYear()} ${m[3]}:00`);
+    if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  }
+  let d = new Date(s);
+  if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  d = new Date(s + ' ' + new Date().getFullYear());
+  if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  return null;
+}
+
+function fmtTime(unix) {
+  const d = new Date(unix * 1000);
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' +
+         d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MOCK DATA
+// ══════════════════════════════════════════════════════════════════════════════
+const rawLabels = [
+  "Mar24 09:30","Mar24 13:30","Mar24 17:30","Mar24 21:30",
+  "Mar25 01:30","Mar25 05:30","Mar25 09:30","Mar25 13:30","Mar25 17:30","Mar25 21:30",
+  "Mar26 01:30","Mar26 05:30","Mar26 09:30","Mar26 13:30","Mar26 17:30","Mar26 21:30",
+  "Mar27 01:30","Mar27 05:30","Mar27 09:30","Mar27 13:30","Mar27 17:30","Mar27 21:30",
+  "Mar28 01:30","Mar28 05:30","Mar28 09:30","Mar28 13:30","Mar28 17:30","Mar28 21:30",
+  "Mar31 01:30","Mar31 05:30","Mar31 09:30","Mar31 13:30","Mar31 17:30","Mar31 21:30",
+  "Apr01 01:30","Apr01 05:30","Apr01 09:30","Apr01 13:30","Apr01 17:30","Apr01 21:30",
+  "Apr02 01:30","Apr02 05:30","Apr02 09:30","Apr02 13:30","Apr02 17:30","Apr02 21:30",
+  "Apr03 01:30","Apr03 05:30","Apr03 09:30","Apr03 13:30","Apr03 17:30","Apr03 21:30",
+  "Apr04 01:30","Apr04 05:30","Apr04 09:30","Apr04 13:30","Apr04 17:30","Apr04 21:30",
+  "Apr07 01:30","Apr07 05:30","Apr07 09:30","Apr07 13:30","Apr07 17:30","Apr07 21:30",
+  "Apr08 01:30","Apr08 05:30","Apr08 09:30","Apr08 13:30","Apr08 17:30","Apr08 21:30",
+  "Apr09 01:30","Apr09 05:30","Apr09 09:30","Apr09 13:30","Apr09 17:30","Apr09 21:30",
+  "Apr10 01:30","Apr10 05:30","Apr10 09:30","Apr10 13:30","Apr10 17:30",
+];
+
+// Generates realistic OHLC — professional: small bodies, dramatic wicks, clear trends
+function genOHLC(n) {
+  const rng = (a,b) => a + Math.random()*(b-a);
+  let c = 183, trend = 1, streak = 0;
+  const arr = [];
+  for(let i = 0; i < n; i++){
+    // Momentum-based trend flips
+    if(Math.random() < (streak > 7 ? 0.28 : 0.05)){ trend *= -1; streak = 0; } else streak++;
+
+    const open = c + rng(-0.12, 0.12);   // tiny gap between candles
+
+    // Body distribution — most candles have SMALL bodies (realistic)
+    const r = Math.random();
+    let body;
+    if      (r < 0.15) body = rng(0.01, 0.12);   // doji (15%)
+    else if (r < 0.42) body = rng(0.12, 0.45);   // small (27%)
+    else if (r < 0.70) body = rng(0.45, 1.00);   // medium (28%)
+    else if (r < 0.87) body = rng(1.00, 2.00);   // large (17%)
+    else               body = rng(2.00, 3.50);   // strong move (13%)
+
+    const dir   = Math.random() < 0.57 ? trend : -trend;
+    const close = open + body * dir;
+    const hi    = Math.max(open, close);
+    const lo    = Math.min(open, close);
+    const bd    = hi - lo;     // actual body height
+
+    // ── WICKS: key to professional look ──
+    // Min wick = 0.25 regardless of body; multiplier 1.2–5.0×
+    // Upper wicks longer on bearish bars (rejection), lower wicks longer on bullish bars
+    const upMult  = rng(1.2, 5.0);
+    const dnMult  = rng(1.2, 5.0);
+    const minWick = 0.25;
+    const high = hi + Math.max(minWick, bd * upMult);
+    const low  = lo - Math.max(minWick, bd * dnMult);
+
+    arr.push({ open, high, low, close, vol: Math.round(rng(10e6, 42e6)) });
+    c = close;
+  }
+  return arr;
+}
+function calcEMA(c,p){const k=2/(p+1),o=[c[0]];for(let i=1;i<c.length;i++)o.push(c[i]*k+o[i-1]*(1-k));return o;}
+function calcRSI(c,p=14){
+  const o=new Array(p).fill(50);
+  let ag=0,al=0;
+  for(let i=1;i<=p;i++){const d=c[i]-c[i-1];d>0?ag+=d:al-=d;}
+  ag/=p;al/=p;
+  o.push(al===0?100:100-100/(1+ag/al));
+  for(let i=p+1;i<c.length;i++){
+    const d=c[i]-c[i-1];
+    ag=(ag*(p-1)+(d>0?d:0))/p;al=(al*(p-1)+(d<0?-d:0))/p;
+    o.push(al===0?100:100-100/(1+ag/al));
+  }
+  return o;
+}
+function calcBB(c,p=20,m=2){
+  return c.map((_,i)=>{
+    if(i<p-1)return{u:null,l:null};
+    const s=c.slice(i-p+1,i+1),mn=s.reduce((a,b)=>a+b,0)/p;
+    const sd=Math.sqrt(s.reduce((a,b)=>a+(b-mn)**2,0)/p);
+    return{u:mn+m*sd,l:mn-m*sd};
+  });
+}
+
+const ohlc   = genOHLC(rawLabels.length);
+
+// ── Force RSI extremes — consistent direction, professional wicks ──
+for(let i=39;i<=44;i++){
+  const prev = ohlc[i-1] ? ohlc[i-1].close : 183;
+  const o=prev+0.06, cl=prev+1.1;
+  const bd=cl-o;
+  ohlc[i].open=o; ohlc[i].close=cl;
+  ohlc[i].high = cl + Math.max(0.28, bd*1.8);   // long upper wick (buyers tried higher)
+  ohlc[i].low  = o  - Math.max(0.28, bd*1.1);   // medium lower wick
+}
+for(let i=58;i<=63;i++){
+  const prev = ohlc[i-1] ? ohlc[i-1].close : 180;
+  const o=prev-0.06, cl=prev-1.2;
+  const bd=o-cl;
+  ohlc[i].open=o; ohlc[i].close=cl;
+  ohlc[i].high = o  + Math.max(0.28, bd*1.1);   // medium upper wick
+  ohlc[i].low  = cl - Math.max(0.28, bd*1.8);   // long lower wick (sellers pushed hard)
+}
+
+const closes = ohlc.map(o=>o.close);
+const ema20v = calcEMA(closes,20);
+const ema50v = calcEMA(closes,50);
+const rsiV   = calcRSI(closes);
+const bbV    = calcBB(closes);
+const times  = rawLabels.map(toTimeVal);
+
+const mk=(arr)=>arr.map((v,i)=>({time:times[i],value:v})).filter(p=>p.time!=null&&p.value!=null);
+const candleData=ohlc.map((o,i)=>({time:times[i],...o})).filter(c=>c.time!=null);
+const rsiData   =mk(rsiV);
+const volData   =ohlc.map((o,i)=>({time:times[i],value:o.vol,color:o.close>=o.open?'rgba(0,210,130,.6)':'rgba(255,60,74,.55)'})).filter(v=>v.time!=null);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SIGNALS DEFINITION — all types with full data
+// ══════════════════════════════════════════════════════════════════════════════
+// Each signal: { ti (bar index), type, ...data }
+const SIGNALS = [
+  {
+    ti:14, type:'BULL_DIV',
+    label:'RSI Bull Divergence', color:'#00d282', pos:'belowBar', shape:'circle',
+    data:{
+      priceAction:'Lower Low',  pricePts:`${ohlc[10].low.toFixed(2)} → ${ohlc[14].low.toFixed(2)}`,
+      rsiAction:'Higher Low',   rsiPts:`${rsiV[10].toFixed(1)} → ${rsiV[14].toFixed(1)}`,
+      strength:'Strong', signal:'Bullish Reversal', rsi:rsiV[14].toFixed(1),
+    }
+  },
+  {
+    ti:24, type:'BUY',
+    label:'Long Entry', color:'#4da8ff', pos:'belowBar', shape:'arrowUp',
+    data:{
+      entry:ohlc[24].close.toFixed(2), stop:(ohlc[24].close-2.8).toFixed(2),
+      tp1:(ohlc[24].close+4.6).toFixed(2), tp2:(ohlc[24].close+8.2).toFixed(2),
+      rr:'1 : 2.4', risk:'1.55%', rsi:rsiV[24].toFixed(1),
+      trigger:'RSI Bull Div + EMA Cross', conf:'High',
+    }
+  },
+  {
+    ti:32, type:'EMA_CROSS_UP',
+    label:'EMA Golden Cross', color:'#00d282', pos:'belowBar', shape:'circle',
+    data:{
+      ema20:ema20v[32].toFixed(2), ema50:ema50v[32].toFixed(2),
+      spread:(ema20v[32]-ema50v[32]).toFixed(2), trend:'↑ Bullish',
+      rsi:rsiV[32].toFixed(1), signal:'EMA 20 crossed above EMA 50',
+    }
+  },
+  {
+    ti:44, type:'RSI_OB',
+    label:'RSI Overbought', color:'#ffaa00', pos:'aboveBar', shape:'circle',
+    data:{
+      rsi:rsiV[44].toFixed(1), level:'70',
+      excess: Math.max(0, rsiV[44]-70).toFixed(1)+'pts',
+      price:ohlc[44].close.toFixed(2), signal:'Watch for bearish reversal',
+      bb_pos:'Near Upper Band',
+    }
+  },
+  {
+    ti:48, type:'BEAR_DIV',
+    label:'RSI Bear Divergence', color:'#ff3c4a', pos:'aboveBar', shape:'circle',
+    data:{
+      priceAction:'Higher High',  pricePts:`${ohlc[44].high.toFixed(2)} → ${ohlc[48].high.toFixed(2)}`,
+      rsiAction:'Lower High',     rsiPts:`${rsiV[44].toFixed(1)} → ${rsiV[48].toFixed(1)}`,
+      strength:'Moderate', signal:'Bearish Reversal',  rsi:rsiV[48].toFixed(1),
+    }
+  },
+  {
+    ti:52, type:'SELL',
+    label:'Short Entry', color:'#ff3c4a', pos:'aboveBar', shape:'arrowDown',
+    data:{
+      entry:ohlc[52].close.toFixed(2), stop:(ohlc[52].close+2.4).toFixed(2),
+      tp1:(ohlc[52].close-4.0).toFixed(2), tp2:(ohlc[52].close-7.5).toFixed(2),
+      rr:'1 : 2.2', risk:'1.32%', rsi:rsiV[52].toFixed(1),
+      trigger:'Bear Div + RSI OB + BB Upper', conf:'Moderate',
+    }
+  },
+  {
+    ti:56, type:'TP1',
+    label:'Take Profit 1 Hit', color:'#ffd700', pos:'belowBar', shape:'circle',
+    data:{
+      entry:ohlc[52].close.toFixed(2), tp1:ohlc[56].close.toFixed(2),
+      pnl:'+'+Math.abs(ohlc[56].close-ohlc[52].close).toFixed(2),
+      pct:'+'+Math.abs((ohlc[56].close/ohlc[52].close-1)*100).toFixed(2)+'%',
+      rsi:rsiV[56].toFixed(1), status:'TP1 hit — trail stop to entry',
+    }
+  },
+  {
+    ti:63, type:'RSI_OS',
+    label:'RSI Oversold', color:'#00c9c9', pos:'belowBar', shape:'circle',
+    data:{
+      rsi:rsiV[63].toFixed(1), level:'30',
+      deficit: Math.max(0, 30-rsiV[63]).toFixed(1)+'pts',
+      price:ohlc[63].close.toFixed(2), signal:'Watch for bullish reversal',
+      bb_pos:'Near Lower Band',
+    }
+  },
+  {
+    ti:66, type:'BULL_DIV',
+    label:'RSI Bull Divergence', color:'#00d282', pos:'belowBar', shape:'circle',
+    data:{
+      priceAction:'Lower Low',  pricePts:`${ohlc[60].low.toFixed(2)} → ${ohlc[66].low.toFixed(2)}`,
+      rsiAction:'Higher Low',   rsiPts:`${rsiV[60].toFixed(1)} → ${rsiV[66].toFixed(1)}`,
+      strength:'Strong', signal:'Bullish Reversal', rsi:rsiV[66].toFixed(1),
+    }
+  },
+  {
+    ti:70, type:'BUY',
+    label:'Long Entry', color:'#4da8ff', pos:'belowBar', shape:'arrowUp',
+    data:{
+      entry:ohlc[70].close.toFixed(2), stop:(ohlc[70].close-2.6).toFixed(2),
+      tp1:(ohlc[70].close+4.8).toFixed(2), tp2:(ohlc[70].close+9.0).toFixed(2),
+      rr:'1 : 2.6', risk:'1.43%', rsi:rsiV[70].toFixed(1),
+      trigger:'RSI Bull Div + RSI OS + EMA support', conf:'High',
+    }
+  },
+  {
+    ti:73, type:'TP2',
+    label:'Take Profit 2 Hit', color:'#ffd700', pos:'aboveBar', shape:'circle',
+    data:{
+      entry:ohlc[70].close.toFixed(2), tp2:ohlc[73].close.toFixed(2),
+      pnl:'+'+Math.abs(ohlc[73].close-ohlc[70].close).toFixed(2),
+      pct:'+'+Math.abs((ohlc[73].close/ohlc[70].close-1)*100).toFixed(2)+'%',
+      rsi:rsiV[73].toFixed(1), status:'Full TP hit — signal closed',
+    }
+  },
+];
+
+// Make sure indices are valid
+const validSignals = SIGNALS.filter(s => s.ti < candleData.length);
+
+// Divergence pairs for overlay lines
+const divPairs = [
+  {type:'bull',p1:{ti:10,price:ohlc[10].low-.4,rsi:rsiV[10]-2},p2:{ti:14,price:ohlc[14].low-.7,rsi:rsiV[14]+4}},
+  {type:'bear',p1:{ti:44,price:ohlc[44].high+.5,rsi:rsiV[44]+1},p2:{ti:48,price:ohlc[48].high+.8,rsi:rsiV[48]-4}},
+  {type:'bull',p1:{ti:60,price:ohlc[60].low-.3,rsi:rsiV[60]-2},p2:{ti:66,price:ohlc[66].low-.6,rsi:rsiV[66]+4}},
+];
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CHART INIT
+// ══════════════════════════════════════════════════════════════════════════════
+const COMMON = {
+  layout:{background:{color:'transparent'},textColor:'#7a7fa8',fontSize:10,fontFamily:"'JetBrains Mono',monospace"},
+  grid:{vertLines:{color:'rgba(255,255,255,0.03)'},horzLines:{color:'rgba(255,255,255,0.03)'}},
+  crosshair:{mode:LightweightCharts.CrosshairMode.Normal,vertLine:{labelBackgroundColor:'#1c1c2e'},horzLine:{labelBackgroundColor:'#1c1c2e'}},
+  timeScale:{timeVisible:true,secondsVisible:false,borderColor:'rgba(255,255,255,0.05)'},
+  handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true},
+  handleScale:{axisPressedMouseMove:true,mouseWheel:true,pinch:true},
+  rightPriceScale:{borderColor:'rgba(255,255,255,0.05)'},
+};
+
+function mkChart(id){
+  const el=document.getElementById(id);
+  const c=LightweightCharts.createChart(el,{...COMMON,width:el.clientWidth,height:el.clientHeight});
+  new ResizeObserver(()=>c.resize(el.clientWidth,el.clientHeight)).observe(el);
+  return c;
+}
+
+const lwcPrice=mkChart('priceChart');
+const lwcRsi  =mkChart('rsiChart');
+const lwcVol  =mkChart('volChart');
+
+// Candlestick
+const candleSeries=lwcPrice.addCandlestickSeries({
+  upColor:'#00d282',downColor:'#ff3c4a',borderUpColor:'#00d282',borderDownColor:'#ff3c4a',wickUpColor:'#00d282',wickDownColor:'#ff3c4a',
+});
+candleSeries.setData(candleData);
+lwcPrice.priceScale('right').applyOptions({scaleMargins:{top:0.12,bottom:0.12},autoScale:true});
+
+// BB on hidden scale (won't compress candles)
+const bbUpS=lwcPrice.addLineSeries({color:'rgba(255,170,0,.4)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,priceScaleId:'bb'});
+const bbLoS=lwcPrice.addLineSeries({color:'rgba(255,170,0,.4)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,priceScaleId:'bb'});
+bbUpS.setData(mk(bbV.map(b=>b.u))); bbLoS.setData(mk(bbV.map(b=>b.l)));
+lwcPrice.priceScale('bb').applyOptions({visible:false});
+
+// EMAs
+const e20S=lwcPrice.addLineSeries({color:'#4da8ff',lineWidth:1.5,priceLineVisible:false,lastValueVisible:false});
+e20S.setData(mk(ema20v));
+const e50S=lwcPrice.addLineSeries({color:'#b47cff',lineWidth:1.5,lineStyle:1,priceLineVisible:false,lastValueVisible:false});
+e50S.setData(mk(ema50v));
+
+// Markers
+candleSeries.setMarkers(
+  validSignals.map(s=>({
+    time:candleData[s.ti].time,
+    position:s.pos,
+    color:s.color,
+    shape:s.shape,
+    text: ['BUY','SELL'].includes(s.type) ? s.type+' $'+s.data.entry :
+          s.type==='TP1'  ? 'TP1 HIT' :
+          s.type==='TP2'  ? 'TP2 HIT' :
+          s.type==='RSI_OB' ? 'OB '+s.data.rsi :
+          s.type==='RSI_OS' ? 'OS '+s.data.rsi :
+          s.type==='BULL_DIV' ? '▲ DIV' :
+          s.type==='BEAR_DIV' ? '▼ DIV' :
+          s.type==='EMA_CROSS_UP' ? '✕ EMA' : s.label,
+  }))
+);
+
+// RSI
+const rsiSeries=lwcRsi.addLineSeries({color:'#c084fc',lineWidth:2,priceLineVisible:false,lastValueVisible:true});
+rsiSeries.setData(rsiData);
+lwcRsi.priceScale('right').applyOptions({scaleMargins:{top:0.1,bottom:0.1}});
+[[70,'rgba(255,60,74,.4)',2],[50,'rgba(255,255,255,.07)',3],[30,'rgba(0,210,130,.4)',2]].forEach(([v,c,ls])=>{
+  const s=lwcRsi.addLineSeries({color:c,lineWidth:1,lineStyle:ls,priceLineVisible:false,lastValueVisible:false});
+  s.setData(rsiData.map(p=>({time:p.time,value:v})));
+});
+
+// RSI signal dots
+const rsiMarkers=validSignals.filter(s=>['RSI_OB','RSI_OS','BULL_DIV','BEAR_DIV'].includes(s.type)).map(s=>({
+  time:candleData[s.ti].time,
+  position:s.type==='RSI_OB'||s.type==='BEAR_DIV'?'aboveBar':'belowBar',
+  color:s.color, shape:'circle', text:'',
+}));
+rsiSeries.setMarkers(rsiMarkers);
+
+// Volume
+const volSeries=lwcVol.addHistogramSeries({priceScaleId:'right',priceLineVisible:false});
+volSeries.setData(volData);
+lwcVol.priceScale('right').applyOptions({scaleMargins:{top:0.1,bottom:0}});
+
+// ── SYNC ──────────────────────────────────────────────────────────────────────
+let _syn=false;
+[[lwcPrice,[lwcRsi,lwcVol]],[lwcRsi,[lwcPrice,lwcVol]],[lwcVol,[lwcPrice,lwcRsi]]].forEach(([src,rest])=>{
+  src.timeScale().subscribeVisibleLogicalRangeChange(r=>{
+    if(_syn||!r)return;_syn=true;rest.forEach(t=>t.timeScale().setVisibleLogicalRange(r));_syn=false;
+    requestAnimationFrame(drawDivs);
+  });
+});
+lwcPrice.subscribeCrosshairMove(p=>{
+  if(!p.time) return;
+  const dp=p.seriesData.get(candleSeries);
+  if(dp){lwcRsi.setCrosshairPosition(50,p.time,rsiSeries);lwcVol.setCrosshairPosition(0,p.time,volSeries);}
+});
+
+// ── DIVERGENCE OVERLAYS ───────────────────────────────────────────────────────
+const priceOv=document.getElementById('priceOv'), rsiOv=document.getElementById('rsiOv');
+function syncOv(){
+  const pp=document.getElementById('pricePane'),rp=document.getElementById('rsiPane');
+  priceOv.width=pp.clientWidth;priceOv.height=pp.clientHeight;
+  rsiOv.width=rp.clientWidth;rsiOv.height=rp.clientHeight;
+}
+function drawLine(ctx,x1,y1,x2,y2,col,al){
+  if([x1,y1,x2,y2].some(v=>v==null))return;
+  ctx.save();ctx.globalAlpha=al;ctx.strokeStyle=col;ctx.lineWidth=2;
+  ctx.setLineDash([5,4]);ctx.shadowColor=col;ctx.shadowBlur=10;
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  ctx.setLineDash([]);ctx.fillStyle=col;
+  [[x1,y1],[x2,y2]].forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();});
+  ctx.restore();
+}
+function drawDivs(){
+  syncOv();
+  const pCtx=priceOv.getContext('2d'),rCtx=rsiOv.getContext('2d');
+  pCtx.clearRect(0,0,priceOv.width,priceOv.height);rCtx.clearRect(0,0,rsiOv.width,rsiOv.height);
+  divPairs.forEach(div=>{
+    const col=div.type==='bull'?'#00d282':'#ff3c4a', al=0.6;
+    const t1=times[div.p1.ti],t2=times[div.p2.ti];
+    const px1=lwcPrice.timeScale().timeToCoordinate(t1),py1=candleSeries.priceToCoordinate(div.p1.price);
+    const px2=lwcPrice.timeScale().timeToCoordinate(t2),py2=candleSeries.priceToCoordinate(div.p2.price);
+    drawLine(pCtx,px1,py1,px2,py2,col,al);
+    if(px1!=null&&py1!=null&&px2!=null&&py2!=null){
+      pCtx.save();pCtx.globalAlpha=.75;pCtx.fillStyle=col;pCtx.font='bold 8px JetBrains Mono,monospace';
+      pCtx.fillText(div.type==='bull'?'▲ BULL DIV':'▼ BEAR DIV',(px1+px2)/2-22,div.type==='bull'?Math.max(py1,py2)+14:Math.min(py1,py2)-5);
+      pCtx.restore();
+    }
+    const rx1=lwcRsi.timeScale().timeToCoordinate(t1),ry1=rsiSeries.priceToCoordinate(div.p1.rsi);
+    const rx2=lwcRsi.timeScale().timeToCoordinate(t2),ry2=rsiSeries.priceToCoordinate(div.p2.rsi);
+    drawLine(rCtx,rx1,ry1,rx2,ry2,col,al);
+  });
+}
+lwcPrice.timeScale().subscribeVisibleTimeRangeChange(()=>requestAnimationFrame(drawDivs));
+setTimeout(drawDivs,200);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TOOLTIP — shows on crosshair hover near a signal bar
+// ══════════════════════════════════════════════════════════════════════════════
+const tooltip=document.getElementById('sig-tooltip');
+const sigByTime={};
+validSignals.forEach(s=>{ sigByTime[candleData[s.ti].time]=s; });
+
+function tooltipRows(sig){
+  const d=sig.data, col=sig.color;
+  if(sig.type==='BUY'||sig.type==='SELL'){
+    const isBuy=sig.type==='BUY';
+    const rrNum=parseFloat(d.rr.split(':')[1]);
+    const pct=Math.min(100,Math.round(rrNum/(rrNum+1)*100));
+    return `
+      <div class="tt-row"><span class="tt-lbl">Entry</span><span class="tt-val blue">$${d.entry}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Stop Loss</span><span class="tt-val red">$${d.stop}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Target 1</span><span class="tt-val green">$${d.tp1}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Target 2</span><span class="tt-val green">$${d.tp2}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Risk/Reward</span><span class="tt-val orange">${d.rr}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Risk %</span><span class="tt-val red">${d.risk}</span></div>
+      <div class="tt-row"><span class="tt-lbl">RSI</span><span class="tt-val purple">${d.rsi}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Trigger</span><span class="tt-val" style="color:#aaa;font-size:8px;">${d.trigger}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Confidence</span><span class="tt-val ${d.conf==='High'?'green':'orange'}">${d.conf}</span></div>
+      <div class="rr-bar"><div class="rr-fill" style="width:${pct}%"></div></div>`;
+  }
+  if(sig.type==='TP1'||sig.type==='TP2'){
+    return `
+      <div class="tt-row"><span class="tt-lbl">Entry</span><span class="tt-val blue">$${d.entry}</span></div>
+      <div class="tt-row"><span class="tt-lbl">${sig.type} Level</span><span class="tt-val gold">$${sig.type==='TP1'?d.tp1:d.tp2}</span></div>
+      <div class="tt-row"><span class="tt-lbl">P&amp;L</span><span class="tt-val green">${d.pnl}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Return</span><span class="tt-val green">${d.pct}</span></div>
+      <div class="tt-row"><span class="tt-lbl">RSI at Hit</span><span class="tt-val purple">${d.rsi}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Status</span><span class="tt-val orange" style="font-size:8px;">${d.status}</span></div>`;
+  }
+  if(sig.type==='RSI_OB'||sig.type==='RSI_OS'){
+    const isOB=sig.type==='RSI_OB';
+    return `
+      <div class="tt-row"><span class="tt-lbl">RSI Value</span><span class="tt-val ${isOB?'orange':'teal'}">${d.rsi}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Level</span><span class="tt-val">${d.level}</span></div>
+      <div class="tt-row"><span class="tt-lbl">${isOB?'Excess':'Deficit'}</span><span class="tt-val ${isOB?'red':'green'}">${d.excess||d.deficit}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Price</span><span class="tt-val">$${d.price}</span></div>
+      <div class="tt-row"><span class="tt-lbl">BB Position</span><span class="tt-val" style="font-size:8px;">${d.bb_pos}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Signal</span><span class="tt-val ${isOB?'red':'green'}" style="font-size:8px;">${d.signal}</span></div>`;
+  }
+  if(sig.type==='BULL_DIV'||sig.type==='BEAR_DIV'){
+    const isBull=sig.type==='BULL_DIV';
+    return `
+      <div class="tt-row"><span class="tt-lbl">Price Pattern</span><span class="tt-val ${isBull?'red':'green'}">${d.priceAction}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Price Points</span><span class="tt-val">${d.pricePts}</span></div>
+      <div class="tt-row"><span class="tt-lbl">RSI Pattern</span><span class="tt-val ${isBull?'green':'red'}">${d.rsiAction}</span></div>
+      <div class="tt-row"><span class="tt-lbl">RSI Points</span><span class="tt-val purple">${d.rsiPts}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Strength</span><span class="tt-val orange">${d.strength}</span></div>
+      <div class="tt-row"><span class="tt-lbl">RSI Now</span><span class="tt-val purple">${d.rsi}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Signal</span><span class="tt-val ${isBull?'green':'red'}" style="font-size:8px;">${d.signal}</span></div>`;
+  }
+  if(sig.type==='EMA_CROSS_UP'){
+    return `
+      <div class="tt-row"><span class="tt-lbl">EMA 20</span><span class="tt-val blue">$${d.ema20}</span></div>
+      <div class="tt-row"><span class="tt-lbl">EMA 50</span><span class="tt-val purple">$${d.ema50}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Spread</span><span class="tt-val green">+$${d.spread}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Trend</span><span class="tt-val green">${d.trend}</span></div>
+      <div class="tt-row"><span class="tt-lbl">RSI</span><span class="tt-val purple">${d.rsi}</span></div>
+      <div class="tt-row"><span class="tt-lbl">Signal</span><span class="tt-val green" style="font-size:8px;">${d.signal}</span></div>`;
+  }
+  return '';
+}
+
+function showTooltip(sig, x, y){
+  const col=sig.color;
+  const pb = sig.type==='BUY'||sig.type==='EMA_CROSS_UP'||sig.type==='BULL_DIV'||sig.type==='RSI_OS' ? col : sig.type==='TP1'||sig.type==='TP2' ? '#ffd700' : sig.color;
+  tooltip.innerHTML=`
+    <div class="tt-hdr" style="background:${col}18;border-bottom:1px solid ${col}22;">
+      <span class="tt-type" style="color:${col}">${sig.label.toUpperCase()}</span>
+      <span class="tt-time">${fmtTime(candleData[sig.ti].time)}</span>
+    </div>
+    ${tooltipRows(sig)}
+    <div class="tt-pb" style="background:${pb}44;"></div>`;
+  tooltip.style.display='block';
+  const tw=tooltip.offsetWidth, th=tooltip.offsetHeight;
+  let lx=x+14, ly=y-th/2;
+  if(lx+tw>window.innerWidth-10) lx=x-tw-14;
+  if(ly<4) ly=4;
+  if(ly+th>window.innerHeight-4) ly=window.innerHeight-th-4;
+  tooltip.style.left=lx+'px'; tooltip.style.top=ly+'px';
+}
+function hideTooltip(){ tooltip.style.display='none'; }
+
+// Track mouse position for tooltip
+let _mouseX=0, _mouseY=0;
+let _pinnedSig=null; // click to pin tooltip
+document.addEventListener('mousemove',e=>{ _mouseX=e.clientX; _mouseY=e.clientY; });
+
+// ── Wire tooltip to ALL 3 chart panes ──────────────────────────────────────
+// LWC setCrosshairPosition does NOT fire subscribeCrosshairMove on other charts,
+// so we must subscribe to each chart independently.
+function onCrosshairMove(param){
+  if(_pinnedSig) return; // pinned — don't override on hover
+  if(!param.time){hideTooltip();return;}
+  const sig=sigByTime[param.time];
+  if(sig) showTooltip(sig,_mouseX,_mouseY);
+  else hideTooltip();
+}
+lwcPrice.subscribeCrosshairMove(onCrosshairMove);
+lwcRsi.subscribeCrosshairMove(onCrosshairMove);
+lwcVol.subscribeCrosshairMove(onCrosshairMove);
+
+// Click anywhere on chart to pin/unpin tooltip
+[document.getElementById('priceChart'),document.getElementById('rsiChart'),document.getElementById('volChart')].forEach(el=>{
+  el.addEventListener('click',e=>{
+    const t=Object.keys(sigByTime).find(t=>sigByTime[t]);
+    if(_pinnedSig){ _pinnedSig=null; hideTooltip(); }
+    // pin handled in onCrosshairMove — clicking a bar with a signal will pin
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SIGNAL PANEL — Active tab + Log tab + Indicators tab
+// ══════════════════════════════════════════════════════════════════════════════
+const activeSignal=validSignals.find(s=>s.type==='BUY'&&s.ti===70)||validSignals.find(s=>s.type==='BUY');
+
+function typeColor(t){
+  if(t==='BUY'||t==='BULL_DIV'||t==='EMA_CROSS_UP'||t==='RSI_OS') return '#00d282';
+  if(t==='SELL'||t==='BEAR_DIV') return '#ff3c4a';
+  if(t==='TP1'||t==='TP2') return '#ffd700';
+  if(t==='RSI_OB') return '#ffaa00';
+  return '#7a7fa8';
+}
+
+function renderActive(){
+  const s=activeSignal, d=s.data, col=typeColor(s.type);
+  const isBuy=s.type==='BUY', rr=d.rr, rrNum=parseFloat(rr.split(':')[1]);
+  const pct=Math.min(100,Math.round(rrNum/(rrNum+1)*100));
+  return `
+    <div style="padding:6px 8px;font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);">Current Setup</div>
+    <div class="active-card" style="border-color:${col}33;">
+      <div class="ac-hdr" style="background:${col}12;">
+        <span class="ac-type" style="color:${col}">▲ LONG ENTRY — AAPL</span>
+        <span class="ac-date">${fmtTime(candleData[s.ti].time)}</span>
+      </div>
+      <div class="ac-price-row"><span class="ac-price-main" style="color:${col}">$${d.entry}</span><span class="ac-price-lbl">Entry Price</span></div>
+      <div class="ac-rows">
+        <div class="ac-row"><span class="ac-lbl">Stop Loss</span><span class="ac-val red">$${d.stop}</span></div>
+        <div class="ac-row"><span class="ac-lbl">Target 1</span><span class="ac-val green">$${d.tp1}</span></div>
+        <div class="ac-row"><span class="ac-lbl">Target 2</span><span class="ac-val green">$${d.tp2}</span></div>
+        <div class="ac-row"><span class="ac-lbl">Risk/Reward</span><span class="ac-val orange">${d.rr}</span></div>
+        <div class="ac-row"><span class="ac-lbl">Risk %</span><span class="ac-val red">${d.risk}</span></div>
+        <div class="ac-row"><span class="ac-lbl">RSI</span><span class="ac-val purple">${d.rsi}</span></div>
+        <div class="ac-row"><span class="ac-lbl">Confidence</span><span class="ac-val ${d.conf==='High'?'green':'orange'}">${d.conf}</span></div>
+        <div class="ac-row"><span class="ac-lbl">Trigger</span><span class="ac-val" style="font-size:8px;color:var(--text2);">${d.trigger}</span></div>
+      </div>
+      <div class="rr-bar"><div class="rr-fill" style="width:${pct}%"></div></div>
+    </div>
+    <div style="padding:4px 8px;font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-top:4px;">All Signals</div>
+    ${validSignals.map((s,idx)=>{
+      const c=typeColor(s.type), d=s.data;
+      const summary = s.type==='BUY'  ? `Entry $${d.entry} · SL $${d.stop} · RR ${d.rr}` :
+                      s.type==='SELL' ? `Entry $${d.entry} · SL $${d.stop} · RR ${d.rr}` :
+                      s.type==='TP1'  ? `Entry $${d.entry} · TP1 $${d.tp1} · ${d.pct}` :
+                      s.type==='TP2'  ? `Entry $${d.entry} · TP2 $${d.tp2} · ${d.pct}` :
+                      s.type==='RSI_OB' ? `RSI ${d.rsi} · ${Math.max(0,rsiV[s.ti]-70).toFixed(1)}pts above 70` :
+                      s.type==='RSI_OS' ? `RSI ${d.rsi} · ${Math.max(0,30-rsiV[s.ti]).toFixed(1)}pts below 30` :
+                      s.type==='BULL_DIV' ? `Price ${d.priceAction} · RSI ${d.rsiAction} · ${d.strength}` :
+                      s.type==='BEAR_DIV' ? `Price ${d.priceAction} · RSI ${d.rsiAction} · ${d.strength}` :
+                      s.type==='EMA_CROSS_UP' ? `EMA20 $${d.ema20} crossed EMA50 $${d.ema50}` : '';
+      const expandRows = tooltipRows(s).replace(/class="tt-row"/g,'class="tt-row" style="font-size:9px;padding:3px 8px;"')
+                                       .replace(/class="tt-lbl"/g,'class="tt-lbl" style="font-size:8px;"')
+                                       .replace(/class="tt-val/g,'class="tt-val');
+      return `<div class="sig-log-item" id="sli${idx}" onclick="toggleSli(${idx})" style="cursor:pointer;">
+        <div class="sli-bar" style="background:${c};"></div>
+        <div class="sli-body">
+          <div class="sli-top">
+            <span class="sli-type" style="color:${c}">${s.label}</span>
+            <span style="display:flex;align-items:center;gap:4px;">
+              <span class="sli-time">${fmtTime(candleData[s.ti].time)}</span>
+              <span id="sli${idx}arr" style="font-size:9px;color:var(--text3);transition:transform .2s;">▼</span>
+            </span>
+          </div>
+          <div class="sli-details" style="font-size:8px;">${summary}</div>
+          <div id="sli${idx}exp" style="display:none;margin-top:6px;border-top:1px solid rgba(255,255,255,.06);padding-top:6px;">
+            ${expandRows}
+          </div>
+        </div>
+      </div>`;
+    }).join('')}`;
+}
+
+function renderIndicators(){
+  const last=candleData.length-1;
+  return `
+    <div class="active-card" style="margin:8px;">
+      <div class="ac-rows">
+        <div class="ac-row"><span class="ac-lbl">RSI (14)</span><span class="ac-val orange">${rsiV[last].toFixed(1)}</span></div>
+        <div class="ac-row"><span class="ac-lbl">EMA 20</span><span class="ac-val blue">$${ema20v[last].toFixed(2)}</span></div>
+        <div class="ac-row"><span class="ac-lbl">EMA 50</span><span class="ac-val purple">$${ema50v[last].toFixed(2)}</span></div>
+        <div class="ac-row"><span class="ac-lbl">EMA Spread</span><span class="ac-val green">+$${(ema20v[last]-ema50v[last]).toFixed(2)}</span></div>
+        <div class="ac-row"><span class="ac-lbl">BB Upper</span><span class="ac-val">$${(bbV[last].u||0).toFixed(2)}</span></div>
+        <div class="ac-row"><span class="ac-lbl">BB Lower</span><span class="ac-val">$${(bbV[last].l||0).toFixed(2)}</span></div>
+        <div class="ac-row"><span class="ac-lbl">BB Width</span><span class="ac-val orange">${((bbV[last].u||0)-(bbV[last].l||0)).toFixed(2)}</span></div>
+        <div class="ac-row"><span class="ac-lbl">Vol (last)</span><span class="ac-val blue">${(ohlc[last].vol/1e6).toFixed(1)}M</span></div>
+        <div class="ac-row"><span class="ac-lbl">Close</span><span class="ac-val">$${closes[last].toFixed(2)}</span></div>
+        <div class="ac-row"><span class="ac-lbl">EMA Trend</span><span class="ac-val green">↑ Bullish</span></div>
+        <div class="ac-row"><span class="ac-lbl">RSI Zone</span><span class="ac-val orange">${rsiV[last]>70?'Overbought':rsiV[last]<30?'Oversold':rsiV[last]>50?'Neutral+':'Neutral-'}</span></div>
+        <div class="ac-row"><span class="ac-lbl">Rec.</span><span class="ac-val green">BUY / LONG</span></div>
+      </div>
+    </div>`;
+}
+
+// Expand/collapse signal log items
+function toggleSli(idx){
+  const exp=document.getElementById('sli'+idx+'exp');
+  const arr=document.getElementById('sli'+idx+'arr');
+  if(!exp) return;
+  const open=exp.style.display==='none';
+  exp.style.display=open?'block':'none';
+  if(arr) arr.style.transform=open?'rotate(180deg)':'';
+  // show tooltip for this signal too
+  if(open && validSignals[idx]) showTooltip(validSignals[idx], window.innerWidth-300, 200);
+  else if(!open) hideTooltip();
+}
+
+const spBody=document.getElementById('spBody');
+const tabs=document.querySelectorAll('.sp-tab');
+let activeTab=0;
+function renderTab(){
+  if(activeTab===0){ spBody.innerHTML=renderActive(); return; }
+  if(activeTab===2){ spBody.innerHTML=renderIndicators(); return; }
+  // Tab 1 — Signal Log with expand/collapse
+  spBody.innerHTML=`<div style="padding:6px;">${validSignals.map((s,idx)=>{
+    const c=typeColor(s.type),d=s.data;
+    const summary=s.type==='BUY'||s.type==='SELL'?`$${d.entry} → TP1 $${d.tp1} · RR ${d.rr} · RSI ${d.rsi}`:
+      s.type==='TP1'?`Hit $${d.tp1} · P&L ${d.pnl} (${d.pct}) · RSI ${d.rsi}`:
+      s.type==='TP2'?`Hit $${d.tp2} · P&L ${d.pnl} (${d.pct}) · RSI ${d.rsi}`:
+      s.type==='RSI_OB'?`RSI ${d.rsi} (+${Math.max(0,rsiV[s.ti]-70).toFixed(1)}pts above 70) · ${d.bb_pos}`:
+      s.type==='RSI_OS'?`RSI ${d.rsi} (-${Math.max(0,30-rsiV[s.ti]).toFixed(1)}pts below 30) · ${d.bb_pos}`:
+      s.type.includes('DIV')?`Price: ${d.pricePts} · RSI: ${d.rsiPts} · ${d.strength}`:
+      s.type==='EMA_CROSS_UP'?`EMA20 $${d.ema20} × EMA50 $${d.ema50} · Spread +$${d.spread}`:'';
+    const logId='log'+idx;
+    return`<div class="sig-log-item" id="${logId}" onclick="toggleLog('${logId}')" style="cursor:pointer;border-radius:4px;margin-bottom:2px;background:var(--bg3);">
+      <div class="sli-bar" style="background:${c};border-radius:2px;"></div>
+      <div class="sli-body">
+        <div class="sli-top">
+          <span class="sli-type" style="color:${c}">${s.label}</span>
+          <span style="display:flex;align-items:center;gap:4px;">
+            <span class="sli-time">${fmtTime(candleData[s.ti].time)}</span>
+            <span id="${logId}arr" style="font-size:9px;color:var(--text3);">▼</span>
+          </span>
+        </div>
+        <div class="sli-details" style="font-size:8px;">${summary}</div>
+        <div id="${logId}exp" style="display:none;margin-top:6px;border-top:1px solid rgba(255,255,255,.06);padding-top:6px;">
+          ${tooltipRows(s).replace(/class="tt-row"/g,'class="tt-row" style="padding:2px 0;"').replace(/class="tt-lbl"/g,'class="tt-lbl" style="font-size:8px;"')}
+        </div>
+      </div></div>`;
+  }).join('')}</div>`;
+}
+function toggleLog(id){
+  const exp=document.getElementById(id+'exp'), arr=document.getElementById(id+'arr');
+  if(!exp) return;
+  const open=exp.style.display==='none';
+  exp.style.display=open?'block':'none';
+  if(arr) arr.style.transform=open?'rotate(180deg)':'';
+}
+renderTab();
+tabs.forEach((t,i)=>t.addEventListener('click',()=>{tabs.forEach(x=>x.classList.remove('active'));t.classList.add('active');activeTab=i;renderTab();}));
+
+// Fit and scroll to recent bars
+lwcPrice.timeScale().fitContent();
+setTimeout(()=>{
+  const n=candleData.length;
+  // barSpacing=9: narrow bars give the thin TradingView professional look
+  lwcPrice.timeScale().applyOptions({ barSpacing: 9 });
+  lwcRsi  .timeScale().applyOptions({ barSpacing: 9 });
+  lwcVol  .timeScale().applyOptions({ barSpacing: 9 });
+  lwcPrice.timeScale().setVisibleLogicalRange({from:n-50,to:n+1});
+  drawDivs();
+},300);
+
+console.log('✅ DotVerse Terminal — signals:',validSignals.length,'year:',new Date(times[60]*1000).getFullYear());
+</script>
+</body>
+</html>

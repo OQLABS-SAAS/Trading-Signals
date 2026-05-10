@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DotVerse — SPECTRE Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Fira+Code:wght@300;400;500&family=Noto+Sans+JP:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+
+:root {
+  --bg:      #06010F;
+  --void:    #0A0118;
+  --card:    #0E0220;
+  --layer:   #130328;
+  --cyan:    #00D4FF;
+  --cyan2:   #00A8CC;
+  --cyan-dim: rgba(0,212,255,0.08);
+  --cyan-glow: rgba(0,212,255,0.25);
+  --mag:     #FF0090;
+  --mag2:    #CC0073;
+  --mag-dim: rgba(255,0,144,0.08);
+  --mag-glow: rgba(255,0,144,0.25);
+  --purple:  #7B2FBE;
+  --pur-dim: rgba(123,47,190,0.15);
+  --text:    #D0EEFF;
+  --text2:   #7AB8D4;
+  --text3:   #3A5A70;
+  --green:   #00FF9D;
+  --red:     #FF3366;
+  --amber:   #FFB800;
+  --disp:    'Rajdhani', sans-serif;
+  --mono:    'Fira Code', monospace;
+  --jp:      'Noto Sans JP', sans-serif;
+  --holo:    linear-gradient(135deg, var(--cyan), var(--purple), var(--mag));
+  --holo2:   linear-gradient(90deg, var(--cyan), var(--mag));
+}
+
+html { font-size: 14px; background: var(--bg); color: var(--text); font-family: var(--mono); }
+body { min-height: 100vh; position: relative; overflow-x: hidden; }
+
+/* Scanline overlay */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 9999;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px, transparent 2px,
+    rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px
+  );
+}
+
+/* Noise texture */
+body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 9998;
+  pointer-events: none; opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+
+/* ── KEYFRAMES ─────────────────────────────────────────── */
+@keyframes glitch {
+  0%,95%,100%{ clip-path: none; transform: none; }
+  96%{ clip-path: inset(20% 0 60% 0); transform: translateX(-4px); }
+  97%{ clip-path: inset(60% 0 10% 0); transform: translateX(4px); }
+  98%{ clip-path: inset(40% 0 40% 0); transform: translateX(-2px); }
+  99%{ clip-path: none; transform: translateX(2px); }
+}
+@keyframes holoPulse {
+  0%,100%{ opacity:0.7; } 50%{ opacity:1; }
+}
+@keyframes scanSweep {
+  from{ transform: translateY(-100%); }
+  to{   transform: translateY(100vh); }
+}
+@keyframes fadeUp {
+  from{ opacity:0; transform: translateY(16px); }
+  to{   opacity:1; transform: none; }
+}
+@keyframes dataFlicker {
+  0%,100%{ opacity:1; } 92%{ opacity:1; } 93%{ opacity:0.4; } 94%{ opacity:1; }
+}
+@keyframes borderRun {
+  0%{ background-position: 0% 50%; }
+  100%{ background-position: 200% 50%; }
+}
+@keyframes cyanPulse {
+  0%,100%{ box-shadow: 0 0 6px var(--cyan-glow), 0 0 14px rgba(0,212,255,0.1); }
+  50%{ box-shadow: 0 0 12px var(--cyan-glow), 0 0 28px rgba(0,212,255,0.2), 0 0 48px rgba(0,212,255,0.05); }
+}
+
+/* Scan beam */
+.scan-beam {
+  position: fixed; top:0; left:0; right:0; height: 2px; z-index: 9990; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.4;
+  animation: scanSweep 8s linear infinite;
+}
+
+/* ── LAYOUT ────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-rows: 52px 1fr;
+  min-height: 100vh;
+}
+
+/* ── NAV ───────────────────────────────────────────────── */
+nav {
+  display: flex; align-items: center;
+  padding: 0 20px;
+  background: var(--void);
+  border-bottom: 1px solid rgba(0,212,255,0.15);
+  position: sticky; top:0; z-index: 100;
+}
+
+.nav-brand {
+  font-family: var(--disp); font-weight: 700; font-size: 20px;
+  letter-spacing: 6px; text-transform: uppercase;
+  background: var(--holo); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  margin-right: 32px;
+  animation: holoPulse 4s ease-in-out infinite;
+}
+
+.nav-jp { font-family: var(--jp); font-size: 9px; color: var(--text3); letter-spacing: 2px; }
+
+.nav-tabs { display: flex; gap: 2px; flex: 1; }
+.nav-tab {
+  padding: 0 16px; height: 52px; display: flex; align-items: center;
+  font-family: var(--disp); font-size: 13px; font-weight: 600; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--text3); cursor: pointer;
+  border-bottom: 2px solid transparent; transition: all 0.2s;
+  position: relative;
+}
+.nav-tab:hover { color: var(--cyan); }
+.nav-tab.active {
+  color: var(--cyan);
+  border-bottom-color: var(--cyan);
+  background: linear-gradient(180deg, transparent, rgba(0,212,255,0.05));
+}
+
+.nav-status {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--mono); font-size: 11px; color: var(--text3);
+}
+.status-dot { width:6px; height:6px; border-radius:50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: dataFlicker 4s infinite; }
+
+/* ── MAIN ──────────────────────────────────────────────── */
+.main { display: grid; grid-template-columns: 220px 1fr 280px; height: calc(100vh - 52px); overflow: hidden; }
+
+/* ── SIDEBAR LEFT ──────────────────────────────────────── */
+.sidebar-l {
+  background: var(--void);
+  border-right: 1px solid rgba(0,212,255,0.08);
+  overflow-y: auto; padding: 16px 0;
+}
+.sidebar-section-label {
+  font-family: var(--mono); font-size: 9px; color: var(--text3);
+  letter-spacing: 3px; text-transform: uppercase;
+  padding: 0 16px 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.sidebar-section-label::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, rgba(0,212,255,0.2), transparent);
+}
+
+.inst-group { padding: 0 8px 16px; display: flex; flex-direction: column; gap: 2px; }
+.inst-btn {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px; border-radius: 2px; cursor: pointer;
+  font-family: var(--disp); font-size: 13px; font-weight: 600; letter-spacing: 1px;
+  color: var(--text2); transition: all 0.15s;
+  border: 1px solid transparent;
+}
+.inst-btn:hover { background: var(--cyan-dim); color: var(--cyan); border-color: rgba(0,212,255,0.2); }
+.inst-btn.active {
+  background: var(--cyan-dim); color: var(--cyan);
+  border-color: rgba(0,212,255,0.35);
+  box-shadow: inset 0 0 12px rgba(0,212,255,0.06), 0 0 8px var(--cyan-glow);
+}
+.inst-sig { font-family: var(--mono); font-size: 10px; }
+.buy-s { color: var(--green); } .sell-s { color: var(--red); } .hold-s { color: var(--text3); }
+
+/* ── CENTER ────────────────────────────────────────────── */
+.center { overflow-y: auto; background: var(--bg); }
+
+/* Controls bar */
+.ctrl-bar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  background: var(--void); border-bottom: 1px solid rgba(0,212,255,0.08);
+  position: sticky; top: 0; z-index: 10;
+}
+.tf-pill {
+  font-family: var(--disp); font-size: 12px; font-weight: 700; letter-spacing: 2px;
+  padding: 5px 12px; cursor: pointer; text-transform: uppercase;
+  color: var(--text3); border: 1px solid rgba(0,212,255,0.1);
+  background: transparent; border-radius: 2px; transition: all 0.15s;
+}
+.tf-pill:hover { color: var(--cyan); border-color: rgba(0,212,255,0.3); }
+.tf-pill.active {
+  color: var(--cyan); border-color: var(--cyan);
+  background: var(--cyan-dim);
+  box-shadow: 0 0 10px var(--cyan-glow);
+}
+
+.ticker-input {
+  flex: 1; background: var(--card); border: 1px solid rgba(0,212,255,0.15);
+  color: var(--cyan); font-family: var(--mono); font-size: 14px; font-weight: 500;
+  padding: 6px 12px; outline: none; border-radius: 2px; letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.ticker-input:focus { border-color: var(--cyan); box-shadow: 0 0 12px var(--cyan-glow); }
+
+.analyze-btn {
+  padding: 7px 20px; font-family: var(--disp); font-size: 13px; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase; cursor: pointer; border-radius: 2px;
+  background: transparent; color: var(--cyan); border: 1px solid var(--cyan);
+  transition: all 0.2s; position: relative; overflow: hidden;
+}
+.analyze-btn:hover {
+  background: var(--cyan); color: var(--void);
+  box-shadow: 0 0 20px var(--cyan-glow), 0 0 40px rgba(0,212,255,0.15);
+}
+
+/* ── SIGNAL HERO ───────────────────────────────────────── */
+.signal-hero {
+  margin: 16px; border-radius: 2px; overflow: hidden;
+  animation: fadeUp 0.4s ease-out both;
+  position: relative;
+}
+/* Holo border via gradient outline trick */
+.signal-hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  padding: 1px; border-radius: 2px;
+  background: var(--holo);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: holoPulse 3s ease-in-out infinite;
+}
+
+.sh-inner { background: var(--card); padding: 0; display: grid; grid-template-columns: 180px 1fr; }
+
+.sh-left {
+  background: var(--void); padding: 20px;
+  display: flex; flex-direction: column; gap: 6px;
+  border-right: 1px solid rgba(0,212,255,0.1);
+}
+.sh-ticker { font-family: var(--mono); font-size: 11px; color: var(--text3); letter-spacing: 3px; }
+.sh-direction {
+  font-family: var(--disp); font-size: 64px; font-weight: 700; line-height: 1;
+  animation: glitch 6s infinite;
+}
+.sh-direction.buy { color: var(--green); text-shadow: 0 0 20px rgba(0,255,157,0.5), 0 0 40px rgba(0,255,157,0.2); }
+.sh-direction.sell { color: var(--red); text-shadow: 0 0 20px rgba(255,51,102,0.5), 0 0 40px rgba(255,51,102,0.2); }
+.sh-jp { font-family: var(--jp); font-size: 10px; color: var(--text3); letter-spacing: 2px; margin-top: 4px; }
+.sh-conf { margin-top: auto; }
+.conf-ring {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: conic-gradient(var(--cyan) 0% 78%, rgba(0,212,255,0.1) 78% 100%);
+  display: flex; align-items: center; justify-content: center; position: relative;
+  box-shadow: 0 0 14px var(--cyan-glow);
+}
+.conf-ring::before {
+  content: '78%'; font-family: var(--mono); font-size: 9px; font-weight: 500;
+  color: var(--cyan); position: absolute;
+}
+.conf-inner { width: 30px; height: 30px; border-radius: 50%; background: var(--card); }
+
+.sh-right { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+.level-row { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 12px; }
+.level-jp { font-family: var(--jp); font-size: 9px; color: var(--text3); }
+.level-label {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--text3);
+}
+.level-val { font-family: var(--mono); font-size: 15px; font-weight: 500; }
+.entry-v { color: var(--cyan); }
+.sl-v { color: var(--red); }
+.tp-v { color: var(--green); }
+.level-bar { height: 1px; background: rgba(0,212,255,0.08); position: relative; }
+.level-bar::after {
+  content: ''; position: absolute; left: 0; top: 0; height: 100%;
+  width: 72%; background: var(--holo2); opacity: 0.5;
+}
+
+.rr-badge {
+  font-family: var(--mono); font-size: 9px; padding: 2px 6px;
+  border: 1px solid rgba(0,255,157,0.3); color: var(--green); border-radius: 2px;
+}
+
+/* ── CHART SECTION ─────────────────────────────────────── */
+.chart-wrap {
+  margin: 0 16px 16px;
+  background: var(--card);
+  border: 1px solid rgba(0,212,255,0.1);
+  border-radius: 2px; overflow: hidden; position: relative;
+}
+.chart-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid rgba(0,212,255,0.06);
+  background: var(--void);
+}
+.chart-title { font-family: var(--disp); font-size: 12px; font-weight: 700; letter-spacing: 3px; color: var(--text2); text-transform: uppercase; }
+.chart-sub { font-family: var(--jp); font-size: 9px; color: var(--text3); }
+
+/* ── SVG CHART (preserved) ─────────────────────────────── */
+.chart-svg-wrap { padding: 12px; height: 220px; }
+svg.chart { width: 100%; height: 100%; }
+.price-line { stroke: var(--cyan); stroke-width: 1.5; fill: none; }
+.area-fill { fill: url(#areaGrad); }
+.ema-fast { stroke: var(--mag); stroke-width: 1; fill: none; stroke-dasharray: none; }
+.ema-slow { stroke: rgba(123,47,190,0.7); stroke-width: 1; fill: none; }
+.sl-line { stroke: var(--red); stroke-width: 1; stroke-dasharray: 4,3; fill: none; }
+.tp-line { stroke: var(--green); stroke-width: 1; stroke-dasharray: 4,3; fill: none; }
+.vol-bar { opacity: 0.3; }
+
+/* ── INDICATORS ────────────────────────────────────────── */
+.ind-section { margin: 0 16px 16px; }
+.sec-hdr {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 10px;
+}
+.sec-title {
+  font-family: var(--disp); font-size: 11px; font-weight: 700;
+  letter-spacing: 4px; text-transform: uppercase; color: var(--text3);
+}
+.sec-title-jp { font-family: var(--jp); font-size: 9px; color: var(--text3); opacity: 0.6; }
+.sec-line { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(0,212,255,0.2), transparent); }
+
+.ind-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ind-card {
+  background: var(--card); border: 1px solid rgba(0,212,255,0.08);
+  padding: 10px 12px; border-radius: 2px;
+  animation: fadeUp 0.3s ease-out both;
+  animation-delay: calc(var(--ind-index,0) * 35ms);
+  transition: border-color 0.2s;
+}
+.ind-card:hover { border-color: rgba(0,212,255,0.25); }
+.ind-name { font-family: var(--mono); font-size: 9px; color: var(--text3); letter-spacing: 2px; margin-bottom: 4px; }
+.ind-name-jp { font-family: var(--jp); font-size: 8px; color: var(--text3); opacity: 0.5; }
+.ind-val { font-family: var(--mono); font-size: 15px; font-weight: 500; color: var(--text); }
+.ind-badge {
+  display: inline-flex; padding: 2px 6px; border-radius: 2px;
+  font-family: var(--mono); font-size: 9px; font-weight: 500; letter-spacing: 1px;
+  text-transform: uppercase; margin-top: 4px;
+}
+.ind-badge.bull { background: rgba(0,255,157,0.1); color: var(--green); border: 1px solid rgba(0,255,157,0.25); }
+.ind-badge.bear { background: rgba(255,51,102,0.1); color: var(--red); border: 1px solid rgba(255,51,102,0.25); }
+.ind-badge.neut { background: var(--cyan-dim); color: var(--cyan); border: 1px solid rgba(0,212,255,0.2); }
+
+/* ── MTF ───────────────────────────────────────────────── */
+.mtf-section { margin: 0 16px 16px; }
+.mtf-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.mtf-cell {
+  background: var(--card); border: 1px solid rgba(0,212,255,0.08);
+  padding: 10px 8px; border-radius: 2px; text-align: center;
+}
+.mtf-tf { font-family: var(--mono); font-size: 9px; color: var(--text3); letter-spacing: 2px; }
+.mtf-sig {
+  font-family: var(--disp); font-size: 13px; font-weight: 700;
+  letter-spacing: 1px; margin-top: 4px;
+}
+.mtf-sig.buy { color: var(--green); }
+.mtf-sig.sell { color: var(--red); }
+.mtf-sig.hold { color: var(--cyan); }
+
+/* ── SCANNER ───────────────────────────────────────────── */
+.scanner-section { padding: 16px; }
+.scan-table { width: 100%; border-collapse: collapse; }
+.scan-table th {
+  font-family: var(--mono); font-size: 9px; color: var(--text3); letter-spacing: 2px;
+  text-align: left; padding: 8px 10px; text-transform: uppercase;
+  border-bottom: 1px solid rgba(0,212,255,0.1);
+}
+.scan-table td {
+  padding: 8px 10px; border-bottom: 1px solid rgba(0,212,255,0.04);
+  transition: background 0.15s;
+}
+.scan-table tbody tr { animation: fadeUp 0.3s ease-out both; animation-delay: calc(var(--row-index,0) * 40ms); }
+.scan-table tbody tr:hover { background: rgba(0,212,255,0.04); cursor: pointer; }
+.scan-ticker { font-family: var(--disp); font-size: 14px; font-weight: 700; letter-spacing: 1px; color: var(--text); }
+.scan-name { font-family: var(--mono); font-size: 9px; color: var(--text3); }
+.scan-price { font-family: var(--mono); font-size: 13px; color: var(--text); }
+.scan-sig {
+  display: inline-flex; padding: 3px 8px; border-radius: 2px;
+  font-family: var(--disp); font-size: 11px; font-weight: 700; letter-spacing: 2px;
+}
+.scan-sig.buy { background: rgba(0,255,157,0.1); color: var(--green); border: 1px solid rgba(0,255,157,0.3); }
+.scan-sig.sell { background: rgba(255,51,102,0.1); color: var(--red); border: 1px solid rgba(255,51,102,0.3); }
+.scan-sig.hold { background: var(--cyan-dim); color: var(--cyan); border: 1px solid rgba(0,212,255,0.2); }
+
+/* ── SIDEBAR RIGHT ─────────────────────────────────────── */
+.sidebar-r {
+  background: var(--void);
+  border-left: 1px solid rgba(0,212,255,0.08);
+  overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+.side-card {
+  background: var(--card); border: 1px solid rgba(0,212,255,0.1); border-radius: 2px;
+  overflow: hidden; position: relative;
+}
+/* Holo top border */
+.side-card::before {
+  content: ''; display: block; height: 1px;
+  background: var(--holo);
+  background-size: 200% 100%;
+  animation: borderRun 4s linear infinite;
+}
+
+.side-card-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid rgba(0,212,255,0.06);
+}
+.side-card-title {
+  font-family: var(--disp); font-size: 11px; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase; color: var(--text2);
+}
+.side-card-jp { font-family: var(--jp); font-size: 8px; color: var(--text3); }
+.side-card-body { padding: 12px; }
+
+/* Fear & Greed */
+.fg-arc-wrap { display: flex; align-items: center; gap: 16px; }
+.fg-num {
+  font-family: var(--disp); font-size: 48px; font-weight: 700; color: var(--amber);
+  text-shadow: 0 0 20px rgba(255,184,0,0.4);
+  animation: dataFlicker 6s infinite;
+}
+.fg-label { font-family: var(--mono); font-size: 9px; color: var(--amber); letter-spacing: 2px; }
+.fg-jp { font-family: var(--jp); font-size: 8px; color: var(--text3); }
+.fg-bar-track { height: 4px; background: rgba(0,212,255,0.08); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.fg-bar-fill { height: 100%; width: 62%; background: var(--amber); box-shadow: 0 0 8px rgba(255,184,0,0.5); border-radius: 2px; }
+
+/* Journey */
+.journey-steps { display: flex; flex-direction: column; gap: 10px; }
+.journey-step {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px; border: 1px solid rgba(0,212,255,0.08);
+  border-radius: 2px; cursor: pointer; transition: all 0.15s;
+}
+.journey-step:hover { border-color: rgba(0,212,255,0.25); background: var(--cyan-dim); }
+.journey-step.done { border-color: rgba(0,255,157,0.2); background: rgba(0,255,157,0.04); }
+.step-num {
+  width: 22px; height: 22px; border-radius: 2px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 10px; font-weight: 500; flex-shrink: 0;
+  background: var(--cyan-dim); color: var(--cyan); border: 1px solid rgba(0,212,255,0.3);
+}
+.step-num.done { background: rgba(0,255,157,0.1); color: var(--green); border-color: rgba(0,255,157,0.3); }
+.step-text { font-family: var(--mono); font-size: 10px; color: var(--text2); line-height: 1.5; }
+.step-text-jp { font-family: var(--jp); font-size: 8px; color: var(--text3); margin-top: 2px; }
+.step-cta {
+  margin-top: 6px; padding: 4px 10px; font-family: var(--disp); font-size: 10px; font-weight: 700;
+  letter-spacing: 2px; text-transform: uppercase; cursor: pointer;
+  background: transparent; color: var(--cyan); border: 1px solid rgba(0,212,255,0.3);
+  border-radius: 2px; transition: all 0.15s; display: inline-block;
+}
+.step-cta:hover { background: var(--cyan); color: var(--void); box-shadow: 0 0 12px var(--cyan-glow); }
+
+/* News feed */
+.news-feed { display: flex; flex-direction: column; gap: 8px; }
+.news-item { padding: 8px; border-bottom: 1px solid rgba(0,212,255,0.06); }
+.news-headline { font-family: var(--mono); font-size: 10px; color: var(--text2); line-height: 1.4; }
+.news-meta { font-family: var(--mono); font-size: 9px; color: var(--text3); margin-top: 4px; }
+.news-bull { color: var(--green); } .news-bear { color: var(--red); }
+
+/* Calculator */
+.calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.calc-field label {
+  display: block; font-family: var(--mono); font-size: 9px; color: var(--text3);
+  letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px;
+}
+.calc-field label span { font-family: var(--jp); font-size: 8px; opacity: 0.6; margin-left: 4px; }
+.calc-input {
+  width: 100%; background: var(--void); border: 1px solid rgba(0,212,255,0.15);
+  color: var(--cyan); font-family: var(--mono); font-size: 13px; padding: 6px 8px;
+  outline: none; border-radius: 2px; transition: border-color 0.2s;
+}
+.calc-input:focus { border-color: var(--cyan); box-shadow: 0 0 8px var(--cyan-glow); }
+.calc-result {
+  margin-top: 10px; padding: 10px; background: var(--void);
+  border: 1px solid rgba(0,255,157,0.15); border-radius: 2px;
+}
+.calc-pos-size { font-family: var(--disp); font-size: 22px; font-weight: 700; color: var(--green); }
+.calc-pos-label { font-family: var(--mono); font-size: 9px; color: var(--text3); letter-spacing: 2px; }
+.calc-pos-jp { font-family: var(--jp); font-size: 8px; color: var(--text3); }
+.calc-risk {
+  margin-top: 6px; font-family: var(--mono); font-size: 10px; color: var(--red);
+  padding: 4px 8px; background: rgba(255,51,102,0.08); border-radius: 2px;
+  border-left: 2px solid var(--red);
+}
+
+/* Win badge */
+.win-badge {
+  display: flex; align-items: center; gap: 10px; padding: 10px;
+  background: var(--void); border: 1px solid rgba(0,212,255,0.1); border-radius: 2px;
+}
+.wb-num { font-family: var(--disp); font-size: 32px; font-weight: 700; color: var(--green); line-height: 1; }
+.wb-num.mid { color: var(--amber); }
+.wb-num.low { color: var(--red); }
+.wb-label { font-family: var(--mono); font-size: 9px; color: var(--text3); letter-spacing: 2px; }
+.wb-label-jp { font-family: var(--jp); font-size: 8px; color: var(--text3); opacity: 0.6; }
+.wb-bar-track { flex:1; height:4px; background: rgba(0,212,255,0.08); border-radius:2px; overflow:hidden; }
+.wb-bar-fill { height:100%; background: var(--green); border-radius:2px; box-shadow:0 0 6px var(--green); transition: width 0.9s cubic-bezier(0.68,-0.55,0.265,1.55); }
+
+/* ── TABS CONTENT ──────────────────────────────────────── */
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--void); }
+::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.2); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.4); }
+
+/* ── PORTFOLIO ─────────────────────────────────────────── */
+.pf-section { padding: 16px; }
+.pf-table { width:100%; border-collapse:collapse; }
+.pf-table th { font-family:var(--mono); font-size:9px; color:var(--text3); letter-spacing:2px; text-transform:uppercase; padding:8px 10px; border-bottom:1px solid rgba(0,212,255,0.1); }
+.pf-table td { padding:9px 10px; border-bottom:1px solid rgba(0,212,255,0.04); font-family:var(--mono); font-size:12px; }
+.pf-table tbody tr:hover { background: rgba(0,212,255,0.03); }
+.pf-pos { color:var(--cyan); font-weight:500; }
+.pf-pnl-pos { color:var(--green); } .pf-pnl-neg { color:var(--red); }
+.var-card { background:var(--card); border:1px solid rgba(255,0,144,0.2); padding:14px; border-radius:2px; margin-bottom:10px; position:relative; }
+.var-card::before { content:''; display:block; height:1px; background:var(--holo); margin:-14px -14px 14px; }
+.var-label { font-family:var(--mono); font-size:9px; color:var(--text3); letter-spacing:3px; text-transform:uppercase; }
+.var-label-jp { font-family:var(--jp); font-size:8px; color:var(--text3); opacity:0.6; }
+.var-val { font-family:var(--disp); font-size:36px; font-weight:700; color:var(--red); line-height:1.1; text-shadow:0 0 16px rgba(255,51,102,0.4); }
+.var-sub { font-family:var(--mono); font-size:10px; color:var(--text3); margin-top:4px; }
+
+/* ── HEATMAP ───────────────────────────────────────────── */
+.heatmap-grid { display:grid; gap:2px; }
+.hm-cell { display:flex; align-items:center; justify-content:center; height:36px; border-radius:2px; }
+.hm-label { font-family:var(--mono); font-size:9px; }
+
+/* Responsive */
+@media(max-width:1100px){
+  .main { grid-template-columns: 200px 1fr; }
+  .sidebar-r { display:none; }
+}
+@media(max-width:768px){
+  .main { grid-template-columns: 1fr; }
+  .sidebar-l { display:none; }
+}
+</style>
+</head>
+<body>
+<div class="scan-beam"></div>
+<div class="shell">
+
+<!-- NAV -->
+<nav>
+  <div style="margin-right:32px;">
+    <div class="nav-brand">DotVerse</div>
+    <div class="nav-jp">ドットバース · 量子取引</div>
+  </div>
+  <div class="nav-tabs">
+    <div class="nav-tab active" onclick="switchTab('signals',this)">SIGNALS</div>
+    <div class="nav-tab" onclick="switchTab('scanner',this)">SCANNER</div>
+    <div class="nav-tab" onclick="switchTab('backtest',this)">BACKTEST</div>
+    <div class="nav-tab" onclick="switchTab('portfolio',this)">PORTFOLIO</div>
+    <div class="nav-tab" onclick="switchTab('calc',this)">CALCULATOR</div>
+  </div>
+  <div class="nav-status">
+    <div class="status-dot"></div>
+    <span>LIVE · 14:32:09</span>
+    <span style="color:var(--text3);">|</span>
+    <span style="font-family:var(--jp);font-size:10px;">接続済み</span>
+  </div>
+</nav>
+
+<!-- MAIN GRID -->
+<div class="main">
+
+  <!-- SIDEBAR LEFT -->
+  <div class="sidebar-l">
+    <div class="sidebar-section-label">暗号資産 · CRYPTO</div>
+    <div class="inst-group">
+      <div class="inst-btn active"><span>BTC-USD</span><span class="inst-sig buy-s">BUY</span></div>
+      <div class="inst-btn"><span>ETH-USD</span><span class="inst-sig buy-s">BUY</span></div>
+      <div class="inst-btn"><span>SOL-USD</span><span class="inst-sig hold-s">HOLD</span></div>
+      <div class="inst-btn"><span>BNB-USD</span><span class="inst-sig sell-s">SELL</span></div>
+      <div class="inst-btn"><span>AVAX-USD</span><span class="inst-sig buy-s">BUY</span></div>
+    </div>
+    <div class="sidebar-section-label">株式 · STOCKS</div>
+    <div class="inst-group">
+      <div class="inst-btn"><span>AAPL</span><span class="inst-sig hold-s">HOLD</span></div>
+      <div class="inst-btn"><span>NVDA</span><span class="inst-sig buy-s">BUY</span></div>
+      <div class="inst-btn"><span>TSLA</span><span class="inst-sig sell-s">SELL</span></div>
+      <div class="inst-btn"><span>MSFT</span><span class="inst-sig hold-s">HOLD</span></div>
+    </div>
+    <div class="sidebar-section-label">外国為替 · FOREX</div>
+    <div class="inst-group">
+      <div class="inst-btn"><span>EUR/USD</span><span class="inst-sig buy-s">BUY</span></div>
+      <div class="inst-btn"><span>GBP/USD</span><span class="inst-sig sell-s">SELL</span></div>
+      <div class="inst-btn"><span>USD/JPY</span><span class="inst-sig hold-s">HOLD</span></div>
+    </div>
+    <div class="sidebar-section-label">指数 · INDICES</div>
+    <div class="inst-group">
+      <div class="inst-btn"><span>^GSPC</span><span class="inst-sig buy-s">BUY</span></div>
+      <div class="inst-btn"><span>^NDX</span><span class="inst-sig buy-s">BUY</span></div>
+    </div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center" id="center">
+
+    <!-- SIGNALS TAB -->
+    <div class="tab-content active" id="tab-signals">
+      <!-- Controls -->
+      <div class="ctrl-bar">
+        <div class="tf-pill active">15M</div>
+        <div class="tf-pill">1H</div>
+        <div class="tf-pill">4H</div>
+        <div class="tf-pill">1D</div>
+        <div class="tf-pill">1W</div>
+        <div class="tf-pill">1M</div>
+        <input class="ticker-input" value="BTC-USD" style="max-width:160px;">
+        <button class="analyze-btn">ANALYZE · 解析</button>
+        <select style="background:var(--card);border:1px solid rgba(0,212,255,0.15);color:var(--text2);font-family:var(--mono);font-size:11px;padding:6px 8px;outline:none;border-radius:2px;">
+          <option>AUTO-REFRESH OFF</option><option>15S</option><option>30S</option>
+        </select>
+      </div>
+
+      <!-- Signal Hero -->
+      <div class="signal-hero">
+        <div class="sh-inner">
+          <div class="sh-left">
+            <div class="sh-ticker">BTC-USD · 1H</div>
+            <div class="sh-direction buy">BUY</div>
+            <div class="sh-jp">買いシグナル · 強い</div>
+            <div class="sh-conf" style="margin-top:12px;">
+              <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;margin-bottom:6px;">信頼度</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div class="conf-ring"><div class="conf-inner"></div></div>
+                <div>
+                  <div style="font-family:var(--disp);font-size:16px;font-weight:700;color:var(--cyan);">CONFIRMED</div>
+                  <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">78% bull confluence</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="sh-right">
+            <div class="level-row">
+              <div>
+                <div class="level-label">エントリー</div>
+                <div class="level-jp" style="font-size:8px;color:var(--text3);">ENTRY</div>
+              </div>
+              <div class="level-bar"></div>
+              <div class="level-val entry-v">$84,210.00</div>
+            </div>
+            <div class="level-row">
+              <div>
+                <div class="level-label">損切り</div>
+                <div class="level-jp" style="font-size:8px;color:var(--text3);">STOP LOSS</div>
+              </div>
+              <div class="level-bar" style="--fill:30%;"></div>
+              <div class="level-val sl-v">$80,850.00</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">利確1 · TP1</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+                  <div class="level-val tp-v">$86,900.00</div>
+                  <div class="rr-badge">1:0.8</div>
+                </div>
+              </div>
+              <div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">利確2 · TP2</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+                  <div class="level-val tp-v">$89,600.00</div>
+                  <div class="rr-badge">1:1.6</div>
+                </div>
+              </div>
+              <div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">利確3 · TP3</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+                  <div class="level-val tp-v">$94,100.00</div>
+                  <div class="rr-badge">1:2.9</div>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(0,212,255,0.06);">
+              <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">ポジションサイズ · POSITION SIZE</div>
+              <div style="font-family:var(--disp);font-size:16px;font-weight:700;color:var(--amber);">0.015 BTC · 1% risk</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div class="chart-wrap">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">BTC-USD · 1H · チャート</div>
+          </div>
+          <div class="chart-sub">PRICE ACTION · 価格チャート</div>
+        </div>
+        <div class="chart-svg-wrap">
+          <svg class="chart" viewBox="0 0 700 180" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#00D4FF" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#00D4FF" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <!-- Area fill -->
+            <path class="area-fill" d="M0,140 C30,135 50,120 80,115 C110,110 130,90 160,85 C190,80 210,95 240,100 C270,105 290,80 320,70 C350,60 370,75 400,65 C430,55 450,40 480,35 C510,30 530,45 560,50 C590,55 620,40 650,38 C670,36 685,40 700,42 L700,180 L0,180 Z"/>
+            <!-- Price line -->
+            <path class="price-line" d="M0,140 C30,135 50,120 80,115 C110,110 130,90 160,85 C190,80 210,95 240,100 C270,105 290,80 320,70 C350,60 370,75 400,65 C430,55 450,40 480,35 C510,30 530,45 560,50 C590,55 620,40 650,38 C670,36 685,40 700,42"/>
+            <!-- EMA fast (magenta) -->
+            <path class="ema-fast" d="M0,145 C40,138 80,118 120,108 C160,98 200,100 240,102 C280,104 320,78 360,68 C400,58 440,48 480,42 C520,36 560,48 600,44 C640,40 670,42 700,44"/>
+            <!-- EMA slow (purple) -->
+            <path class="ema-slow" d="M0,150 C50,145 100,130 150,120 C200,110 250,108 300,95 C350,82 400,70 450,60 C500,50 550,52 600,48 C640,45 670,44 700,46"/>
+            <!-- SL line -->
+            <line class="sl-line" x1="0" y1="155" x2="700" y2="155"/>
+            <!-- TP lines -->
+            <line class="tp-line" x1="0" y1="22" x2="700" y2="22"/>
+            <line class="tp-line" x1="0" y1="12" x2="700" y2="12" style="opacity:0.5"/>
+            <!-- Volume bars -->
+            <rect class="vol-bar" fill="#00D4FF" x="0" y="165" width="6" height="10"/>
+            <rect class="vol-bar" fill="#00D4FF" x="8" y="162" width="6" height="13"/>
+            <rect class="vol-bar" fill="#FF3366" x="16" y="163" width="6" height="12"/>
+            <rect class="vol-bar" fill="#00D4FF" x="24" y="160" width="6" height="15"/>
+            <rect class="vol-bar" fill="#FF3366" x="32" y="164" width="6" height="11"/>
+            <rect class="vol-bar" fill="#00D4FF" x="40" y="158" width="6" height="17"/>
+            <rect class="vol-bar" fill="#00D4FF" x="48" y="155" width="6" height="20"/>
+            <rect class="vol-bar" fill="#FF3366" x="56" y="161" width="6" height="14"/>
+            <rect class="vol-bar" fill="#00D4FF" x="64" y="157" width="6" height="18"/>
+            <rect class="vol-bar" fill="#00D4FF" x="72" y="153" width="6" height="22"/>
+            <rect class="vol-bar" fill="#FF3366" x="80" y="162" width="6" height="13"/>
+            <rect class="vol-bar" fill="#00D4FF" x="88" y="159" width="6" height="16"/>
+          </svg>
+        </div>
+        <div style="padding:0 14px 10px;display:flex;gap:16px;">
+          <div style="display:flex;align-items:center;gap:5px;"><div style="width:16px;height:1.5px;background:var(--cyan);"></div><span style="font-family:var(--mono);font-size:9px;color:var(--text3);">価格 PRICE</span></div>
+          <div style="display:flex;align-items:center;gap:5px;"><div style="width:16px;height:1px;background:var(--mag);"></div><span style="font-family:var(--mono);font-size:9px;color:var(--text3);">EMA速 FAST</span></div>
+          <div style="display:flex;align-items:center;gap:5px;"><div style="width:16px;height:1px;background:var(--purple);"></div><span style="font-family:var(--mono);font-size:9px;color:var(--text3);">EMA遅 SLOW</span></div>
+          <div style="display:flex;align-items:center;gap:5px;"><div style="width:16px;height:1px;background:var(--red);border-top:1px dashed var(--red);"></div><span style="font-family:var(--mono);font-size:9px;color:var(--text3);">損切 SL</span></div>
+          <div style="display:flex;align-items:center;gap:5px;"><div style="width:16px;height:1px;background:var(--green);border-top:1px dashed var(--green);"></div><span style="font-family:var(--mono);font-size:9px;color:var(--text3);">利確 TP</span></div>
+        </div>
+      </div>
+
+      <!-- Indicators -->
+      <div class="ind-section">
+        <div class="sec-hdr">
+          <div class="sec-title">INDICATORS</div>
+          <div class="sec-title-jp">テクニカル指標</div>
+          <div class="sec-line"></div>
+        </div>
+        <div class="ind-grid">
+          <div class="ind-card" style="--ind-index:0">
+            <div class="ind-name">RSI <span class="ind-name-jp">相対力指数</span></div>
+            <div class="ind-val">61.4</div>
+            <div class="ind-badge bull">BULLISH</div>
+          </div>
+          <div class="ind-card" style="--ind-index:1">
+            <div class="ind-name">MACD <span class="ind-name-jp">モメンタム</span></div>
+            <div class="ind-val">+142</div>
+            <div class="ind-badge bull">BULLISH</div>
+          </div>
+          <div class="ind-card" style="--ind-index:2">
+            <div class="ind-name">EMA CROSS <span class="ind-name-jp">移動平均</span></div>
+            <div class="ind-val">↑ ABOVE</div>
+            <div class="ind-badge bull">BULLISH</div>
+          </div>
+          <div class="ind-card" style="--ind-index:3">
+            <div class="ind-name">BOLLINGER <span class="ind-name-jp">ボリンジャー</span></div>
+            <div class="ind-val">MID</div>
+            <div class="ind-badge neut">NEUTRAL</div>
+          </div>
+          <div class="ind-card" style="--ind-index:4">
+            <div class="ind-name">ATR <span class="ind-name-jp">真のレンジ</span></div>
+            <div class="ind-val">$3,360</div>
+            <div class="ind-badge neut">NORMAL</div>
+          </div>
+          <div class="ind-card" style="--ind-index:5">
+            <div class="ind-name">VOLUME <span class="ind-name-jp">出来高</span></div>
+            <div class="ind-val">2.1× AVG</div>
+            <div class="ind-badge bull">STRONG</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MTF -->
+      <div class="mtf-section">
+        <div class="sec-hdr">
+          <div class="sec-title">MULTI-TIMEFRAME</div>
+          <div class="sec-title-jp">マルチタイムフレーム</div>
+          <div class="sec-line"></div>
+        </div>
+        <div class="mtf-grid">
+          <div class="mtf-cell"><div class="mtf-tf">15M</div><div class="mtf-sig buy">BUY</div></div>
+          <div class="mtf-cell" style="border:1px solid rgba(0,212,255,0.3);box-shadow:0 0 10px var(--cyan-glow);"><div class="mtf-tf">1H ←</div><div class="mtf-sig buy">BUY</div></div>
+          <div class="mtf-cell"><div class="mtf-tf">4H</div><div class="mtf-sig buy">BUY</div></div>
+          <div class="mtf-cell"><div class="mtf-tf">1D</div><div class="mtf-sig hold">HOLD</div></div>
+          <div class="mtf-cell"><div class="mtf-tf">1W</div><div class="mtf-sig buy">BUY</div></div>
+          <div class="mtf-cell"><div class="mtf-tf">1M</div><div class="mtf-sig buy">BUY</div></div>
+        </div>
+      </div>
+
+      <div style="height:24px;"></div>
+    </div>
+
+    <!-- SCANNER TAB -->
+    <div class="tab-content" id="tab-scanner">
+      <div class="ctrl-bar">
+        <button class="analyze-btn">全スキャン · SCAN ALL</button>
+        <div style="display:flex;gap:4px;">
+          <div class="tf-pill active">1H</div>
+          <div class="tf-pill">4H</div>
+          <div class="tf-pill">1D</div>
+        </div>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--text3);">買いシグナル優先表示 · BUY signals first</span>
+      </div>
+      <div class="scanner-section">
+        <div class="sec-hdr">
+          <div class="sec-title">MARKET SCANNER</div>
+          <div class="sec-title-jp">市場スキャナー · DotVerse 65% 合流ゲート</div>
+          <div class="sec-line"></div>
+        </div>
+        <table class="scan-table">
+          <thead>
+            <tr>
+              <th>銘柄 ASSET</th>
+              <th>価格 PRICE</th>
+              <th>シグナル SIGNAL</th>
+              <th>信頼度 CONF</th>
+              <th>エントリー ENTRY</th>
+              <th>リスクリワード RR</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="--row-index:0"><td><div class="scan-ticker">BTC-USD</div><div class="scan-name">Bitcoin · 暗号資産</div></td><td class="scan-price">$84,210</td><td><span class="scan-sig buy">BUY</span></td><td style="font-family:var(--mono);font-size:11px;color:var(--green);">HIGH</td><td style="font-family:var(--mono);font-size:11px;color:var(--text2);">$84,210</td><td style="font-family:var(--mono);font-size:11px;color:var(--green);">1:2.9</td></tr>
+            <tr style="--row-index:1"><td><div class="scan-ticker">ETH-USD</div><div class="scan-name">Ethereum · 暗号資産</div></td><td class="scan-price">$3,182</td><td><span class="scan-sig buy">BUY</span></td><td style="font-family:var(--mono);font-size:11px;color:var(--cyan);">MED</td><td style="font-family:var(--mono);font-size:11px;color:var(--text2);">$3,182</td><td style="font-family:var(--mono);font-size:11px;color:var(--green);">1:2.1</td></tr>
+            <tr style="--row-index:2"><td><div class="scan-ticker">NVDA</div><div class="scan-name">NVIDIA Corp · 株式</div></td><td class="scan-price">$875.20</td><td><span class="scan-sig buy">BUY</span></td><td style="font-family:var(--mono);font-size:11px;color:var(--green);">HIGH</td><td style="font-family:var(--mono);font-size:11px;color:var(--text2);">$875.20</td><td style="font-family:var(--mono);font-size:11px;color:var(--green);">1:3.2</td></tr>
+            <tr style="--row-index:3"><td><div class="scan-ticker">SOL-USD</div><div class="scan-name">Solana · 暗号資産</div></td><td class="scan-price">$138.40</td><td><span class="scan-sig hold">HOLD</span></td><td style="font-family:var(--mono);font-size:11px;color:var(--text3);">LOW</td><td style="font-family:var(--mono);font-size:11px;color:var(--text3);">—</td><td style="font-family:var(--mono);font-size:11px;color:var(--text3);">—</td></tr>
+            <tr style="--row-index:4"><td><div class="scan-ticker">TSLA</div><div class="scan-name">Tesla Inc · 株式</div></td><td class="scan-price">$162.80</td><td><span class="scan-sig sell">SELL</span></td><td style="font-family:var(--mono);font-size:11px;color:var(--cyan);">MED</td><td style="font-family:var(--mono);font-size:11px;color:var(--text2);">$162.80</td><td style="font-family:var(--mono);font-size:11px;color:var(--red);">1:1.4</td></tr>
+            <tr style="--row-index:5"><td><div class="scan-ticker">EUR/USD</div><div class="scan-name">Euro Dollar · 外国為替</div></td><td class="scan-price">1.0842</td><td><span class="scan-sig buy">BUY</span></td><td style="font-family:var(--mono);font-size:11px;color:var(--green);">HIGH</td><td style="font-family:var(--mono);font-size:11px;color:var(--text2);">1.0842</td><td style="font-family:var(--mono);font-size:11px;color:var(--green);">1:2.5</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BACKTEST TAB -->
+    <div class="tab-content" id="tab-backtest">
+      <div class="ctrl-bar">
+        <button class="analyze-btn">RUN BACKTEST · バックテスト</button>
+        <div class="tf-pill active">1H</div>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--text3);">ATR研究スクリプト · Research Script — historical analysis only</span>
+      </div>
+      <div style="padding:16px;display:grid;gap:12px;">
+        <div class="side-card">
+          <div class="side-card-hdr">
+            <div class="side-card-title">BACKTEST RESULTS · バックテスト結果</div>
+          </div>
+          <div class="side-card-body">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+              <div style="text-align:center;">
+                <div style="font-family:var(--disp);font-size:32px;font-weight:700;color:var(--green);">62%</div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">WIN RATE<br>勝率</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-family:var(--disp);font-size:32px;font-weight:700;color:var(--cyan);">147</div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">TOTAL TRADES<br>総取引数</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-family:var(--disp);font-size:32px;font-weight:700;color:var(--green);">4.948</div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">SHARPE RATIO<br>シャープレシオ</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-family:var(--disp);font-size:32px;font-weight:700;color:var(--amber);">+38.4%</div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">NET RETURN<br>純利益率</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="side-card">
+          <div class="side-card-hdr">
+            <div class="side-card-title">PINE SCRIPT · 最適設定 RSI10 ATR2×</div>
+          </div>
+          <div class="side-card-body">
+            <pre style="font-family:var(--mono);font-size:11px;color:var(--text2);line-height:1.6;background:var(--void);padding:12px;border-radius:2px;overflow:auto;border:1px solid rgba(0,212,255,0.08);">//@version=5
+strategy("DotVerse · BTC-USD · 1H", overlay=true)
+
+// Exact signal levels
+entry = <span style="color:var(--cyan);">84210.00</span>
+stop  = <span style="color:var(--red);">80850.00</span>
+tp1   = <span style="color:var(--green);">86900.00</span>
+tp2   = <span style="color:var(--green);">89600.00</span>
+tp3   = <span style="color:var(--green);">94100.00</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PORTFOLIO TAB -->
+    <div class="tab-content" id="tab-portfolio">
+      <div style="padding:16px;display:grid;gap:12px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+          <div class="var-card">
+            <div class="var-label">バリューアットリスク</div>
+            <div class="var-label-jp">VALUE AT RISK · 95% CONF</div>
+            <div class="var-val">$246.51</div>
+            <div class="var-sub">Portfolio STD: 1.4987% · 252-day</div>
+          </div>
+          <div class="var-card" style="border-color:rgba(255,184,0,0.2);">
+            <div class="var-label">ストレステスト</div>
+            <div class="var-label-jp">STRESS TEST · −20% SHOCK</div>
+            <div class="var-val" style="color:var(--amber);text-shadow:0 0 16px rgba(255,184,0,0.4);">−$100.00</div>
+            <div class="var-sub">AAPL −20% → $160.00</div>
+          </div>
+          <div class="var-card" style="border-color:rgba(0,212,255,0.2);">
+            <div class="var-label">最適化</div>
+            <div class="var-label-jp">PARAM OPTIMISATION · RQ JOB</div>
+            <div class="var-val" style="color:var(--cyan);text-shadow:0 0 16px var(--cyan-glow);font-size:28px;">RSI10 ATR2×</div>
+            <div class="var-sub">Sharpe 4.948 · EMA 20/50</div>
+          </div>
+        </div>
+        <div class="side-card">
+          <div class="side-card-hdr"><div class="side-card-title">ポジション · POSITIONS</div></div>
+          <div class="side-card-body">
+            <table class="pf-table">
+              <thead><tr><th>銘柄</th><th>方向</th><th>エントリー</th><th>現在価格</th><th>P&L</th><th>ポジション</th></tr></thead>
+              <tbody>
+                <tr><td class="pf-pos">AAPL</td><td style="color:var(--green);font-family:var(--disp);font-weight:700;">BUY</td><td style="font-family:var(--mono);font-size:12px;">$200.00</td><td style="font-family:var(--mono);font-size:12px;">$195.30</td><td class="pf-pnl-neg">−$47.00</td><td style="font-family:var(--mono);font-size:12px;">10 shares</td></tr>
+                <tr><td class="pf-pos">BTC-USD</td><td style="color:var(--green);font-family:var(--disp);font-weight:700;">BUY</td><td style="font-family:var(--mono);font-size:12px;">$82,400</td><td style="font-family:var(--mono);font-size:12px;">$84,210</td><td class="pf-pnl-pos">+$181.00</td><td style="font-family:var(--mono);font-size:12px;">0.01 BTC</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Correlation heatmap -->
+        <div class="side-card">
+          <div class="side-card-hdr"><div class="side-card-title">相関ヒートマップ · CORRELATION MATRIX</div></div>
+          <div class="side-card-body">
+            <div style="display:grid;grid-template-columns:80px repeat(5,1fr);gap:2px;font-family:var(--mono);font-size:9px;">
+              <div></div>
+              <div style="text-align:center;color:var(--text3);padding:4px;">BTC</div>
+              <div style="text-align:center;color:var(--text3);padding:4px;">AAPL</div>
+              <div style="text-align:center;color:var(--text3);padding:4px;">GC=F</div>
+              <div style="text-align:center;color:var(--text3);padding:4px;">^GSPC</div>
+              <div style="text-align:center;color:var(--text3);padding:4px;">EUR</div>
+
+              <div style="color:var(--text3);padding:4px 0;display:flex;align-items:center;">BTC</div>
+              <div style="background:rgba(0,255,157,0.6);border-radius:2px;padding:6px;text-align:center;color:#000;font-weight:600;">1.00</div>
+              <div style="background:rgba(0,212,255,0.25);border-radius:2px;padding:6px;text-align:center;color:var(--text);">0.42</div>
+              <div style="background:rgba(255,51,102,0.15);border-radius:2px;padding:6px;text-align:center;color:var(--text);">−0.12</div>
+              <div style="background:rgba(0,212,255,0.3);border-radius:2px;padding:6px;text-align:center;color:var(--text);">0.48</div>
+              <div style="background:rgba(0,212,255,0.1);border-radius:2px;padding:6px;text-align:center;color:var(--text);">0.21</div>
+
+              <div style="color:var(--text3);padding:4px 0;display:flex;align-items:center;">AAPL</div>
+              <div style="background:rgba(0,212,255,0.25);border-radius:2px;padding:6px;text-align:center;color:var(--text);">0.42</div>
+              <div style="background:rgba(0,255,157,0.6);border-radius:2px;padding:6px;text-align:center;color:#000;font-weight:600;">1.00</div>
+              <div style="background:rgba(255,51,102,0.08);border-radius:2px;padding:6px;text-align:center;color:var(--text);">−0.08</div>
+              <div style="background:rgba(0,255,157,0.4);border-radius:2px;padding:6px;text-align:center;color:var(--text);">0.71</div>
+              <div style="background:rgba(0,212,255,0.15);border-radius:2px;padding:6px;text-align:center;color:var(--text);">0.28</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CALCULATOR TAB -->
+    <div class="tab-content" id="tab-calc">
+      <div style="padding:16px;">
+        <div class="sec-hdr">
+          <div class="sec-title">POSITION CALCULATOR</div>
+          <div class="sec-title-jp">ポジションサイズ計算機</div>
+          <div class="sec-line"></div>
+        </div>
+        <div class="side-card" style="margin-top:12px;">
+          <div class="side-card-body">
+            <div class="calc-grid">
+              <div class="calc-field">
+                <label>口座残高 <span>ACCOUNT SIZE</span></label>
+                <input class="calc-input" value="10000" type="number">
+              </div>
+              <div class="calc-field">
+                <label>リスク % <span>RISK PER TRADE</span></label>
+                <input class="calc-input" value="1" type="number">
+              </div>
+              <div class="calc-field">
+                <label>エントリー <span>ENTRY PRICE</span></label>
+                <input class="calc-input" value="84210" type="number">
+              </div>
+              <div class="calc-field">
+                <label>損切り <span>STOP LOSS</span></label>
+                <input class="calc-input" value="80850" type="number">
+              </div>
+              <div class="calc-field">
+                <label>アセット <span>ASSET TYPE</span></label>
+                <select class="calc-input">
+                  <option>CRYPTO</option><option>STOCKS</option><option>FOREX</option>
+                </select>
+              </div>
+              <div class="calc-field">
+                <label>レバレッジ <span>LEVERAGE</span></label>
+                <input class="calc-input" value="1" type="number">
+              </div>
+            </div>
+            <div class="calc-result">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                  <div class="calc-pos-label">ポジションサイズ · POSITION SIZE</div>
+                  <div class="calc-pos-size">0.02979 BTC</div>
+                  <div class="calc-pos-jp" style="margin-top:2px;">$2,507.49 notional</div>
+                </div>
+                <div>
+                  <div class="calc-pos-label">リスク金額 · MONEY AT RISK</div>
+                  <div class="calc-pos-size" style="color:var(--amber);">$100.00</div>
+                  <div class="calc-pos-jp" style="margin-top:2px;">1.0% of account</div>
+                </div>
+              </div>
+              <div class="calc-risk" style="margin-top:12px;">
+                損切りヒット時: −$100.00 · SL HIT → lose exactly $100.00
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;">
+              <div style="background:var(--void);border:1px solid rgba(0,255,157,0.15);padding:10px;border-radius:2px;">
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">利確1 · TP1</div>
+                <div style="font-family:var(--disp);font-size:18px;font-weight:700;color:var(--green);">+$79.64</div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">RR 1:0.8</div>
+              </div>
+              <div style="background:var(--void);border:1px solid rgba(0,255,157,0.2);padding:10px;border-radius:2px;">
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">利確2 · TP2</div>
+                <div style="font-family:var(--disp);font-size:18px;font-weight:700;color:var(--green);">+$159.28</div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">RR 1:1.6</div>
+              </div>
+              <div style="background:var(--void);border:1px solid rgba(0,255,157,0.25);padding:10px;border-radius:2px;">
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;">利確3 · TP3</div>
+                <div style="font-family:var(--disp);font-size:18px;font-weight:700;color:var(--green);">+$289.79</div>
+                <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">RR 1:2.9</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Win badge -->
+        <div class="win-badge" style="margin-top:12px;">
+          <div>
+            <div class="wb-num">62%</div>
+            <div class="wb-label">WIN RATE<br><span class="wb-label-jp">勝率</span></div>
+          </div>
+          <div style="flex:1;">
+            <div class="wb-bar-track"><div class="wb-bar-fill" style="width:62%;"></div></div>
+            <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:4px;">147 trades · 90 wins · 57 losses</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /center -->
+
+  <!-- SIDEBAR RIGHT -->
+  <div class="sidebar-r">
+
+    <!-- Fear & Greed -->
+    <div class="side-card">
+      <div class="side-card-hdr">
+        <div class="side-card-title">FEAR & GREED</div>
+        <div class="side-card-jp">恐怖と欲望</div>
+      </div>
+      <div class="side-card-body">
+        <div class="fg-arc-wrap">
+          <div>
+            <div class="fg-num">62</div>
+            <div class="fg-label">GREED · 欲望</div>
+          </div>
+        </div>
+        <div class="fg-bar-track"><div class="fg-bar-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- What To Do Next -->
+    <div class="side-card">
+      <div class="side-card-hdr">
+        <div class="side-card-title">NEXT STEPS</div>
+        <div class="side-card-jp">次のアクション</div>
+      </div>
+      <div class="side-card-body">
+        <div class="journey-steps">
+          <div class="journey-step done">
+            <div class="step-num done">✓</div>
+            <div>
+              <div class="step-text">Signal analyzed — BUY confirmed 78% confluence</div>
+              <div class="step-text-jp">シグナル分析完了 · 合流ゲート通過</div>
+            </div>
+          </div>
+          <div class="journey-step done">
+            <div class="step-num done">✓</div>
+            <div>
+              <div class="step-text">Risk understood — $100 max loss on $10k account</div>
+              <div class="step-text-jp">リスク確認済み · 最大損失額</div>
+            </div>
+          </div>
+          <div class="journey-step">
+            <div class="step-num">3</div>
+            <div>
+              <div class="step-text">Verify track record — run backtest first</div>
+              <div class="step-text-jp">バックテストで実績を確認する</div>
+              <div class="step-cta">BACKTEST → バックテスト</div>
+            </div>
+          </div>
+          <div class="journey-step">
+            <div class="step-num">4</div>
+            <div>
+              <div class="step-text">Copy exact levels to TradingView</div>
+              <div class="step-text-jp">正確なレベルをTradingViewにコピー</div>
+              <div class="step-cta">PINE SCRIPT → コピー</div>
+            </div>
+          </div>
+          <div class="journey-step">
+            <div class="step-num">5</div>
+            <div>
+              <div class="step-text">Set alerts at entry, SL, and each TP</div>
+              <div class="step-text-jp">アラートを設定する</div>
+              <div class="step-cta">SET ALERT → アラート設定</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Latest News -->
+    <div class="side-card">
+      <div class="side-card-hdr">
+        <div class="side-card-title">LATEST NEWS</div>
+        <div class="side-card-jp">最新ニュース</div>
+      </div>
+      <div class="side-card-body">
+        <div class="news-feed">
+          <div class="news-item">
+            <div class="news-headline">Bitcoin ETF inflows hit $380M in single day — institutional demand accelerating</div>
+            <div class="news-meta"><span class="news-bull">● BULLISH</span> · 14分前 · 14 min ago</div>
+          </div>
+          <div class="news-item">
+            <div class="news-headline">Fed holds rates — Powell signals data dependence through Q3</div>
+            <div class="news-meta"><span style="color:var(--text3);">● NEUTRAL</span> · 1時間前 · 1h ago</div>
+          </div>
+          <div class="news-item">
+            <div class="news-headline">NVDA earnings beat by 18% — data center revenue $22.6B</div>
+            <div class="news-meta"><span class="news-bull">● BULLISH</span> · 3時間前 · 3h ago</div>
+          </div>
+          <div class="news-item">
+            <div class="news-headline">TSLA delivery miss Q1 — analyst target cuts across 6 banks</div>
+            <div class="news-meta"><span class="news-bear">● BEARISH</span> · 5時間前 · 5h ago</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /sidebar-r -->
+</div><!-- /main -->
+</div><!-- /shell -->
+
+<script>
+function switchTab(id, el) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  const tab = document.getElementById('tab-'+id);
+  if(tab) tab.classList.add('active');
+  if(el) el.classList.add('active');
+}
+</script>
+</body>
+</html>

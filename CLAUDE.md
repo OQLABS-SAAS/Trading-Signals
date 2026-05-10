@@ -32,6 +32,49 @@ Beginners rely on DotVerse not just to identify a trade, but to **educate them a
 - Trade type label on signal cards: show the type, AND a one-line description of what that type means (hold time, mindset).
 
 ---
+## CORE OPERATING PRINCIPLES (apply every session, every fix)
+
+### 1. PLan Node Default
+•⁠  ⁠﻿﻿Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+•⁠  ⁠﻿﻿If something goes sideways, STOP
+and re-plan immediately - don't keep pushing
+•⁠  ⁠﻿﻿Use plan mode for verification steps, not just building
+•⁠  ⁠﻿﻿Write detailed specs upfront to reduce ambiguity
+
+### 2. Self-Improvement Loop
+•⁠  ⁠﻿﻿After ANY correction from the user: update "tasks/lessons,md" with the pattern
+•⁠  ⁠﻿﻿Write rules for yourself that prevent the same mistake
+•⁠  ⁠﻿﻿Ruthlessly iterate on these lessons until mistake rate drops
+•⁠  ⁠﻿﻿Review lessons at session start for relevant project
+### 3. Verification Before Done
+•⁠  ⁠﻿﻿Never mark a task complete without proving it works
+•⁠  ⁠﻿﻿Diff behavior between main and your changes when relevant
+•⁠  ⁠﻿﻿Ask yourself: "Would a staff engineer approve this?"
+•⁠  ⁠﻿﻿Run tests, check logs, demonstrate correctness
+### 4. Demand Elegance (Balanced)
+•⁠  ⁠﻿﻿For non-trivial changes: pause and ask "is there a more elegant way?"
+•⁠  ⁠﻿﻿If a fix feels hacky: "Knowing everything I know now, implement the elegant soluti
+•⁠  ⁠﻿﻿Skip this for simple, obvious fixes - don't over-engineer
+•⁠  ⁠﻿﻿Challenge your own work before presenting it
+### 5. Autonomous Bug Fizing
+•⁠  ⁠﻿﻿When given a bug report: just fix it. Don't ask for hand-holding
+•⁠  ⁠﻿﻿Point at logs, errors, failing tests - then resolve them
+•⁠  ⁠﻿﻿Zero context switching required from the user
+•⁠  ⁠﻿﻿Go fix failing CI tests without being told how
+## 6. Task Management
+.⁠ ⁠*Plan First*: Write plan to tasks/todo.md" with checkable items
+.⁠ ⁠﻿﻿﻿*Verify Plan*: Check in before starting implementation
+.⁠ ⁠﻿﻿﻿*Track Progress*: Mark items complete as you go
+.⁠ ⁠﻿﻿﻿*Explain Changes*: High-level summary at each step
+.⁠ ⁠﻿﻿﻿*Document Results*: Add review section to "tasks/todo.md"
+.⁠ ⁠﻿﻿﻿*Capture Lessons*: Update 'tasks/lessons-md' after corrections
+## 7. Core Principles
+•⁠  ⁠﻿﻿*Simplicity First*: Make every change as simple as possible. Impact minimal code
+•⁠  ⁠﻿﻿*No Laziness*: Find root causes. No temporary fixes. Senior developer standards.
+•⁠  ⁠﻿﻿*Minimat Impact*: Changes should only touch what's necessary. Avoid introducing bugs.
+
+
+---
 
 ## ⚠️ CRITICAL — READ BEFORE TOUCHING ANYTHING — SESSION 2026-05-01
 

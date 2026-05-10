@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>DotVerse · Visual Audit</title>
+<link href='https://fonts.googleapis.com/css2?family=Syne:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&family=IBM+Plex+Mono:wght@300;400&display=swap' rel='stylesheet'>
+<style>
+/* ── DESIGN TOKENS ── */
+:root{
+  --bg:#07080c;--s1:rgba(255,248,230,.03);--s2:rgba(255,248,230,.05);--s3:rgba(255,248,230,.08);
+  --bd:rgba(201,168,76,.12);--bd2:rgba(201,168,76,.22);
+  --t1:#ede8d8;--t2:rgba(237,232,216,.62);--t3:rgba(237,232,216,.30);--mut:rgba(237,232,216,.38);--txt:#ede8d8;
+  --gold:#c9a84c;--gold2:rgba(201,168,76,.08);--gold-glow:rgba(201,168,76,.28);--gold-bord:rgba(201,168,76,.32);
+  --grn:#5de8a0;--red:#e8706e;--grn2:rgba(93,232,160,.08);--red2:rgba(232,112,110,.08);
+  --hold:rgba(237,232,216,.55);
+  --mono:'IBM Plex Mono',monospace;--ui:'Space Grotesk',sans-serif;--syne:'Syne',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0a0c10;color:var(--t1);font-family:var(--ui);padding:32px 40px;}
+h1{font-family:var(--syne);font-size:22px;font-weight:400;letter-spacing:-.02em;margin-bottom:4px;}
+h2{font-size:13px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:24px;}
+.page{border-bottom:1px solid var(--bd);padding-bottom:40px;margin-bottom:40px;}
+.page:last-child{border-bottom:none;}
+
+/* ── ANNOTATION ── */
+.note{display:flex;align-items:flex-start;gap:10px;margin-bottom:16px;padding:12px 16px;
+  border-radius:6px;font-size:12px;line-height:1.6;
+  background:rgba(232,112,110,.06);border:1px solid rgba(232,112,110,.18);}
+.note svg{flex-shrink:0;margin-top:1px;}
+.note span{color:var(--t2);}
+.note em{font-style:normal;color:var(--gold);}
+.note-id{display:inline-block;background:var(--red);color:#fff;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:700;margin-right:6px;font-family:var(--mono);}
+
+.fix{background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.18);}
+.fix .note-id{background:var(--grn);color:#07080c;}
+
+/* ── MARKET PAGE ── */
+.mkt-body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
+.mkt-body-wide{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px;}
+.mkt-section-card{
+  background:rgba(9,8,13,.68);
+  border:1px solid rgba(237,232,216,.09);
+  border-radius:8px;overflow:hidden;position:relative;
+}
+.mkt-sc-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px 10px;border-bottom:1px solid rgba(237,232,216,.06);}
+.mkt-sc-title{font-size:12px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:rgba(237,232,216,.75);}
+.mkt-sc-sub{font-size:10.5px;color:rgba(237,232,216,.32);}
+.mkt-sc-badge{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:3px;background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.72);}
+.mkt-row{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.03);}
+.mkt-row:last-child{border-bottom:none;}
+.mkt-row-left{display:flex;align-items:center;gap:11px;}
+.mkt-row-icon{width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;font-weight:600;border:1px solid rgba(255,255,255,.06);}
+.mkt-row-name{font-size:13px;color:rgba(237,232,216,.88);}
+.mkt-row-sub{font-size:10.5px;color:rgba(237,232,216,.34);margin-top:1px;}
+.mkt-row-right{text-align:right;}
+.mkt-row-price{font-family:var(--mono);font-size:13px;color:rgba(237,232,216,.9);}
+.mkt-row-chg{font-family:var(--mono);font-size:10.5px;margin-top:3px;}
+.mkt-row-chg.up{color:#62f29d;}.mkt-row-chg.dn{color:#f07070;}
+
+/* Fear & Greed */
+.mkt-fear-gauge{padding:16px;text-align:center;}
+.mkt-fear-val{font-size:30px;font-weight:300;font-family:var(--mono);}
+.mkt-fear-lbl{font-size:10.5px;color:rgba(237,232,216,.38);margin-top:4px;text-transform:uppercase;letter-spacing:.04em;}
+.mkt-fear-bar{height:5px;border-radius:3px;background:linear-gradient(to right,rgba(98,242,157,.8),rgba(237,232,216,.62),rgba(240,112,112,.8));margin:12px 0 4px;position:relative;}
+.mkt-fear-pin{position:absolute;top:50%;transform:translate(-50%,-50%);width:11px;height:11px;border-radius:50%;background:#e2ddf5;border:2px solid rgba(9,8,13,.9);}
+.mkt-fear-scale{display:flex;justify-content:space-between;font-size:9px;color:rgba(237,232,216,.28);}
+
+/* Heatmap */
+.mkt-heatmap{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;padding:14px;}
+.mkt-heat-cell{padding:10px 6px 9px;border-radius:6px;text-align:center;}
+.mkt-heat-sym{font-size:9.5px;font-weight:600;color:rgba(200,210,232,.82);}
+.mkt-heat-val{font-family:var(--mono);font-size:9px;margin-top:4px;}
+
+/* Sector bars */
+.mkt-bar-wrap{padding:12px 16px;}
+.mkt-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.mkt-bar-row:last-child{margin-bottom:0;}
+.mkt-bar-lbl{font-size:11.5px;color:rgba(237,232,216,.6);width:96px;flex-shrink:0;}
+.mkt-bar-track{flex:1;height:4px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden;}
+.mkt-bar-fill{height:100%;border-radius:2px;}
+.mkt-bar-val{font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.45);width:36px;text-align:right;flex-shrink:0;}
+
+/* Live Signals */
+.mkt-sig-row{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid rgba(255,255,255,.03);}
+.mkt-sig-row:last-child{border-bottom:none;}
+.mkt-sig-badge{font-size:9.5px;font-weight:600;letter-spacing:.06em;padding:3px 8px;border-radius:4px;flex-shrink:0;}
+.mkt-sig-badge.buy{background:rgba(98,242,157,.1);border:1px solid rgba(98,242,157,.3);color:#62f29d;}
+.mkt-sig-badge.sell{background:rgba(240,112,112,.1);border:1px solid rgba(240,112,112,.3);color:#f07070;}
+.mkt-sig-badge.hold{background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.55);}
+.mkt-sig-sym{font-size:13px;font-weight:500;color:rgba(237,232,216,.88);width:52px;flex-shrink:0;}
+.mkt-sig-detail{font-size:11px;color:rgba(237,232,216,.42);flex:1;}
+.mkt-sig-conf{font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.62);flex-shrink:0;}
+
+/* CTA button */
+.flow-btn-next{background:#c9a84c;color:#07080c;font-weight:700;border-radius:7px;border:none;padding:11px 18px;font-size:12px;cursor:pointer;}
+
+/* Signal list container */
+.sig-list{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;min-height:80px;}
+.sig-list .empty-void{min-height:60px;display:flex;align-items:center;justify-content:center;color:rgba(237,232,216,.25);font-size:11px;font-family:var(--mono);}
+
+/* Eco calendar */
+.mkt-ec-row{display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.03);}
+.mkt-ec-row:last-child{border-bottom:none;}
+.mkt-ec-time{font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.36);width:42px;flex-shrink:0;}
+.mkt-ec-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.mkt-ec-body{flex:1;}
+.mkt-ec-event{font-size:12.5px;color:rgba(237,232,216,.84);}
+.mkt-ec-country{font-size:10.5px;color:rgba(237,232,216,.35);margin-top:2px;}
+.mkt-ec-forecast{font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.60);margin-top:3px;}
+
+/* ── SIZE PAGE ── */
+.sz-layout{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.sz-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px;}
+.sz-card-title{font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:1.2px;color:rgba(237,232,216,.45);text-transform:uppercase;margin-bottom:10px;border-bottom:1px solid rgba(201,168,76,.1);padding-bottom:6px;}
+.sz-dir-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;}
+.sz-dir-btn{padding:8px;border:1px solid rgba(201,168,76,.15);border-radius:6px;background:rgba(255,248,230,.04);color:rgba(237,232,216,.55);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;}
+.sz-dir-btn.active.long{background:rgba(93,232,160,.1);border-color:rgba(93,232,160,.4);color:#5de8a0;}
+.sz-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.sz-field{display:flex;flex-direction:column;gap:4px;}
+.sz-field.full{grid-column:1/-1;}
+.sz-lbl{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.5px;color:rgba(237,232,216,.55);text-transform:uppercase;}
+.sz-inp{background:rgba(255,248,230,.04);border:1px solid rgba(201,168,76,.18);border-radius:5px;padding:8px 10px;color:var(--txt);font-family:var(--mono);font-size:13px;outline:none;width:100%;}
+.sz-hint{font-size:10px;color:rgba(237,232,216,.32);line-height:1.4;}
+.sz-right{display:flex;flex-direction:column;gap:0;}
+.sz-no-signal{padding:8px 0 12px;font-size:11px;color:rgba(237,232,216,.38);font-family:var(--mono);}
+
+/* Sonar box */
+.sz-sonar-box{background:rgba(255,248,230,.03);border:1px solid rgba(201,168,76,.12);border-radius:8px;overflow:hidden;}
+.sz-sonar-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid rgba(201,168,76,.1);}
+.sz-sonar-sym{font-family:var(--mono);font-weight:800;font-size:15px;color:var(--txt);}
+.sz-sonar-price{font-family:var(--mono);font-size:12px;color:rgba(237,232,216,.38);}
+.sz-sonar-grid{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid rgba(255,255,255,.05);}
+.sz-sonar-cell{padding:9px 10px;border-right:1px solid rgba(255,255,255,.05);}
+.sz-sonar-lbl{font-family:var(--mono);font-size:8px;letter-spacing:.7px;color:rgba(237,232,216,.35);text-transform:uppercase;margin-bottom:3px;}
+.sz-sonar-val{font-family:var(--mono);font-weight:700;font-size:15px;color:rgba(255,255,255,.9);}
+.sz-sonar-val.sm{font-size:12px;}
+.sz-sonar-val.amber{color:#d4b87a;}
+
+/* RR bar */
+.sz-rr-box{padding:10px;cursor:pointer;border-right:1px solid rgba(201,168,76,.08);background:rgba(255,248,230,.03);}
+.sz-rr-box:last-child{border-right:none;}
+.sz-rr-box-lbl{font-family:var(--mono);font-size:8px;letter-spacing:.8px;text-transform:uppercase;color:rgba(237,232,216,.38);margin-bottom:4px;}
+.sz-rr-box-val{font-family:var(--mono);font-size:17px;font-weight:800;margin-bottom:2px;}
+.sz-rr-box-val.red{color:#e8706e;}
+.sz-rr-box-val.grn{color:#5de8a0;}
+.sz-rr-box-sub{font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.38);}
+.sz-rr-box-hint{font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.25);margin-top:5px;}
+
+/* RR bar grid override */
+.rr-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;}
+
+/* Coach panel */
+.coach{padding:16px 18px;border-radius:10px;border:1px solid rgba(237,232,216,.14);background:rgba(10,14,22,.85);margin-bottom:14px;}
+.coach-hdr{font-family:var(--mono);font-size:8px;letter-spacing:1.6px;color:rgba(237,232,216,.38);font-weight:700;margin-bottom:10px;text-transform:uppercase;}
+.coach-body{font-size:12px;color:rgba(237,232,216,.82);line-height:1.75;}
+
+/* Preset buttons */
+.preset-row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+.preset-btn{flex:1;min-width:0;padding:7px 4px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.18);color:var(--t2);font-family:var(--mono);font-size:9.5px;font-weight:700;cursor:pointer;text-align:center;line-height:1.35;}
+.preset-btn.active{background:rgba(93,232,160,.08);border-color:rgba(93,232,160,.3);color:#5de8a0;}
+.preset-pct{font-size:11.5px;margin-top:2px;}
+
+/* Teaching panel */
+.teach{padding:9px 11px;border-radius:5px;background:rgba(255,248,230,.04);border:1px solid rgba(201,168,76,.18);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.6;margin-top:7px;}
+
+/* Signal banner */ 
+.sz-signal-banner{display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.18);border-radius:6px;margin-bottom:12px;font-family:var(--mono);}
+.sz-dir-badge{padding:2px 8px;border-radius:3px;font-size:9px;font-weight:800;letter-spacing:.5px;}
+.sz-dir-badge.buy{background:rgba(93,232,160,.18);color:#5de8a0;}
+.sz-dir-badge.sell{background:rgba(232,112,110,.18);color:#e8706e;}
+
+/* Trade Size row */
+.ts-row{border-top:1px solid rgba(237,232,216,.12);background:rgba(237,232,216,.04);}
+.ts-hdr{padding:5px 12px;font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.7);border-bottom:1px solid rgba(237,232,216,.08);}
+
+/* Flow badge */
+.flow-badge{background:rgba(12,15,22,.9);border:1px solid rgba(237,232,216,.12);border-radius:10px;padding:14px 16px;margin-bottom:14px;}
+
+/* Hint text */
+.footer-hint{font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.38);letter-spacing:.8px;text-align:center;padding:6px 0;}
+
+/* ── Issue highlight ── */
+.highlight{border:2px solid var(--red) !important;position:relative;}
+.highlight::after{content:'ISSUE';position:absolute;top:-10px;right:8px;font-size:8px;background:var(--red);color:#fff;padding:1px 6px;border-radius:3px;font-weight:700;letter-spacing:.06em;font-family:var(--mono);z-index:10;}
+
+/* Spacing fix preview */
+.gap-fixed{gap:12px !important;}
+.pad-fixed{padding:18px !important;}
+.min-fixed{min-height:auto !important;}
+
+/* Tab switcher */
+.tabs{display:flex;gap:4px;margin-bottom:20px;}
+.tab-btn{padding:8px 20px;border-radius:6px;border:1px solid var(--bd);background:transparent;color:var(--t3);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.04em;transition:all .15s;}
+.tab-btn.active{background:var(--gold);color:#07080c;border-color:var(--gold);}
+.tab-content{display:none;}
+.tab-content.active{display:block;}
+
+/* Comparison labels */
+.vs-label{display:flex;gap:8px;margin-bottom:8px;align-items:center;}
+.vs-before,.vs-after{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;padding:2px 8px;border-radius:3px;}
+.vs-before{background:rgba(232,112,110,.12);color:var(--red);}
+.vs-after{background:rgba(93,232,160,.12);color:var(--grn);}
+
+.comp-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+
+.section-label{font-size:15px;font-weight:400;font-family:var(--syne);margin:20px 0 12px;color:var(--t1);letter-spacing:-.01em;}
+</style>
+</head>
+<body>
+
+<h1>DotVerse · Visual Audit</h1>
+<h2>Rendered with real CSS from the live app — BEFORE state</h2>
+
+<!-- ─── NOTES ─── -->
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span>This renders the <em>actual</em> CSS and HTML structure from <code>index-v2-prototype.html</code>. Issues highlighted in <em style="color:#e8706e">red border</em>.</span>
+</div>
+
+<!-- ═══════════ TABS ═══════════ -->
+<div class="tabs" style="flex-wrap:wrap;">
+  <button class="tab-btn active" onclick="showTab('market')">1-2: Market + Signals</button>
+  <button class="tab-btn" onclick="showTab('size')">3-4: Size Page</button>
+  <button class="tab-btn" onclick="showTab('opp')">5: Opp Cards</button>
+  <button class="tab-btn" onclick="showTab('nav')">6-8: Nav + Pills</button>
+  <button class="tab-btn" onclick="showTab('all')">9-12: All Other</button>
+  <button class="tab-btn" onclick="showTab('brand')">13: Brand</button>
+</div>
+
+<!-- ═══════════ TAB: MARKET ═══════════ -->
+<div class="tab-content active" id="tab-market">
+
+<div class="section-label">Issue 1 — Live Signals Card</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">1</span> <code>#mktSigList</code> has <code>min-height:80px</code>. When 0–2 signals load, the rest is empty void. The progress bar fills ~30px, leaving 50px+ of dead space.</span>
+</div>
+
+<div class="vs-label">
+  <span class="vs-before">BEFORE</span> <span>min-height:80px — 2 signals + empty void</span>
+</div>
+
+<div style="border:2px solid rgba(232,112,110,.35);border-radius:8px;padding:2px;margin-bottom:24px;">
+  <div class="mkt-body-wide">
+    <div class="mkt-section-card highlight" style="display:flex;flex-direction:column;justify-content:space-between;">
+      <div class="mkt-sc-head">
+        <span class="mkt-sc-title">Live Signals</span>
+        <span class="mkt-sc-badge" style="background:rgba(93,232,160,.12);color:#5de8a0;border-color:rgba(93,232,160,.3);">scanning…</span>
+      </div>
+      <div class="sig-list" id="sig-list-mock" style="min-height:80px;">
+        <!-- Progress bar -->
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 16px 0;">
+          <div style="flex:1;height:3px;border-radius:2px;background:rgba(237,232,216,.1);overflow:hidden;">
+            <div style="width:45%;height:100%;background:linear-gradient(90deg,#d4870a,#f0b952);border-radius:2px;"></div>
+          </div>
+          <span style="font-size:10px;font-family:var(--mono);color:rgba(237,232,216,.5);white-space:nowrap;">DotVerse backtesting signals…</span>
+        </div>
+        <!-- 2 signals loaded -->
+        <div class="mkt-sig-row">
+          <span class="mkt-sig-badge buy">BUY</span>
+          <span class="mkt-sig-sym">BTC</span>
+          <span class="mkt-sig-detail">Entry $67,480 · TP $74,100</span>
+          <span class="mkt-sig-conf">75% conf</span>
+        </div>
+        <div class="mkt-sig-row">
+          <span class="mkt-sig-badge sell">SELL</span>
+          <span class="mkt-sig-sym">DXY</span>
+          <span class="mkt-sig-detail">Entry 105.28 · TP 103.00</span>
+          <span class="mkt-sig-conf">82% conf</span>
+        </div>
+        <!-- EMPTY VOID below — 80px min-height forces this -->
+        <div class="empty-void" style="border:2px dashed rgba(232,112,110,.3);border-radius:4px;">← 80px min-height forces this empty void</div>
+      </div>
+      <button class="flow-btn-next" style="width:100%;justify-content:center;display:flex;">View All Signals →</button>
+    </div>
+
+    <div class="mkt-section-card">
+      <div class="mkt-sc-head">
+        <span class="mkt-sc-title">Economic Calendar</span>
+        <span class="mkt-sc-sub">High-impact events</span>
+      </div>
+      <div class="mkt-ec-row">
+        <div class="mkt-ec-time" style="width:48px;">08:30</div>
+        <div style="width:7px;height:7px;border-radius:50%;background:#e8706e;flex-shrink:0;margin-top:4px;"></div>
+        <div class="mkt-ec-body">
+          <div class="mkt-ec-event" style="font-size:13px;">CPI m/m</div>
+          <div class="mkt-ec-country">United States</div>
+          <div class="mkt-ec-forecast" style="font-size:11px;">Forecast 0.3% · Previous 0.4%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="vs-label"><span class="vs-after">AFTER</span> <span>min-height:auto — content determines height</span></div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(93,232,160,.35);border-radius:8px;padding:2px;">
+    <div class="mkt-section-card" style="display:flex;flex-direction:column;justify-content:space-between;">
+      <div class="mkt-sc-head">
+        <span class="mkt-sc-title">Live Signals</span>
+        <span class="mkt-sc-badge" style="background:rgba(93,232,160,.12);color:#5de8a0;border-color:rgba(93,232,160,.3);">2 signals</span>
+      </div>
+      <div style="display:flex;flex-direction:column;">
+        <div class="mkt-sig-row">
+          <span class="mkt-sig-badge buy">BUY</span>
+          <span class="mkt-sig-sym">BTC</span>
+          <span class="mkt-sig-detail">Entry $67,480 · TP $74,100</span>
+          <span class="mkt-sig-conf">75% conf</span>
+        </div>
+        <div class="mkt-sig-row">
+          <span class="mkt-sig-badge sell">SELL</span>
+          <span class="mkt-sig-sym">DXY</span>
+          <span class="mkt-sig-detail">Entry 105.28 · TP 103.00</span>
+          <span class="mkt-sig-conf">82% conf</span>
+        </div>
+        <button class="flow-btn-next" style="width:100%;justify-content:center;display:flex;margin:12px;">View All Signals →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fix" style="margin-bottom:24px;">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5" style="flex-shrink:0;margin-top:1px;"><polyline points="20 6 9 17 4 12"/></svg>
+  <span><span class="note-id">FIX</span> Line 8656: <code>min-height:80px</code> → <code>min-height:auto</code> · 1 character change</span>
+</div>
+
+<!-- ═══════════  Full Market Page  ═══════════ -->
+<div class="section-label">Full Market Page (before)</div>
+
+<div class="mkt-body">
+  <!-- Indices -->
+  <div class="mkt-section-card">
+    <div class="mkt-sc-head">
+      <span class="mkt-sc-title">Indices</span>
+      <span class="mkt-sc-badge">+0.82% avg</span>
+    </div>
+    <div class="mkt-row"><div class="mkt-row-left"><div class="mkt-row-icon" style="background:rgba(255,255,255,.06);color:rgba(237,232,216,.6);">SPX</div><div><div class="mkt-row-name">S&P 500</div><div class="mkt-row-sub">US Benchmark</div></div></div><div class="mkt-row-right"><div class="mkt-row-price">5,284.47</div><div class="mkt-row-chg up">+0.82%</div></div></div>
+    <div class="mkt-row"><div class="mkt-row-left"><div class="mkt-row-icon" style="background:rgba(255,255,255,.06);color:rgba(237,232,216,.6);">NDX</div><div><div class="mkt-row-name">NASDAQ</div><div class="mkt-row-sub">Tech Composite</div></div></div><div class="mkt-row-right"><div class="mkt-row-price">16,521</div><div class="mkt-row-chg up">+1.14%</div></div></div>
+    <div class="mkt-row"><div class="mkt-row-left"><div class="mkt-row-icon" style="background:rgba(255,255,255,.06);color:rgba(237,232,216,.6);">DJI</div><div><div class="mkt-row-name">DOW</div><div class="mkt-row-sub">Industrial Avg</div></div></div><div class="mkt-row-right"><div class="mkt-row-price">39,872</div><div class="mkt-row-chg up">+0.43%</div></div></div>
+  </div>
+  <!-- Crypto -->
+  <div class="mkt-section-card">
+    <div class="mkt-sc-head">
+      <span class="mkt-sc-title">Crypto</span>
+      <span class="mkt-sc-badge">+1.9% avg</span>
+    </div>
+    <div class="mkt-row"><div class="mkt-row-left"><div class="mkt-row-icon" style="background:rgba(255,255,255,.06);color:rgba(237,232,216,.6);">BTC</div><div><div class="mkt-row-name">Bitcoin</div><div class="mkt-row-sub">BTC-USD</div></div></div><div class="mkt-row-right"><div class="mkt-row-price">68,240</div><div class="mkt-row-chg up">+2.10%</div></div></div>
+    <div class="mkt-row"><div class="mkt-row-left"><div class="mkt-row-icon" style="background:rgba(255,255,255,.06);color:rgba(237,232,216,.6);">ETH</div><div><div class="mkt-row-name">Ethereum</div><div class="mkt-row-sub">ETH-USD</div></div></div><div class="mkt-row-right"><div class="mkt-row-price">3,485</div><div class="mkt-row-chg up">+1.70%</div></div></div>
+    <div class="mkt-row"><div class="mkt-row-left"><div class="mkt-row-icon" style="background:rgba(255,255,255,.06);color:rgba(237,232,216,.6);">SOL</div><div><div class="mkt-row-name">Solana</div><div class="mkt-row-sub">SOL-USD</div></div></div><div class="mkt-row-right"><div class="mkt-row-price">152.40</div><div class="mkt-row-chg up">+3.20%</div></div></div>
+  </div>
+  <!-- Commodities + Fear -->
+  <div class="mkt-section-card">
+    <div class="mkt-sc-head">
+      <span class="mkt-sc-title">Commodities</span>
+      <span class="mkt-sc-sub">Spot prices</span>
+    </div>
+    <div class="mkt-row"><div class="mkt-row-left"><div class="mkt-row-icon" style="background:rgba(255,255,255,.06);color:rgba(237,232,216,.6);">GC</div><div><div class="mkt-row-name">Gold</div><div class="mkt-row-sub">GC=F</div></div></div><div class="mkt-row-right"><div class="mkt-row-price">2,341</div><div class="mkt-row-chg up">+0.30%</div></div></div>
+    <!-- Fear & Greed -->
+    <div class="mkt-fear-gauge" style="border-top:1px solid rgba(237,232,216,.06);">
+      <div class="mkt-fear-val" style="color:rgba(237,232,216,.82);">62</div>
+      <div class="mkt-fear-lbl">Fear &amp; Greed Index</div>
+      <div class="mkt-fear-bar"><div class="mkt-fear-pin" style="left:62%;"></div></div>
+      <div class="mkt-fear-scale"><span>Fear</span><span>Neutral</span><span>Greed</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="mkt-body-wide">
+  <!-- Heatmap -->
+  <div class="mkt-section-card">
+    <div class="mkt-sc-head">
+      <span class="mkt-sc-title">S&amp;P 500 Heatmap</span>
+      <span class="mkt-sc-sub">% change today</span>
+    </div>
+    <div class="mkt-heatmap">
+      <div class="mkt-heat-cell" style="background:rgba(93,232,160,.1);"><div class="mkt-heat-sym">AAPL</div><div class="mkt-heat-val" style="color:#62f29d;">+1.4%</div></div>
+      <div class="mkt-heat-cell" style="background:rgba(93,232,160,.08);"><div class="mkt-heat-sym">MSFT</div><div class="mkt-heat-val" style="color:#62f29d;">+0.9%</div></div>
+      <div class="mkt-heat-cell" style="background:rgba(232,112,110,.06);"><div class="mkt-heat-sym">GOOGL</div><div class="mkt-heat-val" style="color:rgba(232,112,110,.7);">−0.4%</div></div>
+      <div class="mkt-heat-cell" style="background:rgba(93,232,160,.1);"><div class="mkt-heat-sym">NVDA</div><div class="mkt-heat-val" style="color:#62f29d;">+3.2%</div></div>
+      <div class="mkt-heat-cell" style="background:rgba(237,232,216,.03);"><div class="mkt-heat-sym">AMZN</div><div class="mkt-heat-val" style="color:rgba(237,232,216,.5);">+0.1%</div></div>
+      <div class="mkt-heat-cell" style="background:rgba(93,232,160,.06);"><div class="mkt-heat-sym">META</div><div class="mkt-heat-val" style="color:#62f29d;">+0.7%</div></div>
+      <div class="mkt-heat-cell" style="background:rgba(232,112,110,.08);"><div class="mkt-heat-sym">TSLA</div><div class="mkt-heat-val" style="color:rgba(232,112,110,.7);">−1.2%</div></div>
+    </div>
+  </div>
+  <!-- Sectors -->
+  <div class="mkt-section-card">
+    <div class="mkt-sc-head">
+      <span class="mkt-sc-title">Sector Strength</span>
+      <span class="mkt-sc-sub">Relative momentum</span>
+    </div>
+    <div class="mkt-bar-wrap">
+      <div class="mkt-bar-row"><div class="mkt-bar-lbl">Technology</div><div class="mkt-bar-track"><div class="mkt-bar-fill" style="width:82%;background:#62f29d;"></div></div><div class="mkt-bar-val">+1.8%</div></div>
+      <div class="mkt-bar-row"><div class="mkt-bar-lbl">Financials</div><div class="mkt-bar-track"><div class="mkt-bar-fill" style="width:64%;background:#98e0c8;"></div></div><div class="mkt-bar-val">+0.9%</div></div>
+      <div class="mkt-bar-row"><div class="mkt-bar-lbl">Healthcare</div><div class="mkt-bar-track"><div class="mkt-bar-fill" style="width:48%;background:rgba(237,232,216,.6);"></div></div><div class="mkt-bar-val">+0.2%</div></div>
+      <div class="mkt-bar-row"><div class="mkt-bar-lbl">Energy</div><div class="mkt-bar-track"><div class="mkt-bar-fill" style="width:38%;background:rgba(237,232,216,.5);"></div></div><div class="mkt-bar-val">−0.3%</div></div>
+      <div class="mkt-bar-row"><div class="mkt-bar-lbl">Real Estate</div><div class="mkt-bar-track"><div class="mkt-bar-fill" style="width:22%;background:rgba(232,112,110,.6);"></div></div><div class="mkt-bar-val">−0.8%</div></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /tab-market -->
+
+<!-- ═══════════ TAB: SIZE ═══════════ -->
+<div class="tab-content" id="tab-size">
+
+<div class="section-label">Issue 2 — Right Column: Zero Gap</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">2</span> <code>.sz-right</code> uses <code>gap:0</code>. The Coach panel, SonarBox, Flow badge, and RR bar all touch edge-to-edge with no breathing room.</span>
+</div>
+
+<div class="vs-label"><span class="vs-before">BEFORE</span> <span>gap:0 — boxes glued together</span></div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div class="sz-right" style="gap:0;border:2px solid rgba(232,112,110,.3);border-radius:8px;padding:8px;">
+    <div class="coach"><div class="coach-hdr">SIZING GUIDE</div><div class="coach-body">Enter your account and risk % above. I'll calculate how much to buy and your exact risk.</div></div>
+    <div class="sz-sonar-box">
+      <div class="sz-sonar-hdr"><span class="sz-sonar-sym">BTC</span><span class="sz-sonar-price">$68,240</span></div>
+      <div class="sz-sonar-grid">
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Balance</div><div class="sz-sonar-val sm">$10,000</div></div>
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Risk %</div><div class="sz-sonar-val sm">2%</div></div>
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Money at Risk</div><div class="sz-sonar-val amber">$200</div></div>
+      </div>
+      <div class="sz-sonar-grid">
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Lots / Units</div><div class="sz-sonar-val grn">0.0031 BTC</div></div>
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Margin Req.</div><div class="sz-sonar-val sm">$211.40</div></div>
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">R:R (TP1)</div><div class="sz-sonar-val sm">1:2.5</div></div>
+      </div>
+    </div>
+    <div class="flow-badge" style="font-size:11px;font-family:var(--mono);color:var(--t2);">Market Flow: <span style="color:var(--grn);">TRENDING</span> · Kelly suggests 1.8% risk</div>
+    <div style="border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);">
+      <div style="padding:6px 12px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.38);font-weight:700;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.06);">Your Risk vs Your Reward</div>
+      <div class="rr-grid">
+        <div class="sz-rr-box"><div class="sz-rr-box-lbl">Worst Case</div><div class="sz-rr-box-val red">−$200</div><div class="sz-rr-box-sub">if SL hit</div><div class="sz-rr-box-hint">details</div></div>
+        <div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 1</div><div class="sz-rr-box-val grn">+$500</div><div class="sz-rr-box-sub">1:2.5</div><div class="sz-rr-box-hint">details</div></div>
+        <div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 2</div><div class="sz-rr-box-val grn">+$700</div><div class="sz-rr-box-sub">1:3.5</div><div class="sz-rr-box-hint">details</div></div>
+        <div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 3</div><div class="sz-rr-box-val grn">+$900</div><div class="sz-rr-box-sub">1:4.5</div><div class="sz-rr-box-hint">details</div></div>
+      </div>
+    </div>
+    <div class="footer-hint">RESULTS UPDATE AS YOU TYPE</div>
+  </div>
+</div>
+
+<div class="vs-label"><span class="vs-after">AFTER</span> <span>gap:12px — each section breathes</span></div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div class="sz-right gap-fixed" style="border:2px solid rgba(93,232,160,.35);border-radius:8px;padding:8px;">
+    <div class="coach"><div class="coach-hdr">SIZING GUIDE</div><div class="coach-body">Enter your account and risk % above. I'll calculate how much to buy and your exact risk.</div></div>
+    <div class="sz-sonar-box">
+      <div class="sz-sonar-hdr"><span class="sz-sonar-sym">BTC</span><span class="sz-sonar-price">$68,240</span></div>
+      <div class="sz-sonar-grid">
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Balance</div><div class="sz-sonar-val sm">$10,000</div></div>
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Risk %</div><div class="sz-sonar-val sm">2%</div></div>
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Money at Risk</div><div class="sz-sonar-val amber">$200</div></div>
+      </div>
+      <div class="sz-sonar-grid">
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Lots / Units</div><div class="sz-sonar-val grn">0.0031 BTC</div></div>
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Margin Req.</div><div class="sz-sonar-val sm">$211.40</div></div>
+        <div class="sz-sonar-cell"><div class="sz-sonar-lbl">R:R (TP1)</div><div class="sz-sonar-val sm">1:2.5</div></div>
+      </div>
+    </div>
+    <div class="flow-badge" style="font-size:11px;font-family:var(--mono);color:var(--t2);">Market Flow: <span style="color:var(--grn);">TRENDING</span> · Kelly suggests 1.8% risk</div>
+    <div style="border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);">
+      <div style="padding:6px 12px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.38);font-weight:700;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.06);">Your Risk vs Your Reward</div>
+      <div class="rr-grid">
+        <div class="sz-rr-box"><div class="sz-rr-box-lbl">Worst Case</div><div class="sz-rr-box-val red">−$200</div><div class="sz-rr-box-sub">if SL hit</div><div class="sz-rr-box-hint">details</div></div>
+        <div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 1</div><div class="sz-rr-box-val grn">+$500</div><div class="sz-rr-box-sub">1:2.5</div><div class="sz-rr-box-hint">details</div></div>
+        <div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 2</div><div class="sz-rr-box-val grn">+$700</div><div class="sz-rr-box-sub">1:3.5</div><div class="sz-rr-box-hint">details</div></div>
+        <div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 3</div><div class="sz-rr-box-val grn">+$900</div><div class="sz-rr-box-sub">1:4.5</div><div class="sz-rr-box-hint">details</div></div>
+      </div>
+    </div>
+    <div class="footer-hint">RESULTS UPDATE AS YOU TYPE</div>
+  </div>
+</div>
+
+<div class="fix" style="margin-bottom:24px;">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5" style="flex-shrink:0;margin-top:1px;"><polyline points="20 6 9 17 4 12"/></svg>
+  <span><span class="note-id">FIX</span> Line 2439: <code>gap:0</code> → <code>gap:12px</code> · 1 character change</span>
+</div>
+
+<!-- Issue 3: Tight card padding -->
+<div class="section-label">Issue 3 — Left Card Padding Too Tight</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">3</span> <code>.sz-card</code> has <code>padding:14px</code> around 12+ input fields. No visual divider between "Trade Levels" and "Account & Risk" sections. Feels crowded.</span>
+</div>
+
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(232,112,110,.3);border-radius:10px;overflow:hidden;">
+    <div class="sz-card" style="padding:14px;">
+      <div class="sz-card-title" style="border-bottom:none;margin-bottom:8px;">Trade Levels</div>
+      <div class="sz-fields" style="margin-bottom:2px;">
+        <div class="sz-field full"><label class="sz-lbl">Entry Price</label><input class="sz-inp" value="68,240" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Stop Loss</label><input class="sz-inp" value="65,800" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Current Price</label><input class="sz-inp" value="68,100" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">TP 1</label><input class="sz-inp" value="72,000" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">TP 2</label><input class="sz-inp" value="74,500" readonly></div>
+        <div class="sz-field full"><label class="sz-lbl">TP 3</label><input class="sz-inp" value="78,000" readonly></div>
+      </div>
+      <div class="sz-card-title" style="margin-top:6px;">Account &amp; Risk</div>
+      <div class="sz-fields">
+        <div class="sz-field"><label class="sz-lbl">Account Size ($)</label><input class="sz-inp" value="10,000" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Risk %</label><input class="sz-inp" value="2" readonly></div>
+        <div class="sz-field full"><label class="sz-lbl">Trade Size ($)</label><input class="sz-inp" placeholder="auto-filled" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Asset Type</label><input class="sz-inp" value="Crypto" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Leverage</label><input class="sz-inp" value="Standard" readonly></div>
+      </div>
+    </div>
+  </div>
+  <div style="border:2px solid rgba(93,232,160,.35);border-radius:10px;overflow:hidden;">
+    <div class="sz-card pad-fixed">
+      <div class="sz-card-title" style="border-bottom:none;margin-bottom:8px;">Trade Levels</div>
+      <div class="sz-fields" style="margin-bottom:4px;">
+        <div class="sz-field full"><label class="sz-lbl">Entry Price</label><input class="sz-inp" value="68,240" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Stop Loss</label><input class="sz-inp" value="65,800" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Current Price</label><input class="sz-inp" value="68,100" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">TP 1</label><input class="sz-inp" value="72,000" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">TP 2</label><input class="sz-inp" value="74,500" readonly></div>
+        <div class="sz-field full"><label class="sz-lbl">TP 3</label><input class="sz-inp" value="78,000" readonly></div>
+      </div>
+      <hr style="border:none;border-top:1px solid rgba(201,168,76,.12);margin:4px 0 14px;">
+      <div class="sz-card-title" style="margin-bottom:10px;">Account &amp; Risk</div>
+      <div class="sz-fields">
+        <div class="sz-field"><label class="sz-lbl">Account Size ($)</label><input class="sz-inp" value="10,000" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Risk %</label><input class="sz-inp" value="2" readonly></div>
+        <div class="sz-field full"><label class="sz-lbl">Trade Size ($)</label><input class="sz-inp" placeholder="auto-filled" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Asset Type</label><input class="sz-inp" value="Crypto" readonly></div>
+        <div class="sz-field"><label class="sz-lbl">Leverage</label><input class="sz-inp" value="Standard" readonly></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fix" style="margin-bottom:24px;">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5" style="flex-shrink:0;margin-top:1px;"><polyline points="20 6 9 17 4 12"/></svg>
+  <span><span class="note-id">FIX</span> Line 2421: <code>padding:14px</code> → <code>padding:18px</code> + add divider <code>&lt;hr&gt;</code> between sections · 2 changes</span>
+</div>
+
+<!-- Issue 4: Invisible instruction text -->
+<div class="section-label" style="margin-top:40px;">Issue 4 — "RESULTS UPDATE AS YOU TYPE" Too Small</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">4</span> 8px font at 0.38 opacity is essentially invisible. This is the key instruction telling users results update live.</span>
+</div>
+
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div class="footer-hint" style="font-size:8px;opacity:.38;border:2px solid rgba(232,112,110,.3);border-radius:6px;">RESULTS UPDATE AS YOU TYPE</div>
+  <div class="footer-hint" style="font-size:9px;opacity:.5;color:rgba(201,168,76,.7);border:2px solid rgba(93,232,160,.35);border-radius:6px;">RESULTS UPDATE AS YOU TYPE</div>
+</div>
+
+<div class="fix">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5" style="flex-shrink:0;margin-top:1px;"><polyline points="20 6 9 17 4 12"/></svg>
+  <span><span class="note-id">FIX</span> Line 12317: <code>font-size:8px; opacity:.5</code> → <code>font-size:9px; opacity:.7; color:var(--gold)</code> · inline style change</span>
+</div>
+
+</div><!-- /tab-size -->
+
+<!-- ═══════════ TAB: OPPORTUNITY CARDS ═══════════ -->
+<div class="tab-content" id="tab-opp">
+
+<div class="section-label">Issue 5 — Opportunity Cards: Too Tight</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">5</span> Confidence label at <code>8.5px</code>, badge padding <code>3px 9px</code>, levels <code>gap:3px</code> — all data that beginners need to read</span>
+</div>
+
+<div class="vs-label"><span class="vs-before">BEFORE</span> <span>8.5px conf label · 3px gap · tight badge</span></div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(232,112,110,.35);border-radius:12px;padding:2px;background:rgba(8,9,14,.68);">
+    <div style="border-radius:10px;overflow:hidden;border:1px solid rgba(237,232,216,.09);">
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 10px;">
+        <span style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.22);">01</span>
+        <div style="flex:1;"><div style="font-size:14px;font-weight:600;color:var(--t1);">ETHUSD</div><div style="font-size:10px;color:var(--t3);">Day Trade · 4H</div></div>
+        <span style="font-size:9.5px;font-weight:700;padding:3px 9px;border-radius:4px;background:rgba(93,232,160,.09);border:1px solid rgba(93,232,160,.28);color:#5de8a0;">BUY</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:0 16px 12px;">
+        <div style="width:52px;height:52px;border-radius:50%;background:rgba(93,232,160,.1);border:3px solid rgba(93,232,160,.35);display:flex;align-items:center;justify-content:center;"><span style="font-family:var(--mono);font-size:11px;">70</span></div>
+        <div style="flex:1;">
+          <div style="font-family:var(--mono);font-size:18px;color:rgba(237,232,216,.82);">1:2.4</div>
+          <div style="font-size:8.5px;letter-spacing:.07em;font-weight:600;text-transform:uppercase;color:rgba(93,232,160,.8);margin-top:3px;margin-bottom:8px;border:2px dashed rgba(232,112,110,.4);padding:2px 6px;border-radius:3px;">LIKELY ← 8.5px</div>
+          <div style="display:flex;flex-direction:column;gap:3px;border:2px dashed rgba(232,112,110,.4);padding:4px;border-radius:4px;">
+            <div style="display:flex;gap:8px;"><span style="font-size:9.5px;color:var(--t3);width:28px;">E</span><span style="font-family:var(--mono);font-size:10.5px;">2,408.32</span></div>
+            <div style="display:flex;gap:8px;"><span style="font-size:9.5px;color:var(--t3);width:28px;">SL</span><span style="font-family:var(--mono);font-size:10.5px;color:var(--red);">2,353.39</span></div>
+            <div style="display:flex;gap:8px;"><span style="font-size:9.5px;color:var(--t3);width:28px;">TP</span><span style="font-family:var(--mono);font-size:10.5px;color:var(--grn);">2,540.83</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="border:2px solid rgba(93,232,160,.35);border-radius:12px;padding:2px;background:rgba(8,9,14,.68);">
+    <div style="border-radius:10px;overflow:hidden;border:1px solid rgba(237,232,216,.09);">
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 10px;">
+        <span style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.22);">01</span>
+        <div style="flex:1;"><div style="font-size:14px;font-weight:600;color:var(--t1);">ETHUSD</div><div style="font-size:10px;color:var(--t3);">Day Trade · 4H</div></div>
+        <span style="font-size:10px;font-weight:700;padding:4px 10px;border-radius:4px;background:rgba(93,232,160,.09);border:1px solid rgba(93,232,160,.28);color:#5de8a0;">BUY</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:0 16px 12px;">
+        <div style="width:52px;height:52px;border-radius:50%;background:rgba(93,232,160,.1);border:3px solid rgba(93,232,160,.35);display:flex;align-items:center;justify-content:center;"><span style="font-family:var(--mono);font-size:11px;">70</span></div>
+        <div style="flex:1;">
+          <div style="font-family:var(--mono);font-size:18px;color:rgba(237,232,216,.82);">1:2.4</div>
+          <div style="font-size:10px;letter-spacing:.07em;font-weight:600;text-transform:uppercase;color:rgba(93,232,160,.8);margin-top:3px;margin-bottom:8px;">LIKELY</div>
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            <div style="display:flex;gap:8px;"><span style="font-size:9.5px;color:var(--t3);width:28px;">E</span><span style="font-family:var(--mono);font-size:10.5px;">2,408.32</span></div>
+            <div style="display:flex;gap:8px;"><span style="font-size:9.5px;color:var(--t3);width:28px;">SL</span><span style="font-family:var(--mono);font-size:10.5px;color:var(--red);">2,353.39</span></div>
+            <div style="display:flex;gap:8px;"><span style="font-size:9.5px;color:var(--t3);width:28px;">TP</span><span style="font-family:var(--mono);font-size:10.5px;color:var(--grn);">2,540.83</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fix" style="margin-bottom:24px;">
+  <span><span class="note-id">FIX</span> <code>.opp-conf-lbl</code> 8.5px→10px · <code>.opp-badge</code> 3px→4px · <code>.opp-levels gap</code> 3px→5px</span>
+</div>
+
+</div><!-- /tab-opp -->
+
+<!-- ═══════════ TAB: NAV + PILLS ═══════════ -->
+<div class="tab-content" id="tab-nav">
+
+<div class="section-label">Issue 6 — Pipeline Nav: Tiny Pills</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">6</span> Pipeline pills at <code>padding:2px 4px</code> + <code>9px font</code> + <code>gap:3px</code> — nearly invisible click targets on mobile</span>
+</div>
+
+<div class="vs-label"><span class="vs-before">BEFORE</span> <span>2px padding · 9px · 3px gap</span></div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="display:flex;align-items:center;gap:3px;padding:12px 14px 10px;border:2px solid rgba(232,112,110,.35);border-radius:8px;margin-bottom:8px;">
+    <span style="font-size:9px;font-weight:600;padding:2px 4px;border-radius:3px;color:rgba(200,210,232,.32);">MKT</span>
+    <span style="font-size:9px;color:rgba(237,232,216,.18);">›</span>
+    <span style="font-size:9px;font-weight:600;padding:2px 4px;border-radius:3px;color:rgba(200,210,232,.32);">SIG</span>
+    <span style="font-size:9px;color:rgba(237,232,216,.18);">›</span>
+    <span style="font-size:9px;font-weight:600;padding:2px 4px;border-radius:3px;color:rgba(237,232,216,.82);border:1px solid rgba(201,168,76,.45);">UND</span>
+    <span style="font-size:9px;color:rgba(237,232,216,.18);">›</span>
+    <span style="font-size:9px;font-weight:600;padding:2px 4px;border-radius:3px;color:rgba(200,210,232,.32);">SZE</span>
+    <span style="font-size:9px;color:rgba(237,232,216,.18);">›</span>
+    <span style="font-size:9px;font-weight:600;padding:2px 4px;border-radius:3px;color:rgba(200,210,232,.32);">ACT</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;padding:12px 14px 10px;border:2px solid rgba(93,232,160,.35);border-radius:8px;margin-bottom:8px;">
+    <span style="font-size:10px;font-weight:600;padding:4px 8px;border-radius:3px;color:rgba(200,210,232,.32);">MKT</span>
+    <span style="font-size:9px;color:rgba(237,232,216,.18);">›</span>
+    <span style="font-size:10px;font-weight:600;padding:4px 8px;border-radius:3px;color:rgba(200,210,232,.32);">SIG</span>
+    <span style="font-size:9px;color:rgba(237,232,216,.18);">›</span>
+    <span style="font-size:10px;font-weight:600;padding:4px 8px;border-radius:3px;color:rgba(237,232,216,.82);border:1px solid rgba(201,168,76,.45);">UND</span>
+    <span style="font-size:9px;color:rgba(237,232,216,.18);">›</span>
+    <span style="font-size:10px;font-weight:600;padding:4px 8px;border-radius:3px;color:rgba(200,210,232,.32);">SZE</span>
+    <span style="font-size:9px;color:rgba(237,232,216,.18);">›</span>
+    <span style="font-size:10px;font-weight:600;padding:4px 8px;border-radius:3px;color:rgba(200,210,232,.32);">ACT</span>
+  </div>
+</div>
+
+<div class="section-label" style="margin-top:32px;">Issue 7 — Scanner Pills: 2px Padding</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">7</span> Signal pills at <code>padding:2px 7px</code> — text touches pill edges, feels crushed</span>
+</div>
+
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="display:flex;gap:4px;border:2px solid rgba(232,112,110,.35);padding:10px;border-radius:8px;">
+    <span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;background:rgba(93,232,160,.1);color:#5de8a0;border:1px solid rgba(93,232,160,.3);">BUY</span>
+    <span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;background:rgba(232,112,110,.1);color:#e8706e;border:1px solid rgba(232,112,110,.3);">SELL</span>
+    <span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;background:rgba(237,232,216,.06);color:rgba(237,232,216,.55);border:1px solid rgba(237,232,216,.15);">HOLD</span>
+  </div>
+  <div style="display:flex;gap:4px;border:2px solid rgba(93,232,160,.35);padding:10px;border-radius:8px;">
+    <span style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:3px;background:rgba(93,232,160,.1);color:#5de8a0;border:1px solid rgba(93,232,160,.3);">BUY</span>
+    <span style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:3px;background:rgba(232,112,110,.1);color:#e8706e;border:1px solid rgba(232,112,110,.3);">SELL</span>
+    <span style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:3px;background:rgba(237,232,216,.06);color:rgba(237,232,216,.55);border:1px solid rgba(237,232,216,.15);">HOLD</span>
+  </div>
+</div>
+
+<div class="section-label" style="margin-top:32px;">Issue 8 — Heatmap "→Scan" at 7px: Invisible</div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(232,112,110,.35);padding:10px;border-radius:8px;text-align:center;">
+    <div style="padding:10px 6px 9px;border-radius:6px;background:rgba(93,232,160,.1);display:inline-block;width:68px;">
+      <div style="font-size:9.5px;font-weight:600;color:rgba(200,210,232,.82);">AAPL</div>
+      <div style="font-family:var(--mono);font-size:9px;margin-top:4px;color:#62f29d;">+2.66%</div>
+      <div style="font-size:7px;color:rgba(237,232,216,.25);margin-top:4px;border:2px dashed rgba(232,112,110,.4);padding:1px 3px;border-radius:2px;">→ Scan</div>
+    </div>
+  </div>
+  <div style="border:2px solid rgba(93,232,160,.35);padding:10px;border-radius:8px;text-align:center;">
+    <div style="padding:10px 6px 9px;border-radius:6px;background:rgba(93,232,160,.1);display:inline-block;width:68px;">
+      <div style="font-size:9.5px;font-weight:600;color:rgba(200,210,232,.82);">AAPL</div>
+      <div style="font-family:var(--mono);font-size:9px;margin-top:4px;color:#62f29d;">+2.66%</div>
+      <div style="font-size:9px;color:rgba(237,232,216,.35);margin-top:4px;">→ Scan</div>
+    </div>
+  </div>
+</div>
+
+<div class="fix" style="margin-bottom:24px;">
+  <span><span class="note-id">FIX</span> <code>.npp</code> padding 2px→4px, font 9px→10px, gap 3px→6px · <code>.sc-pill</code> padding 2px→3px · <code>.mkt-heat-cell::after</code> font 7px→9px</span>
+</div>
+
+</div><!-- /tab-nav -->
+
+<!-- ═══════════ TAB: ALL OTHER PAGES ═══════════ -->
+<div class="tab-content" id="tab-all">
+
+<div class="section-label">Issue 9 — Auth / Landing Page: Glued Text</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">9</span> Auth title <code>margin-bottom:4px</code> on 21px heading — subtext hugs the heading. Footer 6px below CTA.</span>
+</div>
+
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(232,112,110,.35);padding:20px;border-radius:10px;background:rgba(9,8,13,.8);width:320px;">
+    <div style="font-family:var(--syne);font-size:21px;font-weight:500;margin-bottom:4px;color:#ede8d8;">Welcome back</div>
+    <div style="font-size:13px;color:var(--t3);margin-bottom:20px;">Sign in to your account</div>
+    <input style="width:100%;padding:11px 13px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(201,168,76,.18);color:#ede8d8;font-family:var(--mono);font-size:13px;margin-bottom:12px;" placeholder="you@dotverse.ai">
+    <input style="width:100%;padding:11px 13px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(201,168,76,.18);color:#ede8d8;font-family:var(--mono);font-size:13px;margin-bottom:12px;" placeholder="Password" type="password">
+    <button style="width:100%;padding:13px;background:#c9a84c;border:none;border-radius:6px;color:#07080c;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:6px;">Sign In →</button>
+    <div style="text-align:center;font-size:12px;color:rgba(237,232,216,.4);">Don't have an account? <span style="color:rgba(201,168,76,.85);cursor:pointer;">Sign up</span></div>
+  </div>
+  <div style="border:2px solid rgba(93,232,160,.35);padding:20px;border-radius:10px;background:rgba(9,8,13,.8);width:320px;">
+    <div style="font-family:var(--syne);font-size:21px;font-weight:500;margin-bottom:8px;color:#ede8d8;">Welcome back</div>
+    <div style="font-size:13px;color:var(--t3);margin-bottom:20px;">Sign in to your account</div>
+    <input style="width:100%;padding:11px 13px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(201,168,76,.18);color:#ede8d8;font-family:var(--mono);font-size:13px;margin-bottom:12px;" placeholder="you@dotverse.ai">
+    <input style="width:100%;padding:11px 13px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(201,168,76,.18);color:#ede8d8;font-family:var(--mono);font-size:13px;margin-bottom:12px;" placeholder="Password" type="password">
+    <button style="width:100%;padding:13px;background:#c9a84c;border:none;border-radius:6px;color:#07080c;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">Sign In →</button>
+    <div style="text-align:center;font-size:12px;color:rgba(237,232,216,.4);">Don't have an account? <span style="color:rgba(201,168,76,.85);cursor:pointer;">Sign up</span></div>
+  </div>
+</div>
+
+<div class="section-label" style="margin-top:32px;">Issue 10 — Button Font Size Inconsistency</div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(232,112,110,.35);padding:10px;border-radius:8px;display:flex;flex-wrap:wrap;gap:6px;">
+    <span style="font-size:9px;padding:4px 7px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:4px;color:var(--gold);font-family:var(--mono);">DV Toggle 9px</span>
+    <span style="font-size:10px;padding:4px 8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:var(--t2);font-family:var(--mono);">Backtest 10px</span>
+    <span style="font-size:11.5px;padding:6px 14px;background:rgba(93,232,160,.1);border:1px solid rgba(93,232,160,.3);border-radius:6px;color:#5de8a0;font-weight:700;">Opportunity 11.5px</span>
+    <span style="font-size:12px;padding:8px 16px;background:#c9a84c;border:none;border-radius:7px;color:#07080c;font-weight:700;">CTA 12px</span>
+    <span style="margin-left:auto;font-size:9px;color:var(--mut);font-family:var(--mono);">4 different sizes</span>
+  </div>
+  <div style="border:2px solid rgba(93,232,160,.35);padding:10px;border-radius:8px;display:flex;flex-wrap:wrap;gap:6px;">
+    <span style="font-size:10px;padding:5px 10px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:4px;color:var(--gold);font-family:var(--mono);">DV Toggle 10px</span>
+    <span style="font-size:10.5px;padding:5px 10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:var(--t2);font-family:var(--mono);">Backtest 10.5px</span>
+    <span style="font-size:12px;padding:6px 14px;background:rgba(93,232,160,.1);border:1px solid rgba(93,232,160,.3);border-radius:6px;color:#5de8a0;font-weight:700;">Opportunity 12px</span>
+    <span style="font-size:12px;padding:8px 16px;background:#c9a84c;border:none;border-radius:7px;color:#07080c;font-weight:700;">CTA 12px</span>
+    <span style="margin-left:auto;font-size:9px;color:var(--grn);font-family:var(--mono);">2 sizes only</span>
+  </div>
+</div>
+
+<div class="section-label" style="margin-top:32px;">Issue 11 — All 8px Labels Across the Site</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">11</span> 12+ CSS selectors use <code>8px</code> font for data labels users need to read: Sonar labels, RR labels, duration labels, TP expand hints, heatmap "→Scan". These are decision-critical.</span>
+</div>
+
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(232,112,110,.35);padding:14px;border-radius:8px;">
+    <div style="font-size:8px;letter-spacing:.7px;color:var(--mut);text-transform:uppercase;margin-bottom:3px;">BALANCE ← 8px</div>
+    <div style="font-size:8px;letter-spacing:.7px;color:var(--mut);text-transform:uppercase;margin-bottom:3px;">MONEY AT RISK ← 8px</div>
+    <div style="font-size:8px;letter-spacing:.8px;text-transform:uppercase;color:var(--mut);margin-bottom:4px;">WORST CASE ← 8px</div>
+    <div style="font-size:8px;color:var(--mut);text-transform:uppercase;">SCALP ← 8px</div>
+    <div style="font-size:8px;color:var(--mut);margin-top:4px;">▼ DETAILS ← 8px</div>
+  </div>
+  <div style="border:2px solid rgba(93,232,160,.35);padding:14px;border-radius:8px;">
+    <div style="font-size:10px;letter-spacing:.7px;color:var(--mut);text-transform:uppercase;margin-bottom:3px;">BALANCE</div>
+    <div style="font-size:10px;letter-spacing:.7px;color:var(--mut);text-transform:uppercase;margin-bottom:3px;">MONEY AT RISK</div>
+    <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--mut);margin-bottom:4px;">WORST CASE</div>
+    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;">SCALP</div>
+    <div style="font-size:10px;color:var(--mut);margin-top:4px;">▼ DETAILS</div>
+  </div>
+</div>
+
+<div class="section-label" style="margin-top:32px;">Issue 12 — Sidebar Section Asymmetry</div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(232,112,110,.35);padding:12px 14px 5px;border-radius:8px;font-size:10px;letter-spacing:.06em;color:var(--t3);text-transform:uppercase;width:160px;margin-bottom:4px;">Pipeline ← 12px top · 5px bottom</div>
+  <div style="border:2px solid rgba(93,232,160,.35);padding:12px 14px 12px;border-radius:8px;font-size:10px;letter-spacing:.06em;color:var(--t3);text-transform:uppercase;width:160px;">Pipeline ← 12px both sides</div>
+</div>
+
+<div class="fix" style="margin-bottom:24px;">
+  <span><span class="note-id">FIX</span> 8px labels → 10px (12 selectors) · auth spacing · buttons 9px→10px · sidebar 5px→12px</span>
+</div>
+
+</div><!-- /tab-all -->
+
+<!-- ═══════════ TAB: BRAND ═══════════ -->
+<div class="tab-content" id="tab-brand">
+
+<div class="section-label">Issue 13 — Brand: Slogan + Logo + AI Removal + Name Casing</div>
+
+<div class="comp-grid" style="margin-bottom:24px;">
+  <!-- Before -->
+  <div style="border:2px solid rgba(232,112,110,.35);padding:24px;border-radius:12px;background:rgba(9,8,13,.85);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;">
+      <svg width="28" height="28" viewBox="0 0 28 28"><circle cx="5" cy="5" r="2.5" fill="#b8814a" opacity=".9"/><circle cx="23" cy="8" r="2" fill="#b8814a" opacity=".6"/><circle cx="14" cy="22" r="2" fill="#b8814a" opacity=".7"/><circle cx="20" cy="18" r="1.5" fill="#7c6fe0" opacity=".7"/><circle cx="8" cy="16" r="1.5" fill="#62f29d" opacity=".6"/><line x1="5" y1="5" x2="23" y2="8" stroke="#b8814a" opacity=".3"/><line x1="23" y1="8" x2="20" y2="18" stroke="#7c6fe0" opacity=".25"/><line x1="5" y1="5" x2="8" y2="16" stroke="#62f29d" opacity=".25"/><line x1="8" y1="16" x2="14" y2="22" stroke="#b8814a" opacity=".2"/><line x1="20" y1="18" x2="14" y2="22" stroke="#b8814a" opacity=".2"/></svg>
+      <span style="font-family:var(--syne);font-size:18px;">Dotverse</span>
+    </div>
+    <div style="font-family:var(--syne);font-size:32px;line-height:1.15;margin-bottom:12px;">Connect all the dots<br><span style="color:var(--gold);">of intelligence.</span></div>
+    <div style="font-size:14px;color:var(--t2);max-width:320px;margin-bottom:16px;">AI-powered signals, portfolio analytics, and market intelligence — unified into one trading workflow.</div>
+    <div style="font-size:11px;color:var(--mut);margin-top:20px;">
+      <div style="margin-bottom:4px;">✗ Name: Dotverse (lowercase v)</div>
+      <div>✗ Slogan: clichéd · AI everywhere</div>
+      <div>✗ Logo: 5 dots · 2 colors · wrong gold</div>
+    </div>
+  </div>
+  <!-- After -->
+  <div style="border:2px solid rgba(93,232,160,.35);padding:24px;border-radius:12px;background:rgba(9,8,13,.85);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;">
+      <svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="3" fill="#c9a84c" opacity=".95"/><circle cx="14" cy="14" r="6.5" stroke="#c9a84c" stroke-width=".7" opacity=".35" fill="none"/><circle cx="14" cy="14" r="10" stroke="#c9a84c" stroke-width=".5" opacity=".2" fill="none"/><circle cx="14" cy="14" r="13" stroke="#c9a84c" stroke-width=".35" opacity=".1" fill="none"/></svg>
+      <span style="display:flex;align-items:center;gap:3px;">
+        <svg width="7" height="7" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3.5" fill="#c9a84c"/></svg>
+        <span style="font-family:var(--syne);font-size:18px;color:var(--t1);">Dot</span><span style="font-family:var(--syne);font-size:18px;color:var(--gold);">Verse</span>
+      </span>
+    </div>
+    <div style="font-family:var(--syne);font-size:32px;line-height:1.15;margin-bottom:12px;">Connect the Dot<br><span style="color:var(--gold);">intelligently</span></div>
+    <div style="font-size:14px;color:var(--t2);max-width:320px;margin-bottom:16px;">Trade like you know</div>
+    <div style="font-size:11px;color:var(--grn);margin-top:20px;">
+      <div style="margin-bottom:4px;">✓ Name: DotVerse (capital V)</div>
+      <div>✓ Slogan: original · no AI</div>
+      <div>✓ Logo: dot + ripples · brand gold</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-label" style="margin-top:32px;">AI Text Removal: 8 Occurrences</div>
+<div class="comp-grid" style="margin-bottom:24px;">
+  <div style="border:2px solid rgba(232,112,110,.35);padding:14px;border-radius:8px;">
+    <div style="font-size:11px;color:var(--t3);margin-bottom:6px;"><span style="color:#e8706e;">AI-</span>ranked by confluence score</div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:6px;"><span style="color:#e8706e;">AI</span> signals and alerts will be filtered</div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:6px;"><span style="color:#e8706e;">AI-</span>filtered · sentiment scored</div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:6px;">Momentum <span style="color:#e8706e;">AI</span> · 4m ago</div>
+    <div style="font-size:11px;color:var(--t3);"><span style="color:#e8706e;">AI</span> Trade Assistant</div>
+  </div>
+  <div style="border:2px solid rgba(93,232,160,.35);padding:14px;border-radius:8px;">
+    <div style="font-size:11px;color:var(--t3);margin-bottom:6px;"><span style="color:#5de8a0;">Ranked</span> by confluence score</div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:6px;"><span style="color:#5de8a0;">S</span>ignals and alerts will be filtered</div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:6px;"><span style="color:#5de8a0;">Curated</span> · sentiment scored</div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:6px;">Momentum · 4m ago</div>
+    <div style="font-size:11px;color:var(--t3);">Trade Assistant</div>
+  </div>
+</div>
+
+<div class="fix" style="margin-bottom:24px;">
+  <span><span class="note-id">FIX</span> Brand: slogan, logo, name case, AI removal, gold color, email domain, sidebar rename</span>
+</div>
+
+</div><!-- /tab-brand -->
+
+<!-- ═══════════ TAB: GLOW + CTA ═══════════ -->
+<div class="tab-content" id="tab-cta">
+
+<div class="section-label">Issue 14 — Subtle Electric Glows on Interactive Elements</div>
+<div class="note">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  <span><span class="note-id">14</span> Original DotVerse had subtle electric glows on pills and buttons. Current version lost that — solid colors, no atmospheric light.</span>
+</div>
+
+<div class="vs-label"><span class="vs-before">BEFORE</span> <span>flat pills · no glow · solid yellow CTA</span></div>
+<div style="border:2px solid rgba(232,112,110,.35);padding:16px;border-radius:10px;display:flex;flex-direction:column;gap:14px;margin-bottom:8px;">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <span style="font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.55);background:rgba(255,255,255,.03);">15M</span>
+    <span style="font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.55);background:rgba(255,255,255,.03);">1H</span>
+    <span style="font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(201,168,76,.4);color:#c9a84c;background:rgba(255,255,255,.07);">4H</span>
+    <span style="font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.55);background:rgba(255,255,255,.03);">1D</span>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <span style="font-size:9.5px;padding:5px 12px;border-radius:5px;border:1px solid rgba(237,232,216,.12);color:rgba(237,232,216,.55);background:rgba(255,248,230,.03);">ALL</span>
+    <span style="font-size:9.5px;padding:5px 12px;border-radius:5px;border:1px solid rgba(93,232,160,.4);color:#5de8a0;background:rgba(93,232,160,.08);">BUY</span>
+    <span style="font-size:9.5px;padding:5px 12px;border-radius:5px;border:1px solid rgba(237,232,216,.12);color:rgba(237,232,216,.55);background:rgba(255,248,230,.03);">SELL</span>
+  </div>
+  <button style="background:#c9a84c;color:#07080c;font-weight:700;border-radius:7px;border:none;padding:11px 18px;font-size:12px;width:220px;">View All Signals →</button>
+</div>
+
+<div class="vs-label" style="margin-top:24px;"><span class="vs-after">AFTER</span> <span>subtle electric glow · muted CTA with atmospheric light</span></div>
+<div style="border:2px solid rgba(93,232,160,.35);padding:16px;border-radius:10px;display:flex;flex-direction:column;gap:14px;margin-bottom:8px;">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <span style="font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.55);background:rgba(255,255,255,.03);box-shadow:0 0 6px rgba(201,168,76,.04);">15M</span>
+    <span style="font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.55);background:rgba(255,255,255,.03);box-shadow:0 0 6px rgba(201,168,76,.04);">1H</span>
+    <span style="font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(201,168,76,.4);color:#c9a84c;background:rgba(255,255,255,.07);box-shadow:0 0 10px rgba(201,168,76,.12);">4H</span>
+    <span style="font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.55);background:rgba(255,255,255,.03);box-shadow:0 0 6px rgba(201,168,76,.04);">1D</span>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <span style="font-size:9.5px;padding:5px 12px;border-radius:5px;border:1px solid rgba(237,232,216,.12);color:rgba(237,232,216,.55);background:rgba(255,248,230,.03);box-shadow:0 0 8px rgba(201,168,76,.03);">ALL</span>
+    <span style="font-size:9.5px;padding:5px 12px;border-radius:5px;border:1px solid rgba(93,232,160,.4);color:#5de8a0;background:rgba(93,232,160,.08);box-shadow:0 0 12px rgba(93,232,160,.1);">BUY</span>
+    <span style="font-size:9.5px;padding:5px 12px;border-radius:5px;border:1px solid rgba(237,232,216,.12);color:rgba(237,232,216,.55);background:rgba(255,248,230,.03);box-shadow:0 0 8px rgba(201,168,76,.03);">SELL</span>
+  </div>
+  <button style="background:rgba(201,168,76,.12);color:#d4b558;font-weight:600;border-radius:7px;border:1px solid rgba(201,168,76,.35);padding:11px 18px;font-size:12px;width:220px;box-shadow:0 0 14px rgba(201,168,76,.08);">View All Signals →</button>
+</div>
+
+<div class="fix" style="margin-top:20px;">
+  <span><span class="note-id">FIX</span> Add <code>box-shadow: 0 0 6-12px rgba(201,168,76,.04-.12)</code> to all pills, buttons, filter toggles · CTA solid fill → ghost+glow</span>
+</div>
+
+</div><!-- /tab-cta -->
+
+<!-- ═══════════ TABS ═══════════ -->
+<div class="tabs" style="margin-top:40px;">
+  <button class="tab-btn active" onclick="showTab('market')">1-2: Market + Signals</button>
+  <button class="tab-btn" onclick="showTab('size')">3-4: Size Page</button>
+  <button class="tab-btn" onclick="showTab('opp')">5: Opportunity Cards</button>
+  <button class="tab-btn" onclick="showTab('nav')">6-8: Nav + Pills</button>
+  <button class="tab-btn" onclick="showTab('all')">9-12: All Other</button>
+  <button class="tab-btn" onclick="showTab('brand')">13: Brand</button>
+</div>
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+  var btns = document.querySelectorAll('.tab-btn');
+  for(var i=0;i<btns.length;i++){if(btns[i].getAttribute('onclick').indexOf("'"+id+"'")>-1)btns[i].classList.add('active');}
+  var target = document.getElementById('tab-'+id);
+  if(target) target.classList.add('active');
+}
+</script>
+
+</body>
+</html>

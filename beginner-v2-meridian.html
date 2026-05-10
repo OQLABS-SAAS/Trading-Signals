@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DotVerse Beginner — V2: Meridian</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#F9F6F1;--bg2:#FFFFFF;--bg3:#F2EDE6;--bg4:#EAE4DB;
+  --amber:#C8780A;--amber-lt:#E8952A;--amber-bg:rgba(200,120,10,.07);--amber-border:rgba(200,120,10,.2);
+  --navy:#0F172A;--navy2:#1E293B;--navy3:#334155;
+  --green:#0D6E4E;--green-bg:rgba(13,110,78,.08);--green-border:rgba(13,110,78,.2);
+  --red:#B91C1C;--red-bg:rgba(185,28,28,.07);--red-border:rgba(185,28,28,.2);
+  --muted:#64748B;--muted2:#94A3B8;
+  --border:#E2D9CC;--border2:#D1C8BB;
+  --display:'Playfair Display',serif;--sans:'DM Sans',sans-serif;
+  --radius:8px;--shadow:0 2px 16px rgba(15,23,42,.07);
+}
+body{background:var(--bg);color:var(--navy);font-family:var(--sans);min-height:100vh;overflow-x:hidden}
+
+/* NOISE TEXTURE */
+body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;opacity:.4;z-index:0}
+.main{position:relative;z-index:1}
+
+/* NAV */
+nav{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;background:var(--bg2);border-bottom:1px solid var(--border);box-shadow:var(--shadow);position:sticky;top:0;z-index:100}
+.nav-logo{font-family:var(--display);font-size:18px;font-weight:900;color:var(--navy);letter-spacing:.5px}
+.nav-logo span{color:var(--amber)}
+.mode-toggle{display:flex;background:var(--bg3);border:1px solid var(--border2);border-radius:20px;padding:3px;overflow:hidden}
+.mode-btn{padding:6px 16px;font-family:var(--sans);font-size:11px;font-weight:600;cursor:pointer;border:none;background:transparent;color:var(--muted);border-radius:16px;transition:all .2s}
+.mode-btn.active{background:var(--navy);color:#FFF}
+.nav-chip{font-size:12px;color:var(--muted)}
+.nav-price{color:var(--navy2);font-weight:600}
+.nav-chg{color:var(--green);font-weight:600;margin-left:4px}
+
+/* TABS */
+.tab-bar{display:flex;gap:0;padding:0 28px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.tab{padding:12px 20px;font-family:var(--sans);font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s}
+.tab.active{color:var(--amber);border-bottom-color:var(--amber)}
+.tab:hover:not(.active){color:var(--navy2)}
+
+/* MAIN */
+.main{padding:28px;max-width:960px;margin:0 auto}
+.section{display:none}
+.section.active{display:block}
+
+/* GUIDE STRIP */
+.guide-strip{background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:20px;display:flex;align-items:flex-start;gap:10px;font-size:13px;color:var(--amber);line-height:1.6}
+
+/* SEARCH */
+.search-row{display:flex;gap:10px;margin-bottom:16px}
+.search-box{flex:1;background:var(--bg2);border:1.5px solid var(--border2);border-radius:var(--radius);padding:12px 16px;font-family:var(--sans);font-size:13px;color:var(--navy);outline:none;box-shadow:var(--shadow);transition:border .2s}
+.search-box:focus{border-color:var(--amber)}
+.search-box::placeholder{color:var(--muted2)}
+.tf-select{background:var(--bg2);border:1.5px solid var(--border2);border-radius:var(--radius);padding:12px 14px;font-family:var(--sans);font-size:12px;color:var(--navy2);outline:none;cursor:pointer;box-shadow:var(--shadow)}
+.btn-analyze{background:var(--navy);color:#FFF;border:none;border-radius:var(--radius);padding:12px 24px;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;box-shadow:var(--shadow);transition:background .2s;white-space:nowrap}
+.btn-analyze:hover{background:var(--navy2)}
+
+/* CHIPS */
+.chip-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:24px}
+.chip{padding:6px 14px;background:var(--bg2);border:1.5px solid var(--border);border-radius:20px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;transition:all .2s;box-shadow:var(--shadow)}
+.chip:hover,.chip.active{background:var(--amber-bg);border-color:var(--amber-border);color:var(--amber)}
+
+/* CHART */
+.chart-panel{background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow);margin-bottom:20px}
+.chart-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+.chart-ticker-block{display:flex;align-items:baseline;gap:10px}
+.chart-ticker{font-family:var(--display);font-size:18px;font-weight:700;color:var(--navy)}
+.chart-price{font-family:var(--display);font-size:24px;font-weight:900;color:var(--navy)}
+.chart-chg{font-size:12px;color:var(--green);font-weight:600;background:var(--green-bg);border:1px solid var(--green-border);padding:3px 8px;border-radius:20px}
+.chart-tfs{display:flex;gap:4px}
+.chart-tf{padding:5px 10px;font-size:10px;font-weight:600;border:1.5px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;background:transparent;font-family:var(--sans)}
+.chart-tf.active{border-color:var(--amber-border);color:var(--amber);background:var(--amber-bg)}
+canvas{display:block;width:100%;height:220px}
+
+/* DECISION BLOCK */
+.decision-block{background:var(--bg2);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:24px;margin-bottom:16px;display:flex;gap:24px;align-items:flex-start}
+.decision-left{flex-shrink:0;text-align:center}
+.big-circle{width:100px;height:100px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;border:3px solid;margin-bottom:8px}
+.big-circle.buy{background:var(--green-bg);border-color:rgba(13,110,78,.4)}
+.circle-sig{font-family:var(--display);font-size:22px;font-weight:900}
+.circle-sig.buy{color:var(--green)}
+.circle-conf{font-size:10px;font-weight:600;color:var(--muted)}
+.decision-right{flex:1}
+.decision-headline{font-family:var(--display);font-size:20px;font-weight:700;color:var(--navy);margin-bottom:8px;line-height:1.3}
+.decision-body{font-size:13px;color:var(--muted);line-height:1.7}
+
+/* STEP CARDS */
+.steps-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.step-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:var(--shadow)}
+.step-num{font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.step-label{font-size:11px;color:var(--muted);margin-bottom:6px}
+.step-value{font-family:var(--display);font-size:18px;font-weight:700}
+.step-sub{font-size:10px;color:var(--muted2);margin-top:3px}
+
+/* SAFETY ROW */
+.safety-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
+.safety-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;box-shadow:var(--shadow)}
+.safety-label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.safety-pip{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.safety-val{font-size:13px;font-weight:600;color:var(--navy2)}
+
+/* WHY STRIP */
+.why-strip{background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:10px;padding:16px;margin-bottom:16px}
+.why-label{font-family:var(--display);font-size:13px;font-weight:700;color:var(--amber);margin-bottom:8px;font-style:italic}
+.why-text{font-size:13px;color:var(--navy3);line-height:1.7}
+
+/* ACTIONS */
+.action-row{display:flex;gap:10px}
+.btn-secondary{flex:1;padding:12px;background:var(--bg2);border:1.5px solid var(--border2);border-radius:var(--radius);font-family:var(--sans);font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;transition:all .2s}
+.btn-secondary:hover{border-color:var(--amber-border);color:var(--amber);background:var(--amber-bg)}
+.btn-primary{flex:1;padding:12px;background:var(--navy);border:none;border-radius:var(--radius);font-family:var(--sans);font-size:12px;font-weight:600;color:#FFF;cursor:pointer;box-shadow:var(--shadow)}
+.btn-primary:hover{background:var(--navy2)}
+
+/* BACKTEST */
+.bt-perf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.bt-metric{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:var(--shadow);text-align:center}
+.bt-metric-label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.bt-metric-val{font-family:var(--display);font-size:24px;font-weight:900}
+.bt-verdict{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px;box-shadow:var(--shadow);margin-bottom:16px}
+.bt-verdict-title{font-family:var(--display);font-size:16px;font-weight:700;color:var(--navy);margin-bottom:10px;font-style:italic}
+.bt-verdict-text{font-size:13px;color:var(--muted);line-height:1.8}
+
+/* SCANNER */
+.scan-item{display:flex;align-items:center;gap:14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:all .2s;box-shadow:var(--shadow)}
+.scan-item:hover{border-color:var(--amber-border);box-shadow:0 4px 20px rgba(200,120,10,.08)}
+.scan-sig-badge{width:48px;height:48px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:.5px;flex-shrink:0;font-family:var(--sans)}
+.sig-buy{background:var(--green-bg);border:1.5px solid var(--green-border);color:var(--green)}
+.sig-sell{background:var(--red-bg);border:1.5px solid var(--red-border);color:var(--red)}
+.sig-hold{background:var(--amber-bg);border:1.5px solid var(--amber-border);color:var(--amber)}
+.scan-info{flex:1}
+.scan-ticker{font-family:var(--display);font-size:14px;font-weight:700;color:var(--navy)}
+.scan-desc{font-size:11px;color:var(--muted);margin-top:3px}
+.scan-rr{text-align:right;font-family:var(--display);font-size:16px;font-weight:700;color:var(--navy2)}
+.scan-rr-label{font-size:10px;color:var(--muted);margin-top:2px}
+
+/* PORTFOLIO */
+.pf-summary{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
+.pf-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;box-shadow:var(--shadow)}
+.pf-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px}
+.pf-val{font-family:var(--display);font-size:24px;font-weight:900;color:var(--navy)}
+.pf-sub{font-size:11px;color:var(--muted2);margin-top:4px}
+.pf-risk-bar{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px;box-shadow:var(--shadow)}
+.pf-risk-title{font-family:var(--display);font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px;font-style:italic}
+.risk-track{height:8px;background:var(--bg4);border-radius:4px;margin-bottom:8px;overflow:hidden}
+.risk-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#0D6E4E,#C8780A)}
+.risk-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted)}
+.pf-pos-list{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.pf-pos-header{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;padding:10px 16px;background:var(--bg3);border-bottom:1px solid var(--border);font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.pf-pos-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;padding:12px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--navy3)}
+.pf-pos-row:last-child{border-bottom:none}
+.pos-ticker{color:var(--navy);font-weight:700}
+.pos-pl-pos{color:var(--green);font-weight:600}
+
+/* UPSELL */
+.upsell{text-align:center;margin-top:24px;padding:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)}
+.upsell-link{color:var(--amber);cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">Dot<span>Verse</span></div>
+  <div class="mode-toggle">
+    <button class="mode-btn" onclick="setMode('pro')">Pro Mode</button>
+    <button class="mode-btn active" onclick="setMode('beginner')">Beginner</button>
+  </div>
+  <div class="nav-chip">
+    <span class="nav-price">BTC-USD $83,420</span>
+    <span class="nav-chg">▲ 2.14%</span>
+  </div>
+</nav>
+
+<div class="tab-bar">
+  <div class="tab active" onclick="switchTab('signal',this)">Signal</div>
+  <div class="tab" onclick="switchTab('backtest',this)">Backtest</div>
+  <div class="tab" onclick="switchTab('scanner',this)">Scanner</div>
+  <div class="tab" onclick="switchTab('portfolio',this)">Portfolio</div>
+</div>
+
+<div class="main">
+
+  <!-- SIGNAL TAB -->
+  <div id="tab-signal" class="section active">
+    <div class="guide-strip">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span>Enter any stock, crypto, or currency and we'll give you one clear answer: buy, sell, or wait — with exact price levels.</span>
+    </div>
+    <div class="search-row">
+      <input class="search-box" type="text" placeholder="Stock, crypto, forex… (e.g. AAPL, BTC, EURUSD)" value="BTC-USD">
+      <select class="tf-select"><option>4H</option><option>1H</option><option>1D</option><option>1W</option></select>
+      <button class="btn-analyze">⚡ Analyse</button>
+    </div>
+    <div class="chip-row">
+      <span class="chip active">BTC</span>
+      <span class="chip">ETH</span>
+      <span class="chip">AAPL</span>
+      <span class="chip">NVDA</span>
+      <span class="chip">EUR/USD</span>
+      <span class="chip">Gold</span>
+    </div>
+
+    <div class="chart-panel">
+      <div class="chart-header">
+        <div class="chart-ticker-block">
+          <span class="chart-ticker">BTC-USD</span>
+          <span class="chart-price">$83,420</span>
+          <span class="chart-chg">▲ +2.14%</span>
+        </div>
+        <div class="chart-tfs">
+          <button class="chart-tf">1H</button>
+          <button class="chart-tf active">4H</button>
+          <button class="chart-tf">1D</button>
+          <button class="chart-tf">1W</button>
+        </div>
+      </div>
+      <canvas id="chartCanvas"></canvas>
+    </div>
+
+    <div class="decision-block">
+      <div class="decision-left">
+        <div class="big-circle buy">
+          <span class="circle-sig buy">BUY</span>
+          <span class="circle-conf">78%</span>
+        </div>
+        <div style="font-size:10px;color:var(--muted);font-weight:600">CONFIRMED</div>
+      </div>
+      <div class="decision-right">
+        <div class="decision-headline">The market is trending up — it's a good time to buy</div>
+        <div class="decision-body">Momentum is building across multiple timeframes. Price broke above a key level with higher than average volume. Risk is clearly defined with a tight stop loss below recent support.</div>
+      </div>
+    </div>
+
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-num">① Buy at</div>
+        <div class="step-label">Entry price</div>
+        <div class="step-value" style="color:var(--navy)">$83,420</div>
+        <div class="step-sub">Current market</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">② Stop Loss</div>
+        <div class="step-label">Exit if wrong</div>
+        <div class="step-value" style="color:var(--red)">$79,800</div>
+        <div class="step-sub">Protects your account</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">③ Take Profit</div>
+        <div class="step-label">First target</div>
+        <div class="step-value" style="color:var(--green)">$89,600</div>
+        <div class="step-sub">2.1:1 reward</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">④ Position Size</div>
+        <div class="step-label">% of account</div>
+        <div class="step-value" style="color:var(--amber)">2.4%</div>
+        <div class="step-sub">For 1% account risk</div>
+      </div>
+    </div>
+
+    <div class="safety-row">
+      <div class="safety-card">
+        <div class="safety-label">Timing</div>
+        <span class="safety-pip" style="background:#0D6E4E"></span>
+        <span class="safety-val" style="color:var(--green)">Good</span>
+      </div>
+      <div class="safety-card">
+        <div class="safety-label">Risk Level</div>
+        <span class="safety-pip" style="background:#C8780A"></span>
+        <span class="safety-val" style="color:var(--amber)">Medium</span>
+      </div>
+      <div class="safety-card">
+        <div class="safety-label">Signal Strength</div>
+        <span class="safety-pip" style="background:#0D6E4E"></span>
+        <span class="safety-val" style="color:var(--green)">Strong</span>
+      </div>
+    </div>
+
+    <div class="why-strip">
+      <div class="why-label">Why we're saying BUY</div>
+      <div class="why-text">RSI sits at 58 — room to grow without being overbought. Price closed above its 21-period moving average for 3 consecutive candles. MACD flipped positive. Volume came in 40% above the daily average, which suggests real buying conviction — not just a random spike.</div>
+    </div>
+    <div class="action-row">
+      <button class="btn-secondary">View Backtest History</button>
+      <button class="btn-primary">⚡ Set Price Alert</button>
+    </div>
+    <div class="upsell">
+      Want all 12 indicators, the strategy scanner, and position tracker? <span class="upsell-link" onclick="setMode('pro')">Upgrade to Pro Mode →</span>
+    </div>
+  </div>
+
+  <!-- BACKTEST TAB -->
+  <div id="tab-backtest" class="section">
+    <div class="guide-strip">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span>See how our signal performed on this asset in the past — so you can decide if you trust it before risking real money.</span>
+    </div>
+    <div class="search-row">
+      <input class="search-box" type="text" value="BTC-USD" placeholder="Enter ticker...">
+      <select class="tf-select"><option>6 months</option><option>3 months</option><option>1 year</option></select>
+      <button class="btn-analyze">⚡ Run Backtest</button>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-header">
+        <div>
+          <div class="chart-ticker" style="font-size:14px">Equity Curve — BTC-USD / 4H</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Strategy vs buy & hold, last 6 months</div>
+        </div>
+        <span class="chart-chg">Strategy: +34.2%</span>
+      </div>
+      <canvas id="btCanvas"></canvas>
+    </div>
+    <div class="bt-perf-grid">
+      <div class="bt-metric"><div class="bt-metric-label">Win Rate</div><div class="bt-metric-val" style="color:var(--green)">62%</div></div>
+      <div class="bt-metric"><div class="bt-metric-label">Total Return</div><div class="bt-metric-val" style="color:var(--green)">+34.2%</div></div>
+      <div class="bt-metric"><div class="bt-metric-label">Max Drawdown</div><div class="bt-metric-val" style="color:var(--red)">-8.4%</div></div>
+      <div class="bt-metric"><div class="bt-metric-label">No. of Trades</div><div class="bt-metric-val" style="color:var(--navy)">47</div></div>
+    </div>
+    <div class="bt-verdict">
+      <div class="bt-verdict-title">What these numbers mean for you</div>
+      <div class="bt-verdict-text">This strategy won 62 out of every 100 trades. For every $1 you risked, you made $2.10 back on average. The worst stretch saw your account drop 8.4% before recovering — on a $10,000 account that's a temporary dip of about $840. That's manageable if you use the position size we recommend.</div>
+    </div>
+    <div class="action-row">
+      <button class="btn-secondary">Download Full Report</button>
+      <button class="btn-primary">⚡ Trade This Signal Now</button>
+    </div>
+  </div>
+
+  <!-- SCANNER TAB -->
+  <div id="tab-scanner" class="section">
+    <div class="guide-strip">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span>Here are the strongest opportunities right now, ranked by quality of the signal. Tap any row to see full details.</span>
+    </div>
+    <div class="search-row" style="margin-bottom:16px">
+      <select class="tf-select" style="flex:1"><option>All Markets</option><option>Crypto only</option><option>Stocks only</option><option>Forex only</option></select>
+      <button class="btn-analyze">⚡ Scan Markets Now</button>
+    </div>
+    <div class="scan-item">
+      <div class="scan-sig-badge sig-buy">BUY</div>
+      <div class="scan-info">
+        <div class="scan-ticker">Bitcoin / USD</div>
+        <div class="scan-desc">RSI breakout · Volume surge · Above EMA21</div>
+      </div>
+      <div class="scan-rr"><div>2.1:1</div><div class="scan-rr-label">Risk / Reward</div></div>
+    </div>
+    <div class="scan-item">
+      <div class="scan-sig-badge sig-buy">BUY</div>
+      <div class="scan-info">
+        <div class="scan-ticker">NVIDIA Corp</div>
+        <div class="scan-desc">MACD crossover · Institutional flow detected</div>
+      </div>
+      <div class="scan-rr"><div>3.4:1</div><div class="scan-rr-label">Risk / Reward</div></div>
+    </div>
+    <div class="scan-item">
+      <div class="scan-sig-badge sig-sell">SELL</div>
+      <div class="scan-info">
+        <div class="scan-ticker">EUR / USD</div>
+        <div class="scan-desc">Overbought RSI · Resistance rejection · Bearish divergence</div>
+      </div>
+      <div class="scan-rr"><div>1.8:1</div><div class="scan-rr-label">Risk / Reward</div></div>
+    </div>
+    <div class="scan-item">
+      <div class="scan-sig-badge sig-buy">BUY</div>
+      <div class="scan-info">
+        <div class="scan-ticker">Ethereum / USD</div>
+        <div class="scan-desc">Breakout from consolidation · Strong momentum</div>
+      </div>
+      <div class="scan-rr"><div>2.6:1</div><div class="scan-rr-label">Risk / Reward</div></div>
+    </div>
+    <div class="scan-item">
+      <div class="scan-sig-badge sig-hold">WAIT</div>
+      <div class="scan-info">
+        <div class="scan-ticker">Gold (XAU/USD)</div>
+        <div class="scan-desc">Mixed signals — waiting for a clear direction</div>
+      </div>
+      <div class="scan-rr"><div>—</div><div class="scan-rr-label">Risk / Reward</div></div>
+    </div>
+  </div>
+
+  <!-- PORTFOLIO TAB -->
+  <div id="tab-portfolio" class="section">
+    <div class="guide-strip">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span>Log your open trades here. We'll tell you if your portfolio is too risky before it's too late.</span>
+    </div>
+    <div class="pf-summary">
+      <div class="pf-card">
+        <div class="pf-label">Portfolio Value</div>
+        <div class="pf-val">$10,420</div>
+        <div class="pf-sub">+$420 this month</div>
+      </div>
+      <div class="pf-card">
+        <div class="pf-label">Safety Check</div>
+        <div class="pf-val" style="color:var(--green)">Healthy</div>
+        <div class="pf-sub">Risk within safe limits</div>
+      </div>
+      <div class="pf-card">
+        <div class="pf-label">Worst-Case Loss Today</div>
+        <div class="pf-val" style="color:var(--amber)">$246</div>
+        <div class="pf-sub">2.4% of your portfolio</div>
+      </div>
+    </div>
+    <div class="pf-risk-bar">
+      <div class="pf-risk-title">How exposed is your portfolio?</div>
+      <div class="risk-track"><div class="risk-fill" style="width:34%"></div></div>
+      <div class="risk-labels"><span>Safe (0%)</span><span style="color:var(--amber);font-weight:600">34% exposed</span><span>Danger (100%)</span></div>
+    </div>
+    <div class="pf-pos-list">
+      <div class="pf-pos-header">
+        <div>Asset</div><div>Entry</div><div>Now</div><div>Profit / Loss</div>
+      </div>
+      <div class="pf-pos-row">
+        <div class="pos-ticker">BTC-USD <span style="font-size:9px;color:var(--green);font-weight:700;margin-left:4px;background:var(--green-bg);padding:1px 5px;border-radius:4px">BUY</span></div>
+        <div>$81,200</div><div>$83,420</div><div class="pos-pl-pos">+$220</div>
+      </div>
+      <div class="pf-pos-row">
+        <div class="pos-ticker">AAPL <span style="font-size:9px;color:var(--green);font-weight:700;margin-left:4px;background:var(--green-bg);padding:1px 5px;border-radius:4px">BUY</span></div>
+        <div>$200.00</div><div>$204.50</div><div class="pos-pl-pos">+$45</div>
+      </div>
+      <div class="pf-pos-row">
+        <div class="pos-ticker">EUR/USD <span style="font-size:9px;color:var(--red);font-weight:700;margin-left:4px;background:var(--red-bg);padding:1px 5px;border-radius:4px">SELL</span></div>
+        <div>1.0820</div><div>1.0795</div><div class="pos-pl-pos">+$25</div>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="action-row">
+        <button class="btn-secondary">+ Log a New Trade</button>
+        <button class="btn-primary">⚡ Run Safety Check</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function switchTab(id,el){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  el.classList.add('active');
+  if(id==='backtest') drawBtChart();
+}
+function setMode(m){
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  if(m==='pro') document.querySelector('.mode-btn:first-child').classList.add('active');
+  else document.querySelector('.mode-btn:last-child').classList.add('active');
+  if(m==='pro') alert('PRO MODE — Full DotVerse interface with sidebar, indicator grid, analysis tabs and all advanced tools.');
+}
+
+// SIGNAL CHART
+(function(){
+  const canvas=document.getElementById('chartCanvas');
+  if(!canvas)return;
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.parentElement.clientWidth;
+  const H=220;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+
+  const n=90;const pts=[];let p=79000;
+  for(let i=0;i<n;i++){p+=((Math.random()-.45)*1100);pts.push(Math.max(73000,Math.min(90000,p)));}
+  pts[n-1]=83420;
+
+  const min=Math.min(...pts)-1500;const max=Math.max(...pts)+1500;
+  const xS=(W-24)/n;const yR=max-min;
+  const toX=i=>12+i*xS;const toY=v=>H-12-(v-min)/yR*(H-28);
+
+  // Background grid
+  ctx.strokeStyle='rgba(226,217,204,0.4)';ctx.lineWidth=1;
+  for(let r=0;r<4;r++){const y=12+r*(H-24)/3;ctx.beginPath();ctx.moveTo(12,y);ctx.lineTo(W-12,y);ctx.stroke();}
+
+  // Fill
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(200,120,10,0.12)');
+  grad.addColorStop(1,'rgba(200,120,10,0)');
+  ctx.beginPath();ctx.moveTo(toX(0),toY(pts[0]));
+  for(let i=1;i<n;i++)ctx.lineTo(toX(i),toY(pts[i]));
+  ctx.lineTo(toX(n-1),H-12);ctx.lineTo(toX(0),H-12);ctx.closePath();
+  ctx.fillStyle=grad;ctx.fill();
+
+  // Line
+  ctx.beginPath();ctx.strokeStyle='#C8780A';ctx.lineWidth=2;
+  ctx.moveTo(toX(0),toY(pts[0]));
+  for(let i=1;i<n;i++)ctx.lineTo(toX(i),toY(pts[i]));
+  ctx.stroke();
+
+  // Level lines
+  function hline(val,color,label,align){
+    const y=toY(val);
+    ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=1;ctx.setLineDash([5,5]);
+    ctx.moveTo(12,y);ctx.lineTo(W-12,y);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=color;ctx.font='600 10px DM Sans,sans-serif';
+    const x=align==='left'?14:W-80;ctx.fillText(label,x,y-4);
+  }
+  hline(89600,'#0D6E4E','TP $89,600');
+  hline(83420,'#C8780A','ENTRY $83,420');
+  hline(79800,'#B91C1C','SL $79,800');
+
+  // Dot
+  ctx.beginPath();ctx.arc(toX(n-1),toY(pts[n-1]),5,0,Math.PI*2);
+  ctx.fillStyle='#C8780A';ctx.fill();
+  ctx.beginPath();ctx.arc(toX(n-1),toY(pts[n-1]),9,0,Math.PI*2);
+  ctx.strokeStyle='rgba(200,120,10,0.3)';ctx.lineWidth=2;ctx.stroke();
+})();
+
+function drawBtChart(){
+  const canvas=document.getElementById('btCanvas');
+  if(!canvas||canvas._drawn)return;canvas._drawn=true;
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.parentElement.clientWidth;const H=220;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
+  const n=60;const strat=[];const hold=[];
+  let s=10000,h=10000;
+  for(let i=0;i<n;i++){s+=s*(Math.random()*.028-.007);h+=h*(Math.random()*.022-.009);strat.push(s);hold.push(h);}
+  strat[n-1]=13420;hold[n-1]=11810;
+  const all=[...strat,...hold];
+  const min=Math.min(...all)*.97;const max=Math.max(...all)*1.03;
+  const xS=(W-24)/n;const yR=max-min;
+  const toX=i=>12+i*xS;const toY=v=>H-12-(v-min)/yR*(H-28);
+
+  // Grid
+  ctx.strokeStyle='rgba(226,217,204,0.5)';ctx.lineWidth=1;
+  for(let r=0;r<4;r++){const y=12+r*(H-24)/3;ctx.beginPath();ctx.moveTo(12,y);ctx.lineTo(W-12,y);ctx.stroke();}
+
+  // Hold line (dashed)
+  ctx.beginPath();ctx.strokeStyle='#94A3B8';ctx.lineWidth=1.5;ctx.setLineDash([4,4]);
+  ctx.moveTo(toX(0),toY(hold[0]));for(let i=1;i<n;i++)ctx.lineTo(toX(i),toY(hold[i]));ctx.stroke();ctx.setLineDash([]);
+
+  // Strategy fill
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(200,120,10,0.15)');grad.addColorStop(1,'rgba(200,120,10,0)');
+  ctx.beginPath();ctx.moveTo(toX(0),toY(strat[0]));
+  for(let i=1;i<n;i++)ctx.lineTo(toX(i),toY(strat[i]));
+  ctx.lineTo(toX(n-1),H-12);ctx.lineTo(toX(0),H-12);ctx.closePath();
+  ctx.fillStyle=grad;ctx.fill();
+
+  ctx.beginPath();ctx.strokeStyle='#C8780A';ctx.lineWidth=2;
+  ctx.moveTo(toX(0),toY(strat[0]));for(let i=1;i<n;i++)ctx.lineTo(toX(i),toY(strat[i]));ctx.stroke();
+
+  ctx.fillStyle='#C8780A';ctx.font='600 11px DM Sans,sans-serif';ctx.fillText('Strategy +34.2%',W-130,toY(strat[n-1])-8);
+  ctx.fillStyle='#94A3B8';ctx.fillText('Buy & Hold +18.1%',W-140,toY(hold[n-1])+16);
+}
+</script>
+</body>
+</html>

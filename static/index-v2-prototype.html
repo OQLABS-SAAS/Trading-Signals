@@ -12452,6 +12452,43 @@ function _vPollResult(jobId, sig){
     }).catch(function(){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; });
   }, 2000);
 }
+function _vBuildAutoReview(s) {
+  // Heuristic review of user's Automations settings against the verdict plan.
+  // Reads window._autoSettings (populated by showAutomations / localStorage).
+  var auto = window._autoSettings || {};
+  var lines = [];
+  var totalRisk = (s.risk_ladder || [0.5,1.0,1.5]).reduce(function(a,b){return a+b;},0);
+
+  // Trailing stop
+  if (auto.trailing) {
+    var trailHint = (s.trailing && s.trailing[0]) ? s.trailing[0] : 'after initial target is hit';
+    lines.push({ok:true,  text:'Trailing stop is ON — Risk Team recommends activating it '+trailHint+'.'});
+  } else {
+    lines.push({ok:false, text:'Trailing stop is OFF — Risk Team recommends enabling it to lock in profits once price reaches +1.5R.'});
+  }
+  // Move-to-breakeven
+  if (auto.breakeven) {
+    lines.push({ok:true,  text:'Move-to-breakeven is ON — protects against full loss if price reverses after initial move.'});
+  } else {
+    lines.push({ok:false, text:'Move-to-breakeven is OFF — consider enabling it to remove downside risk once in profit.'});
+  }
+  // TP ladder
+  var tpActive = [auto.autoTP1, auto.autoTP2, auto.autoTP3].filter(Boolean).length;
+  var recTp = s.positions || 3;
+  if (tpActive >= recTp) {
+    lines.push({ok:true,  text:'TP ladder: '+tpActive+' of '+recTp+' take-profit levels active — plan to scale out as recommended.'});
+  } else {
+    lines.push({ok:false, text:'TP ladder: only '+tpActive+' take-profit level(s) active. Risk Team recommends enabling all '+recTp+' — scaling out reduces risk progressively.'});
+  }
+  // Daily loss limit
+  if (auto.dailyLossLimit) {
+    var limitOk = totalRisk <= (auto.dailyLossMax || 3);
+    lines.push({ok:limitOk, text:'Daily loss limit: '+auto.dailyLossMax+'% max. This plan uses '+totalRisk.toFixed(1)+'% total risk — '+(limitOk ? 'within limit ✓' : 'exceeds limit ⚠ — reduce position size or split entries across days.')});
+  }
+
+  return lines;
+}
+
 function _vRenderLive(sig, verdict, structured){
   window._verdictRunning = false;
   window._verdictPrewarmJobId = null;
@@ -12488,30 +12525,55 @@ function _vRenderLive(sig, verdict, structured){
       + '</div>';
   }
 
-  // Build agent cards grid from structured data
-  var agentCardsHtml = '';
-  var agents = s.agents || [];
-  if (agents.length > 0) {
-    var cardItems = '';
-    for (var ai = 0; ai < agents.length; ai++) {
-      var ag = agents[ai];
-      var agVote = (ag.vote || 'HOLD').toUpperCase();
-      var agCol = agVote === 'BUY' ? '#5de8a0' : agVote === 'SELL' ? '#e8706e' : '#c9a84c';
-      var agBg  = agVote === 'BUY' ? 'rgba(93,232,160,.04)' : agVote === 'SELL' ? 'rgba(232,112,110,.04)' : 'rgba(201,168,76,.04)';
-      var agBd  = agVote === 'BUY' ? 'rgba(93,232,160,.18)' : agVote === 'SELL' ? 'rgba(232,112,110,.18)' : 'rgba(201,168,76,.18)';
-      cardItems += '<div style="background:'+agBg+';border:1px solid '+agBd+';border-radius:8px;padding:12px 14px;min-width:0">'
-        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
-        + '<span style="font-size:10px;font-weight:700;color:var(--t1);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">'+ag.name+'</span>'
-        + '<span style="padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;font-family:var(--mono);background:'+agCol+'22;color:'+agCol+'">'+agVote+'</span>'
-        + '</div>'
-        + '<div style="font-size:10px;color:rgba(237,232,216,.7);line-height:1.6">'+(ag.argument||'')+'</div>'
-        + '</div>';
-    }
-    agentCardsHtml = '<div style="margin-bottom:14px">'
-      + '<div style="font-size:9px;font-weight:700;color:var(--t3);letter-spacing:.07em;text-transform:uppercase;margin-bottom:8px">8 Agent Debate</div>'
-      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+cardItems+'</div>'
+  // Build agent cards grid from structured data.
+  // If backend returned no agents (e.g. DeepSeek key missing on worker), show
+  // placeholder cards from the 8 known agent names with action vote so the
+  // section always appears — content filled once key is configured.
+  var _agentDefaults = [
+    "Market Analyst","Sentiment Analyst","News Researcher","Fundamentals Researcher",
+    "Bull Researcher","Bear Researcher","Research Manager","Risk Team"
+  ];
+  var agents = s.agents && s.agents.length > 0 ? s.agents
+    : _agentDefaults.map(function(n,i){
+        var v = (i===4)?'BUY':(i===5)?'SELL':action;
+        return {name:n, vote:v, argument:'Report available after analysis completes. Run Verdict to load full agent arguments.'};
+      });
+  var cardItems = '';
+  for (var ai = 0; ai < agents.length; ai++) {
+    var ag = agents[ai];
+    var agVote = (ag.vote || 'HOLD').toUpperCase();
+    var agCol = agVote === 'BUY' ? '#5de8a0' : agVote === 'SELL' ? '#e8706e' : '#c9a84c';
+    var agBg  = agVote === 'BUY' ? 'rgba(93,232,160,.04)' : agVote === 'SELL' ? 'rgba(232,112,110,.04)' : 'rgba(201,168,76,.04)';
+    var agBd  = agVote === 'BUY' ? 'rgba(93,232,160,.18)' : agVote === 'SELL' ? 'rgba(232,112,110,.18)' : 'rgba(201,168,76,.18)';
+    cardItems += '<div style="background:'+agBg+';border:1px solid '+agBd+';border-radius:8px;padding:12px 14px;min-width:0">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
+      + '<span style="font-size:10px;font-weight:700;color:var(--t1);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">'+ag.name+'</span>'
+      + '<span style="padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;font-family:var(--mono);background:'+agCol+'22;color:'+agCol+'">'+agVote+'</span>'
+      + '</div>'
+      + '<div style="font-size:10px;color:rgba(237,232,216,.7);line-height:1.6">'+(ag.argument||'')+'</div>'
       + '</div>';
   }
+  var agentCardsHtml = '<div style="margin-bottom:14px">'
+    + '<div style="font-size:9px;font-weight:700;color:var(--t3);letter-spacing:.07em;text-transform:uppercase;margin-bottom:8px">8 Agent Debate</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+cardItems+'</div>'
+    + '</div>';
+
+  // Build automations review from user's current settings vs verdict plan
+  var autoLines = _vBuildAutoReview(s);
+  var autoLineItems = autoLines.map(function(l){
+    var col = l.ok ? '#5de8a0' : '#c9a84c';
+    var icon = l.ok
+      ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="'+col+'" stroke-width="2.5" style="flex-shrink:0;margin-top:2px"><polyline points="20 6 9 17 4 12"/></svg>'
+      : '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="'+col+'" stroke-width="2.5" style="flex-shrink:0;margin-top:2px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+    return '<div style="display:flex;align-items:flex-start;gap:7px;padding:5px 0;border-bottom:1px solid rgba(237,232,216,.06)">'
+      + icon+'<span style="font-size:10px;color:rgba(237,232,216,.72);line-height:1.6">'+l.text+'</span></div>';
+  }).join('');
+  var autoReviewHtml = '<div style="margin-bottom:14px;border-radius:8px;border:1px solid rgba(201,168,76,.18);background:rgba(201,168,76,.04);padding:14px 16px">'
+    + '<div style="font-size:9px;font-weight:700;color:var(--amb);letter-spacing:.07em;text-transform:uppercase;margin-bottom:10px">Automations Review</div>'
+    + autoLineItems
+    + '<div style="margin-top:10px;font-size:9px;color:var(--t3);line-height:1.5">Based on your current Automations settings. '
+    + '<span style="color:var(--crys);cursor:pointer" onclick="setNav(\'automations\');showAutomations()">Review Automations →</span></div>'
+    + '</div>';
 
   results.style.display = 'block';
   results.innerHTML =
@@ -12538,6 +12600,8 @@ function _vRenderLive(sig, verdict, structured){
       : '')
     // Position plan
     + planHtml
+    // Automations review
+    + autoReviewHtml
     + '</div>'
     + '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px">'
     + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
@@ -12675,6 +12739,17 @@ function _vPreloadSize(){
     tpSplit: [50, 30, 20]
   };
   setNav('size'); showSize();
+  // After showSize() renders, fill szRisk with first-position risk % from the
+  // verdict ladder and trigger recalculation so the user sees live numbers.
+  var _firstRisk = riskLadder[0] || 0.5;
+  setTimeout(function(){
+    var rInp = document.getElementById('szRisk');
+    if (rInp) {
+      rInp.value = _firstRisk.toFixed(1);
+      if (typeof szRiskOnInput === 'function') szRiskOnInput();
+      if (typeof szCalc === 'function') szCalc();
+    }
+  }, 150);
 }
 function _vChat(q){
   if(!q||!q.trim()) return;

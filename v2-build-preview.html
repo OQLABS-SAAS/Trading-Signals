@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DotVerse v2 Prototype – Visual Preview</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --crys: rgba(148,175,220,0.82);
+    --gold: rgba(195,168,92,0.80);
+    --b-base: #0a0f1a;
+    --b-mid: #1a2740;
+    --b-light: #2a3a5c;
+    --text: #e0e8f0;
+    --accent: #88aad4;
+    --danger: #c44f5c;
+    --success: #4b9e86;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--b-base); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; overflow-x: hidden; }
+  #app-header { display:flex; align-items:center; padding:12px 24px; background:var(--b-mid); border-bottom:1px solid rgba(148,175,220,0.15); position:sticky; top:0; z-index:100; }
+  .logo { font-size:20px; font-weight:700; letter-spacing:-0.5px; display:flex; align-items:center; gap:8px; }
+  .logo svg { fill: var(--accent); }
+  #pipeline-nav { display:flex; gap:4px; margin-left:32px; }
+  .nav-btn { padding:8px 18px; background:transparent; border:1px solid transparent; color:var(--text); cursor:pointer; border-radius:6px; font-size:13px; font-weight:500; transition:0.2s; }
+  .nav-btn.active { background:var(--b-light); border-color:var(--accent); color:#fff; }
+  .nav-btn:hover { border-color:var(--crys); }
+  .page { display:none; padding:24px; animation:fadeIn 0.25s; }
+  .page.active { display:block; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  .pipeline-card { background:var(--b-mid); border:1px solid rgba(148,175,220,0.12); border-radius:10px; padding:18px; margin-bottom:18px; }
+  .card-header { font-weight:600; font-size:15px; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+  input, select { background:var(--b-base); border:1px solid var(--b-light); color:var(--text); padding:6px 10px; border-radius:5px; font-size:13px; }
+  input[type="checkbox"] { accent-color: var(--accent); }
+  button { cursor:pointer; }
+  .chip-group label { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--crys); }
+  .chip-group input { margin:0; }
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width:6px; }
+  ::-webkit-scrollbar-track { background:rgba(0,0,0,0.2); }
+  ::-webkit-scrollbar-thumb { background:var(--crys); border-radius:3px; }
+</style>
+</head>
+<body>
+<!-- HEADER -->
+<header id="app-header">
+  <div class="logo">
+    <svg width="28" height="28" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="var(--accent)"/></svg>
+    DotVerse
+  </div>
+  <!-- Auto-refresh chips -->
+  <div id="refresh-chips" class="chip-group" style="display:flex;gap:8px;margin-left:24px;">
+    <label><input type="radio" name="refresh" checked onchange="setRefresh(0)">OFF</label>
+    <label><input type="radio" name="refresh" onchange="setRefresh(15000)">15s</label>
+    <label><input type="radio" name="refresh" onchange="setRefresh(30000)">30s</label>
+    <label><input type="radio" name="refresh" onchange="setRefresh(60000)">1m</label>
+    <label><input type="radio" name="refresh" onchange="setRefresh(300000)">5m</label>
+  </div>
+</header>
+
+<!-- PIPELINE NAV -->
+<div id="pipeline-nav" style="display:flex;gap:4px;padding:12px 24px 0;">
+  <button class="nav-btn" onclick="showPage('discover')">DISCOVER</button>
+  <button class="nav-btn" onclick="showPage('signal')">SIGNAL</button>
+  <button class="nav-btn active" onclick="showPage('understand')">UNDERSTAND</button>
+  <button class="nav-btn" onclick="showPage('size')">SIZE</button>
+  <button class="nav-btn" onclick="showPage('act')">ACT</button>
+  <button class="nav-btn" onclick="showPage('backtest')">BACKTEST</button>
+  <button class="nav-btn" onclick="showPage('trackrecord')">TRACK RECORD</button>
+</div>
+
+<!-- ============== PAGES ============== -->
+
+<!-- DISCOVER -->
+<div id="page-discover" class="page">
+  <h2>Scanner</h2>
+  <div class="pipeline-card">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span>Auto‑scan</span><input type="checkbox" onchange="toggleAutoScan(this.checked)">
+    </div>
+    <table style="width:100%;margin-top:12px;border-collapse:collapse;">
+      <thead><tr><th>Ticker</th><th>Signal</th><th>R:R</th></tr></thead>
+      <tbody id="scanner-body">
+        <tr><td>BTC-USD</td><td>Strong Buy</td><td>2.4</td></tr>
+        <tr><td>ETH-USD</td><td>Neutral</td><td>1.8</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- SIGNAL -->
+<div id="page-signal" class="page">
+  <h2>Current Signal</h2>
+  <div class="pipeline-card" id="signal-current">
+    <div style="display:flex;align-items:center;">
+      <span style="font-size:18px;font-weight:700;">BTC-USD</span>
+      <button id="watch-btn" style="margin-left:8px;padding:4px;background:none;border:1px solid var(--accent);border-radius:50%;" title="Watch">
+        <svg width="16" height="16" viewBox="0 0 24 24" stroke="var(--accent)" fill="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>
+      </button>
+    </div>
+    <div style="margin-top:10px;">Direction: <strong style="color:var(--success);">Long</strong> | Entry: $27,000 | SL: $26,500 | TP1: $28,000 | TP2: $29,000 | TP3: $30,000</div>
+    <button id="gen-pine" style="margin-top:12px;padding:6px 14px;">Generate Pine Script</button>
+    <div id="pine-output" style="display:none;margin-top:10px;position:relative;">
+      <pre id="pine-code" style="background:#0f1722;padding:12px;border-radius:6px;font-size:12px;"></pre>
+      <button id="copy-pine" style="position:absolute;top:4px;right:4px;">Copy</button>
+    </div>
+  </div>
+  <!-- Signal History -->
+  <div class="pipeline-card">
+    <div class="card-header">Signal History <button onclick="loadHistory()" style="margin-left:auto;">Load</button></div>
+    <div id="history-list" style="max-height:200px;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- UNDERSTAND -->
+<div id="page-understand" class="page active">
+  <h2>Understand</h2>
+  <!-- Chart + order flow card -->
+  <div class="pipeline-card">
+    <div class="card-header">
+      <svg width="20" height="20" viewBox="0 0 24 24" stroke="var(--accent)" fill="none"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Chart & Order Flow · <span id="ticker-label">BTC-USD</span>
+    </div>
+    <div id="chart-container" style="width:100%;height:380px;"></div>
+    <div id="rsi-container" style="width:100%;height:160px;margin-top:8px;"></div>
+    <div id="macd-container" style="width:100%;height:130px;margin-top:8px;"></div>
+    <div style="margin-top:16px;">
+      <div style="font-weight:600;margin-bottom:6px;">Order Flow (CVD)</div>
+      <div id="orderflow-container" style="width:100%;height:150px;"></div>
+    </div>
+  </div>
+  <!-- What To Do Next -->
+  <div class="pipeline-card" id="what-next">
+    <div class="card-header">What To Do Next</div>
+    <ol style="margin-left:18px;">
+      <li>Confirm trend on daily chart</li>
+      <li>Watch for RSI divergence reversal</li>
+      <li>Check order flow imbalance</li>
+      <li>Set stop‑loss below recent swing</li>
+      <li>Calculate position size</li>
+    </ol>
+  </div>
+</div>
+
+<!-- SIZE -->
+<div id="page-size" class="page">
+  <h2>Position Size Calculator</h2>
+  <div class="pipeline-card">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <label>Account Size ($) <input id="size-account" value="10000"></label>
+      <label>Risk % <input id="size-risk" value="1" step="0.1"></label>
+      <label>Stop Loss (pips) <input id="size-sl" value="50"></label>
+      <label>Pip Value ($) <input id="size-pipval" value="10"></label>
+    </div>
+    <div style="margin-top:14px;font-weight:600;">Lot Size: <span id="size-result" style="color:var(--gold);">0.20</span></div>
+    <button onclick="calcSize()" style="margin-top:10px;">Calculate</button>
+  </div>
+</div>
+
+<!-- ACT -->
+<div id="page-act" class="page">
+  <h2>Active Trades</h2>
+  <div class="pipeline-card" id="active-trades">
+    <div>BTC-USD Long · Entry $27,000 · SL $26,500 · TP1 $28,000 · Remaining: <span id="timer">12:34</span></div>
+  </div>
+  <div class="pipeline-card">
+    <div class="card-header">MT5 Execution</div>
+    <label>Volume <input id="mt5-vol" value="0.1" style="width:70px;"></label>
+    <label><input type="checkbox" id="mt5-be"> Breakeven</label>
+    <label><input type="checkbox" id="mt5-trail"> Trailing</label>
+    <button onclick="execMT5()" style="margin-left:12px;padding:6px 16px;">Execute via MT5</button>
+    <div id="mt5-msg" style="font-size:12px;margin-top:6px;"></div>
+  </div>
+</div>
+
+<!-- BACKTEST -->
+<div id="page-backtest" class="page">
+  <h2>Backtest</h2>
+  <div class="pipeline-card">
+    <form id="bt-form" style="display:flex;gap:12px;align-items:flex-end;">
+      <label>Ticker <input id="bt-ticker" value="BTC-USD"></label>
+      <label>Strategy <select id="bt-strat"><option>RSI Divergence</option><option>MACD Cross</option></select></label>
+      <button type="submit">Run</button>
+    </form>
+    <div id="bt-results" style="margin-top:14px;">
+      <div>Total Trades: 42</div><div>Win Rate: 68.2%</div><div>Net P&L: +$3,450</div>
+    </div>
+  </div>
+</div>
+
+<!-- TRACK RECORD -->
+<div id="page-trackrecord" class="page">
+  <h2>Track Record</h2>
+  <div class="pipeline-card">
+    <table style="width:100%;text-align:left;">
+      <thead><tr><th>Date</th><th>Ticker</th><th>Direction</th><th>Result</th></tr></thead>
+      <tbody><tr><td>2025-01-15</td><td>BTC-USD</td><td>Long</td><td style="color:var(--success)">+1.8%</td></tr>
+      <tr><td>2025-01-10</td><td>ETH-USD</td><td>Short</td><td style="color:var(--success)">+2.3%</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ALERT BUILDER MODAL (simplified, shown on button) -->
+<div id="alert-modal" style="display:none;position:fixed;top:30%;left:50%;transform:translate(-50%,-50%);background:var(--b-mid);padding:24px;border-radius:12px;z-index:200;border:1px solid var(--accent);">
+  <h3 style="margin-top:0;">Alert Builder</h3>
+  <label>Ticker: <input id="alert-tick" value="BTC-USD"></label><br><br>
+  <label>Condition: <select id="alert-cond"><option>Price crosses above</option><option>RSI > 70</option></select></label><br><br>
+  <label>Value: <input id="alert-val" value="30000"></label><br><br>
+  <button onclick="saveAlert()">Save</button>
+  <button onclick="document.getElementById('alert-modal').style.display='none'">Cancel</button>
+</div>
+<button onclick="document.getElementById('alert-modal').style.display='block'" style="position:fixed;bottom:20px;right:20px;background:var(--accent);border:none;border-radius:50%;width:48px;height:48px;font-size:22px;color:#0a0f1a;z-index:150;">🔔</button> <!-- Inline SVG? using text for brevity, but per spec no emoji; replace with SVG if needed -->
+
+<!-- Telegram subscribe modal (hidden) -->
+<div id="telegram-modal" style="display:none;position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);background:var(--b-mid);padding:20px;border-radius:10px;z-index:200;">
+  <h3>Telegram Alerts</h3>
+  <label>Chat ID: <input id="tele-chatid"></label>
+  <button onclick="subTelegram()">Subscribe</button>
+  <button onclick="document.getElementById('telegram-modal').style.display='none'">Cancel</button>
+</div>
+<button onclick="document.getElementById('telegram-modal').style.display='block'" style="position:fixed;bottom:20px;right:80px;background:var(--accent);border:none;border-radius:50%;width:48px;height:48px;z-index:150;">✈️</button> <!-- replace with SVG -->
+
+<script>
+// ---- PAGE NAVIGATION ----
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  // Trigger page-specific loads
+  if (name === 'understand') { drawMockChart(); drawMockOrderFlow(); }
+  if (name === 'trackrecord') { } // static data
+}
+
+// ---- MOCK CHART DATA ----
+function drawMockChart() {
+  const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
+    layout: { background:{color:'transparent'}, textColor:'rgba(200,210,225,0.9)' },
+    grid: { vertLines:{color:'rgba(148,175,220,0.12)'}, horzLines:{color:'rgba(148,175,220,0.08)'} },
+    crosshair: { mode:0 },
+  });
+  const now = Date.now() / 1000;
+  const ohlc = Array.from({length:200}, (_,i) => {
+    const t = now - (200-i)*3600;
+    const base = 27000 + Math.sin(i/8)*800 + i*5;
+    const open = base, close = open + (Math.random()-0.5)*400;
+    return { time: t, open, high: Math.max(open,close)+(Math.random()*200), low: Math.min(open,close)-(Math.random()*200), close, volume: Math.random()*500+100 };
+  });
+  const candle = chart.addCandlestickSeries({ upColor:'#4b9e86', downColor:'#c44f5c', wickColor:'#bbb' });
+  candle.setData(ohlc);
+  // RSI chart
+  const rsiChart = LightweightCharts.createChart(document.getElementById('rsi-container'), {
+    layout: { background:{color:'transparent'}, textColor:'rgba(200,210,225,0.9)' },
+    grid: { vertLines:{color:'rgba(148,175,220,0.12)'}, horzLines:{color:'rgba(148,175,220,0.08)'} },
+  });
+  const rsiValues = ohlc.map((_,i) => ({ time: ohlc[i].time, value: 50 + Math.sin(i/10)*25 + (Math.random()*10-5) }));
+  const rsiLine = rsiChart.addLineSeries({ color:'#d4b671', lineWidth:2 });
+  rsiLine.setData(rsiValues);
+  rsiLine.createPriceLine({ price:70, color:'rgba(200,168,92,0.5)', lineStyle:2 });
+  rsiLine.createPriceLine({ price:30, color:'rgba(200,168,92,0.5)', lineStyle:2 });
+  // MACD chart
+  const macdChart = LightweightCharts.createChart(document.getElementById('macd-container'), {
+    layout: { background:{color:'transparent'}, textColor:'rgba(200,210,225,0.9)' },
+    grid: { vertLines:{color:'rgba(148,175,220,0.12)'}, horzLines:{color:'rgba(148,175,220,0.08)'} },
+  });
+  const macdLine = macdChart.addLineSeries({ color:'#7eb0d5' });
+  const signalLine = macdChart.addLineSeries({ color:'#c44f5c' });
+  const hist = macdChart.addHistogramSeries({ color:'rgba(148,175,220,0.5)' });
+  const macdData = ohlc.map((_,i) => ({ time: ohlc[i].time, macd: Math.sin(i/15)*2, signal: Math.sin(i/15+0.5)*2, hist: Math.sin(i/15)*0.8 }));
+  macdLine.setData(macdData.map(d=>({time:d.time, value:d.macd})));
+  signalLine.setData(macdData.map(d=>({time:d.time, value:d.signal})));
+  hist.setData(macdData.map(d=>({time:d.time, value:d.hist, color:d.hist>=0?'#4b9e86':'#c44f5c'})));
+}
+
+function drawMockOrderFlow() {
+  const oc = document.getElementById('orderflow-container');
+  const chart = LightweightCharts.createChart(oc, {
+    layout: { background:{color:'transparent'}, textColor:'rgba(200,210,225,0.9)' },
+    grid: { vertLines:{color:'rgba(148,175,220,0.12)'}, horzLines:{color:'rgba(148,175,220,0.08)'} },
+    rightPriceScale: { visible:false },
+  });
+  const data = Array.from({length:50}, (_,i) => ({ time: Date.now()/1000 - (50-i)*900, value: Math.random()*500-250 + (i>25?50:-50) }));
+  const line = chart.addLineSeries({ color:'#d4b671', lineWidth:2 });
+  line.setData(data);
+}
+
+// ---- OTHER INTERACTIONS ----
+function setRefresh(ms) { console.log('Refresh set to', ms, 'ms'); }
+function toggleAutoScan(on) { console.log('Auto-scan', on); }
+function loadHistory() { document.getElementById('history-list').innerHTML = '<div>1. BTC-USD Long @ 27000 (SL 26500, TP 28000) – Jan 16</div><div>2. ETH-USD Short @ 1800 – Jan 15</div>'; }
+
+document.getElementById('gen-pine').addEventListener('click', ()=>{
+  document.getElementById('pine-code').textContent = `//@version=5\nstrategy("Signal", overlay=true)\nentry = 27000\nsl = 26500\ntp1 = 28000\ntp2 = 29000\ntp3 = 30000\nif strategy.position_size == 0\n    strategy.entry("Long", strategy.long, limit=entry)\nstrategy.exit("XL", "Long", stop=sl, limit=tp1)`;
+  document.getElementById('pine-output').style.display = 'block';
+});
+document.getElementById('copy-pine').addEventListener('click', ()=>{ 
+  navigator.clipboard.writeText(document.getElementById('pine-code').textContent); 
+  alert('Copied!');
+});
+
+function calcSize() {
+  const acc = +document.getElementById('size-account').value;
+  const risk = +document.getElementById('size-risk').value / 100;
+  const sl = +document.getElementById('size-sl').value;
+  const pipVal = +document.getElementById('size-pipval').value;
+  const lot = (acc * risk) / (sl * pipVal);
+  document.getElementById('size-result').textContent = lot.toFixed(2);
+}
+function execMT5() {
+  document.getElementById('mt5-msg').textContent = 'Order sent (mock) – breakeven: '+document.getElementById('mt5-be').checked+', trailing: '+document.getElementById('mt5-trail').checked;
+}
+function saveAlert() {
+  alert('Alert saved (mock)');
+  document.getElementById('alert-modal').style.display = 'none';
+}
+function subTelegram() {
+  alert('Subscribed (mock)');
+  document.getElementById('telegram-modal').style.display = 'none';
+}
+
+// Init
+showPage('understand');
+drawMockChart();
+drawMockOrderFlow();
+</script>
+</body>
+</html>

@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DotVerse · Visual Preview (re-skin)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: #050709;
+    --bg-1: #08090E;
+    --glass: rgba(255,255,255,0.022);
+    --glass-hi: rgba(255,255,255,0.045);
+    --line: rgba(255,255,255,0.055);
+    --line-bright: rgba(255,255,255,0.11);
+    --cream: #F5F0E0;
+    --t1: rgba(237,232,216,0.92);
+    --t2: rgba(237,232,216,0.62);
+    --t3: rgba(237,232,216,0.38);
+    --gold: #E5B83D;
+    --gold-soft: rgba(229,184,61,0.07);
+    --gold-line: rgba(229,184,61,0.32);
+    --gold-glow-1: rgba(229,184,61,0.20);
+    --gold-glow-2: rgba(229,184,61,0.08);
+    --grn: #5DE0A0;
+    --red: #E07A78;
+    --syne: 'Syne', sans-serif;
+    --ui:   'Space Grotesk', sans-serif;
+    --mono: 'IBM Plex Mono', monospace;
+  }
+  *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg-1);
+    color: var(--t1);
+    font-family: var(--ui);
+    font-size: 13.5px;
+    letter-spacing: -0.005em;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  /* ── Constellation background (matches current live site's vibe) ── */
+  .bg-base { position: fixed; inset: 0; z-index: -3;
+    background:
+      radial-gradient(ellipse 70% 50% at 15% 8%, rgba(229,184,61,0.04) 0%, transparent 55%),
+      radial-gradient(ellipse 60% 50% at 88% 92%, rgba(80,120,200,0.04) 0%, transparent 50%),
+      linear-gradient(180deg, #050709 0%, #08090E 60%, #050709 100%);
+  }
+  canvas#bgnet {
+    position: fixed; inset: 0; z-index: -2;
+    width: 100%; height: 100%;
+    opacity: 0.65;
+    pointer-events: none;
+  }
+
+  /* ──────── LAYOUT ──────── */
+  .app { display: grid; grid-template-columns: 220px 1fr; min-height: 100dvh; }
+
+  /* ──────── SIDEBAR ──────── */
+  aside.sidebar {
+    background: rgba(8,9,14,0.62);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border-right: 1px solid var(--line);
+    padding: 16px 12px 14px;
+    display: flex; flex-direction: column; gap: 14px;
+    position: sticky; top: 0; height: 100dvh;
+    overflow-y: auto;
+  }
+  aside.sidebar::-webkit-scrollbar { width: 0; }
+
+  .brand-mini { display: flex; align-items: center; gap: 9px; padding: 4px 6px 2px; }
+  .logo-mark { position: relative; width: 22px; height: 22px; flex-shrink: 0; }
+  .logo-mark .core {
+    position: absolute; left: 50%; top: 50%; width: 6px; height: 6px;
+    margin: -3px 0 0 -3px; border-radius: 50%; background: var(--gold);
+    box-shadow: 0 0 8px rgba(229,184,61,0.65);
+  }
+  .logo-mark .ring {
+    position: absolute; left: 50%; top: 50%; width: 6px; height: 6px;
+    margin: -3px 0 0 -3px; border-radius: 50%;
+    border: 1px solid var(--gold); opacity: 0;
+    animation: ripple 3.2s ease-out infinite;
+  }
+  .logo-mark .ring:nth-child(2){animation-delay: 0s;}
+  .logo-mark .ring:nth-child(3){animation-delay: 1.07s;}
+  .logo-mark .ring:nth-child(4){animation-delay: 2.13s;}
+  @keyframes ripple {
+    0%   { transform: scale(1); opacity: 0.7; border-width: 1.2px; }
+    70%  { opacity: 0.16; }
+    100% { transform: scale(3.6); opacity: 0; border-width: 0.4px; }
+  }
+  .wordmark {
+    font-family: var(--syne); font-weight: 600; font-size: 14px;
+    letter-spacing: -0.018em; display: flex; align-items: center; gap: 4px;
+    line-height: 1;
+  }
+  .wordmark .pre { color: var(--gold); font-size: 17px; transform: translateY(-1px); }
+  .wordmark .dotw { color: var(--cream); }
+  .wordmark .vrs  { color: var(--gold); }
+
+  .dot-trail {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 6px; font-family: var(--mono); font-size: 9.5px;
+    color: var(--t3); letter-spacing: 0.12em;
+  }
+  .dot-trail .dt { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .dot-trail .ind {
+    width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.15);
+  }
+  .dot-trail .dt.on .ind { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
+  .dot-trail .dt.on { color: var(--gold); }
+  .dot-trail .sep { color: rgba(255,255,255,0.12); margin-bottom: 9px; }
+
+  .admin-btn {
+    display: flex; align-items: center; gap: 7px;
+    padding: 7px 11px; border-radius: 7px;
+    background: rgba(229,184,61,0.06);
+    border: 1px solid var(--gold-line);
+    color: var(--gold);
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.10em; text-transform: uppercase;
+    cursor: pointer;
+    transition: all 200ms ease-out;
+    width: 100%;
+  }
+  .admin-btn:hover {
+    background: rgba(229,184,61,0.10);
+    box-shadow: 0 0 0 1px rgba(229,184,61,0.22), 0 0 14px rgba(229,184,61,0.12);
+  }
+  .admin-btn .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+
+  .nav-group { display: flex; flex-direction: column; gap: 1px; }
+  .nav-section {
+    font-family: var(--mono); font-size: 9.5px; color: var(--t3);
+    letter-spacing: 0.18em; text-transform: uppercase;
+    padding: 10px 8px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 9px; border-radius: 8px;
+    cursor: pointer; transition: all 180ms ease-out;
+    color: var(--t2); position: relative;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.02); color: var(--cream); }
+  .nav-item.active {
+    background: rgba(229,184,61,0.07);
+    border: 1px solid var(--gold-line);
+    color: var(--gold);
+  }
+  .nav-item .ico {
+    width: 14px; height: 14px; flex-shrink: 0;
+    color: currentColor; opacity: 0.85;
+  }
+  .nav-item .lbl {
+    font-size: 12px; font-weight: 500; letter-spacing: 0.005em;
+    line-height: 1.2;
+  }
+  .nav-item .lbl small {
+    display: block; font-size: 10px; color: var(--t3); font-weight: 400;
+    letter-spacing: 0.005em; margin-top: 2px;
+  }
+  .nav-item.active .lbl small { color: rgba(229,184,61,0.55); }
+  .nav-item .step {
+    margin-left: auto; font-family: var(--mono); font-size: 9.5px;
+    color: var(--t3); letter-spacing: 0.04em;
+    padding: 2px 5px; border-radius: 4px;
+    background: rgba(255,255,255,0.025); border: 1px solid var(--line);
+  }
+  .nav-item.active .step { background: var(--gold-soft); color: var(--gold); border-color: var(--gold-line); }
+
+  .collapse-btn {
+    margin-top: auto;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 7px 9px; border-radius: 7px;
+    background: var(--glass); border: 1px solid var(--line);
+    color: var(--t2);
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.10em;
+    text-transform: uppercase; cursor: pointer;
+    transition: all 200ms ease-out;
+  }
+  .collapse-btn:hover { color: var(--cream); border-color: var(--line-bright); }
+
+  .user-badge {
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px 8px; border-radius: 8px;
+    border-top: 1px solid var(--line);
+    margin-top: 4px; padding-top: 12px;
+  }
+  .user-badge .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--gold) 0%, rgba(229,184,61,0.5) 100%);
+    color: #0A0A0A; font-family: var(--syne); font-weight: 600; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .user-badge .info .name {
+    font-size: 12px; font-weight: 600; color: var(--cream); letter-spacing: 0.04em;
+  }
+  .user-badge .info .role {
+    font-family: var(--mono); font-size: 9.5px; color: var(--t3);
+    letter-spacing: 0.10em; text-transform: lowercase;
+  }
+  .user-badge .out {
+    margin-left: auto; padding: 4px 7px; border-radius: 5px;
+    color: var(--t3); cursor: pointer; transition: all 180ms;
+  }
+  .user-badge .out:hover { color: var(--cream); background: rgba(255,255,255,0.04); }
+
+  /* ──────── MAIN COLUMN ──────── */
+  main { padding: 16px 24px 60px; }
+
+  /* Top bar */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px; gap: 12px;
+  }
+  .crumb {
+    font-family: var(--mono); font-size: 10.5px; color: var(--t3);
+    letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .crumb b { color: var(--cream); font-weight: 500; }
+  .crumb .date { color: var(--gold); margin-left: 6px; }
+
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+  .utc-pill {
+    font-family: var(--mono); font-size: 10px;
+    padding: 5px 10px; border-radius: 100px;
+    background: var(--glass); border: 1px solid var(--line);
+    color: var(--t2); letter-spacing: 0.08em;
+  }
+  .lvl-toggle {
+    display: flex; gap: 0; padding: 2px;
+    background: var(--glass); border: 1px solid var(--line);
+    border-radius: 7px; backdrop-filter: blur(14px) saturate(140%);
+  }
+  .lvl-toggle button {
+    font-family: var(--syne); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 6px 13px; border-radius: 5px;
+    background: transparent; color: var(--t2);
+    border: none; cursor: pointer;
+    transition: all 200ms ease-out;
+  }
+  .lvl-toggle button:hover { color: var(--cream); }
+  .lvl-toggle button.on {
+    background: var(--gold-soft);
+    color: var(--gold);
+    box-shadow: inset 0 0 0 1px var(--gold-line);
+  }
+
+  /* CTAs — transparent glass with electric amber glow */
+  .cta {
+    position: relative; overflow: hidden;
+    font-family: var(--syne); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.10em; text-transform: uppercase;
+    padding: 9px 16px; border-radius: 7px; cursor: pointer;
+    transition: all 220ms cubic-bezier(.2,.8,.3,1);
+    backdrop-filter: blur(10px) saturate(140%);
+    background: linear-gradient(180deg, rgba(229,184,61,0.05) 0%, rgba(229,184,61,0.018) 100%);
+    border: 1px solid var(--gold-line);
+    color: var(--gold);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .cta::before {
+    content:''; position: absolute; top:0; left:-130%;
+    width:60%; height:100%;
+    background: linear-gradient(90deg, transparent, rgba(229,184,61,0.20), transparent);
+    transform: skewX(-20deg);
+    transition: left 600ms ease-out;
+  }
+  .cta:hover::before { left: 220%; }
+  .cta:hover {
+    color: #FAEAB0;
+    border-color: rgba(229,184,61,0.62);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.08),
+      0 0 0 1px rgba(229,184,61,0.22),
+      0 0 20px var(--gold-glow-1),
+      0 0 50px var(--gold-glow-2);
+    transform: translateY(-1px);
+  }
+  .cta.lg { font-size: 12px; padding: 10px 20px; }
+  .cta.full { width: 100%; justify-content: center; }
+  .cta.ghost {
+    background: var(--glass); border-color: var(--line-bright);
+    color: var(--t1);
+  }
+  .cta.ghost:hover {
+    border-color: rgba(255,255,255,0.22);
+    color: var(--cream);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 14px rgba(255,255,255,0.05);
+  }
+  .cta.ghost::before { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent); }
+
+  /* Glass panel base */
+  .panel {
+    background: var(--glass);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 30px rgba(0,0,0,0.30);
+    transition: border-color 240ms ease-out, background 240ms ease-out;
+  }
+  .panel:hover { border-color: var(--line-bright); }
+
+  /* Quick Analyse bar */
+  .qa-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px; border-radius: 10px;
+    background: var(--glass); backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid var(--line);
+    margin-bottom: 14px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+  .qa-lbl {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--t3); letter-spacing: 0.16em; text-transform: uppercase;
+    padding-right: 8px; border-right: 1px solid var(--line);
+  }
+  .qa-sel {
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid var(--line);
+    color: var(--t1); padding: 6px 10px; border-radius: 6px;
+    cursor: pointer; transition: all 180ms;
+  }
+  .qa-sel:hover { border-color: var(--line-bright); color: var(--cream); }
+  .qa-input {
+    flex: 1; min-width: 200px;
+    font-family: var(--mono); font-size: 11px;
+    background: rgba(255,255,255,0.020);
+    border: 1px solid var(--line);
+    color: var(--t1); padding: 7px 11px; border-radius: 6px;
+    outline: none; transition: all 180ms;
+  }
+  .qa-input::placeholder { color: var(--t3); }
+  .qa-input:focus { border-color: var(--gold-line); background: var(--gold-soft); }
+  .tf-chip {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    padding: 6px 11px; border-radius: 6px;
+    background: rgba(255,255,255,0.020);
+    border: 1px solid var(--line);
+    color: var(--t2); cursor: pointer;
+    letter-spacing: 0.06em; transition: all 180ms ease-out;
+  }
+  .tf-chip:hover { color: var(--cream); border-color: var(--line-bright); }
+  .tf-chip.on {
+    background: var(--gold-soft); color: var(--gold);
+    border-color: var(--gold-line);
+    box-shadow: 0 0 12px rgba(229,184,61,0.10);
+  }
+
+  /* Sessions strip */
+  .sess-strip {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    margin-bottom: 22px;
+    border-radius: 8px;
+    background: var(--glass); border: 1px solid var(--line);
+    backdrop-filter: blur(12px) saturate(140%);
+  }
+  .sess-strip .clk {
+    font-family: var(--mono); font-size: 10.5px; color: var(--t3);
+    letter-spacing: 0.10em; padding-right: 10px; border-right: 1px solid var(--line);
+  }
+  .sess-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px; border-radius: 100px;
+    background: rgba(255,255,255,0.020);
+    border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10px; color: var(--t2);
+    letter-spacing: 0.04em;
+  }
+  .sess-pill .dotc {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--t3);
+  }
+  .sess-pill.open .dotc { background: var(--grn); box-shadow: 0 0 7px var(--grn); }
+  .sess-pill.open { color: var(--cream); }
+  .sess-pill .st { color: var(--t3); margin-left: 3px; }
+  .sess-pill.open .st { color: var(--grn); }
+
+  /* Section headers */
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; gap: 12px; }
+  .sec-head .ttl {
+    font-family: var(--syne); font-weight: 500; font-size: 22px;
+    color: var(--cream); letter-spacing: -0.018em;
+  }
+  .sec-head .sub {
+    font-family: var(--ui); font-size: 12px; color: var(--t2);
+    letter-spacing: 0.005em;
+  }
+  .sec-head .meta {
+    font-family: var(--mono); font-size: 10px; color: var(--gold);
+    letter-spacing: 0.16em; text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 100px;
+    background: var(--gold-soft); border: 1px solid var(--gold-line);
+  }
+  .sec-head .meta .pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); animation: pulse 1.8s ease-in-out infinite; }
+
+  /* Mode cards (Scalp / Day Trade / Swing / Position) */
+  .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; margin-bottom: 18px; }
+  @media (max-width:1100px){ .modes { grid-template-columns: repeat(2, 1fr); } }
+  .mode-card {
+    padding: 16px 16px;
+    border-radius: 12px;
+    background: var(--glass);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    display: flex; flex-direction: column; gap: 8px;
+    transition: all 240ms cubic-bezier(.2,.8,.3,1);
+  }
+  .mode-card:hover { border-color: var(--line-bright); transform: translateY(-1px); background: var(--glass-hi); }
+  .mode-top { display: flex; justify-content: space-between; align-items: center; }
+  .mode-name { font-family: var(--syne); font-weight: 500; font-size: 17px; color: var(--cream); letter-spacing: -0.012em; }
+  .mode-status {
+    font-family: var(--mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 4px;
+  }
+  .mode-status.wait { background: rgba(229,184,61,0.10); color: var(--gold); border: 1px solid var(--gold-line); }
+  .mode-status.go   { background: rgba(93,224,160,0.10); color: var(--grn); border: 1px solid rgba(93,224,160,0.32); }
+  .mode-tf { font-family: var(--mono); font-size: 11px; color: var(--gold); letter-spacing: 0.06em; }
+  .mode-desc { font-size: 12px; color: var(--t2); }
+  .mode-note { font-size: 11px; color: var(--t3); font-style: italic; }
+  .mode-cta {
+    margin-top: 6px; padding: 9px 14px; border-radius: 7px;
+    background: rgba(255,255,255,0.020);
+    border: 1px solid var(--line);
+    color: var(--t1);
+    font-family: var(--syne); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    cursor: pointer; text-align: center;
+    transition: all 220ms cubic-bezier(.2,.8,.3,1);
+  }
+  .mode-card:hover .mode-cta {
+    background: var(--gold-soft);
+    border-color: var(--gold-line);
+    color: var(--gold);
+    box-shadow: 0 0 18px rgba(229,184,61,0.10);
+  }
+
+  .live-mom-strip {
+    display: flex; align-items: center; gap: 11px;
+    padding: 11px 16px; border-radius: 10px;
+    background: var(--glass); border: 1px solid var(--line);
+    backdrop-filter: blur(14px) saturate(140%);
+    margin-bottom: 26px;
+  }
+  .live-mom-strip .lbl { font-family: var(--mono); font-size: 10.5px; color: var(--gold); letter-spacing: 0.16em; text-transform: uppercase; }
+  .live-mom-strip .lbl b { color: var(--cream); font-weight: 500; }
+  .live-mom-strip .msg { font-size: 12.5px; color: var(--t2); margin-left: auto; }
+
+  /* Trending banner */
+  .trending {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 18px; border-radius: 10px;
+    background: linear-gradient(90deg, rgba(93,224,160,0.06) 0%, rgba(93,224,160,0.018) 100%);
+    border: 1px solid rgba(93,224,160,0.24);
+    margin-bottom: 12px;
+  }
+  .trending .pulse {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--grn); box-shadow: 0 0 10px var(--grn);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  .trending .ttl { font-family: var(--syne); font-weight: 600; font-size: 12px; color: var(--grn); letter-spacing: 0.16em; text-transform: uppercase; }
+  .trending .desc { font-size: 12.5px; color: var(--t1); flex: 1; }
+  .trending .cta { padding: 7px 13px; font-size: 10px; }
+
+  /* Index ticker strip */
+  .idx-strip {
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 0;
+    padding: 14px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 18px;
+  }
+  @media (max-width:1100px){ .idx-strip { grid-template-columns: repeat(4, 1fr); } }
+  .idx-item {
+    padding: 0 18px;
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .idx-item:last-child { border-right: none; }
+  .idx-item .nm { font-family: var(--mono); font-size: 9.5px; color: var(--t3); letter-spacing: 0.14em; text-transform: uppercase; }
+  .idx-item .vl { font-family: var(--mono); font-size: 14.5px; color: var(--cream); font-variant-numeric: tabular-nums; }
+  .idx-item .ch { font-family: var(--mono); font-size: 10.5px; }
+  .ch.up { color: var(--grn); }
+  .ch.dn { color: var(--red); }
+
+  /* 3-column tile grid (INDICES / CRYPTO / COMMODITIES) */
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+  @media (max-width:1100px){ .three { grid-template-columns: 1fr; } }
+  .col-card { padding: 16px 18px; }
+  .col-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .col-head .nm { font-family: var(--mono); font-size: 11px; color: var(--cream); letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; }
+  .col-head .avg {
+    font-family: var(--mono); font-size: 9.5px; color: var(--gold);
+    padding: 3px 8px; border-radius: 4px;
+    background: var(--gold-soft); border: 1px solid var(--gold-line);
+    letter-spacing: 0.04em;
+  }
+
+  .ticker-row {
+    display: grid; grid-template-columns: 32px 1fr auto;
+    gap: 11px; align-items: center;
+    padding: 10px 0; border-top: 1px solid var(--line);
+  }
+  .ticker-row:first-of-type { border-top: none; }
+  .ticker-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: rgba(229,184,61,0.07);
+    border: 1px solid var(--gold-line);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 9px; font-weight: 500;
+    color: var(--gold); letter-spacing: 0.04em;
+  }
+  .ticker-row .nm-stack .nm { font-family: var(--mono); font-size: 11.5px; color: var(--cream); font-weight: 500; letter-spacing: 0.04em; }
+  .ticker-row .nm-stack .sub { font-family: var(--mono); font-size: 9.5px; color: var(--t3); }
+  .ticker-row .price { font-family: var(--mono); font-size: 13px; color: var(--cream); text-align: right; font-variant-numeric: tabular-nums; }
+  .ticker-row .pct { font-family: var(--mono); font-size: 10.5px; text-align: right; }
+
+  /* Fear & Greed gauge */
+  .fg-card { padding: 22px 24px; margin-bottom: 24px; }
+  .fg-num {
+    font-family: var(--syne); font-weight: 500; font-size: 56px;
+    color: var(--cream); letter-spacing: -0.04em; line-height: 1;
+    text-align: center;
+  }
+  .fg-cap {
+    text-align: center; margin: 7px 0 14px;
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--gold); letter-spacing: 0.18em; text-transform: uppercase;
+  }
+  .fg-bar {
+    height: 6px; border-radius: 100px; position: relative;
+    background: linear-gradient(90deg, #E07A78 0%, #E5B83D 50%, #5DE0A0 100%);
+    margin: 0 0 8px;
+  }
+  .fg-marker {
+    position: absolute; top: 50%; left: 47%; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--cream); transform: translate(-50%,-50%);
+    border: 2px solid #050709;
+    box-shadow: 0 0 10px rgba(255,255,255,0.4);
+  }
+  .fg-labels { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 9.5px; color: var(--t3); letter-spacing: 0.10em; text-transform: uppercase; }
+
+  /* Heatmap */
+  .heat-wrap { padding: 18px 20px; margin-bottom: 24px; }
+  .heat-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 12px; }
+  @media (max-width:1100px){ .heat-grid { grid-template-columns: repeat(4, 1fr); } }
+  .heat-tile {
+    aspect-ratio: 1.5;
+    border-radius: 8px; padding: 9px 10px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    border: 1px solid var(--line);
+    cursor: pointer; transition: all 220ms cubic-bezier(.2,.8,.3,1);
+  }
+  .heat-tile:hover { transform: translateY(-1px); border-color: var(--line-bright); }
+  .heat-tile .sym { font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--cream); letter-spacing: 0.06em; }
+  .heat-tile .pct { font-family: var(--mono); font-size: 11px; }
+  .heat-tile.up { background: rgba(93,224,160,0.10); border-color: rgba(93,224,160,0.24); }
+  .heat-tile.up .pct { color: var(--grn); }
+  .heat-tile.dn { background: rgba(224,122,120,0.09); border-color: rgba(224,122,120,0.24); }
+  .heat-tile.dn .pct { color: var(--red); }
+  .heat-tile.flat { background: rgba(255,255,255,0.025); }
+  .heat-tile.flat .pct { color: var(--t2); }
+
+  /* Sector bars */
+  .sectors { padding: 18px 20px; margin-bottom: 24px; }
+  .sec-row { display: grid; grid-template-columns: 100px 1fr 60px; align-items: center; gap: 14px; padding: 7px 0; }
+  .sec-row .nm { font-family: var(--mono); font-size: 11px; color: var(--t1); letter-spacing: 0.04em; }
+  .sec-row .bar { height: 4px; border-radius: 100px; background: rgba(255,255,255,0.04); position: relative; overflow: hidden; }
+  .sec-row .bar::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+    background: var(--gold);
+  }
+  .sec-row .pct { font-family: var(--mono); font-size: 11px; text-align: right; }
+
+  /* Economic calendar */
+  .cal-wrap { padding: 18px 20px; margin-bottom: 30px; }
+  .cal-row { display: grid; grid-template-columns: 50px 1fr 60px; gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
+  .cal-row:first-of-type { border-top: none; }
+  .cal-time { font-family: var(--mono); font-size: 11px; color: var(--gold); letter-spacing: 0.04em; }
+  .cal-evt { font-family: var(--ui); font-size: 12.5px; color: var(--cream); }
+  .cal-evt small { display: block; font-family: var(--mono); font-size: 10px; color: var(--t3); margin-top: 2px; letter-spacing: 0.04em; }
+  .cal-imp {
+    font-family: var(--mono); font-size: 9px; font-weight: 600; text-align: center;
+    padding: 3px 7px; border-radius: 4px;
+    letter-spacing: 0.10em;
+  }
+  .cal-imp.high { color: var(--red); background: rgba(224,122,120,0.10); border: 1px solid rgba(224,122,120,0.32); }
+  .cal-imp.med  { color: var(--gold); background: var(--gold-soft); border: 1px solid var(--gold-line); }
+  .cal-imp.low  { color: var(--t3); background: rgba(255,255,255,0.025); border: 1px solid var(--line); }
+
+  /* Step footer */
+  .step-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 22px; border-radius: 12px;
+    background: linear-gradient(90deg, rgba(229,184,61,0.05) 0%, rgba(229,184,61,0.012) 100%);
+    border: 1px solid var(--gold-line);
+    margin-bottom: 80px;
+  }
+  .step-foot .lbl { font-family: var(--mono); font-size: 10.5px; color: var(--gold); letter-spacing: 0.18em; text-transform: uppercase; }
+  .step-foot .msg { font-family: var(--ui); font-size: 13px; color: var(--cream); margin-left: 12px; }
+
+  /* Floating tag */
+  .vtag {
+    position: fixed; bottom: 20px; right: 22px; z-index: 100;
+    font-family: var(--mono); font-size: 9.5px; font-weight: 500;
+    color: var(--gold); letter-spacing: 0.18em; text-transform: uppercase;
+    padding: 8px 14px; border-radius: 100px;
+    background: rgba(229,184,61,0.08); border: 1px solid var(--gold-line);
+    backdrop-filter: blur(14px); display: inline-flex; align-items: center; gap: 7px;
+  }
+  .vtag .pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); animation: pulse 1.8s ease-in-out infinite; }
+
+  /* Two-col grid for live signals + economic calendar at bottom */
+  .twocol { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
+  @media (max-width:1100px){ .twocol { grid-template-columns: 1fr; } }
+  .live-sig { padding: 18px 20px; }
+  .live-sig .empty {
+    text-align: center; padding: 26px 18px;
+    font-family: var(--ui); font-size: 12.5px; color: var(--t2);
+    border: 1px dashed var(--line); border-radius: 9px;
+    margin: 14px 0 12px;
+  }
+  .live-sig .empty b { color: var(--cream); font-weight: 500; }
+
+  /* Halftime adjustments */
+  @media (max-width: 1100px) { .app { grid-template-columns: 1fr; } aside.sidebar { position: relative; height: auto; } }
+</style>
+</head>
+<body>
+
+<div class="bg-base"></div>
+<canvas id="bgnet"></canvas>
+
+<div class="vtag"><span class="pulse"></span>Visual preview · re-skin · entire site</div>
+
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand-mini">
+      <div class="logo-mark"><div class="core"></div><div class="ring"></div><div class="ring"></div><div class="ring"></div></div>
+      <div class="wordmark"><span class="pre">·</span><span class="dotw">Dot</span><span class="vrs">Verse</span></div>
+    </div>
+
+    <div class="dot-trail">
+      <div class="dt on"><div class="ind"></div>MKT</div>
+      <div class="sep">›</div>
+      <div class="dt"><div class="ind"></div>SIG</div>
+      <div class="sep">›</div>
+      <div class="dt"><div class="ind"></div>UND</div>
+      <div class="sep">›</div>
+      <div class="dt"><div class="ind"></div>SZE</div>
+      <div class="sep">›</div>
+      <div class="dt"><div class="ind"></div>ACT</div>
+    </div>
+
+    <button class="admin-btn"><span class="dot"></span>Admin</button>
+
+    <div class="nav-group">
+      <div class="nav-section">Pipeline</div>
+      <div class="nav-item active">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        <div class="lbl">Market<small>Is now a good time?</small></div>
+        <span class="step">01</span>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 18 9 12 14 17 21 6"/><polyline points="14 6 21 6 21 13"/></svg>
+        <div class="lbl">Signal<small>Find your next trade</small></div>
+        <span class="step">—</span>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+        <div class="lbl">Scanner</div>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><line x1="12" y1="2" x2="12" y2="12"/><line x1="12" y1="12" x2="22" y2="12"/></svg>
+        <div class="lbl">Understand<small>Know what you're entering</small></div>
+        <span class="step">03</span>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><polyline points="17 5 12 2 7 5"/><polyline points="17 19 12 22 7 19"/></svg>
+        <div class="lbl">Size<small>How much to risk</small></div>
+        <span class="step">04</span>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <div class="lbl">Act<small>Place your trade</small></div>
+        <span class="step">05</span>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <div class="lbl">Automations<small>Rules & protection</small></div>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <div class="lbl">Track Record<small>Backtest & performance</small></div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-section">Account</div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z"/></svg>
+        <div class="lbl">Risk Manager</div>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+        <div class="lbl">Portfolio</div>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <div class="lbl">Track Record</div>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <div class="lbl">Alerts</div>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zM18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>
+        <div class="lbl">News</div>
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <div class="lbl">Settings</div>
+      </div>
+    </div>
+
+    <button class="collapse-btn">‹ Collapse</button>
+
+    <div class="user-badge">
+      <div class="avatar">O</div>
+      <div class="info">
+        <div class="name">OMAR</div>
+        <div class="role">admin</div>
+      </div>
+      <div class="out" title="Sign out">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main>
+
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="crumb">Trading Dashboard <span class="date">· May 8, 2026</span></div>
+      <div class="topbar-right">
+        <div class="utc-pill">UTC 22:05</div>
+        <div class="lvl-toggle">
+          <button class="on">Beginner</button>
+          <button>Advanced</button>
+        </div>
+        <button class="cta lg">View Signals →</button>
+      </div>
+    </div>
+
+    <!-- Quick Analyse -->
+    <div class="qa-bar">
+      <span class="qa-lbl">Quick Analyse</span>
+      <button class="qa-sel">Crypto ▾</button>
+      <button class="qa-sel">BTC · Bitcoin ▾</button>
+      <input class="qa-input" placeholder="or type custom (e.g. AVAX, AMZN)">
+      <button class="tf-chip">15M</button>
+      <button class="tf-chip">1H</button>
+      <button class="tf-chip">30M</button>
+      <button class="tf-chip on">4H</button>
+      <button class="tf-chip">1D</button>
+      <button class="tf-chip">1W</button>
+      <button class="tf-chip">1M</button>
+      <button class="cta">Analyse</button>
+    </div>
+
+    <!-- Sessions strip -->
+    <div class="sess-strip">
+      <span class="clk">UTC 22:05</span>
+      <span class="sess-pill open"><span class="dotc"></span>Sydney <span class="st">OPEN</span></span>
+      <span class="sess-pill"><span class="dotc"></span>Tokyo <span class="st">CLOSED</span></span>
+      <span class="sess-pill"><span class="dotc"></span>London <span class="st">CLOSED</span></span>
+      <span class="sess-pill"><span class="dotc"></span>New York <span class="st">CLOSED</span></span>
+      <span class="sess-pill open"><span class="dotc"></span>Crypto <span class="st">OPEN</span></span>
+    </div>
+
+    <!-- Mode picker section -->
+    <div class="sec-head">
+      <div>
+        <div class="ttl">What can you trade right now?</div>
+        <div class="sub">Tap a mode to start · your choice filters the SIGNAL tab</div>
+      </div>
+      <div class="meta"><span class="pulse"></span>NY / Asia · 22:03 UTC</div>
+    </div>
+
+    <div class="modes">
+      <div class="mode-card">
+        <div class="mode-top"><div class="mode-name">Scalp</div><div class="mode-status wait">Wait</div></div>
+        <div class="mode-tf">15m – 1H</div>
+        <div class="mode-desc">Minutes to hours</div>
+        <div class="mode-note">Thin market — hold off</div>
+        <div class="mode-cta">Find Scalp Signals →</div>
+      </div>
+      <div class="mode-card">
+        <div class="mode-top"><div class="mode-name">Day Trade</div><div class="mode-status wait">Wait</div></div>
+        <div class="mode-tf">1H – 4H</div>
+        <div class="mode-desc">Open & close same day</div>
+        <div class="mode-note">Session ending soon</div>
+        <div class="mode-cta">Find Day Trade Signals →</div>
+      </div>
+      <div class="mode-card">
+        <div class="mode-top"><div class="mode-name">Swing</div><div class="mode-status go">Go</div></div>
+        <div class="mode-tf">4H – 1D</div>
+        <div class="mode-desc">Hold 2 – 10 days</div>
+        <div class="mode-note">No major catalysts blocking</div>
+        <div class="mode-cta">Find Swing Signals →</div>
+      </div>
+      <div class="mode-card">
+        <div class="mode-top"><div class="mode-name">Position</div><div class="mode-status go">Go</div></div>
+        <div class="mode-tf">1D – 1W</div>
+        <div class="mode-desc">Hold weeks to months</div>
+        <div class="mode-note">Intraday noise irrelevant — focus on weekly close</div>
+        <div class="mode-cta">Find Position Signals →</div>
+      </div>
+    </div>
+
+    <div class="live-mom-strip">
+      <div class="lbl">▸ Live Momentum Windows · <b>New Listings & Coins</b></div>
+      <div class="msg">No new listings with actionable signals right now — check back later.</div>
+    </div>
+
+    <!-- Today's Market -->
+    <div class="sec-head">
+      <div>
+        <div class="ttl">Today's Market</div>
+        <div class="sub">Is now a good time to trade?</div>
+      </div>
+      <div class="meta"><span class="pulse"></span>● Live</div>
+    </div>
+
+    <div class="trending">
+      <span class="pulse"></span>
+      <div class="ttl">Trending Conditions</div>
+      <div class="desc">6 of 8 assets in directional moves · Good session for momentum trades</div>
+      <button class="cta">10 signals match → Signal</button>
+    </div>
+
+    <!-- Index ticker strip -->
+    <div class="idx-strip">
+      <div class="idx-item"><div class="nm">S&P 500</div><div class="vl">7,337.11</div><div class="ch dn">−0.38%</div></div>
+      <div class="idx-item"><div class="nm">Nasdaq</div><div class="vl">25,806</div><div class="ch dn">−0.13%</div></div>
+      <div class="idx-item"><div class="nm">Dow</div><div class="vl">49,597</div><div class="ch dn">−0.63%</div></div>
+      <div class="idx-item"><div class="nm">VIX</div><div class="vl">17.0800</div><div class="ch dn">−1.78%</div></div>
+      <div class="idx-item"><div class="nm">BTC</div><div class="vl">79,640</div><div class="ch dn">−2.20%</div></div>
+      <div class="idx-item"><div class="nm">ETH</div><div class="vl">2,284.30</div><div class="ch dn">−2.83%</div></div>
+      <div class="idx-item"><div class="nm">Gold</div><div class="vl">4,696.00</div><div class="ch up">+0.30%</div></div>
+      <div class="idx-item"><div class="nm">Oil</div><div class="vl">97.6600</div><div class="ch up">+2.71%</div></div>
+    </div>
+
+    <!-- 3-column tile grid -->
+    <div class="three">
+      <div class="panel col-card">
+        <div class="col-head"><div class="nm">Indices</div><div class="avg">+0.82% avg</div></div>
+        <div class="ticker-row"><div class="ticker-icon">SPY</div><div class="nm-stack"><div class="nm">SPY</div><div class="sub">S&P 500 ETF</div></div><div><div class="price">731.58</div><div class="pct dn">−0.31%</div></div></div>
+        <div class="ticker-row"><div class="ticker-icon">QQQ</div><div class="nm-stack"><div class="nm">QQQ</div><div class="sub">Nasdaq ETF</div></div><div><div class="price">694.94</div><div class="pct dn">−0.12%</div></div></div>
+        <div class="ticker-row"><div class="ticker-icon">DIA</div><div class="nm-stack"><div class="nm">DIA</div><div class="sub">Dow Jones ETF</div></div><div><div class="price">495.91</div><div class="pct dn">−0.63%</div></div></div>
+        <div class="ticker-row"><div class="ticker-icon">IWM</div><div class="nm-stack"><div class="nm">IWM</div><div class="sub">Russell 2000</div></div><div><div class="price">282.26</div><div class="pct dn">−1.58%</div></div></div>
+      </div>
+
+      <div class="panel col-card">
+        <div class="col-head"><div class="nm">Crypto</div><div class="avg">+1.9% avg</div></div>
+        <div class="ticker-row"><div class="ticker-icon">BTC</div><div class="nm-stack"><div class="nm">BTC</div><div class="sub">Bitcoin</div></div><div><div class="price">$79,640</div><div class="pct dn">−2.20%</div></div></div>
+        <div class="ticker-row"><div class="ticker-icon">ETH</div><div class="nm-stack"><div class="nm">ETH</div><div class="sub">Ethereum</div></div><div><div class="price">$2,284.30</div><div class="pct dn">−2.83%</div></div></div>
+        <div class="ticker-row"><div class="ticker-icon">SOL</div><div class="nm-stack"><div class="nm">SOL</div><div class="sub">Solana</div></div><div><div class="price">$87.8000</div><div class="pct dn">−1.51%</div></div></div>
+        <div class="ticker-row"><div class="ticker-icon">BNB</div><div class="nm-stack"><div class="nm">BNB</div><div class="sub">BNB</div></div><div><div class="price">641.94</div><div class="pct dn">−0.87%</div></div></div>
+      </div>
+
+      <div class="panel col-card">
+        <div class="col-head"><div class="nm">Commodities</div><div class="avg">Spot prices</div></div>
+        <div class="ticker-row"><div class="ticker-icon">XAU</div><div class="nm-stack"><div class="nm">XAU</div><div class="sub">Gold Spot</div></div><div><div class="price">$4,696.00</div><div class="pct up">+0.30%</div></div></div>
+        <div class="ticker-row"><div class="ticker-icon">WTI</div><div class="nm-stack"><div class="nm">WTI</div><div class="sub">Crude Oil WTI</div></div><div><div class="price">$97.6600</div><div class="pct up">+2.71%</div></div></div>
+        <div class="ticker-row"><div class="ticker-icon">XAG</div><div class="nm-stack"><div class="nm">XAG</div><div class="sub">Silver Spot</div></div><div><div class="price">$78.9150</div><div class="pct up">+2.74%</div></div></div>
+
+        <div style="margin-top:18px; padding-top:18px; border-top:1px solid var(--line);">
+          <div class="fg-num">47</div>
+          <div class="fg-cap">Fear & Greed · Neutral</div>
+          <div class="fg-bar"><div class="fg-marker"></div></div>
+          <div class="fg-labels"><span>Fear</span><span>Neutral</span><span>Greed</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Heatmap -->
+    <div class="panel heat-wrap">
+      <div class="sec-head" style="margin-bottom:4px;">
+        <div>
+          <div class="ttl" style="font-size:18px;">S&P 500 Heatmap</div>
+          <div class="sub">% change today · 14 stocks</div>
+        </div>
+      </div>
+      <div class="heat-grid">
+        <div class="heat-tile flat"><div class="sym">AAPL</div><div class="pct">−0.02%</div></div>
+        <div class="heat-tile up"><div class="sym">MSFT</div><div class="pct">+1.65%</div></div>
+        <div class="heat-tile up"><div class="sym">NVDA</div><div class="pct">+1.77%</div></div>
+        <div class="heat-tile dn"><div class="sym">AMZN</div><div class="pct">−1.39%</div></div>
+        <div class="heat-tile up"><div class="sym">META</div><div class="pct">+0.64%</div></div>
+        <div class="heat-tile flat"><div class="sym">GOOG</div><div class="pct">+0.04%</div></div>
+        <div class="heat-tile up"><div class="sym">TSLA</div><div class="pct">+3.28%</div></div>
+        <div class="heat-tile dn"><div class="sym">AMD</div><div class="pct">−3.07%</div></div>
+        <div class="heat-tile flat"><div class="sym">NFLX</div><div class="pct">−0.02%</div></div>
+        <div class="heat-tile dn"><div class="sym">UBER</div><div class="pct">−3.08%</div></div>
+        <div class="heat-tile flat"><div class="sym">PYPL</div><div class="pct">−0.11%</div></div>
+        <div class="heat-tile dn"><div class="sym">INTC</div><div class="pct">−3.00%</div></div>
+        <div class="heat-tile flat"><div class="sym">ORCL</div><div class="pct">+0.29%</div></div>
+        <div class="heat-tile up"><div class="sym">ADBE</div><div class="pct">+2.53%</div></div>
+      </div>
+    </div>
+
+    <!-- Sectors -->
+    <div class="panel sectors">
+      <div class="sec-head" style="margin-bottom:4px;">
+        <div>
+          <div class="ttl" style="font-size:18px;">Sector Strength</div>
+          <div class="sub">Relative momentum</div>
+        </div>
+      </div>
+      <div class="sec-row"><div class="nm">Technology</div><div class="bar" style="--w:-2"><span style="position:absolute;top:0;bottom:0;right:50%;width:2%;background:var(--red)"></span></div><div class="pct dn">−0.2%</div></div>
+      <div class="sec-row"><div class="nm">Healthcare</div><div class="bar"><span style="position:absolute;top:0;bottom:0;right:50%;width:6%;background:var(--red)"></span></div><div class="pct dn">−0.6%</div></div>
+      <div class="sec-row"><div class="nm">Financials</div><div class="bar"><span style="position:absolute;top:0;bottom:0;right:50%;width:5%;background:var(--red)"></span></div><div class="pct dn">−0.5%</div></div>
+      <div class="sec-row"><div class="nm">Consumer</div><div class="bar"><span style="position:absolute;top:0;bottom:0;right:50%;width:18%;background:var(--red)"></span></div><div class="pct dn">−1.8%</div></div>
+      <div class="sec-row"><div class="nm">Energy</div><div class="bar"><span style="position:absolute;top:0;bottom:0;right:50%;width:8%;background:var(--red)"></span></div><div class="pct dn">−0.8%</div></div>
+      <div class="sec-row"><div class="nm">Real Estate</div><div class="bar"><span style="position:absolute;top:0;bottom:0;right:50%;width:16%;background:var(--red)"></span></div><div class="pct dn">−1.6%</div></div>
+    </div>
+
+    <!-- Live signals + Economic calendar -->
+    <div class="twocol" style="margin-top:24px;">
+      <div class="panel live-sig">
+        <div class="sec-head" style="margin-bottom:4px;">
+          <div><div class="ttl" style="font-size:18px;">Live Signals</div><div class="sub">scanning…</div></div>
+        </div>
+        <div class="empty"><b>Data temporarily unavailable</b><br>Retrying shortly.</div>
+        <div style="display:flex; gap:9px;">
+          <button class="cta ghost">Retry</button>
+          <button class="cta full">View All Signals → Signal</button>
+        </div>
+      </div>
+
+      <div class="panel cal-wrap">
+        <div class="sec-head" style="margin-bottom:4px;">
+          <div><div class="ttl" style="font-size:18px;">Economic Calendar</div><div class="sub">High-impact events</div></div>
+        </div>
+        <div class="cal-row"><div class="cal-time">09:30</div><div class="cal-evt">Non-Farm Payrolls<small>USA · Prev: 303K · Est: 240K</small></div><div class="cal-imp high">High</div></div>
+        <div class="cal-row"><div class="cal-time">10:00</div><div class="cal-evt">ISM Manufacturing PMI<small>USA · Prev: 50.3 · Est: 49.9</small></div><div class="cal-imp med">Med</div></div>
+        <div class="cal-row"><div class="cal-time">11:00</div><div class="cal-evt">EIA Crude Oil Inventory<small>USA · Prev: −3.2M · Est: −1.8M</small></div><div class="cal-imp low">Low</div></div>
+        <div class="cal-row"><div class="cal-time">14:00</div><div class="cal-evt">Fed Chair Powell Speech<small>USA · Impact: Medium-High</small></div><div class="cal-imp med">Med</div></div>
+        <div class="cal-row"><div class="cal-time">16:30</div><div class="cal-evt">UK Manufacturing PMI<small>GBR · Prev: 51.2 · Est: 51.0</small></div><div class="cal-imp low">Low</div></div>
+      </div>
+    </div>
+
+    <!-- Step footer -->
+    <div class="step-foot" style="margin-top:30px;">
+      <div>
+        <div class="lbl">Step 1 of 5 · Market</div>
+        <div class="msg">Market context loaded — ready to find your next trade</div>
+      </div>
+      <button class="cta lg">Find Opportunities → Signal</button>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // Constellation background — close in spirit to the live site's animation
+  (function(){
+    const c = document.getElementById('bgnet');
+    const ctx = c.getContext('2d');
+    let w, h, dots;
+    function resize(){
+      w = c.width = window.innerWidth * window.devicePixelRatio;
+      h = c.height = window.innerHeight * window.devicePixelRatio;
+      c.style.width = window.innerWidth + 'px';
+      c.style.height = window.innerHeight + 'px';
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      const count = Math.min(80, Math.floor(window.innerWidth/22));
+      dots = Array.from({length:count}, () => ({
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        vx: (Math.random()-0.5) * 0.18,
+        vy: (Math.random()-0.5) * 0.18,
+        r: Math.random()*1.4 + 0.6
+      }));
+    }
+    function step(){
+      ctx.clearRect(0,0,window.innerWidth,window.innerHeight);
+      // dots
+      for(const d of dots){
+        d.x += d.vx; d.y += d.vy;
+        if(d.x<0||d.x>window.innerWidth) d.vx*=-1;
+        if(d.y<0||d.y>window.innerHeight) d.vy*=-1;
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(229,184,61,0.42)';
+        ctx.fill();
+      }
+      // lines
+      for(let i=0; i<dots.length; i++){
+        for(let j=i+1; j<dots.length; j++){
+          const dx = dots[i].x - dots[j].x;
+          const dy = dots[i].y - dots[j].y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if(dist < 130){
+            ctx.beginPath();
+            ctx.moveTo(dots[i].x, dots[i].y);
+            ctx.lineTo(dots[j].x, dots[j].y);
+            ctx.strokeStyle = 'rgba(229,184,61,' + (0.16 * (1 - dist/130)) + ')';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+      requestAnimationFrame(step);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+    step();
+  })();
+</script>
+</body>
+</html>

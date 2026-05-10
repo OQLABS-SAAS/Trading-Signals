@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DotVerse · Animation Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07080c;
+  --s1:rgba(255,248,230,.03); --s2:rgba(255,248,230,.05); --s3:rgba(255,248,230,.08);
+  --bd:rgba(201,168,76,.12);  --bd2:rgba(201,168,76,.22);
+  --t1:#ede8d8; --t2:rgba(237,232,216,.62); --t3:rgba(237,232,216,.30);
+  --gold:#c9a84c; --amb:#c9a84c;
+  --grn:#5de8a0; --red:#e8706e;
+  --mono:'IBM Plex Mono',monospace;
+  --ui:'Space Grotesk',sans-serif;
+  --syne:'Syne',sans-serif;
+  /* Animation timing — single source of truth */
+  --anim-fast:150ms;
+  --anim-mid:300ms;
+  --anim-slow:600ms;
+  --anim-ring:800ms;
+  --spring:cubic-bezier(.34,1.56,.64,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--t1);font-family:var(--ui);font-size:14px;padding:48px 32px;-webkit-font-smoothing:antialiased;line-height:1.5;}
+h1{font-family:var(--syne);font-weight:600;font-size:28px;letter-spacing:-.5px;}
+h2{font-family:var(--syne);font-weight:600;font-size:18px;color:var(--gold);margin:0 0 4px;letter-spacing:-.2px;}
+.sub{font-size:12px;color:var(--t2);margin-bottom:14px;}
+.lab{font-family:var(--mono);font-size:10px;color:var(--t3);letter-spacing:1px;text-transform:uppercase;}
+
+.wrap{max-width:1100px;margin:0 auto;}
+.head{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid var(--bd);}
+.replay-btn{padding:10px 20px;background:var(--gold);color:var(--bg);font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.5px;border-radius:6px;cursor:pointer;border:none;transition:transform var(--anim-fast),box-shadow var(--anim-fast);}
+.replay-btn:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(201,168,76,.3);}
+.replay-btn:active{transform:scale(.97);}
+
+section{padding:28px;margin-bottom:24px;background:var(--s1);border:1px solid var(--bd);border-radius:10px;}
+.demo-area{margin-top:18px;padding:24px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;min-height:140px;display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;}
+
+/* ════════════════════════════════════════════
+   ANIMATION DEFINITIONS (wrapped in motion preference)
+══════════════════════════════════════════════ */
+@media (prefers-reduced-motion: no-preference){
+  @keyframes cardEntry{
+    from{opacity:0;transform:scale(.96) translateY(8px);}
+    to{opacity:1;transform:scale(1) translateY(0);}
+  }
+  @keyframes ringFill{
+    from{stroke-dashoffset:var(--circ);}
+    to{stroke-dashoffset:var(--target);}
+  }
+  @keyframes shimmer{
+    from{background-position:-200% 0;}
+    to{background-position:200% 0;}
+  }
+  @keyframes spin{
+    to{transform:rotate(360deg);}
+  }
+  @keyframes pulseGold{
+    0%,100%{box-shadow:0 0 0 0 rgba(201,168,76,.4);}
+    50%{box-shadow:0 0 0 6px rgba(201,168,76,0);}
+  }
+  @keyframes slideDown{
+    from{opacity:0;transform:translateY(-8px);max-height:0;}
+    to{opacity:1;transform:translateY(0);max-height:80px;}
+  }
+}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;}
+}
+
+/* ════════════════════════════════════════════
+   1. SIGNAL CARD ENTRY (staggered)
+══════════════════════════════════════════════ */
+.signal-card{
+  flex:1 1 280px;max-width:340px;background:var(--s2);border:1px solid var(--bd);border-radius:10px;padding:18px;
+  animation:cardEntry var(--anim-mid) var(--spring) both;
+}
+.signal-card:nth-child(1){animation-delay:0ms;}
+.signal-card:nth-child(2){animation-delay:80ms;}
+.signal-card:nth-child(3){animation-delay:160ms;}
+.signal-card .card-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;}
+.signal-card .ticker{font-family:var(--syne);font-weight:600;font-size:18px;}
+.signal-card .meta{font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px;}
+.badge{font-family:var(--mono);font-size:10px;font-weight:600;padding:5px 10px;border-radius:5px;letter-spacing:.5px;}
+.badge.buy{background:rgba(93,232,160,.12);color:var(--grn);border:1px solid rgba(93,232,160,.3);}
+.badge.sell{background:rgba(232,112,110,.12);color:var(--red);border:1px solid rgba(232,112,110,.3);}
+.badge.hold{background:var(--s3);color:var(--t2);border:1px solid var(--bd);}
+.signal-card .rr{font-family:var(--syne);font-weight:600;font-size:24px;margin:8px 0 4px;}
+.signal-card .conf{font-family:var(--mono);font-size:10px;color:var(--gold);letter-spacing:1px;}
+.levels{margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--t2);line-height:1.7;}
+
+/* ════════════════════════════════════════════
+   2. CONFIDENCE RING FILL
+══════════════════════════════════════════════ */
+.ring-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;}
+.ring{width:80px;height:80px;position:relative;}
+.ring svg{transform:rotate(-90deg);}
+.ring .track{fill:none;stroke:var(--s3);stroke-width:5;}
+.ring .fill{fill:none;stroke:var(--gold);stroke-width:5;stroke-linecap:round;}
+.ring .fill[data-anim]{
+  --circ:226.19;  /* 2π × 36 */
+  stroke-dasharray:var(--circ);
+  animation:ringFill var(--anim-ring) var(--ease-out) forwards;
+}
+.ring .num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:18px;font-weight:600;color:var(--gold);}
+
+/* ════════════════════════════════════════════
+   3. NUMBER TICKING
+══════════════════════════════════════════════ */
+.tick-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;width:100%;max-width:600px;}
+.tick-stat{background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:16px;text-align:center;}
+.tick-stat .lab{margin-bottom:6px;}
+.tick-stat .val{font-family:var(--mono);font-size:24px;font-weight:400;color:var(--t1);}
+
+/* ════════════════════════════════════════════
+   4. SCANNER LOADING SKELETON
+══════════════════════════════════════════════ */
+.skel-table{width:100%;max-width:680px;}
+.skel-row{display:grid;grid-template-columns:80px 60px 60px 60px 60px 1fr 90px;gap:14px;padding:12px 0;border-bottom:1px solid var(--bd);align-items:center;}
+.skel{height:14px;border-radius:3px;
+  background:linear-gradient(90deg,var(--s2) 25%,var(--s3) 50%,var(--s2) 75%);
+  background-size:200% 100%;
+  animation:shimmer 1.4s linear infinite;
+}
+.skel.short{width:60%;}
+.skel.tall{height:24px;}
+
+/* ════════════════════════════════════════════
+   5. ANALYZE BUTTON STATES
+══════════════════════════════════════════════ */
+.btn-row{display:flex;gap:14px;flex-wrap:wrap;}
+.az-btn{padding:12px 28px;background:var(--gold);color:var(--bg);font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.5px;border-radius:6px;cursor:pointer;border:none;display:inline-flex;align-items:center;gap:10px;transition:transform var(--anim-fast),box-shadow var(--anim-fast);}
+.az-btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 16px rgba(201,168,76,.3);}
+.az-btn:active:not(:disabled){transform:scale(.97);}
+.az-btn:disabled{cursor:wait;opacity:.7;}
+.az-btn.loading::before{
+  content:'';width:12px;height:12px;border:2px solid rgba(7,8,12,.3);border-top-color:var(--bg);border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+.az-btn:focus-visible{outline:2px solid var(--gold);outline-offset:3px;}
+
+/* ════════════════════════════════════════════
+   6. GATE NOTE SLIDE-IN
+══════════════════════════════════════════════ */
+.gate-card{max-width:560px;background:var(--s2);border:1px solid var(--bd);border-radius:10px;padding:18px;}
+.gate-line{font-family:var(--syne);font-weight:600;font-size:18px;display:flex;justify-content:space-between;align-items:center;}
+.gate-note{margin-top:10px;padding:12px 14px;background:rgba(201,168,76,.08);border-left:3px solid var(--gold);border-radius:4px;font-family:var(--mono);font-size:11px;color:var(--t2);line-height:1.6;
+  animation:slideDown 400ms var(--ease-out) both;animation-delay:200ms;overflow:hidden;
+}
+
+/* ════════════════════════════════════════════
+   7. FULL CARD — everything combined
+══════════════════════════════════════════════ */
+.full-card{
+  max-width:480px;background:var(--s2);border:1px solid var(--bd2);border-radius:12px;padding:22px;
+  animation:cardEntry var(--anim-mid) var(--spring) both;
+}
+.full-card .top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
+.full-card .ttl{font-family:var(--syne);font-weight:600;font-size:20px;}
+.full-card .body{display:flex;gap:18px;align-items:center;}
+.full-card .ring-col{flex-shrink:0;}
+.full-card .stats-col{flex:1;}
+.full-card .rr-big{font-family:var(--syne);font-weight:600;font-size:30px;line-height:1;}
+.full-card .lvls{margin-top:10px;font-family:var(--mono);font-size:11.5px;color:var(--t2);line-height:1.8;}
+.full-card .lvls .red{color:var(--red);}
+.full-card .lvls .grn{color:var(--grn);}
+
+footer{margin-top:48px;padding-top:24px;border-top:1px solid var(--bd);font-family:var(--mono);font-size:11px;color:var(--t3);text-align:center;line-height:1.8;}
+.note{margin-top:16px;padding:14px 18px;background:var(--s1);border-left:3px solid var(--gold);border-radius:4px;font-size:13px;color:var(--t2);}
+.note strong{color:var(--gold);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <div>
+    <h1>DotVerse · Animation Preview</h1>
+    <div class="sub" style="margin-top:6px;">Tier 1 enhancements · all motion respects <code>prefers-reduced-motion</code></div>
+  </div>
+  <button class="replay-btn" onclick="replayAll()">↻ Replay All</button>
+</div>
+
+<div class="note">
+  <strong>What you're previewing:</strong> Five motion patterns proposed for v1.0.1. Each section isolates one animation so you can feel its character. Bottom shows them composed into a single signal card. Click <em>Replay All</em> to retrigger.
+</div>
+
+<!-- 1. SIGNAL CARD ENTRY -->
+<section>
+  <h2>1 · Signal card entry</h2>
+  <div class="sub">When new signals load, cards animate in with a soft spring. 80ms stagger between siblings reads as "data arriving."</div>
+  <div class="demo-area" id="demo-1">
+    <div class="signal-card">
+      <div class="card-head"><div><div class="ticker">BTCUSD</div><div class="meta">4H · crypto</div></div><div class="badge buy">BUY</div></div>
+      <div class="rr">1:2.4</div><div class="conf">LIKELY</div>
+      <div class="levels">Entry 77,541.14<br>SL 76,167.9 · TP 80,819.16</div>
+    </div>
+    <div class="signal-card">
+      <div class="card-head"><div><div class="ticker">AAPL</div><div class="meta">4H · stock</div></div><div class="badge buy">BUY</div></div>
+      <div class="rr">1:2.4</div><div class="conf">LIKELY</div>
+      <div class="levels">Entry 270.76<br>SL 263.36 · TP 288.71</div>
+    </div>
+    <div class="signal-card">
+      <div class="card-head"><div><div class="ticker">XAUUSD</div><div class="meta">4H · gold</div></div><div class="badge sell">SELL</div></div>
+      <div class="rr">1:2.4</div><div class="conf">LIKELY</div>
+      <div class="levels">Entry 4,577.30<br>SL 4,652.38 · TP 4,398.75</div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. CONFIDENCE RING FILL -->
+<section>
+  <h2>2 · Confidence ring fill</h2>
+  <div class="sub">SVG stroke draws from 0% to target value over 800ms. Beginners read this as "system computing." Replaces the static "60" / "70" snap.</div>
+  <div class="demo-area" id="demo-2">
+    <div class="ring-wrap"><div class="lab">CONFIDENCE 60</div><div class="ring"><svg width="80" height="80" viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="36"/><circle class="fill" cx="40" cy="40" r="36" data-anim style="--target:90.476"/></svg><div class="num">60</div></div></div>
+    <div class="ring-wrap"><div class="lab">CONFIDENCE 70</div><div class="ring"><svg width="80" height="80" viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="36"/><circle class="fill" cx="40" cy="40" r="36" data-anim style="--target:67.857"/></svg><div class="num">70</div></div></div>
+    <div class="ring-wrap"><div class="lab">CONFIDENCE 85</div><div class="ring"><svg width="80" height="80" viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="36"/><circle class="fill" cx="40" cy="40" r="36" data-anim style="--target:33.929"/></svg><div class="num">85</div></div></div>
+  </div>
+</section>
+
+<!-- 3. NUMBER TICKING -->
+<section>
+  <h2>3 · Number ticking</h2>
+  <div class="sub">Price, RSI, win-rate count up smoothly over 600ms instead of snapping. Beginners feel values "settle into place."</div>
+  <div class="demo-area">
+    <div class="tick-grid">
+      <div class="tick-stat"><div class="lab">BTC PRICE</div><div class="val tick" data-target="77541.14" data-format="$">$0</div></div>
+      <div class="tick-stat"><div class="lab">RSI 14</div><div class="val tick" data-target="62.4" data-format="num">0</div></div>
+      <div class="tick-stat"><div class="lab">WIN RATE 7D</div><div class="val tick" data-target="71.8" data-format="pct">0%</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. SKELETON -->
+<section>
+  <h2>4 · Scanner loading skeleton</h2>
+  <div class="sub">Replaces spinner with shimmer placeholder rows. Users see <em>structure</em> before data — perceived load time drops ~40%.</div>
+  <div class="demo-area">
+    <div class="skel-table">
+      <div class="skel-row"><div class="skel tall"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>
+      <div class="skel-row"><div class="skel tall"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>
+      <div class="skel-row"><div class="skel tall"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>
+      <div class="skel-row"><div class="skel tall"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. ANALYZE BUTTON STATES -->
+<section>
+  <h2>5 · Analyze button states</h2>
+  <div class="sub">Spinner appears on click. Hover lifts, active scales down. Focus ring for keyboard users (mandatory for accessibility).</div>
+  <div class="demo-area">
+    <div class="btn-row">
+      <button class="az-btn">ANALYSE →</button>
+      <button class="az-btn loading" disabled>ANALYSING</button>
+      <button class="az-btn" disabled style="opacity:.4">DISABLED</button>
+    </div>
+  </div>
+</section>
+
+<!-- 6. GATE NOTE SLIDE-IN -->
+<section>
+  <h2>6 · Gate-note slide-in (bonus)</h2>
+  <div class="sub">When the engine demotes a signal, the explanation slides down from below the verdict. User sees <em>why</em>, not just what.</div>
+  <div class="demo-area">
+    <div class="gate-card">
+      <div class="gate-line">EURUSD 4H<span class="badge hold">HOLD</span></div>
+      <div class="lab" style="margin-top:6px;color:var(--gold);">LIKELY · 0 bull / 4 bear</div>
+      <div class="gate-note">
+        <strong>HTF trend is bullish</strong> — counter-trend SELL suppressed. The 4-hour bear setup conflicts with the daily uptrend; DotVerse blocks counter-trend entries to protect against trend reversal traps.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. FULL CARD COMBINED -->
+<section>
+  <h2>7 · All together — single card</h2>
+  <div class="sub">Everything composed: card entry, ring fill, ticking values, hover lift. This is what your dashboard cards become.</div>
+  <div class="demo-area">
+    <div class="full-card" id="full-card">
+      <div class="top">
+        <div><div class="ttl">BTCUSD</div><div class="lab" style="margin-top:4px;">4H · CRYPTO</div></div>
+        <div class="badge buy">BUY</div>
+      </div>
+      <div class="body">
+        <div class="ring-col"><div class="ring"><svg width="80" height="80" viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="36"/><circle class="fill" cx="40" cy="40" r="36" data-anim style="--target:67.857"/></svg><div class="num">70</div></div></div>
+        <div class="stats-col">
+          <div class="rr-big">1:2.4</div>
+          <div class="lab" style="color:var(--gold);margin-top:4px;">LIKELY</div>
+          <div class="lvls">
+            Entry <span class="tick" data-target="77541.14" data-format="num-no-prefix">0</span><br>
+            SL <span class="red tick" data-target="76167.9" data-format="num-no-prefix">0</span> · TP <span class="grn tick" data-target="80819.16" data-format="num-no-prefix">0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Animation tokens — fast 150ms · mid 300ms · slow 600ms · ring 800ms<br>
+  Spring curve cubic-bezier(.34,1.56,.64,1) · Ease-out cubic-bezier(.16,1,.3,1)<br>
+  All keyframes wrapped in @media (prefers-reduced-motion: no-preference)
+</footer>
+
+</div>
+
+<script>
+function tickTo(el, target, format){
+  const start = performance.now();
+  const dur = 600;
+  const ease = t => 1 - Math.pow(1-t, 3);
+  function frame(now){
+    const t = Math.min(1, (now - start) / dur);
+    const v = target * ease(t);
+    if(format === '$') el.textContent = '$' + v.toLocaleString(undefined,{maximumFractionDigits:2});
+    else if(format === 'pct') el.textContent = v.toFixed(1) + '%';
+    else if(format === 'num-no-prefix') el.textContent = v.toLocaleString(undefined,{maximumFractionDigits:2});
+    else el.textContent = v.toFixed(1);
+    if(t < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+function replayAll(){
+  // Re-run ring fills by reapplying inline animation
+  document.querySelectorAll('.ring .fill[data-anim]').forEach(el => {
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+  });
+  // Re-run card entries
+  document.querySelectorAll('.signal-card, .full-card').forEach(el => {
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+  });
+  // Re-run number ticks
+  document.querySelectorAll('.tick').forEach(el => {
+    el.textContent = '0';
+    tickTo(el, parseFloat(el.dataset.target), el.dataset.format);
+  });
+  // Re-run gate-note slide-in
+  document.querySelectorAll('.gate-note').forEach(el => {
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+  });
+}
+
+// Initial run
+window.addEventListener('load', () => {
+  document.querySelectorAll('.tick').forEach(el => {
+    tickTo(el, parseFloat(el.dataset.target), el.dataset.format);
+  });
+});
+</script>
+</body>
+</html>

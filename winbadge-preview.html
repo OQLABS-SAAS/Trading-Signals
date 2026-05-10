@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Win Badge — DotVerse UI Preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@400;700;900&family=Fira+Code:wght@400;600;700&family=Sora:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0C0A08;
+    --bg2: #141210;
+    --bg3: #1a1816;
+    --amber: #f5a623;
+    --amber-dim: rgba(245,166,35,.15);
+    --amber-glow: rgba(245,166,35,.35);
+    --green: #26a65b;
+    --green-dim: rgba(38,166,91,.15);
+    --green-glow: rgba(38,166,91,.4);
+    --red: #e05555;
+    --red-dim: rgba(224,85,85,.15);
+    --red-glow: rgba(224,85,85,.35);
+    --border: rgba(255,255,255,.08);
+    --muted: rgba(255,255,255,.35);
+    --muted2: rgba(255,255,255,.22);
+    --display: 'Anybody', sans-serif;
+    --mono: 'Fira Code', monospace;
+    --body: 'Sora', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: #fff;
+    font-family: var(--body);
+    min-height: 100vh;
+    padding: 40px 24px;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 8px;
+  }
+
+  .subtitle {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    margin-bottom: 40px;
+  }
+
+  /* ── COMPARISON GRID ── */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    max-width: 900px;
+    margin: 0 auto 60px;
+  }
+
+  .compare-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .col-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted2);
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── CONTEXT: confidence ring + badge together ── */
+  .signal-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 20px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  /* ── CONFIDENCE RING (unchanged) ── */
+  .conf-ring-wrap {
+    position: relative;
+    width: 72px;
+    height: 72px;
+  }
+
+  .conf-ring-wrap svg {
+    transform: rotate(-90deg);
+  }
+
+  .conf-inner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .conf-pct {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--amber);
+    line-height: 1;
+  }
+
+  .conf-lbl {
+    font-family: var(--mono);
+    font-size: 7px;
+    color: var(--muted2);
+    letter-spacing: 1.5px;
+    margin-top: 1px;
+  }
+
+  /* ── BEFORE: old win badge ── */
+  .win-badge-old {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 5px 10px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    width: 90px;
+  }
+
+  .wb-val-old {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--amber);
+    line-height: 1;
+  }
+
+  .wb-lbl-old {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    color: var(--muted2);
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .wb-sample-old {
+    font-size: 9px;
+    color: var(--muted2);
+    text-align: center;
+    margin-top: 1px;
+  }
+
+  /* ── AFTER: new win badge ── */
+  .win-badge-new {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 12px 7px;
+    background: var(--badge-bg, rgba(38,166,91,.06));
+    border: 1px solid var(--badge-border, rgba(38,166,91,.2));
+    border-radius: 5px;
+    width: 100px;
+    position: relative;
+    overflow: hidden;
+    animation: badgePop .5s cubic-bezier(.34,1.56,.64,1) both;
+    animation-delay: .15s;
+  }
+
+  .win-badge-new.win-high  { --badge-bg: rgba(38,166,91,.06);  --badge-border: rgba(38,166,91,.22); --badge-val-color: var(--green); --bar-color: var(--green); --bar-glow: var(--green-glow); }
+  .win-badge-new.win-mid   { --badge-bg: rgba(245,166,35,.06); --badge-border: rgba(245,166,35,.2); --badge-val-color: var(--amber); --bar-color: var(--amber); --bar-glow: var(--amber-glow); }
+  .win-badge-new.win-low   { --badge-bg: rgba(224,85,85,.06);  --badge-border: rgba(224,85,85,.2);  --badge-val-color: var(--red);   --bar-color: var(--red);   --bar-glow: var(--red-glow); }
+
+  @keyframes badgePop {
+    from { opacity: 0; transform: scale(.88); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  .wb-val-new {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--badge-val-color);
+    line-height: 1;
+    letter-spacing: -.5px;
+  }
+
+  .wb-bar-track {
+    width: 76px;
+    height: 3px;
+    background: rgba(255,255,255,.07);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .wb-bar-fill {
+    height: 100%;
+    background: var(--bar-color);
+    box-shadow: 0 0 6px var(--bar-glow);
+    border-radius: 2px;
+    width: 0%;
+    animation: barFill .8s cubic-bezier(.4,0,.2,1) both;
+    animation-delay: .3s;
+  }
+
+  @keyframes barFill {
+    from { width: 0%; }
+    to   { width: var(--bar-width, 67%); }
+  }
+
+  .wb-lbl-new {
+    font-family: var(--mono);
+    font-size: 8px;
+    color: var(--muted2);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  .wb-sample-new {
+    font-family: var(--mono);
+    font-size: 8px;
+    color: var(--muted2);
+    text-align: center;
+  }
+
+  /* ── STATES SECTION ── */
+  .states-section {
+    max-width: 900px;
+    margin: 0 auto 60px;
+  }
+
+  .states-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted2);
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+
+  .states-row {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .state-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 24px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-width: 140px;
+  }
+
+  .state-card-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-align: center;
+  }
+
+  /* ── ANIMATION PLAYGROUND ── */
+  .playground {
+    max-width: 900px;
+    margin: 0 auto;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 28px;
+  }
+
+  .playground-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+
+  .playground-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+
+  .replay-btn {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--amber);
+    background: var(--amber-dim);
+    border: 1px solid rgba(245,166,35,.3);
+    border-radius: 3px;
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+
+  .replay-btn:hover {
+    background: rgba(245,166,35,.25);
+    border-color: rgba(245,166,35,.5);
+  }
+
+  .live-demo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 32px;
+    background: var(--bg);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  .live-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sig-btns-preview {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .sig-btn-demo {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 3px;
+    border: none;
+    cursor: pointer;
+    background: #26a65b22;
+    color: #26a65b;
+    border: 1px solid #26a65b44;
+    transition: background .15s;
+  }
+  .sig-btn-demo:hover { background: #26a65b33; }
+  .sig-btn-demo.sell { background: #e0555522; color: #e05555; border-color: #e0555544; }
+  .sig-btn-demo.hold { background: rgba(255,255,255,.05); color: var(--muted); border-color: var(--border); }
+  .sig-btn-demo.active {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+  }
+
+  /* Conf label styles */
+  .conf-label-chip {
+    font-family: var(--mono);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+  .conf-label-chip.confirmed { background: rgba(38,166,91,.15); color: #26a65b; }
+  .conf-label-chip.likely    { background: rgba(245,166,35,.15); color: var(--amber); }
+  .conf-label-chip.hypothesis { background: rgba(255,255,255,.06); color: var(--muted); }
+
+  /* ── SPEC NOTES ── */
+  .spec-section {
+    max-width: 900px;
+    margin: 40px auto 0;
+    padding: 20px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  .spec-title {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 12px;
+  }
+
+  .spec-row {
+    display: flex;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    font-size: 11px;
+    align-items: baseline;
+  }
+
+  .spec-key {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted2);
+    width: 130px;
+    flex-shrink: 0;
+    letter-spacing: .5px;
+  }
+
+  .spec-val {
+    color: rgba(255,255,255,.7);
+    line-height: 1.5;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 9px;
+    background: rgba(255,255,255,.07);
+    padding: 1px 5px;
+    border-radius: 2px;
+    color: var(--amber);
+  }
+</style>
+</head>
+<body>
+
+<h1>Win Badge — UI Improvement Preview</h1>
+<p class="subtitle">DotVerse · Signals Tab · Under Confidence Ring</p>
+
+<!-- BEFORE / AFTER -->
+<div class="compare-grid">
+
+  <!-- BEFORE -->
+  <div class="compare-col">
+    <div class="col-label">Before — current</div>
+    <div class="signal-meta">
+      <!-- Confidence ring -->
+      <div class="conf-ring-wrap">
+        <svg width="72" height="72" viewBox="0 0 72 72">
+          <circle cx="36" cy="36" r="28" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="5"/>
+          <circle cx="36" cy="36" r="28" fill="none" stroke="#f5a623" stroke-width="5"
+            stroke-dasharray="175.9" stroke-dashoffset="52.8" stroke-linecap="round"/>
+        </svg>
+        <div class="conf-inner">
+          <span class="conf-pct">70%</span>
+          <span class="conf-lbl">CONF</span>
+        </div>
+      </div>
+      <div style="font-family:var(--mono);font-size:8px;color:var(--amber);letter-spacing:1px;margin-top:-4px;">CONFIRMED</div>
+      <!-- Old win badge -->
+      <div class="win-badge-old">
+        <div class="wb-val-old">67%</div>
+        <div class="wb-lbl-old">Win Rate</div>
+        <div class="wb-sample-old">42 past signals</div>
+      </div>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);padding:8px 0;line-height:1.7;">
+      — Static amber value regardless of win rate<br>
+      — No visual signal: 67% looks same as 20%<br>
+      — No animated entrance<br>
+      — Not visually connected to confidence ring
+    </div>
+  </div>
+
+  <!-- AFTER -->
+  <div class="compare-col">
+    <div class="col-label">After — improved</div>
+    <div class="signal-meta">
+      <!-- Confidence ring -->
+      <div class="conf-ring-wrap">
+        <svg width="72" height="72" viewBox="0 0 72 72">
+          <circle cx="36" cy="36" r="28" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="5"/>
+          <circle cx="36" cy="36" r="28" fill="none" stroke="#f5a623" stroke-width="5"
+            stroke-dasharray="175.9" stroke-dashoffset="52.8" stroke-linecap="round"/>
+        </svg>
+        <div class="conf-inner">
+          <span class="conf-pct">70%</span>
+          <span class="conf-lbl">CONF</span>
+        </div>
+      </div>
+      <div style="font-family:var(--mono);font-size:8px;color:var(--amber);letter-spacing:1px;margin-top:-4px;">CONFIRMED</div>
+      <!-- New win badge: HIGH (>55%) -->
+      <div class="win-badge-new win-high" id="demoBadgeAfter">
+        <div class="wb-val-new">67%</div>
+        <div class="wb-bar-track">
+          <div class="wb-bar-fill" style="--bar-width:67%;"></div>
+        </div>
+        <div class="wb-lbl-new">Win Rate</div>
+        <div class="wb-sample-new">42 past signals</div>
+      </div>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);padding:8px 0;line-height:1.7;">
+      + Green/amber/red value reflects actual win rate<br>
+      + Animated fill bar: visual weight of the number<br>
+      + Spring-in entrance on every new signal<br>
+      + Signal-tinted border matches direction
+    </div>
+  </div>
+</div>
+
+<!-- ALL THREE STATES -->
+<div class="states-section">
+  <div class="states-label">All three states — colour logic</div>
+  <div class="states-row">
+
+    <div class="state-card">
+      <div class="state-card-label">Win rate &gt; 55%<br>HIGH — green</div>
+      <div class="win-badge-new win-high">
+        <div class="wb-val-new">72%</div>
+        <div class="wb-bar-track">
+          <div class="wb-bar-fill" style="--bar-width:72%;animation-delay:.1s;"></div>
+        </div>
+        <div class="wb-lbl-new">Win Rate</div>
+        <div class="wb-sample-new">58 past signals</div>
+      </div>
+    </div>
+
+    <div class="state-card">
+      <div class="state-card-label">Win rate 45–55%<br>MID — amber</div>
+      <div class="win-badge-new win-mid">
+        <div class="wb-val-new">51%</div>
+        <div class="wb-bar-track">
+          <div class="wb-bar-fill" style="--bar-width:51%;animation-delay:.1s;"></div>
+        </div>
+        <div class="wb-lbl-new">Win Rate</div>
+        <div class="wb-sample-new">31 past signals</div>
+      </div>
+    </div>
+
+    <div class="state-card">
+      <div class="state-card-label">Win rate &lt; 45%<br>LOW — red</div>
+      <div class="win-badge-new win-low">
+        <div class="wb-val-new">38%</div>
+        <div class="wb-bar-track">
+          <div class="wb-bar-fill" style="--bar-width:38%;animation-delay:.1s;"></div>
+        </div>
+        <div class="wb-lbl-new">Win Rate</div>
+        <div class="wb-sample-new">19 past signals</div>
+      </div>
+    </div>
+
+    <div class="state-card">
+      <div class="state-card-label">No backtest yet<br>EMPTY — dashes</div>
+      <div class="win-badge-new win-mid" style="--badge-bg:rgba(255,255,255,.03);--badge-border:var(--border);">
+        <div class="wb-val-new" style="color:var(--muted2);">—</div>
+        <div class="wb-bar-track">
+          <div style="height:100%;background:rgba(255,255,255,.07);border-radius:2px;width:100%;"></div>
+        </div>
+        <div class="wb-lbl-new">Win Rate</div>
+        <div class="wb-sample-new" style="font-style:italic;">run backtest first</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- LIVE ANIMATION DEMO -->
+<div class="playground">
+  <div class="playground-header">
+    <span class="playground-title">Live Animation Demo — click a signal type</span>
+    <button class="replay-btn" onclick="triggerSignal('buy')">▶ Replay BUY</button>
+  </div>
+
+  <div class="live-demo">
+    <div class="live-col">
+      <div class="conf-ring-wrap" id="demoRing">
+        <svg width="72" height="72" viewBox="0 0 72 72" id="demoRingSvg">
+          <circle cx="36" cy="36" r="28" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="5"/>
+          <circle cx="36" cy="36" r="28" fill="none" stroke="#f5a623" stroke-width="5"
+            stroke-dasharray="175.9" stroke-dashoffset="52.8" stroke-linecap="round" id="demoArc"/>
+        </svg>
+        <div class="conf-inner">
+          <span class="conf-pct" id="demoConfPct">70%</span>
+          <span class="conf-lbl">CONF</span>
+        </div>
+      </div>
+      <span class="conf-label-chip confirmed" id="demoConfLabel">CONFIRMED</span>
+      <div id="demoBadgeLive" class="win-badge-new win-high">
+        <div class="wb-val-new" id="demoWbVal">67%</div>
+        <div class="wb-bar-track">
+          <div class="wb-bar-fill" id="demoWbBar" style="--bar-width:67%;"></div>
+        </div>
+        <div class="wb-lbl-new">Win Rate</div>
+        <div class="wb-sample-new" id="demoWbSample">42 past signals</div>
+      </div>
+
+      <div class="sig-btns-preview">
+        <button class="sig-btn-demo active" id="btnBuy" onclick="triggerSignal('buy')">BUY</button>
+        <button class="sig-btn-demo sell" id="btnSell" onclick="triggerSignal('sell')">SELL</button>
+        <button class="sig-btn-demo hold" id="btnHold" onclick="triggerSignal('hold')">HOLD</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SPEC NOTES -->
+<div class="spec-section">
+  <div class="spec-title">Implementation Spec</div>
+
+  <div class="spec-row">
+    <div class="spec-key">Colour thresholds</div>
+    <div class="spec-val"><code>≥55%</code> → green · <code>45–54%</code> → amber · <code>&lt;45%</code> → red · <code>null</code> → muted/dashes</div>
+  </div>
+  <div class="spec-row">
+    <div class="spec-key">Bar fill animation</div>
+    <div class="spec-val"><code>@keyframes barFill</code> — 0% → win_rate% — 0.8s ease — triggered via CSS variable <code>--bar-width</code></div>
+  </div>
+  <div class="spec-row">
+    <div class="spec-key">Entrance</div>
+    <div class="spec-val"><code>@keyframes badgePop</code> — scale .88→1 — cubic-bezier spring — same as existing MTF cells</div>
+  </div>
+  <div class="spec-row">
+    <div class="spec-key">JS trigger point</div>
+    <div class="spec-val">In <code>renderSignal(d)</code> — set <code>classList</code> on <code>#winRateBadge</code> + update <code>style</code> <code>--bar-width</code> CSS var — then force re-animation by cloning node</div>
+  </div>
+  <div class="spec-row">
+    <div class="spec-key">Files changed</div>
+    <div class="spec-val"><code>static/index.html</code> only — CSS block (~8 lines) + JS in renderSignal (~6 lines)</div>
+  </div>
+  <div class="spec-row">
+    <div class="spec-key">Features preserved</div>
+    <div class="spec-val">IDs unchanged: <code>#winRateBadge</code>, <code>#winRateVal</code>, <code>#winRateSample</code> — zero JS call-site changes needed</div>
+  </div>
+</div>
+
+<script>
+  const signals = {
+    buy: {
+      conf: 70, confLabel: 'CONFIRMED', confClass: 'confirmed',
+      arcColor: '#f5a623', arcOffset: 52.8,
+      winRate: 67, winClass: 'win-high', trades: 42
+    },
+    sell: {
+      conf: 58, confLabel: 'LIKELY', confClass: 'likely',
+      arcColor: '#f5a623', arcOffset: 74.4,
+      winRate: 49, winClass: 'win-mid', trades: 31
+    },
+    hold: {
+      conf: 38, confLabel: 'HYPOTHESIS', confClass: 'hypothesis',
+      arcColor: '#f5a623', arcOffset: 109.4,
+      winRate: 28, winClass: 'win-low', trades: 19
+    }
+  };
+
+  function triggerSignal(type) {
+    const s = signals[type];
+
+    // Update conf ring
+    document.getElementById('demoArc').style.strokeDashoffset = s.arcOffset;
+    document.getElementById('demoConfPct').textContent = s.conf + '%';
+    const lbl = document.getElementById('demoConfLabel');
+    lbl.textContent = s.confLabel;
+    lbl.className = 'conf-label-chip ' + s.confClass;
+
+    // Rebuild badge to retrigger animation
+    const badgeWrap = document.getElementById('demoBadgeLive');
+    const clone = badgeWrap.cloneNode(false);
+    clone.id = 'demoBadgeLive';
+    clone.className = 'win-badge-new ' + s.winClass;
+
+    const val = document.createElement('div');
+    val.className = 'wb-val-new';
+    val.id = 'demoWbVal';
+    val.textContent = s.winRate + '%';
+
+    const track = document.createElement('div');
+    track.className = 'wb-bar-track';
+    const fill = document.createElement('div');
+    fill.className = 'wb-bar-fill';
+    fill.id = 'demoWbBar';
+    fill.style.setProperty('--bar-width', s.winRate + '%');
+    fill.style.animationDelay = '0.3s';
+    track.appendChild(fill);
+
+    const lbl2 = document.createElement('div');
+    lbl2.className = 'wb-lbl-new';
+    lbl2.textContent = 'Win Rate';
+
+    const sample = document.createElement('div');
+    sample.className = 'wb-sample-new';
+    sample.id = 'demoWbSample';
+    sample.textContent = s.trades + ' past signals';
+
+    clone.appendChild(val);
+    clone.appendChild(track);
+    clone.appendChild(lbl2);
+    clone.appendChild(sample);
+
+    badgeWrap.replaceWith(clone);
+
+    // Update active button
+    ['btnBuy','btnSell','btnHold'].forEach(id => {
+      document.getElementById(id).classList.remove('active');
+    });
+    document.getElementById('btn' + type.charAt(0).toUpperCase() + type.slice(1)).classList.add('active');
+  }
+</script>
+</body>
+</html>

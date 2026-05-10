@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DotVerse · Cockpit Preview v3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Surface tokens — deep space */
+    --space-0: #050709;
+    --space-1: #0A0D12;
+    --space-2: #0F1318;
+
+    /* Glass — extremely thin */
+    --glass: rgba(255,255,255,0.025);
+    --glass-hi: rgba(255,255,255,0.045);
+    --line: rgba(255,255,255,0.06);
+    --line-bright: rgba(255,255,255,0.12);
+
+    /* Text */
+    --cream: #F5F0E0;
+    --txt: rgba(237,232,216,0.92);
+    --txt-mid: rgba(237,232,216,0.62);
+    --txt-low: rgba(237,232,216,0.38);
+
+    /* Brand — electric amber */
+    --gold: #E5B83D;
+    --gold-soft: rgba(229,184,61,0.08);
+    --gold-line: rgba(229,184,61,0.34);
+    --gold-glow-1: rgba(229,184,61,0.22);
+    --gold-glow-2: rgba(229,184,61,0.10);
+
+    /* Semantic */
+    --green: #5DE8A0;
+    --red: #E8706E;
+
+    /* Type */
+    --display: 'Space Grotesk', system-ui, sans-serif;
+    --body: 'Inter', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--space-1);
+    color: var(--txt);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.55;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  /* ── Background — placeholder for the real animation ─────────────── */
+  .bg-base {
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 10%, rgba(229,184,61,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 70% 50% at 85% 90%, rgba(80,120,200,0.05) 0%, transparent 55%),
+      linear-gradient(180deg, #050709 0%, #0A0D12 50%, #060A10 100%);
+    z-index: -2;
+  }
+  .bg-stars {
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(1px 1px at 12% 22%, rgba(255,255,255,0.6), transparent),
+      radial-gradient(1px 1px at 78% 14%, rgba(255,255,255,0.5), transparent),
+      radial-gradient(1px 1px at 34% 68%, rgba(255,255,255,0.45), transparent),
+      radial-gradient(1px 1px at 91% 56%, rgba(255,255,255,0.4), transparent),
+      radial-gradient(1px 1px at 18% 88%, rgba(255,255,255,0.5), transparent),
+      radial-gradient(1px 1px at 56% 38%, rgba(255,255,255,0.35), transparent),
+      radial-gradient(1px 1px at 65% 82%, rgba(255,255,255,0.5), transparent),
+      radial-gradient(1px 1px at 8% 52%, rgba(255,255,255,0.4), transparent);
+    background-size: 100% 100%;
+    z-index: -1;
+    animation: drift 80s linear infinite;
+  }
+  @keyframes drift {
+    from { transform: translate3d(0,0,0); }
+    to   { transform: translate3d(-40px,-30px,0); }
+  }
+
+  /* ── Layout ──────────────────────────────────────────────────────── */
+  .frame {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 32px 96px;
+  }
+
+  /* ── Header / Logo ───────────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 22px;
+    border-radius: 14px;
+    background: var(--glass);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid var(--line);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.04),
+      0 1px 60px rgba(0,0,0,0.3);
+  }
+
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+  }
+
+  .logo-mark {
+    position: relative;
+    width: 30px; height: 30px;
+    flex-shrink: 0;
+  }
+  .logo-mark .core {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 8px; height: 8px;
+    margin: -4px 0 0 -4px;
+    border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 12px rgba(229,184,61,0.6);
+  }
+  .logo-mark .ring {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 8px; height: 8px;
+    margin: -4px 0 0 -4px;
+    border-radius: 50%;
+    border: 1px solid var(--gold);
+    opacity: 0;
+    animation: ripple 3.2s ease-out infinite;
+  }
+  .logo-mark .ring:nth-child(2) { animation-delay: 0s; }
+  .logo-mark .ring:nth-child(3) { animation-delay: 1.07s; }
+  .logo-mark .ring:nth-child(4) { animation-delay: 2.13s; }
+  @keyframes ripple {
+    0%   { transform: scale(1);   opacity: 0.7; border-width: 1.2px; }
+    70%  { opacity: 0.18; }
+    100% { transform: scale(3.6); opacity: 0;   border-width: 0.4px; }
+  }
+
+  .brand-wordmark {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: -0.015em;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .brand-prefix { color: var(--gold); font-size: 22px; line-height: 0; transform: translateY(-1px); }
+  .brand-dot   { color: var(--cream); }
+  .brand-verse { color: var(--gold); }
+
+  nav.top-nav {
+    display: flex; gap: 4px;
+  }
+  nav.top-nav a {
+    font-family: var(--body);
+    font-size: 13px; font-weight: 500;
+    color: var(--txt-mid);
+    padding: 8px 14px;
+    border-radius: 8px;
+    text-decoration: none;
+    letter-spacing: 0.01em;
+    transition: all 180ms ease-out;
+  }
+  nav.top-nav a:hover { color: var(--txt); background: rgba(255,255,255,0.03); }
+  nav.top-nav a.active {
+    color: var(--gold);
+    background: var(--gold-soft);
+    border: 1px solid var(--gold-line);
+  }
+
+  /* ── Hero ────────────────────────────────────────────────────────── */
+  .hero {
+    padding: 110px 0 72px;
+    text-align: left;
+    max-width: 760px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 26px;
+    display: inline-flex;
+    align-items: center; gap: 10px;
+    padding: 6px 14px;
+    border-radius: 100px;
+    background: var(--gold-soft);
+    border: 1px solid var(--gold-line);
+  }
+  .eyebrow .pulse {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 10px var(--gold);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+
+  h1.hero-title {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: clamp(40px, 5.4vw, 68px);
+    line-height: 1.04;
+    letter-spacing: -0.028em;
+    color: var(--cream);
+    margin-bottom: 22px;
+  }
+  h1.hero-title .accent { color: var(--gold); font-style: italic; font-weight: 500; }
+
+  p.hero-sub {
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--txt-mid);
+    max-width: 560px;
+    margin-bottom: 40px;
+  }
+
+  /* ── CTAs — transparent glass with electric glow ─────────────────── */
+  .cta-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+
+  .cta {
+    position: relative;
+    overflow: hidden;
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 14px 26px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 220ms cubic-bezier(.2,.8,.3,1);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    background: linear-gradient(180deg, rgba(229,184,61,0.05) 0%, rgba(229,184,61,0.02) 100%);
+    border: 1px solid var(--gold-line);
+    color: var(--gold);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.04),
+      inset 0 -1px 0 rgba(229,184,61,0.05);
+  }
+  .cta::before {
+    content: '';
+    position: absolute;
+    top: 0; left: -120%;
+    width: 60%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(229,184,61,0.18), transparent);
+    transform: skewX(-20deg);
+    transition: left 600ms ease-out;
+  }
+  .cta:hover::before { left: 200%; }
+  .cta:hover {
+    color: #FAEAB0;
+    border-color: rgba(229,184,61,0.65);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.08),
+      0 0 0 1px rgba(229,184,61,0.25),
+      0 0 24px var(--gold-glow-1),
+      0 0 60px var(--gold-glow-2);
+    transform: translateY(-1px);
+  }
+  .cta:active { transform: translateY(0); }
+
+  .cta.ghost {
+    background: var(--glass);
+    border-color: var(--line-bright);
+    color: var(--txt);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+  .cta.ghost:hover {
+    border-color: rgba(255,255,255,0.22);
+    color: var(--cream);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.08),
+      0 0 18px rgba(255,255,255,0.06);
+  }
+  .cta.ghost::before { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); }
+
+  .cta svg { display: inline-block; vertical-align: middle; margin-left: 8px; }
+
+  /* ── Glass cards ─────────────────────────────────────────────────── */
+  section.cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    margin-bottom: 96px;
+  }
+  @media (max-width: 880px) {
+    section.cards { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    position: relative;
+    padding: 22px;
+    border-radius: 16px;
+    background: var(--glass);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--line);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.05),
+      0 1px 40px rgba(0,0,0,0.35);
+    transition: all 280ms cubic-bezier(.2,.8,.3,1);
+    opacity: 0;
+    transform: translateY(8px);
+    animation: card-in 600ms cubic-bezier(.2,.8,.3,1) forwards;
+  }
+  .card:nth-child(1) { animation-delay: 80ms; }
+  .card:nth-child(2) { animation-delay: 180ms; }
+  .card:nth-child(3) { animation-delay: 280ms; }
+  @keyframes card-in {
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .card:hover {
+    border-color: var(--line-bright);
+    background: var(--glass-hi);
+    transform: translateY(-2px);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.08),
+      0 8px 50px rgba(0,0,0,0.5),
+      0 0 0 1px rgba(255,255,255,0.02);
+  }
+
+  .card-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 18px;
+  }
+  .card-label {
+    font-family: var(--mono);
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--txt-low);
+  }
+  .card-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 100px;
+  }
+  .card-status.buy   { color: var(--green); background: rgba(93,232,160,0.08); border: 1px solid rgba(93,232,160,0.22); }
+  .card-status.live  { color: var(--gold);  background: var(--gold-soft);     border: 1px solid var(--gold-line); }
+  .card-status.run   { color: var(--cream); background: rgba(255,255,255,0.04); border: 1px solid var(--line-bright); }
+  .card-status .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor; box-shadow: 0 0 8px currentColor;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  .card-title {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 22px;
+    letter-spacing: -0.012em;
+    color: var(--cream);
+    margin-bottom: 4px;
+  }
+  .card-sub {
+    font-family: var(--body);
+    font-size: 13px;
+    color: var(--txt-mid);
+    margin-bottom: 18px;
+  }
+
+  .card-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+  }
+  .card-row:first-of-type { border-top: none; }
+  .card-row .k {
+    font-family: var(--body);
+    font-size: 12px;
+    color: var(--txt-low);
+    letter-spacing: 0.01em;
+  }
+  .card-row .v {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--cream);
+    font-variant-numeric: tabular-nums;
+  }
+  .card-row .v.up { color: var(--green); }
+  .card-row .v.dn { color: var(--red); }
+
+  /* ── Type specimen ────────────────────────────────────────────── */
+  section.spec {
+    padding: 36px;
+    border-radius: 18px;
+    background: var(--glass);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    margin-bottom: 24px;
+  }
+  .spec-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 32px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .spec-header h3 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  .spec-header .meta { font-family: var(--mono); font-size: 11px; color: var(--txt-low); letter-spacing: 0.06em; }
+
+  .spec-grid { display: grid; grid-template-columns: 140px 1fr; gap: 24px 32px; align-items: baseline; }
+  .spec-grid .role {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--txt-low);
+    padding-top: 6px;
+  }
+  .spec-display { font-family: var(--display); font-weight: 500; font-size: 44px; letter-spacing: -0.025em; color: var(--cream); line-height: 1.05; }
+  .spec-headline { font-family: var(--display); font-weight: 500; font-size: 24px; letter-spacing: -0.012em; color: var(--cream); }
+  .spec-body { font-family: var(--body); font-size: 15px; color: var(--txt); line-height: 1.6; max-width: 600px; }
+  .spec-label { font-family: var(--body); font-weight: 500; font-size: 12px; letter-spacing: 0.04em; color: var(--txt-mid); text-transform: uppercase; }
+  .spec-mono { font-family: var(--mono); font-size: 14px; color: var(--cream); font-variant-numeric: tabular-nums; }
+  .spec-mono .gold { color: var(--gold); }
+  .spec-mono .green { color: var(--green); }
+
+  /* ── Color tokens strip ──────────────────────────────────────── */
+  section.tokens {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+  }
+  @media (max-width: 720px) { section.tokens { grid-template-columns: repeat(3, 1fr); } }
+  .token {
+    padding: 14px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--glass);
+    backdrop-filter: blur(8px);
+  }
+  .token .swatch {
+    height: 42px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+  }
+  .token .name {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--txt-mid);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .token .val { font-family: var(--mono); font-size: 11px; color: var(--cream); }
+
+  /* ── Section divider ─────────────────────────────────────────── */
+  .divider {
+    display: flex; align-items: center; gap: 14px;
+    margin: 64px 0 24px;
+  }
+  .divider .line { flex: 1; height: 1px; background: var(--line); }
+  .divider .lbl {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--txt-low);
+  }
+
+  /* ── Logo isolated showcase ─────────────────────────────────── */
+  .logo-showcase {
+    display: flex; align-items: center; justify-content: center;
+    padding: 64px 32px;
+    border-radius: 18px;
+    background: var(--glass);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--line);
+    margin-bottom: 24px;
+  }
+  .logo-big { display: flex; align-items: center; gap: 22px; }
+  .logo-big .logo-mark { width: 60px; height: 60px; }
+  .logo-big .logo-mark .core { width: 14px; height: 14px; margin: -7px 0 0 -7px; box-shadow: 0 0 22px rgba(229,184,61,0.7); }
+  .logo-big .logo-mark .ring { width: 14px; height: 14px; margin: -7px 0 0 -7px; }
+  .logo-big .brand-wordmark { font-size: 42px; gap: 10px; }
+  .logo-big .brand-prefix { font-size: 50px; transform: translateY(-3px); }
+</style>
+</head>
+<body>
+
+<div class="bg-base"></div>
+<div class="bg-stars"></div>
+
+<div class="frame">
+
+  <!-- Header bar -->
+  <header>
+    <div class="brand">
+      <div class="logo-mark" aria-hidden="true">
+        <div class="core"></div>
+        <div class="ring"></div>
+        <div class="ring"></div>
+        <div class="ring"></div>
+      </div>
+      <div class="brand-wordmark">
+        <span class="brand-prefix">·</span><span class="brand-dot">Dot</span><span class="brand-verse">Verse</span>
+      </div>
+    </div>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="#" class="active">Signal</a>
+      <a href="#">Understand</a>
+      <a href="#">Scanner</a>
+      <a href="#">Backtest</a>
+      <a href="#">Portfolio</a>
+    </nav>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="eyebrow"><span class="pulse"></span>Cockpit · Preview v3</div>
+    <h1 class="hero-title">Trade with clarity at the <span class="accent">edge of signal.</span></h1>
+    <p class="hero-sub">A cockpit for traders who want to see the system before they take the trade. Live signals, divergence math, and full DotVerse confluence — distilled into a glass interface that doesn't get in the way.</p>
+    <div class="cta-row">
+      <button class="cta" type="button">
+        Open Cockpit
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </button>
+      <button class="cta ghost" type="button">View Live Signals</button>
+    </div>
+  </section>
+
+  <!-- Glass cards -->
+  <section class="cards" aria-label="Sample cards">
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-label">Live Signal</span>
+        <span class="card-status buy"><span class="dot"></span>Buy</span>
+      </div>
+      <div class="card-title">BTC / USDT</div>
+      <div class="card-sub">4-hour · DotVerse 65% confluence · HIGH confidence</div>
+      <div class="card-row"><span class="k">Entry</span><span class="v">68,240.50</span></div>
+      <div class="card-row"><span class="k">Stop loss</span><span class="v dn">65,810.00</span></div>
+      <div class="card-row"><span class="k">Take profit 1</span><span class="v up">72,180.00</span></div>
+      <div class="card-row"><span class="k">R : R</span><span class="v">1 : 2.4</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-label">Scanner</span>
+        <span class="card-status live"><span class="dot"></span>Live</span>
+      </div>
+      <div class="card-title">All Crypto · 1H</div>
+      <div class="card-sub">Auto-rescan every 30 seconds — 124 instruments</div>
+      <div class="card-row"><span class="k">SOL / USDT</span><span class="v up">+2.84%</span></div>
+      <div class="card-row"><span class="k">ETH / USDT</span><span class="v up">+0.92%</span></div>
+      <div class="card-row"><span class="k">AVAX / USDT</span><span class="v dn">−1.07%</span></div>
+      <div class="card-row"><span class="k">Buy signals</span><span class="v">17 · of 124</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-label">Backtest</span>
+        <span class="card-status run"><span class="dot"></span>Done</span>
+      </div>
+      <div class="card-title">EMA-confluence · 18 mo</div>
+      <div class="card-sub">Win rate 58.2% · 312 trades · Sharpe 1.84</div>
+      <div class="card-row"><span class="k">Net P / L</span><span class="v up">+34.7%</span></div>
+      <div class="card-row"><span class="k">Max drawdown</span><span class="v dn">−8.4%</span></div>
+      <div class="card-row"><span class="k">Avg trade</span><span class="v">+0.31R</span></div>
+      <div class="card-row"><span class="k">Profit factor</span><span class="v">2.18</span></div>
+    </div>
+
+  </section>
+
+  <!-- Logo isolated -->
+  <div class="divider"><div class="line"></div><div class="lbl">Brand mark</div><div class="line"></div></div>
+  <div class="logo-showcase">
+    <div class="logo-big">
+      <div class="logo-mark" aria-hidden="true">
+        <div class="core"></div>
+        <div class="ring"></div>
+        <div class="ring"></div>
+        <div class="ring"></div>
+      </div>
+      <div class="brand-wordmark">
+        <span class="brand-prefix">·</span><span class="brand-dot">Dot</span><span class="brand-verse">Verse</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Typography specimen -->
+  <div class="divider"><div class="line"></div><div class="lbl">Typography</div><div class="line"></div></div>
+  <section class="spec">
+    <div class="spec-header">
+      <h3>Type System</h3>
+      <span class="meta">Display: Space Grotesk · Body: Inter · Mono: JetBrains Mono</span>
+    </div>
+    <div class="spec-grid">
+
+      <div class="role">Display 44</div>
+      <div class="spec-display">Edge of signal.</div>
+
+      <div class="role">Headline 24</div>
+      <div class="spec-headline">A cockpit for clear trading decisions.</div>
+
+      <div class="role">Body 15</div>
+      <div class="spec-body">Live signals, divergence math, and full DotVerse confluence — distilled into a glass interface that gets out of the way. Type rendered with Inter at 1.6 line-height, slight negative tracking, optical sizing on.</div>
+
+      <div class="role">Label 12</div>
+      <div class="spec-label">Live · 4-hour · BTC / USDT</div>
+
+      <div class="role">Mono 14</div>
+      <div class="spec-mono">Entry <span class="gold">68,240.50</span> · SL <span style="color:var(--red)">65,810.00</span> · TP <span class="green">72,180.00</span> · R:R 1:2.4</div>
+
+    </div>
+  </section>
+
+  <!-- Color tokens -->
+  <div class="divider"><div class="line"></div><div class="lbl">Tokens</div><div class="line"></div></div>
+  <section class="tokens">
+    <div class="token"><div class="swatch" style="background:#050709"></div><div class="name">space-0</div><div class="val">#050709</div></div>
+    <div class="token"><div class="swatch" style="background:#0A0D12"></div><div class="name">space-1</div><div class="val">#0A0D12</div></div>
+    <div class="token"><div class="swatch" style="background:#E5B83D"></div><div class="name">gold</div><div class="val">#E5B83D</div></div>
+    <div class="token"><div class="swatch" style="background:#F5F0E0"></div><div class="name">cream</div><div class="val">#F5F0E0</div></div>
+    <div class="token"><div class="swatch" style="background:#5DE8A0"></div><div class="name">green</div><div class="val">#5DE8A0</div></div>
+    <div class="token"><div class="swatch" style="background:#E8706E"></div><div class="name">red</div><div class="val">#E8706E</div></div>
+  </section>
+
+</div>
+
+</body>
+</html>

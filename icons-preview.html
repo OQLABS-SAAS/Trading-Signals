@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DotVerse — Icon Replacement Preview</title>
+<style>
+  :root {
+    --bg:#0d0f12;--bg1:#111316;--bg2:#161920;--bg3:#1a1e26;
+    --border:rgba(255,255,255,.07);--border2:rgba(255,255,255,.12);
+    --text2:rgba(255,255,255,.82);--muted:rgba(255,255,255,.35);--muted2:rgba(255,255,255,.55);
+    --amber:#f5a623;--amber-glow:rgba(245,166,35,.12);
+    --green:#00c98d;--red:#FF4459;--white:#fff;
+    --mono:'JetBrains Mono',monospace;--body:'Inter',sans-serif;
+    --r2:6px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--white);font-family:var(--body);font-size:13px;padding:32px;}
+  h1{font-size:20px;font-weight:800;letter-spacing:-.5px;margin-bottom:6px;}
+  .sub{color:var(--muted2);font-size:12px;margin-bottom:32px;}
+  .section{margin-bottom:36px;}
+  .section-label{font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:var(--amber);text-transform:uppercase;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+  .row{display:flex;align-items:flex-start;gap:32px;flex-wrap:wrap;}
+  .col{flex:1;min-width:220px;}
+  .col-label{font-size:10px;color:var(--muted);font-family:var(--mono);margin-bottom:8px;letter-spacing:.5px;}
+  .before{opacity:.45;text-decoration:line-through;}
+  /* Overlay buttons */
+  .chart-ovr-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+  .chart-ovr-btn{background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:3px 10px;font-size:10px;font-family:var(--mono);color:var(--muted2);cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
+  .chart-ovr-btn.active{background:rgba(245,166,35,.12);border-color:rgba(245,166,35,.3);color:var(--amber);}
+  .ovr-state{margin-left:4px;color:var(--muted);font-size:9px;}
+  /* Backtest load */
+  .bt-load{text-align:center;padding:20px;font-family:var(--mono);font-size:12px;color:var(--amber);border:1px solid var(--border);border-radius:var(--r2);}
+  .spinner{width:28px;height:28px;border:2px solid var(--border);border-top-color:var(--amber);border-radius:50%;margin:8px auto 0;animation:spin .9s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* Sim refresh */
+  .sim-bar{display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:10px 14px;}
+  .btn-primary{background:var(--amber);color:#0C0A08;border:none;border-radius:3px;padding:6px 14px;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;}
+  /* Watch list */
+  .watch-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px;margin-bottom:6px;max-width:280px;}
+  .watch-ticker{font-family:var(--mono);font-weight:700;font-size:13px;}
+  .watch-tf{font-size:11px;color:var(--muted2);}
+  .watch-status{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--green);}
+  .watch-check{font-family:var(--mono);font-size:10px;color:var(--muted2);display:inline-flex;align-items:center;gap:3px;}
+  .watch-channels{font-size:10px;color:var(--muted2);margin-top:4px;font-family:var(--mono);}
+  .remove-watch-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 4px;}
+  /* Sim banner */
+  .sim-banner{background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.2);border-radius:var(--r2);padding:10px 12px;max-width:480px;}
+  /* Delta pills */
+  .fp-pill{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:3px;margin-bottom:4px;display:block;}
+  .fp-pill.g{background:rgba(0,201,141,.1);color:var(--green);}
+  .fp-pill.r{background:rgba(255,68,89,.1);color:var(--red);}
+  .fp-pill.a{background:rgba(245,166,35,.1);color:var(--amber);}
+  /* RR */
+  .calc-rr-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;max-width:480px;}
+  .rr-box{padding:10px;border-right:1px solid var(--border);}
+  .rr-box:last-child{border-right:none;}
+  .rr-detail{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:14px;margin-top:8px;max-width:480px;}
+  .rr-det-hdr{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:8px;}
+  /* Journey */
+  .journey-panel{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:14px;max-width:480px;}
+  .step{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+  .step:last-child{border-bottom:none;}
+  .step-num{width:20px;height:20px;border-radius:50%;background:rgba(245,166,35,.15);border:1px solid rgba(245,166,35,.3);font-size:9px;font-family:var(--mono);font-weight:700;color:var(--amber);flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+  .step-body{flex:1;}
+  .step-title{font-size:11px;font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:2px;}
+  .step-desc{font-size:10px;color:var(--muted2);}
+  /* Buttons */
+  .btn-ghost{background:none;border:1px solid var(--border2);color:var(--muted2);border-radius:3px;padding:5px 12px;font-family:var(--mono);font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;}
+  .btn-ghost.amber{border-color:rgba(245,166,35,.5);color:var(--amber);}
+  /* Signal card */
+  .sig-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:14px;max-width:360px;}
+  .sig-dir{font-family:var(--mono);font-size:22px;font-weight:900;color:var(--green);}
+  .sig-sub{font-size:11px;color:var(--muted2);margin-top:3px;display:flex;align-items:center;gap:6px;}
+  .sig-tf-badge{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 6px;border-radius:2px;background:rgba(255,255,255,.07);color:var(--muted2);}
+  /* Arrow */
+  .arrow{font-size:18px;color:var(--muted);align-self:center;flex-shrink:0;}
+</style>
+</head>
+<body>
+
+<h1>DotVerse — Icon Replacement Preview</h1>
+<p class="sub">Every emoji replaced with professional SVG icons. All sections shown.</p>
+
+<!-- SECTION 1: OVERLAY BUTTONS -->
+<div class="section">
+  <div class="section-label">1 · Chart overlay buttons (Signals tab)</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <div class="chart-ovr-row before">
+        <button class="chart-ovr-btn active">↑↓ Signals <span class="ovr-state">ON</span></button>
+        <button class="chart-ovr-btn active">〰 RSI <span class="ovr-state">ON</span></button>
+        <button class="chart-ovr-btn">⟿ Div History <span class="ovr-state">OFF</span></button>
+        <button class="chart-ovr-btn">≡ BB Bands <span class="ovr-state">OFF</span></button>
+        <button class="chart-ovr-btn">▮ Volume <span class="ovr-state">ON</span></button>
+        <button class="chart-ovr-btn">⬛ Delta <span class="ovr-state">OFF</span></button>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <div class="chart-ovr-row">
+        <button class="chart-ovr-btn active"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l5-5 5 5M7 17l5 5 5-5"/></svg>Signals <span class="ovr-state">ON</span></button>
+        <button class="chart-ovr-btn active"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>RSI <span class="ovr-state">ON</span></button>
+        <button class="chart-ovr-btn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>Div History <span class="ovr-state">OFF</span></button>
+        <button class="chart-ovr-btn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>BB Bands <span class="ovr-state">OFF</span></button>
+        <button class="chart-ovr-btn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Volume <span class="ovr-state">ON</span></button>
+        <button class="chart-ovr-btn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>Delta <span class="ovr-state">OFF</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 2: BACKTEST LOADING -->
+<div class="section">
+  <div class="section-label">2 · Backtest loading state</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <div class="bt-load before">
+        <div style="margin-bottom:8px;">⏳ Running backtest...</div>
+        <div class="spinner"></div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <div class="bt-load">
+        <div style="margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:6px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Running backtest...</div>
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 3: SIMULATION REFRESH -->
+<div class="section">
+  <div class="section-label">3 · Simulation refresh button</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <div class="sim-bar before">
+        <span style="font-family:var(--mono);font-size:12px;color:var(--muted2);">BTC/USD — Long $83,241</span>
+        <button class="btn-primary">⟳ Refresh</button>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <div class="sim-bar">
+        <span style="font-family:var(--mono);font-size:12px;color:var(--muted2);">BTC/USD — Long $83,241</span>
+        <button class="btn-primary"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0C0A08" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 4: WATCH LIST -->
+<div class="section">
+  <div class="section-label">4 · Watch / Alert panel</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <div class="watch-card before">
+        <div style="display:flex;justify-content:space-between;"><span class="watch-ticker">BTC-USD</span><button class="remove-watch-btn">✕</button></div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;">
+          <span class="watch-status">BUY</span>
+          <span class="watch-check">⏱ 2 min ago</span>
+        </div>
+        <div class="watch-channels">📱 💬 SMS · WhatsApp</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <div class="watch-card">
+        <div style="display:flex;justify-content:space-between;"><span class="watch-ticker">BTC-USD</span><button class="remove-watch-btn">✕</button></div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;">
+          <span class="watch-status">BUY</span>
+          <span class="watch-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>2 min ago</span>
+        </div>
+        <div class="watch-channels">SMS · WA · SMS · WhatsApp</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 5: UPCOMING TRADE SIMULATION BANNER -->
+<div class="section">
+  <div class="section-label">5 · Simulation — upcoming trade banner</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <div class="sim-banner before">
+        <span style="color:var(--amber);font-weight:700;">⏳ UPCOMING TRADE</span>
+        <span> HOLD — next buy at <strong style="color:var(--green);">$61,200</strong></span>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <div class="sim-banner">
+        <span style="display:inline-flex;align-items:center;gap:5px;color:var(--amber);font-weight:700;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>UPCOMING TRADE</span>
+        <span> HOLD — next buy at <strong style="color:var(--green);">$61,200</strong></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 6: DELTA / ORDER FLOW PILLS -->
+<div class="section">
+  <div class="section-label">6 · Delta / Order Flow indicator pills (Signals tab)</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <span class="fp-pill a before">⚠ Buying delta vs SELL signal — possible relief bounce</span>
+      <span class="fp-pill g before">⬆ Strong buying delta on breakout candle</span>
+      <span class="fp-pill r before">⬇ Selling pressure on current candle</span>
+      <span class="fp-pill a before">⚠ CVD rising but signal is SELL — watch for reversal</span>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <span class="fp-pill a">! Buying delta vs SELL signal — possible relief bounce</span>
+      <span class="fp-pill g">▲ Strong buying delta on breakout candle</span>
+      <span class="fp-pill r">▼ Selling pressure on current candle</span>
+      <span class="fp-pill a">! CVD rising but signal is SELL — watch for reversal</span>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 7: RR DETAIL HEADERS -->
+<div class="section">
+  <div class="section-label">7 · Risk/Reward detail panel headers</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <div class="rr-detail before" style="margin-bottom:8px;">
+        <div class="rr-det-hdr" style="color:var(--red);">⛔ Worst Case — Stop Loss Triggered</div>
+      </div>
+      <div class="rr-detail before">
+        <div class="rr-det-hdr" style="color:var(--green);">🎯 TP1 — First Target</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <div class="rr-detail" style="margin-bottom:8px;">
+        <div class="rr-det-hdr" style="color:var(--red);">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          Worst Case — Stop Loss Triggered
+        </div>
+      </div>
+      <div class="rr-detail">
+        <div class="rr-det-hdr" style="color:var(--green);">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          TP1 — First Target
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 8: JOURNEY PANEL -->
+<div class="section">
+  <div class="section-label">8 · "What To Do Next" journey panel</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <div class="journey-panel before">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><div class="step-title">⚖️ Understand Your Risk</div><div class="step-desc">Open the calculator below</div></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><div class="step-title">🧮 Set Position Size</div><div class="step-desc">Account + Risk %</div></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><div class="step-title">📊 Verify Track Record</div><div class="step-desc">Run the backtest</div></div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><div class="step-title">📋 Copy to TradingView</div><div class="step-desc">Exact entry/SL/TP levels</div></div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-body"><div class="step-title">🔔 Set Alerts</div><div class="step-desc">DotVerse + TradingView</div></div></div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <div class="journey-panel">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><div class="step-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>Understand Your Risk</div><div class="step-desc">Open the calculator below</div></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><div class="step-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg>Set Position Size</div><div class="step-desc">Account + Risk %</div></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><div class="step-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Verify Track Record</div><div class="step-desc">Run the backtest</div></div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><div class="step-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>Copy to TradingView</div><div class="step-desc">Exact entry/SL/TP levels</div></div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-body"><div class="step-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Set Alerts</div><div class="step-desc">DotVerse + TradingView</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 9: BUTTONS -->
+<div class="section">
+  <div class="section-label">9 · Action buttons</div>
+  <div class="row">
+    <div class="col">
+      <div class="col-label">BEFORE</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;" class="before">
+        <button style="background:var(--amber);color:#0C0A08;border:none;border-radius:3px;padding:8px 20px;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">⚡ ANALYZE</button>
+        <button class="btn-ghost amber">📋 Signal Script</button>
+        <button class="btn-ghost amber">🔔 Alert Me</button>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="col-label">AFTER</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button style="background:var(--amber);color:#0C0A08;border:none;border-radius:3px;padding:8px 20px;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0C0A08" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>ANALYZE</button>
+        <button class="btn-ghost amber"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>Pine Script</button>
+        <button class="btn-ghost amber"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Alert Me</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:40px;padding:16px;background:rgba(0,201,141,.06);border:1px solid rgba(0,201,141,.2);border-radius:6px;font-family:var(--mono);font-size:11px;color:var(--green);">
+  ✓ All 34 emoji replacements applied · Zero emoji remaining in user-facing UI · ✓/✗/✕ marks (scanner, close buttons) retained as professional minimal indicators
+</div>
+
+</body>
+</html>

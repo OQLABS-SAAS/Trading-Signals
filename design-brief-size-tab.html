@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Design Brief — Size Tab Trading Intelligence Layer</title>
+<style>
+:root{--mono:'IBM Plex Mono',ui-monospace,monospace;--amb:#d4870a;--grn:#3dbe6c;--red:#e8706e;--mut:rgba(237,232,216,.55);--t3:rgba(237,232,216,.65)}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:#0a0c12;color:rgba(237,232,216,.92);font-family:system-ui,-apple-system,'Helvetica Neue',sans-serif;line-height:1.6}
+.wrap{max-width:920px;margin:0 auto;padding:48px 32px 80px}
+.cover{padding:56px 0 48px;border-bottom:1px solid rgba(237,232,216,.12);margin-bottom:48px}
+.cover .doc-meta{font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--mut);text-transform:uppercase;margin-bottom:14px}
+.cover h1{font-size:34px;line-height:1.15;margin:0 0 12px;color:rgba(237,232,216,.98);font-weight:700;letter-spacing:-.01em}
+.cover .sub{font-size:16px;color:var(--t3);max-width:680px}
+.cover .stamp{margin-top:32px;padding:14px 18px;background:rgba(212,135,10,.07);border:1px solid rgba(212,135,10,.3);border-radius:8px;font-size:13px;color:rgba(237,232,216,.8)}
+.toc{position:sticky;top:0;background:rgba(10,12,18,.96);backdrop-filter:blur(8px);padding:14px 0;margin:-14px 0 32px;border-bottom:1px solid rgba(237,232,216,.08);font-family:var(--mono);font-size:10.5px;letter-spacing:.4px}
+.toc a{color:var(--mut);text-decoration:none;margin-right:18px}
+.toc a:hover{color:var(--amb)}
+section{padding:32px 0;border-bottom:1px solid rgba(237,232,216,.07)}
+section h2{font-size:11px;font-family:var(--mono);letter-spacing:.7px;text-transform:uppercase;color:var(--amb);margin:0 0 6px;font-weight:600}
+section .ttl{font-size:24px;line-height:1.25;margin:0 0 16px;color:rgba(237,232,216,.95);font-weight:600;letter-spacing:-.005em}
+section p{font-size:15px;color:var(--t3);margin:0 0 14px}
+section p strong{color:rgba(237,232,216,.92);font-weight:600}
+.lead{font-size:16px;color:rgba(237,232,216,.85)}
+.callout{background:rgba(212,135,10,.05);border-left:3px solid var(--amb);padding:14px 18px;font-size:14px;border-radius:0 6px 6px 0;margin:20px 0;color:rgba(237,232,216,.85)}
+
+/* component cards */
+.comp{background:rgba(8,9,14,.78);border:1px solid rgba(237,232,216,.12);border-radius:12px;padding:24px;margin:20px 0;display:grid;grid-template-columns:140px 1fr;gap:24px;align-items:start}
+.comp .num{font-family:var(--mono);font-size:42px;font-weight:700;line-height:1;color:var(--amb);opacity:.85}
+.comp .num small{display:block;font-size:9px;letter-spacing:.6px;color:var(--mut);margin-top:6px;text-transform:uppercase;font-weight:500}
+.comp h3{font-size:18px;margin:0 0 6px;color:rgba(237,232,216,.97);font-weight:600}
+.comp .one-liner{font-size:13.5px;color:var(--t3);margin:0 0 14px;font-style:italic}
+.comp dl{margin:0;display:grid;grid-template-columns:130px 1fr;row-gap:8px;column-gap:14px;font-size:13px}
+.comp dt{font-family:var(--mono);font-size:9.5px;color:var(--mut);letter-spacing:.5px;text-transform:uppercase;align-self:start;padding-top:2px}
+.comp dd{margin:0;color:rgba(237,232,216,.82);line-height:1.55}
+.comp dd strong{color:var(--amb)}
+
+/* mockup */
+.mock-shell{background:rgba(4,5,8,.85);border:1px solid rgba(237,232,216,.14);border-radius:14px;padding:18px;margin:24px 0;font-family:var(--mono);font-size:11px}
+.mock-shell .h{font-size:9.5px;color:var(--mut);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(237,232,216,.08)}
+.mk-card{background:rgba(8,9,14,.78);border:1px solid rgba(237,232,216,.1);border-radius:8px;padding:14px;margin-bottom:10px}
+.mk-card .label{font-size:9.5px;color:var(--mut);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.mk-card .label .dot{width:6px;height:6px;border-radius:50%;background:var(--amb)}
+.row{display:flex;gap:12px;align-items:center;padding:5px 0}
+.row .l{font-size:10.5px;color:var(--mut);min-width:110px}
+.row .v{font-weight:600;font-size:11.5px}
+.bar{height:7px;background:rgba(237,232,216,.06);border-radius:4px;flex:1;overflow:hidden}
+.bar>div{height:100%;background:linear-gradient(90deg,var(--amb),#f0b952)}
+.green{color:var(--grn)} .red{color:var(--red)} .amb{color:var(--amb)}
+.verdict{margin-top:8px;padding:8px 11px;background:rgba(93,232,160,.07);border:1px solid rgba(93,232,160,.25);border-radius:5px;font-size:11px;color:rgba(93,232,160,.95)}
+
+/* tables */
+table.rvp{width:100%;border-collapse:collapse;font-size:10.5px;margin-top:8px}
+table.rvp th{padding:6px 4px;text-align:right;color:var(--mut);font-size:9px;letter-spacing:.4px;font-weight:600;border-bottom:1px solid rgba(237,232,216,.1)}
+table.rvp th:first-child{text-align:left}
+table.rvp td{padding:6px 4px;text-align:right;font-family:var(--mono);border-bottom:1px solid rgba(237,232,216,.05)}
+table.rvp td:first-child{text-align:left;color:rgba(237,232,216,.8)}
+
+/* flow tape */
+.tape{font-family:var(--mono);font-size:10.5px;line-height:1.7}
+.tape .t{display:grid;grid-template-columns:75px 50px 1fr 130px;gap:8px;align-items:center;padding:2px 0;border-bottom:1px solid rgba(237,232,216,.05)}
+.tape .t .ts{color:var(--mut)}
+.tape .t .b{height:11px;background:linear-gradient(90deg,rgba(93,232,160,.08),rgba(93,232,160,.4));border-right:2px solid var(--grn)}
+.tape .t .b.s{background:linear-gradient(90deg,rgba(232,112,110,.08),rgba(232,112,110,.4));border-right:none;border-left:2px solid var(--red);text-align:left}
+
+.flow-step{display:grid;grid-template-columns:36px 1fr;gap:18px;align-items:start;padding:14px 0;border-bottom:1px solid rgba(237,232,216,.06)}
+.flow-step:last-child{border-bottom:none}
+.flow-step .step-n{font-family:var(--mono);font-size:11px;color:var(--amb);font-weight:700;background:rgba(212,135,10,.1);border:1px solid rgba(212,135,10,.3);border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center}
+.flow-step .step-c h4{margin:0 0 4px;font-size:14.5px;color:rgba(237,232,216,.95)}
+.flow-step .step-c p{font-size:13px;color:var(--t3);margin:0}
+
+.tooltip-demo{display:inline-block;border-bottom:1px dotted rgba(212,135,10,.5);cursor:help;position:relative}
+.tooltip-demo:hover::after{
+  content:attr(data-t);position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);
+  background:rgba(20,22,32,.98);color:rgba(237,232,216,.95);padding:8px 11px;border-radius:6px;
+  border:1px solid rgba(212,135,10,.4);font-size:12px;font-family:system-ui,sans-serif;font-weight:400;
+  white-space:normal;width:240px;line-height:1.5;text-transform:none;letter-spacing:0;
+  box-shadow:0 4px 16px rgba(0,0,0,.5);z-index:100;pointer-events:none
+}
+
+.risk-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.risk-cell{padding:14px 16px;border-radius:8px;font-size:13.5px}
+.risk-cell h5{margin:0 0 6px;font-size:12px;font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase;color:var(--amb)}
+.risk-cell p{margin:0;color:rgba(237,232,216,.78);font-size:13px;line-height:1.55}
+.risk-cell.ok{background:rgba(93,232,160,.05);border:1px solid rgba(93,232,160,.2)}
+.risk-cell.warn{background:rgba(232,112,110,.05);border:1px solid rgba(232,112,110,.2)}
+
+.signoff{background:linear-gradient(135deg,rgba(212,135,10,.08),rgba(93,232,160,.04));border:1px solid rgba(212,135,10,.3);border-radius:12px;padding:32px;margin-top:48px}
+.signoff h2{color:var(--amb);font-size:11px;margin-bottom:8px}
+.signoff h3{font-size:22px;margin:0 0 16px;color:rgba(237,232,216,.95);font-weight:600}
+.signoff p{font-size:14px;color:var(--t3);margin:0 0 18px}
+.signoff .checklist{display:grid;gap:8px;margin:18px 0}
+.signoff .ck{display:flex;align-items:flex-start;gap:10px;font-size:13.5px;color:rgba(237,232,216,.85)}
+.signoff .ck input{margin-top:4px;accent-color:var(--amb)}
+.signoff .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+.btn{padding:10px 20px;font-family:var(--mono);font-size:11px;letter-spacing:.5px;border-radius:6px;cursor:pointer;font-weight:700;text-transform:uppercase;border:none}
+.btn-go{background:var(--amb);color:#07080c}
+.btn-no{background:rgba(237,232,216,.06);color:rgba(237,232,216,.85);border:1px solid rgba(237,232,216,.18)}
+.btn-tweak{background:transparent;color:var(--amb);border:1px solid rgba(212,135,10,.4)}
+</style></head><body>
+
+<div class="wrap">
+
+<!-- COVER -->
+<div class="cover">
+  <div class="doc-meta">DotVerse · Design Brief · DV-DB-2026-05</div>
+  <h1>Size Tab — Trading Intelligence Layer</h1>
+  <p class="sub">Adds the four pre-trade signals professional traders rely on — market depth, contract specs, candle footprint, and live order flow — directly inside the Size step. Plus a global hover-tooltip system bringing back v1 DotVerse's "every term has an explanation" UX.</p>
+  <div class="stamp">
+    <strong>Status:</strong> Draft for approval &nbsp;·&nbsp;
+    <strong>Author:</strong> Engineering &nbsp;·&nbsp;
+    <strong>Decision needed by:</strong> Before any code is written
+  </div>
+</div>
+
+<div class="toc">
+  <a href="#problem">1 · Problem</a>
+  <a href="#solution">2 · Solution</a>
+  <a href="#mockup">3 · Mockup</a>
+  <a href="#components">4 · Components</a>
+  <a href="#flow">5 · User flow</a>
+  <a href="#tooltips">6 · Hover tooltips</a>
+  <a href="#risks">7 · Trade-offs</a>
+  <a href="#timeline">8 · Timeline</a>
+  <a href="#approval">9 · Approval</a>
+</div>
+
+<!-- 1 PROBLEM -->
+<section id="problem">
+  <h2>1 · The problem</h2>
+  <h3 class="ttl">A trader sizing 10 simultaneous trades has no idea what they're walking into.</h3>
+  <p class="lead">The current Size tab tells them <strong>how big</strong> their position is. It doesn't tell them whether the market can absorb the orders, what they're actually buying (1 lot of EUR/USD ≠ 1 lot of gold), or whether real money is moving with them or against them.</p>
+  <p>This is the gap between an amateur app and a professional trading platform. Pro tools — Sierra Chart, Bookmap, NinjaTrader — show all four data layers. DotVerse hides them. Users sense the lack and either over-trade (because they can't see liquidity warnings) or under-trade (because they don't trust the signals).</p>
+  <div class="callout">DotVerse v1 had partial versions of these. v2 dropped them in the redesign. This brief restores them, in a single, coherent panel.</div>
+</section>
+
+<!-- 2 SOLUTION -->
+<section id="solution">
+  <h2>2 · The solution</h2>
+  <h3 class="ttl">One "Trade Intelligence" panel on the Size tab, four stacked sections, all pulling live data.</h3>
+  <p>Sits between the position calculator and the Multi-Trade Ladder. Read top-to-bottom in 6 seconds. Every section answers one specific trader question.</p>
+
+  <div class="comp">
+    <div class="num">01<small>Liquidity</small></div>
+    <div>
+      <h3>Can the market absorb my orders?</h3>
+      <p class="one-liner">Bid/ask depth + spread + verdict.</p>
+      <dl>
+        <dt>Data source</dt>
+          <dd>Binance order book (crypto) · Broker L2 feed via the EA (forex/stocks/commodity)</dd>
+        <dt>Refresh</dt>
+          <dd>Every 2 seconds while Size tab is open</dd>
+        <dt>Trader value</dt>
+          <dd><strong>Tells them whether to split a $10k ladder into one order or ten.</strong> Thin book = slip badly = trades go off entry by 0.5%+.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="comp">
+    <div class="num">02<small>Contract</small></div>
+    <div>
+      <h3>What does 1 lot of THIS asset actually mean?</h3>
+      <p class="one-liner">Lot size + pip value + tick size + margin + trading hours.</p>
+      <dl>
+        <dt>Data source</dt>
+          <dd>Static specs per asset class (forex/stocks/commodity/crypto/index) shipped with the app — no API call</dd>
+        <dt>Refresh</dt>
+          <dd>Updates whenever the user changes ticker</dd>
+        <dt>Trader value</dt>
+          <dd><strong>Stops the "I bought 1 lot but didn't realise it was 100 oz of gold" disaster.</strong> Especially critical for newer traders who don't know contract specs.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="comp">
+    <div class="num">03<small>Footprint</small></div>
+    <div>
+      <h3>Were the recent candles driven by real or fake buyers/sellers?</h3>
+      <p class="one-liner">Real vs Poser breakdown for the last 5 candles. v1 DotVerse signature.</p>
+      <dl>
+        <dt>How it's classified</dt>
+          <dd>
+            <strong>Real Buyer</strong> = aggressive market-buys that took the ask, with volume confirmation<br>
+            <strong>Poser Buyer</strong> = bid creeping up but no volume going through (limit orders, not real demand)<br>
+            <strong>Real Seller</strong> / <strong>Poser Seller</strong> — same logic flipped
+          </dd>
+        <dt>Data source</dt>
+          <dd>Existing OHLCV + tick volume from the chart. No new data needed.</dd>
+        <dt>Trader value</dt>
+          <dd><strong>The single best signal-confirmation tool.</strong> A BUY signal on a candle dominated by Real Sellers = trap. Same setup with Real Buyers = strong setup.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="comp">
+    <div class="num">04<small>Order Flow</small></div>
+    <div>
+      <h3>What's happening in the market right now?</h3>
+      <p class="one-liner">Live tape of every trade as it fills, with size + direction + price.</p>
+      <dl>
+        <dt>Data source</dt>
+          <dd>Binance websocket (crypto) · Broker tick feed via the EA (forex/stocks)</dd>
+        <dt>Refresh</dt>
+          <dd>Real-time stream while Size tab is open</dd>
+        <dt>Trader value</dt>
+          <dd><strong>Confirms or denies the trade in the last 10 seconds before pulling the trigger.</strong> Heavy buying right now = take the trade. Heavy selling = wait.</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<!-- 3 MOCKUP -->
+<section id="mockup">
+  <h2>3 · How it'll look</h2>
+  <h3 class="ttl">Final visual — what users see on the Size tab.</h3>
+  <p>Sits below the position calculator + Risk/Reward bar, above the Multi-Trade Ladder. Single card, four sub-cards, dense but readable.</p>
+
+  <div class="mock-shell">
+    <div class="h">SIZE TAB · TRADE INTELLIGENCE PANEL</div>
+
+    <!-- Section 1 -->
+    <div class="mk-card">
+      <div class="label"><span class="dot"></span>Market Liquidity · BTC/USDT · Binance</div>
+      <div class="row"><span class="l">Bid depth</span><div class="bar"><div style="width:78%"></div></div><span class="v green">+$2.4M</span></div>
+      <div class="row"><span class="l">Ask depth</span><div class="bar"><div style="width:65%"></div></div><span class="v green">+$1.9M</span></div>
+      <div class="row"><span class="l">Spread</span><span class="v">$0.40 (0.0006%)</span></div>
+      <div class="verdict">Deep — your $10k ladder will fill at quoted price ±$0.50</div>
+    </div>
+
+    <!-- Section 2 -->
+    <div class="mk-card">
+      <div class="label"><span class="dot"></span>Contract Specs · 1 standard lot</div>
+      <div class="row"><span class="l">Lot size</span><span class="v">1 BTC</span></div>
+      <div class="row"><span class="l">Tick size</span><span class="v">$0.01</span></div>
+      <div class="row"><span class="l">Margin (1:30)</span><span class="v amb">~$2,580 to open</span></div>
+      <div class="row"><span class="l">Trading hours</span><span class="v">24/7</span></div>
+    </div>
+
+    <!-- Section 3 -->
+    <div class="mk-card">
+      <div class="label"><span class="dot"></span>Candle Footprint · Real vs Poser · last 5 candles</div>
+      <table class="rvp">
+        <thead><tr><th>Candle</th><th>Real Buy</th><th>Poser Buy</th><th>Real Sell</th><th>Poser Sell</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>−5 ago</td><td class="green">62%</td><td class="amb">15%</td><td class="red">18%</td><td class="amb">5%</td><td class="green">REAL UP</td></tr>
+          <tr><td>−4 ago</td><td class="green">55%</td><td class="amb">22%</td><td class="red">15%</td><td class="amb">8%</td><td class="green">REAL UP</td></tr>
+          <tr><td>−3 ago</td><td class="green">22%</td><td class="amb">8%</td><td class="red">38%</td><td class="amb">32%</td><td class="amb">FAKE DROP</td></tr>
+          <tr><td>−2 ago</td><td class="green">58%</td><td class="amb">12%</td><td class="red">25%</td><td class="amb">5%</td><td class="green">REAL UP</td></tr>
+          <tr><td>latest</td><td class="green">68%</td><td class="amb">12%</td><td class="red">15%</td><td class="amb">5%</td><td class="green">REAL UP</td></tr>
+        </tbody>
+      </table>
+      <div class="verdict">4 of last 5 candles dominated by REAL buyers · BUY signal confirmed</div>
+    </div>
+
+    <!-- Section 4 -->
+    <div class="mk-card">
+      <div class="label"><span class="dot"></span>Live Order Flow · streaming · last 7 trades</div>
+      <div class="tape">
+        <div class="t"><span class="ts">21:34:12.847</span><span class="green">BUY</span><div class="b" style="width:35%"></div><span class="green">+0.84 BTC @ 77381.20</span></div>
+        <div class="t"><span class="ts">21:34:12.901</span><span class="green">BUY</span><div class="b" style="width:18%"></div><span class="green">+0.41 BTC @ 77381.50</span></div>
+        <div class="t"><span class="ts">21:34:13.022</span><span class="red">SELL</span><div class="b s" style="width:8%"></div><span class="red">−0.18 BTC @ 77380.90</span></div>
+        <div class="t"><span class="ts">21:34:13.156</span><span class="green">BUY</span><div class="b" style="width:62%"></div><span class="green">+1.50 BTC @ 77381.80</span></div>
+        <div class="t"><span class="ts">21:34:13.301</span><span class="green">BUY</span><div class="b" style="width:88%"></div><span class="green">+2.15 BTC @ 77382.50</span></div>
+      </div>
+      <div class="verdict">Last 7 trades: 5 buys (5.52 BTC) vs 2 sells (0.48 BTC) · strong real-time buying</div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 COMPONENTS  (already covered in section 2 — collapse this into a navigation link) -->
+
+<!-- 5 USER FLOW -->
+<section id="flow">
+  <h2>5 · How a trader uses it</h2>
+  <h3 class="ttl">Walkthrough: AAPL signal, 4H, 5-trade ladder.</h3>
+
+  <div class="flow-step">
+    <div class="step-n">1</div>
+    <div class="step-c">
+      <h4>Signal arrives — trader navigates Market → Signal → Understand → <strong>Size</strong></h4>
+      <p>Existing flow. AAPL BUY at 273.66, SL 266.51, TP 290.98. Account $10k, 5% risk, Position size auto-calculated.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-n">2</div>
+    <div class="step-c">
+      <h4>Trader scrolls past the calculator → sees Trade Intelligence panel</h4>
+      <p>Four sub-cards stack vertically. All four populate within 3 seconds of arriving on the Size tab — Liquidity + Order Flow stream live.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-n">3</div>
+    <div class="step-c">
+      <h4>Reads top-down — each section gives a verdict in plain English</h4>
+      <p>"Deep market — your $10k will fill clean." "1 lot AAPL = 100 shares." "4 of last 5 candles REAL UP — confirmed." "Strong buying right now — last 7 trades net +$X buy pressure."</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-n">4</div>
+    <div class="step-c">
+      <h4>Confidence calibrated — proceeds to Multi-Trade Ladder + Submit All to MT5</h4>
+      <p>If any section flags red ("thin liquidity" or "FAKE UP last candle"), they pause or skip the trade. Otherwise full ladder fires.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 6 TOOLTIPS -->
+<section id="tooltips">
+  <h2>6 · Global hover-tooltip system</h2>
+  <h3 class="ttl">Bringing back v1's "every term has an explanation" UX.</h3>
+  <p>Built once as a reusable <code>data-tip</code> attribute. Any element that gets the attribute auto-shows a tooltip on hover. Applied across every page.</p>
+
+  <p style="margin:24px 0;font-size:14.5px;color:rgba(237,232,216,.85)">Try it: hover any term below.</p>
+
+  <div style="background:rgba(8,9,14,.7);border:1px solid rgba(237,232,216,.1);border-radius:8px;padding:18px;font-size:14px">
+    <p style="margin:0 0 10px"><span class="tooltip-demo" data-t="Confluence = how many of the 7 DotVerse indicators (RSI, EMAs, MACD, Bollinger, supertrend, volume, MTF trend) point in the same direction. Higher = stronger consensus.">Confluence</span> 75% · <span class="tooltip-demo" data-t="Risk-to-Reward — for every $1 you risk on the stop loss, how many dollars you target on take profit. 1:2.4 means risk $1 to make $2.40.">R:R</span> 1:2.4 · <span class="tooltip-demo" data-t="ATR (Average True Range) measures how much the asset typically moves per bar. Used to size stops correctly.">ATR</span> 3.2 · <span class="tooltip-demo" data-t="Half-Kelly position sizing — mathematically optimal risk based on win-rate and reward-to-risk. We use HALF Kelly because full Kelly is too aggressive and survives drawdowns poorly.">Half-Kelly</span> 2.5%</p>
+  </div>
+
+  <div class="callout">Coverage scope: every metric, button label, technical term across Market / Signal / Scanner / Understand / Size / Act / Automations / Track Record. ~80 unique terms. Roughly 2 hours of writing tooltip copy + 30 minutes wiring the attribute.</div>
+</section>
+
+<!-- 7 RISKS / TRADE-OFFS -->
+<section id="risks">
+  <h2>7 · Trade-offs and risks</h2>
+  <h3 class="ttl">What we're committing to and where the limits are.</h3>
+
+  <div class="risk-grid">
+    <div class="risk-cell ok">
+      <h5>Liquidity (Section 01)</h5>
+      <p><strong>Crypto:</strong> Binance public REST API — free, no auth, instant.<br><strong>Forex/stocks:</strong> Requires the EA to push order-book depth — adds payload to /api/mt5/push. ~2KB overhead per heartbeat. Acceptable.</p>
+    </div>
+    <div class="risk-cell ok">
+      <h5>Contract specs (Section 02)</h5>
+      <p>Static dataset of ~150 symbols shipped with the app. No external dependency. Easy to maintain.</p>
+    </div>
+    <div class="risk-cell warn">
+      <h5>Real vs Poser (Section 03)</h5>
+      <p>Classification uses heuristics — close-vs-open + volume + range — not true bid/ask data. Will be ~85% accurate vs a Sierra Chart-style true footprint. Trade-off: zero new data infrastructure required.</p>
+    </div>
+    <div class="risk-cell warn">
+      <h5>Live order flow (Section 04)</h5>
+      <p><strong>Heaviest build.</strong> Crypto via Binance websocket is straightforward. Forex/stocks need the EA to stream tick data — increases EA→backend traffic. Recommendation: ship crypto first, forex/stocks as v2.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 8 TIMELINE -->
+<section id="timeline">
+  <h2>8 · Timeline</h2>
+  <h3 class="ttl">Honest estimate, no padding.</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:14px">
+    <thead><tr style="border-bottom:1px solid rgba(237,232,216,.1)">
+      <th style="text-align:left;padding:10px 6px;color:var(--mut);font-weight:600;font-size:11px;letter-spacing:.4px;text-transform:uppercase">Section</th>
+      <th style="text-align:right;padding:10px 6px;color:var(--mut);font-weight:600;font-size:11px;letter-spacing:.4px;text-transform:uppercase">Estimate</th>
+      <th style="text-align:left;padding:10px 6px;color:var(--mut);font-weight:600;font-size:11px;letter-spacing:.4px;text-transform:uppercase">Includes</th>
+    </tr></thead>
+    <tbody>
+      <tr style="border-bottom:1px solid rgba(237,232,216,.05)"><td style="padding:10px 6px">01 Market Liquidity</td><td style="padding:10px 6px;text-align:right;font-family:var(--mono);color:var(--amb)">45 min</td><td style="padding:10px 6px;color:var(--t3)">Binance REST integration + UI card + verdict copy</td></tr>
+      <tr style="border-bottom:1px solid rgba(237,232,216,.05)"><td style="padding:10px 6px">02 Contract Specs</td><td style="padding:10px 6px;text-align:right;font-family:var(--mono);color:var(--amb)">30 min</td><td style="padding:10px 6px;color:var(--t3)">Static symbol dataset + UI card</td></tr>
+      <tr style="border-bottom:1px solid rgba(237,232,216,.05)"><td style="padding:10px 6px">03 Real vs Poser footprint</td><td style="padding:10px 6px;text-align:right;font-family:var(--mono);color:var(--amb)">60 min</td><td style="padding:10px 6px;color:var(--t3)">Heuristic classification + 5-row table + per-candle verdicts</td></tr>
+      <tr style="border-bottom:1px solid rgba(237,232,216,.05)"><td style="padding:10px 6px">04 Live order flow (crypto only)</td><td style="padding:10px 6px;text-align:right;font-family:var(--mono);color:var(--amb)">90 min</td><td style="padding:10px 6px;color:var(--t3)">Binance websocket connection + live-streaming tape UI</td></tr>
+      <tr style="border-bottom:1px solid rgba(237,232,216,.05)"><td style="padding:10px 6px">06 Hover-tooltip system</td><td style="padding:10px 6px;text-align:right;font-family:var(--mono);color:var(--amb)">2.5 hr</td><td style="padding:10px 6px;color:var(--t3)">CSS tooltip pattern + writing copy for ~80 terms across 8 tabs</td></tr>
+      <tr style="background:rgba(212,135,10,.05)"><td style="padding:10px 6px;font-weight:700">TOTAL</td><td style="padding:10px 6px;text-align:right;font-family:var(--mono);color:var(--amb);font-weight:700">~6 hr</td><td style="padding:10px 6px;color:var(--t3)">Sandbox-verified before each push, deployed to Railway sequentially</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 9 APPROVAL -->
+<section id="approval">
+  <h2>9 · Approval</h2>
+</section>
+
+<div class="signoff">
+  <h2>Decision</h2>
+  <h3>Tick the items you approve, then reply with one of the buttons below.</h3>
+  <p>Anything you don't tick gets cut from the build. We do not start coding until you reply.</p>
+
+  <div class="checklist">
+    <label class="ck"><input type="checkbox" checked> <span>Section 01 — Market Liquidity</span></label>
+    <label class="ck"><input type="checkbox" checked> <span>Section 02 — Contract Specs</span></label>
+    <label class="ck"><input type="checkbox" checked> <span>Section 03 — Candle Footprint (Real vs Poser, v1 DotVerse style)</span></label>
+    <label class="ck"><input type="checkbox" checked> <span>Section 04 — Live Order Flow (crypto first, forex/stocks later)</span></label>
+    <label class="ck"><input type="checkbox" checked> <span>Section 06 — Global hover-tooltip system across every tab</span></label>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-go">Reply: "approved"</button>
+    <button class="btn btn-tweak">Reply: "approved with changes — [list them]"</button>
+    <button class="btn btn-no">Reply: "rework — [reason]"</button>
+  </div>
+
+  <p style="margin-top:22px;font-size:12.5px;color:var(--mut);font-family:var(--mono);letter-spacing:.3px">
+    Document version 1.0 · Awaiting business owner sign-off · No code written until approval received
+  </p>
+</div>
+
+</div>
+</body></html>

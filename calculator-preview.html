@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calculator — DotVerse Current Look</title>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@400;700;900&family=Fira+Code:wght@400;600;700&family=Sora:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0C0A08; --bg2:#141210; --bg3:#1a1816;
+  --amber:#f5a623; --amber-dim:rgba(245,166,35,.12); --amber-glow:rgba(245,166,35,.3);
+  --green:#00C98D; --green-bg:rgba(0,201,141,.08);
+  --red:#FF4459; --red-bg:rgba(255,68,89,.08);
+  --border:rgba(255,255,255,.08); --border2:rgba(255,255,255,.12);
+  --muted:rgba(255,255,255,.35); --muted2:rgba(255,255,255,.22);
+  --white:#fff; --white2:rgba(255,255,255,.75);
+  --r2:4px;
+  --disp:'Anybody',sans-serif; --mono:'Fira Code',monospace; --body:'Sora',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:#fff;font-family:var(--body);min-height:100vh;padding:32px 20px;}
+label{display:block;font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;font-weight:600;margin-bottom:5px;}
+
+/* ── OUTER WRAPPER ── */
+.calc-section{
+  max-width:980px;margin:0 auto;
+  background:var(--bg2);border:1px solid var(--border);border-radius:6px;overflow:hidden;
+}
+
+/* Toggle header */
+.calc-toggle{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:14px 20px;cursor:pointer;
+  border-bottom:1px solid var(--border);
+  background:rgba(255,255,255,.02);
+  user-select:none;
+}
+.section-hdr{font-family:var(--disp);font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.85);}
+.calc-toggle-icon{font-family:var(--mono);font-size:11px;color:var(--muted2);}
+
+/* Body */
+.calc-body{padding:16px 20px 20px;}
+
+/* Direction row */
+.calc-dir-row{display:flex;gap:6px;margin-bottom:14px;}
+.calc-dir-btn{
+  flex:1;padding:9px;border-radius:2px;
+  border:1.5px solid rgba(255,255,255,.1);background:transparent;
+  font-family:var(--mono);font-size:12px;font-weight:700;
+  cursor:pointer;transition:all .15s;color:var(--muted2);
+}
+.calc-dir-btn.buy-on{background:var(--green-bg);border-color:var(--green);color:var(--green);}
+.calc-dir-btn.sell-on{background:var(--red-bg);border-color:var(--red);color:var(--red);}
+.calc-dir-btn:not(.buy-on):not(.sell-on):hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.7);}
+
+/* Two-column layout */
+.calc-sonar-wrap{display:grid;grid-template-columns:1fr 360px;gap:0;align-items:start;}
+.calc-left{padding:0 16px 0 0;border-right:1px solid var(--border);}
+.calc-right{padding:0 0 0 16px;}
+
+/* Inputs */
+.calc-grid{display:flex;flex-direction:column;gap:0;}
+.calc-field{display:flex;flex-direction:column;gap:5px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);}
+.calc-field:last-child{border-bottom:none;}
+.calc-field-group{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:0;}
+.calc-field-group .calc-field{border-bottom:none;padding:6px 0;}
+.calc-levels-label{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:rgba(245,166,35,.6);text-transform:uppercase;padding:10px 0 4px;font-weight:700;}
+.calc-input,.calc-select{
+  width:100%;background:var(--bg2);border:1px solid var(--border2);
+  color:var(--white);padding:7px 10px;border-radius:6px;
+  font-family:var(--mono);font-size:13px;outline:none;
+  transition:border-color .15s, box-shadow .15s;
+}
+.calc-input:focus,.calc-select:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(245,166,35,.15);}
+select option{background:var(--bg2);}
+
+/* Results box */
+.calc-sonar-results{background:rgba(0,0,0,.4);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+.csr-ticker{background:rgba(245,166,35,.08);padding:9px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,.06);}
+.csr-ticker-sym{font-family:var(--mono);font-size:11px;font-weight:800;color:var(--amber);letter-spacing:1px;}
+.csr-ticker-price{font-family:var(--mono);font-size:11px;color:var(--white2);}
+.csr-grid{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid rgba(255,255,255,.06);}
+.csr-cell{padding:10px;border-right:1px solid rgba(255,255,255,.06);}
+.csr-cell:last-child{border-right:none;}
+.csr-label{font-family:var(--mono);font-size:8px;color:var(--muted2);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;}
+.csr-val{font-family:var(--mono);font-size:14px;font-weight:800;color:var(--white);}
+.csr-val.amber{color:var(--amber);}
+.csr-val.green{color:var(--green);}
+.csr-val.red{color:var(--red);}
+.csr-val.small{font-size:12px;}
+
+/* Trade size row */
+.csr-trade-row{border-top:1px solid rgba(245,166,35,.2);background:rgba(245,166,35,.04);}
+.csr-trade-hdr{padding:5px 12px;font-family:var(--mono);font-size:8px;color:rgba(245,166,35,.7);letter-spacing:1.5px;text-transform:uppercase;font-weight:700;border-bottom:1px solid rgba(245,166,35,.1);}
+.csr-trade-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;}
+
+/* Stop line */
+.csr-stop{padding:8px 12px;font-family:var(--mono);font-size:10px;color:var(--muted2);border-top:1px solid rgba(255,255,255,.05);}
+
+/* Live typing hint */
+.calc-live-hint{font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.8px;text-align:center;padding:8px 0 0;opacity:.5;}
+
+/* ── BELOW THE COLUMNS ── */
+.calc-results{margin-top:16px;}
+
+/* Win rate line */
+.calc-wr-line{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-top:6px;font-size:11px;}
+.calc-wr-note{font-size:10px;color:var(--muted2);margin-top:2px;padding-bottom:4px;}
+
+/* RR Bar */
+.calc-rr-bar{margin:10px 0 12px;border-radius:3px;overflow:hidden;border:1px solid var(--border);}
+.calc-rr-hdr{background:var(--bg3);padding:6px 10px;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--muted2);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);}
+.calc-rr-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:var(--bg3);}
+.rr-box{padding:10px;border-right:1px solid var(--border);cursor:pointer;transition:background .15s;}
+.rr-box:last-child{border-right:none;}
+.rr-box:hover{background:rgba(255,255,255,.04);}
+.rr-box-label{font-family:var(--mono);font-size:9px;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px;}
+.rr-box-val{font-family:var(--mono);font-size:18px;font-weight:800;}
+.rr-box-sub{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;}
+.rr-box-hint{font-family:var(--mono);font-size:8px;margin-top:5px;letter-spacing:.5px;}
+.rr-detail{border-top:1px solid var(--border);background:var(--bg2);padding:14px 16px;font-size:12px;line-height:1.7;color:var(--muted);}
+
+/* TP rows */
+.calc-tp-title{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:1.3px;color:rgba(245,190,80,.55);text-transform:uppercase;margin-bottom:8px;}
+.calc-tp-table{display:flex;flex-direction:column;gap:5px;}
+.calc-tp-row{background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:10px 12px;cursor:pointer;transition:border-color .15s;}
+.calc-tp-row:hover{border-color:rgba(255,255,255,.18);}
+.calc-tp-main{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;}
+.ctp-lhs{display:flex;flex-direction:column;gap:2px;}
+.ctp-name{font-family:var(--mono);font-size:12px;font-weight:800;color:var(--green);}
+.ctp-price{font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.38);}
+.ctp-mid{display:flex;flex-direction:column;gap:2px;}
+.ctp-rr{font-family:var(--mono);font-size:11px;color:var(--muted2);}
+.ctp-rr-hint{font-size:10px;color:var(--muted);}
+.ctp-profit{font-family:var(--disp);font-size:16px;font-weight:700;color:var(--green);text-align:right;}
+.ctp-expand-hint{font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.22);text-align:right;margin-top:2px;}
+.ctp-detail{display:none;flex-direction:column;gap:4px;padding-top:10px;margin-top:10px;border-top:1px solid rgba(255,255,255,.07);}
+.ctp-detail-row{display:flex;justify-content:space-between;font-size:11px;}
+.ctp-detail-label{color:var(--muted2);}
+.ctp-detail-val{font-family:var(--mono);color:var(--white);font-weight:600;}
+.calc-tp-row.expanded .ctp-detail{display:flex;}
+.calc-tp-row.expanded{border-color:rgba(255,255,255,.22);}
+
+/* Distance breakdown */
+.calc-pips{background:var(--bg3);border:1px solid var(--border);border-radius:2px;padding:12px;margin-top:10px;}
+.cp-title{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:1.3px;color:rgba(245,190,80,.55);text-transform:uppercase;margin-bottom:8px;}
+.cp-row{display:flex;align-items:center;gap:8px;padding:4px 0;}
+.cp-row+.cp-row{border-top:1px solid rgba(255,255,255,.04);}
+.cp-label{font-family:var(--mono);font-size:10px;font-weight:700;width:30px;flex-shrink:0;letter-spacing:.3px;}
+.cp-bar-wrap{flex:1;height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;}
+.cp-bar{height:100%;border-radius:2px;transition:width .6s ease;}
+.cp-val{font-family:var(--mono);font-size:11px;text-align:right;min-width:55px;flex-shrink:0;}
+
+/* Guidance panel */
+.guidance-panel{border-radius:var(--r2);overflow:hidden;font-size:12px;line-height:1.5;margin-bottom:12px;}
+.guidance-step{padding:12px 14px;background:rgba(245,166,35,.07);border:1px solid rgba(245,166,35,.18);border-radius:4px;}
+.guidance-step-title{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--amber);letter-spacing:1px;margin-bottom:4px;}
+.guidance-step p{color:var(--muted);font-size:11px;line-height:1.6;}
+
+/* ── TABS at top for demo states ── */
+.demo-tabs{display:flex;gap:8px;margin-bottom:20px;max-width:980px;margin:0 auto 20px;}
+.demo-tab{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:6px 14px;border-radius:3px;border:1px solid var(--border);cursor:pointer;color:var(--muted);background:transparent;transition:all .15s;}
+.demo-tab.active{background:var(--amber-dim);border-color:rgba(245,166,35,.4);color:var(--amber);}
+
+.page-title{font-family:var(--disp);font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--amber);margin-bottom:6px;}
+.page-sub{font-size:11px;color:var(--muted);margin-bottom:20px;}
+</style>
+</head>
+<body>
+
+<div style="max-width:980px;margin:0 auto 24px;">
+  <div class="page-title">Position Size Calculator — Current State</div>
+  <div class="page-sub">Exact replica of what is in <code style="font-family:'Fira Code',monospace;font-size:10px;background:rgba(255,255,255,.07);padding:1px 6px;border-radius:2px;color:var(--amber);">static/index.html</code> right now. Toggle between states below.</div>
+</div>
+
+<div class="demo-tabs">
+  <button class="demo-tab active" onclick="setDemoState('empty')">Empty state</button>
+  <button class="demo-tab" onclick="setDemoState('guidance')">Coaching step</button>
+  <button class="demo-tab" onclick="setDemoState('populated')">Populated (BTC BUY)</button>
+  <button class="demo-tab" onclick="setDemoState('forex')">Forex (EURUSD)</button>
+</div>
+
+<div class="calc-section" id="calcSection">
+  <div class="calc-toggle" onclick="toggleCalc()">
+    <div class="section-hdr">Position Size Calculator</div>
+    <span class="calc-toggle-icon" id="calcIcon">▼ Expand</span>
+  </div>
+
+  <div class="calc-body" id="calcBody" style="display:none;">
+
+    <!-- Direction -->
+    <div class="calc-dir-row">
+      <button class="calc-dir-btn buy-on" id="cdBuy" onclick="setDir('BUY')">▲ LONG / BUY</button>
+      <button class="calc-dir-btn" id="cdSell" onclick="setDir('SELL')">▼ SHORT / SELL</button>
+    </div>
+
+    <!-- Two-column -->
+    <div class="calc-sonar-wrap">
+
+      <!-- LEFT -->
+      <div class="calc-left">
+        <div class="calc-grid">
+
+          <div class="calc-field-group">
+            <div class="calc-field">
+              <label>Account ($)</label>
+              <input class="calc-input" type="number" id="cAcct" placeholder="e.g. 10000" oninput="recalc()">
+            </div>
+            <div class="calc-field">
+              <label id="cRiskLabel">Risk %</label>
+              <input class="calc-input" type="number" id="cRisk" placeholder="1" value="1" step="0.5" min="0.1" max="100" oninput="recalc()">
+            </div>
+          </div>
+
+          <div class="calc-field">
+            <label>Trade Size ($) <span style="font-size:9px;color:var(--muted);font-weight:400;letter-spacing:.3px;">— how much you want to put in</span></label>
+            <input class="calc-input" type="number" id="cTradeSize" placeholder="e.g. 500" oninput="recalc()">
+          </div>
+
+          <div class="calc-field" id="cLevField">
+            <label id="cLevLabel">Contract Size</label>
+            <select class="calc-select" id="cLev" onchange="recalc()">
+              <option value="100000">Standard (100,000)</option>
+              <option value="10000">Mini (10,000)</option>
+              <option value="1000">Micro (1,000)</option>
+            </select>
+            <div id="cLevNote" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;letter-spacing:.3px;line-height:1.3;">Standard = 100k units · Mini = 10k · Micro = 1k</div>
+          </div>
+
+          <div class="calc-levels-label">Levels</div>
+
+          <div class="calc-field-group">
+            <div class="calc-field">
+              <label>Entry Price</label>
+              <input class="calc-input" type="text" id="cEntry" placeholder="0.00000" oninput="recalc()">
+            </div>
+            <div class="calc-field">
+              <label>Stop Loss</label>
+              <input class="calc-input" type="text" id="cSL" placeholder="0.00000" oninput="recalc()">
+            </div>
+          </div>
+
+          <div class="calc-field-group">
+            <div class="calc-field">
+              <label>TP 1</label>
+              <input class="calc-input" type="text" id="cTP1" placeholder="0.00000" oninput="recalc()">
+            </div>
+            <div class="calc-field">
+              <label>TP 2</label>
+              <input class="calc-input" type="text" id="cTP2" placeholder="0.00000" oninput="recalc()">
+            </div>
+          </div>
+
+          <div class="calc-field-group">
+            <div class="calc-field">
+              <label>TP 3</label>
+              <input class="calc-input" type="text" id="cTP3" placeholder="0.00000" oninput="recalc()">
+            </div>
+            <div class="calc-field">
+              <label>Current Price</label>
+              <input class="calc-input" type="text" id="cAsset" placeholder="0.00000" oninput="recalc()">
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- RIGHT: Results -->
+      <div class="calc-right">
+        <div id="calcGuidance"></div>
+
+        <div class="calc-sonar-results" id="calcSonarBox">
+          <div class="csr-ticker">
+            <span class="csr-ticker-sym" id="csrTicker">—</span>
+            <span class="csr-ticker-price" id="csrPrice">—</span>
+          </div>
+          <div class="csr-grid">
+            <div class="csr-cell">
+              <div class="csr-label">Balance</div>
+              <div class="csr-val small" id="csrBalance">—</div>
+            </div>
+            <div class="csr-cell">
+              <div class="csr-label">Risk %</div>
+              <div class="csr-val small" id="csrRiskPct">—</div>
+            </div>
+            <div class="csr-cell">
+              <div class="csr-label">Money at Risk</div>
+              <div class="csr-val amber" id="cMoneyAtRisk">—</div>
+            </div>
+          </div>
+          <div class="csr-grid">
+            <div class="csr-cell">
+              <div class="csr-label">Lots / Size</div>
+              <div class="csr-val green" id="cRiskDollar">—</div>
+            </div>
+            <div class="csr-cell">
+              <div class="csr-label">Margin Req.</div>
+              <div class="csr-val small" id="csrMarginReq2">—</div>
+            </div>
+            <div class="csr-cell">
+              <div class="csr-label">R : R (TP1)</div>
+              <div class="csr-val" id="csrRR">—</div>
+            </div>
+          </div>
+          <div id="csrTradeSizeRow" style="display:none;" class="csr-trade-row">
+            <div class="csr-trade-hdr">If you put in <span id="csrTradeSizeVal">—</span> — what you make / lose</div>
+            <div class="csr-trade-grid">
+              <div class="csr-cell"><div class="csr-label">If SL Hit</div><div class="csr-val red" id="csrTradeSL">—</div></div>
+              <div class="csr-cell"><div class="csr-label">If TP1 Hit</div><div class="csr-val green" id="csrTradeTP1">—</div></div>
+              <div class="csr-cell"><div class="csr-label">If TP2 Hit</div><div class="csr-val green" id="csrTradeTP2">—</div></div>
+              <div class="csr-cell" style="border-right:none;"><div class="csr-label">If TP3 Hit</div><div class="csr-val green" id="csrTradeTP3">—</div></div>
+            </div>
+          </div>
+          <div class="csr-stop"><span id="csrStopLine">Enter levels to calculate</span></div>
+        </div>
+
+        <div class="calc-live-hint">RESULTS UPDATE AS YOU TYPE</div>
+      </div>
+    </div>
+
+    <!-- Below columns -->
+    <div class="calc-results" id="calcResults">
+      <div class="calc-wr-line">
+        <span style="color:var(--muted2);">Backtest Win Rate</span>
+        <span id="cWinRate" style="color:var(--green);font-weight:700;font-family:var(--mono);">—</span>
+      </div>
+      <div class="calc-wr-note">TP profits shown net of fees · Distances in pips/pts</div>
+
+      <!-- RR Bar -->
+      <div class="calc-rr-bar" id="calcRRBar" style="display:none;">
+        <div class="calc-rr-hdr">Your Risk vs Your Reward — tap any box for details</div>
+        <div class="calc-rr-grid">
+          <div class="rr-box" style="background:rgba(255,68,89,.06);" onclick="rrToggle('SL')">
+            <div class="rr-box-label">Worst Case</div>
+            <div class="rr-box-val" id="rrRisk" style="color:var(--red);">—</div>
+            <div class="rr-box-sub" id="rrRiskLabel">if price hits —</div>
+            <div class="rr-box-hint" style="color:rgba(255,68,89,.5);">▼ what happens</div>
+          </div>
+          <div class="rr-box" onclick="rrToggle('TP1')">
+            <div class="rr-box-label">TP 1</div>
+            <div class="rr-box-val" id="rrTP1" style="color:var(--green);">—</div>
+            <div class="rr-box-sub" id="rrTP1RR">—</div>
+            <div class="rr-box-hint" style="color:rgba(0,201,141,.4);">▼ how to trade it</div>
+          </div>
+          <div class="rr-box" onclick="rrToggle('TP2')">
+            <div class="rr-box-label">TP 2</div>
+            <div class="rr-box-val" id="rrTP2" style="color:var(--green);">—</div>
+            <div class="rr-box-sub" id="rrTP2RR">—</div>
+            <div class="rr-box-hint" style="color:rgba(0,201,141,.4);">▼ how to trade it</div>
+          </div>
+          <div class="rr-box" style="background:rgba(0,201,141,.06);" onclick="rrToggle('TP3')">
+            <div class="rr-box-label">Best Case</div>
+            <div class="rr-box-val" id="rrTP3" style="color:var(--green);">—</div>
+            <div class="rr-box-sub" id="rrTP3RR">—</div>
+            <div class="rr-box-hint" style="color:rgba(0,201,141,.4);">▼ how to trade it</div>
+          </div>
+        </div>
+        <div id="rrDetail" style="display:none;" class="rr-detail"></div>
+      </div>
+
+      <!-- TP rows -->
+      <div class="calc-tp-title">Take Profit Levels</div>
+      <div class="calc-tp-table">
+        <div class="calc-tp-row" onclick="this.classList.toggle('expanded')">
+          <div class="calc-tp-main">
+            <div class="ctp-lhs"><div class="ctp-name">TP 1</div><div class="ctp-price" id="cTP1Price">—</div></div>
+            <div class="ctp-mid"><div class="ctp-rr" id="cTP1RR">—</div><div class="ctp-rr-hint">First target</div></div>
+            <div><div class="ctp-profit" id="cTP1Profit">—</div><div class="ctp-expand-hint">▼ details</div></div>
+          </div>
+          <div class="ctp-detail">
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Distance from entry</span><span class="ctp-detail-val" id="cTP1Dist">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">% gain at TP1</span><span class="ctp-detail-val" id="cTP1Pct">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Total $ profit</span><span class="ctp-detail-val" id="cTP1TotalProfit">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Account % gain</span><span class="ctp-detail-val" id="cTP1AcctPct">—</span></div>
+          </div>
+        </div>
+        <div class="calc-tp-row" onclick="this.classList.toggle('expanded')">
+          <div class="calc-tp-main">
+            <div class="ctp-lhs"><div class="ctp-name">TP 2</div><div class="ctp-price" id="cTP2Price">—</div></div>
+            <div class="ctp-mid"><div class="ctp-rr" id="cTP2RR">—</div><div class="ctp-rr-hint">Extended target</div></div>
+            <div><div class="ctp-profit" id="cTP2Profit">—</div><div class="ctp-expand-hint">▼ details</div></div>
+          </div>
+          <div class="ctp-detail">
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Distance from entry</span><span class="ctp-detail-val" id="cTP2Dist">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">% gain at TP2</span><span class="ctp-detail-val" id="cTP2Pct">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Total $ profit</span><span class="ctp-detail-val" id="cTP2TotalProfit">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Account % gain</span><span class="ctp-detail-val" id="cTP2AcctPct">—</span></div>
+          </div>
+        </div>
+        <div class="calc-tp-row" onclick="this.classList.toggle('expanded')">
+          <div class="calc-tp-main">
+            <div class="ctp-lhs"><div class="ctp-name">TP 3</div><div class="ctp-price" id="cTP3Price">—</div></div>
+            <div class="ctp-mid"><div class="ctp-rr" id="cTP3RR">—</div><div class="ctp-rr-hint">Maximum target</div></div>
+            <div><div class="ctp-profit" id="cTP3Profit">—</div><div class="ctp-expand-hint">▼ details</div></div>
+          </div>
+          <div class="ctp-detail">
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Distance from entry</span><span class="ctp-detail-val" id="cTP3Dist">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">% gain at TP3</span><span class="ctp-detail-val" id="cTP3Pct">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Total $ profit</span><span class="ctp-detail-val" id="cTP3TotalProfit">—</span></div>
+            <div class="ctp-detail-row"><span class="ctp-detail-label">Account % gain</span><span class="ctp-detail-val" id="cTP3AcctPct">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Distance breakdown -->
+      <div class="calc-pips" id="calcPips" style="display:none;">
+        <div class="cp-title">Distance Breakdown</div>
+        <div class="cp-row">
+          <span class="cp-label" style="color:var(--red);">SL</span>
+          <div class="cp-bar-wrap"><div class="cp-bar" style="background:var(--red);" id="cpSLBar"></div></div>
+          <span class="cp-val" style="color:var(--red);" id="cpSLVal">—</span>
+        </div>
+        <div class="cp-row">
+          <span class="cp-label" style="color:var(--green);">TP1</span>
+          <div class="cp-bar-wrap"><div class="cp-bar" style="background:var(--green);" id="cpTP1Bar"></div></div>
+          <span class="cp-val" style="color:var(--green);" id="cpTP1Val">—</span>
+        </div>
+        <div class="cp-row">
+          <span class="cp-label" style="color:var(--green);">TP2</span>
+          <div class="cp-bar-wrap"><div class="cp-bar" style="background:var(--green);" id="cpTP2Bar"></div></div>
+          <span class="cp-val" style="color:var(--green);" id="cpTP2Val">—</span>
+        </div>
+        <div class="cp-row">
+          <span class="cp-label" style="color:var(--green);">TP3</span>
+          <div class="cp-bar-wrap"><div class="cp-bar" style="background:var(--green);" id="cpTP3Bar"></div></div>
+          <span class="cp-val" style="color:var(--green);" id="cpTP3Val">—</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /calc-body -->
+</div>
+
+<script>
+// ── open by default ──
+document.getElementById('calcBody').style.display = 'block';
+document.getElementById('calcIcon').textContent = '▲ Collapse';
+
+function toggleCalc() {
+  const b = document.getElementById('calcBody');
+  const i = document.getElementById('calcIcon');
+  const open = b.style.display !== 'none';
+  b.style.display = open ? 'none' : 'block';
+  i.textContent = open ? '▼ Expand' : '▲ Collapse';
+}
+
+function setDir(d) {
+  document.getElementById('cdBuy').className = 'calc-dir-btn' + (d === 'BUY' ? ' buy-on' : '');
+  document.getElementById('cdSell').className = 'calc-dir-btn' + (d === 'SELL' ? ' sell-on' : '');
+}
+
+function rrToggle(box) {
+  const d = document.getElementById('rrDetail');
+  const msgs = {
+    SL: '⚠ Your stop loss is your worst case. If price reaches your SL level, your trade closes and you lose your money at risk. This is why position sizing matters — your account loss is fixed at exactly your money at risk.',
+    TP1: '✓ TP1 is your first take profit. Consider closing 50% of your position here to lock in profit. Let the remaining 50% run to TP2/TP3.',
+    TP2: '✓ TP2 is your extended target. Close another 30% here. Move your stop loss to entry (breakeven) on your remaining position.',
+    TP3: '✓ TP3 is your maximum target. This is the full move. Close the last 20% here. Well done — you captured the full trade.'
+  };
+  d.style.display = 'block';
+  d.innerHTML = msgs[box];
+}
+
+// ── DEMO STATE SETTER ──
+function setDemoState(state) {
+  // Reset tabs
+  document.querySelectorAll('.demo-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+
+  const states = {
+    empty: { acct:'', risk:'1', tradeSize:'', entry:'', sl:'', tp1:'', tp2:'', tp3:'', asset:'' },
+    guidance: { acct:'10000', risk:'1', tradeSize:'', entry:'', sl:'', tp1:'', tp2:'', tp3:'', asset:'' },
+    populated: { acct:'10000', risk:'1', tradeSize:'500', entry:'83420', sl:'81200', tp1:'85800', tp2:'88400', tp3:'92000', asset:'83420' },
+    forex: { acct:'5000', risk:'1', tradeSize:'', entry:'1.0842', sl:'1.0780', tp1:'1.0920', tp2:'1.1000', tp3:'1.1080', asset:'1.0842' }
+  };
+
+  const s = states[state];
+  document.getElementById('cAcct').value = s.acct;
+  document.getElementById('cRisk').value = s.risk;
+  document.getElementById('cTradeSize').value = s.tradeSize;
+  document.getElementById('cEntry').value = s.entry;
+  document.getElementById('cSL').value = s.sl;
+  document.getElementById('cTP1').value = s.tp1;
+  document.getElementById('cTP2').value = s.tp2;
+  document.getElementById('cTP3').value = s.tp3;
+  document.getElementById('cAsset').value = s.asset;
+
+  if (state === 'forex') {
+    document.getElementById('cLevLabel').textContent = 'Contract Size';
+    document.getElementById('cLevNote').textContent = 'Standard = 100k units · Mini = 10k · Micro = 1k';
+    document.getElementById('cLevField').style.display = '';
+  }
+
+  renderState(state, s);
+}
+
+function renderState(state, s) {
+  const guidance = document.getElementById('calcGuidance');
+
+  if (state === 'empty') {
+    guidance.innerHTML = '';
+    guidance.style.display = 'none';
+    resetResults();
+    return;
+  }
+
+  if (state === 'guidance') {
+    guidance.style.display = 'block';
+    guidance.innerHTML = `
+      <div class="guidance-step">
+        <div class="guidance-step-title">Step 3 — Enter your levels</div>
+        <p>Your account is set to <strong style="color:var(--white);">$10,000</strong> at <strong style="color:var(--white);">1% risk</strong> — that's <strong style="color:var(--amber);">$100 max loss</strong> per trade.<br><br>Now enter the Entry Price and Stop Loss from your signal. They've been auto-filled from the analysis — just confirm them.</p>
+      </div>`;
+    resetResults();
+    document.getElementById('csrBalance').textContent = '$10,000';
+    document.getElementById('csrRiskPct').textContent = '1%';
+    document.getElementById('cMoneyAtRisk').textContent = '$100';
+    return;
+  }
+
+  guidance.innerHTML = '';
+  guidance.style.display = 'none';
+
+  if (state === 'populated') {
+    // BTC BUY: account $10k, 1%, trade $500
+    document.getElementById('csrTicker').textContent = 'BTC-USD';
+    document.getElementById('csrPrice').textContent = '$83,420';
+    document.getElementById('csrBalance').textContent = '$10,000';
+    document.getElementById('csrRiskPct').textContent = '1%';
+    document.getElementById('cMoneyAtRisk').textContent = '$100';
+    document.getElementById('cRiskDollar').textContent = '0.045 BTC';
+    document.getElementById('csrMarginReq2').textContent = '$500';
+    document.getElementById('csrRR').textContent = '1:1.07';
+    document.getElementById('csrStopLine').textContent = 'SL distance: 2,220 pts · if SL hit you lose $100';
+
+    // Trade size row
+    document.getElementById('csrTradeSizeRow').style.display = 'block';
+    document.getElementById('csrTradeSizeVal').textContent = '$500';
+    document.getElementById('csrTradeSL').textContent = '-$13.31';
+    document.getElementById('csrTradeTP1').textContent = '+$14.26';
+    document.getElementById('csrTradeTP2').textContent = '+$29.79';
+    document.getElementById('csrTradeTP3').textContent = '+$51.50';
+
+    // Win rate
+    document.getElementById('cWinRate').textContent = '67%';
+
+    // RR bar
+    document.getElementById('calcRRBar').style.display = 'block';
+    document.getElementById('rrRisk').textContent = '-$100';
+    document.getElementById('rrRiskLabel').textContent = 'if price hits $81,200';
+    document.getElementById('rrTP1').textContent = '+$107';
+    document.getElementById('rrTP1RR').textContent = '1:1.07 R';
+    document.getElementById('rrTP2').textContent = '+$223';
+    document.getElementById('rrTP2RR').textContent = '1:2.23 R';
+    document.getElementById('rrTP3').textContent = '+$386';
+    document.getElementById('rrTP3RR').textContent = '1:3.86 R';
+
+    // TP rows
+    fillTP('cTP1Price','$85,800','cTP1RR','1:1.07 R','cTP1Profit','+$107');
+    fillTP('cTP2Price','$88,400','cTP2RR','1:2.23 R','cTP2Profit','+$223');
+    fillTP('cTP3Price','$92,000','cTP3RR','1:3.86 R','cTP3Profit','+$386');
+
+    // Distance bars
+    document.getElementById('calcPips').style.display = 'block';
+    setBar('cpSLBar','cpSLVal',30,'2,220 pts');
+    setBar('cpTP1Bar','cpTP1Val',35,'2,380 pts');
+    setBar('cpTP2Bar','cpTP2Val',65,'4,980 pts');
+    setBar('cpTP3Bar','cpTP3Val',100,'8,580 pts');
+  }
+
+  if (state === 'forex') {
+    document.getElementById('csrTicker').textContent = 'EURUSD';
+    document.getElementById('csrPrice').textContent = '1.0842';
+    document.getElementById('csrBalance').textContent = '$5,000';
+    document.getElementById('csrRiskPct').textContent = '1%';
+    document.getElementById('cMoneyAtRisk').textContent = '$50';
+    document.getElementById('cRiskDollar').textContent = '0.08 lots';
+    document.getElementById('csrMarginReq2').textContent = '$108';
+    document.getElementById('csrRR').textContent = '1:1.26';
+    document.getElementById('csrStopLine').textContent = 'SL distance: 62 pips · if SL hit you lose $50';
+    document.getElementById('csrTradeSizeRow').style.display = 'none';
+
+    document.getElementById('cWinRate').textContent = '—';
+    document.getElementById('calcRRBar').style.display = 'block';
+    document.getElementById('rrRisk').textContent = '-$50';
+    document.getElementById('rrRiskLabel').textContent = 'if price hits 1.0780';
+    document.getElementById('rrTP1').textContent = '+$63';
+    document.getElementById('rrTP1RR').textContent = '1:1.26 R';
+    document.getElementById('rrTP2').textContent = '+$126';
+    document.getElementById('rrTP2RR').textContent = '1:2.52 R';
+    document.getElementById('rrTP3').textContent = '+$189';
+    document.getElementById('rrTP3RR').textContent = '1:3.78 R';
+
+    fillTP('cTP1Price','1.0920','cTP1RR','1:1.26 R','cTP1Profit','+$63');
+    fillTP('cTP2Price','1.1000','cTP2RR','1:2.52 R','cTP2Profit','+$126');
+    fillTP('cTP3Price','1.1080','cTP3RR','1:3.78 R','cTP3Profit','+$189');
+
+    document.getElementById('calcPips').style.display = 'block';
+    setBar('cpSLBar','cpSLVal',28,'62 pips');
+    setBar('cpTP1Bar','cpTP1Val',35,'78 pips');
+    setBar('cpTP2Bar','cpTP2Val',72,'158 pips');
+    setBar('cpTP3Bar','cpTP3Val',100,'238 pips');
+  }
+}
+
+function fillTP(priceId, price, rrId, rr, profitId, profit) {
+  document.getElementById(priceId).textContent = price;
+  document.getElementById(rrId).textContent = rr;
+  document.getElementById(profitId).textContent = profit;
+}
+
+function setBar(barId, valId, pct, label) {
+  setTimeout(() => { document.getElementById(barId).style.width = pct + '%'; }, 100);
+  document.getElementById(valId).textContent = label;
+}
+
+function resetResults() {
+  ['csrTicker','csrPrice','csrBalance','csrRiskPct','cMoneyAtRisk','cRiskDollar','csrMarginReq2','csrRR'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '—';
+  });
+  document.getElementById('csrStopLine').textContent = 'Enter levels to calculate';
+  document.getElementById('csrTradeSizeRow').style.display = 'none';
+  document.getElementById('calcRRBar').style.display = 'none';
+  document.getElementById('calcPips').style.display = 'none';
+  document.getElementById('cWinRate').textContent = '—';
+  ['cTP1Price','cTP1RR','cTP1Profit','cTP2Price','cTP2RR','cTP2Profit','cTP3Price','cTP3RR','cTP3Profit'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.textContent = '—';
+  });
+}
+
+function recalc() {
+  // Live preview — just update ticker from asset field
+  const entry = document.getElementById('cEntry').value;
+  const sl = document.getElementById('cSL').value;
+  if (entry && sl) {
+    document.getElementById('csrStopLine').textContent = 'SL distance: calculating...';
+  }
+}
+
+// Start with populated state
+setDemoState('populated');
+// Fix tab active state since we called it without event
+document.querySelectorAll('.demo-tab').forEach(t => t.classList.remove('active'));
+document.querySelectorAll('.demo-tab')[2].classList.add('active');
+</script>
+</body>
+</html>

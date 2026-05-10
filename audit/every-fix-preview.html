@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>DotVerse — Every Fix Preview</title>
+<link href='https://fonts.googleapis.com/css2?family=Syne:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&family=IBM+Plex+Mono:wght@300;400&display=swap' rel='stylesheet'>
+<style>
+:root{
+  --bg:#07080c;--s1:rgba(255,248,230,.03);--s2:rgba(255,248,230,.05);--bd:rgba(201,168,76,.12);--bd2:rgba(201,168,76,.22);
+  --t1:#ede8d8;--t2:rgba(237,232,216,.62);--t3:rgba(237,232,216,.30);--mut:rgba(237,232,216,.38);--gold:#c9a84c;
+  --grn:#5de8a0;--red:#e8706e;--mono:'IBM Plex Mono',monospace;--ui:'Space Grotesk',sans-serif;--syne:'Syne',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0c10;color:var(--t1);font-family:var(--ui);padding:32px 40px 100px}
+h1{font-family:var(--syne);font-size:24px;font-weight:400;letter-spacing:-.02em}
+h2{font-size:13px;color:var(--t3);margin-bottom:32px}
+
+.fix-block{border:1px solid var(--bd);border-radius:12px;overflow:hidden;margin-bottom:32px}
+.fix-hdr{padding:14px 18px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px}
+.fix-num{background:var(--gold);color:#07080c;border-radius:4px;padding:2px 8px;font-family:var(--mono);font-size:10px;font-weight:700}
+.fix-title{font-size:14px;font-weight:400;color:var(--t1)}
+.fix-loc{font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:auto}
+.fix-body{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.before,.after{position:relative}
+.before{border:2px solid rgba(232,112,110,.35);border-radius:10px;padding:16px}
+.after{border:2px solid rgba(93,232,160,.35);border-radius:10px;padding:16px}
+.b-lbl,.a-lbl{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.b-dot{width:6px;height:6px;border-radius:50%;background:var(--red)}
+.a-dot{width:6px;height:6px;border-radius:50%;background:var(--grn)}
+.b-lbl{color:var(--red)}.a-lbl{color:var(--grn)}
+
+/* Quick note stripe */
+.note-stripe{padding:10px 18px;background:rgba(255,248,230,.02);border-top:1px solid var(--bd);font-size:11px;color:var(--t3);font-family:var(--mono);display:flex;align-items:center;gap:8px}
+.note-stripe code{color:var(--gold);font-size:10px}
+
+/* All the real component styles */
+.sz-right{display:flex;flex-direction:column;gap:0}
+.sz-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px}
+.sz-card-title{font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:1.2px;color:rgba(237,232,216,.45);text-transform:uppercase;margin-bottom:10px;border-bottom:1px solid rgba(201,168,76,.1);padding-bottom:6px}
+.sz-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sz-field{display:flex;flex-direction:column;gap:4px}
+.sz-field.full{grid-column:1/-1}
+.sz-lbl{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.5px;color:rgba(237,232,216,.55);text-transform:uppercase}
+.sz-inp{background:rgba(255,248,230,.04);border:1px solid rgba(201,168,76,.18);border-radius:5px;padding:8px 10px;color:var(--t1);font-family:var(--mono);font-size:13px;width:100%}
+.sz-sonar-box{background:rgba(255,248,230,.03);border:1px solid rgba(201,168,76,.12);border-radius:8px;overflow:hidden}
+.sz-sonar-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid rgba(201,168,76,.1)}
+.sz-sonar-sym{font-family:var(--mono);font-weight:800;font-size:15px}
+.sz-sonar-grid{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid rgba(255,255,255,.05)}
+.sz-sonar-cell{padding:9px 10px;border-right:1px solid rgba(255,255,255,.05)}
+.sz-sonar-lbl{font-family:var(--mono);font-size:8px;letter-spacing:.7px;color:var(--mut);text-transform:uppercase;margin-bottom:3px}
+.sz-sonar-val{font-family:var(--mono);font-weight:700;font-size:15px}
+.sz-sonar-val.sm{font-size:12px}.sz-sonar-val.amber{color:#d4b87a}.sz-sonar-val.grn{color:var(--grn)}
+.sz-rr-box{padding:10px;cursor:pointer;border-right:1px solid rgba(201,168,76,.08);background:rgba(255,248,230,.03)}
+.sz-rr-box-lbl{font-family:var(--mono);font-size:8px;letter-spacing:.8px;text-transform:uppercase;color:var(--mut);margin-bottom:4px}
+.sz-rr-box-val{font-family:var(--mono);font-size:17px;font-weight:800}
+.sz-rr-box-val.red{color:var(--red)}.sz-rr-box-val.grn{color:var(--grn)}
+.sz-rr-box-sub{font-family:var(--mono);font-size:9px;color:var(--mut)}
+.sz-rr-box-hint{font-family:var(--mono);font-size:8px;color:rgba(255,255,255,.2);margin-top:5px}
+.rr-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr}
+
+/* Gap/Spacing fix vars */
+.gap-12{gap:12px!important}.gap-6{gap:6px!important}.gap-5{gap:5px!important}
+.pad-18{padding:18px!important}.pad-4x8{padding:4px 8px!important}
+.fs10{font-size:10px!important}.fs11{font-size:11px!important}.fs9{font-size:9px!important}
+.mb8{margin-bottom:8px!important}.mb12{margin-bottom:12px!important}
+.fw{width:100%}
+
+/* Opp cards */
+.opp-badge-buy{font-size:9.5px;font-weight:700;padding:3px 9px;border-radius:4px;background:rgba(93,232,160,.09);border:1px solid rgba(93,232,160,.28);color:#5de8a0}
+.opp-conf-lbl{font-size:8.5px;letter-spacing:.07em;font-weight:600;text-transform:uppercase;color:rgba(93,232,160,.8);margin-top:3px;margin-bottom:8px}
+.opp-levels{gap:3px;display:flex;flex-direction:column}
+
+/* Pipeline nav */
+.npp-pill{font-size:9px;font-weight:600;padding:2px 4px;border-radius:3px;color:rgba(200,210,232,.32);letter-spacing:.08em}
+
+/* Scanner pills */
+.sc-pill{font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px}
+.sc-pill-buy{background:rgba(93,232,160,.1);color:#5de8a0;border:1px solid rgba(93,232,160,.3)}
+.sc-pill-sell{background:rgba(232,112,110,.1);color:#e8706e;border:1px solid rgba(232,112,110,.3)}
+.sc-pill-hold{background:rgba(237,232,216,.06);color:rgba(237,232,216,.55);border:1px solid rgba(237,232,216,.15)}
+
+/* Flow CTA */
+.flow-btn{background:#c9a84c;color:#07080c;font-weight:700;border-radius:7px;border:none;padding:11px 18px;font-size:12px}
+.flow-btn-subtle{background:rgba(201,168,76,.12);color:#d4b558;font-weight:600;border-radius:7px;border:1px solid rgba(201,168,76,.35);padding:11px 18px;font-size:12px;box-shadow:0 0 14px rgba(201,168,76,.08)}
+
+/* Glow */
+.glow-subtle{box-shadow:0 0 6px rgba(201,168,76,.04)}
+.glow-active{box-shadow:0 0 10px rgba(201,168,76,.12)}
+.btn-glow{box-shadow:0 0 8px rgba(201,168,76,.06)}
+
+/* Landing */
+.land-card{background:rgba(9,8,13,.85);border-radius:12px;overflow:hidden;border:1px solid rgba(237,232,216,.08)}
+.auth-box{width:320px;padding:20px;background:rgba(9,8,13,.8)}
+.auth-h1{font-family:var(--syne);font-size:21px;font-weight:500;color:#ede8d8;margin-bottom:4px}
+.auth-sub{font-size:13px;color:var(--t3);margin-bottom:20px}
+.auth-inp{width:100%;padding:11px 13px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(201,168,76,.18);color:#ede8d8;font-family:var(--mono);font-size:13px;margin-bottom:12px}
+.auth-btn{width:100%;padding:13px;background:#c9a84c;border:none;border-radius:6px;color:#07080c;font-size:13px;font-weight:700;margin-bottom:6px}
+.auth-foot{text-align:center;font-size:12px;color:rgba(237,232,216,.4)}
+
+/* Market */
+.mkt-section-card{background:rgba(9,8,13,.68);border:1px solid rgba(237,232,216,.09);border-radius:8px;overflow:hidden}
+.mkt-sc-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px 10px;border-bottom:1px solid rgba(237,232,216,.06)}
+.mkt-sc-title{font-size:12px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:rgba(237,232,216,.75)}
+.mkt-sig-row{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid rgba(255,255,255,.03)}
+.mkt-sig-badge{font-size:9.5px;font-weight:600;padding:3px 8px;border-radius:4px}
+.mkt-sig-badge.buy{background:rgba(98,242,157,.1);border:1px solid rgba(98,242,157,.3);color:#62f29d}
+.mkt-heat-cell{padding:10px 6px 9px;border-radius:6px;text-align:center;background:rgba(93,232,160,.1);display:inline-block;width:72px}
+.mkt-heat-sym{font-size:9.5px;font-weight:600;color:rgba(200,210,232,.82)}
+.mkt-heat-val{font-family:var(--mono);font-size:9px;margin-top:4px;color:#62f29d}
+.mkt-heat-scan{font-size:7px;color:rgba(237,232,216,.25);margin-top:4px}
+
+/* Sizing coach */
+.coach{padding:16px 18px;border-radius:10px;border:1px solid rgba(237,232,216,.14);background:rgba(10,14,22,.85);margin-bottom:14px}
+.coach-hdr{font-family:var(--mono);font-size:8px;letter-spacing:1.6px;color:var(--mut);font-weight:700;text-transform:uppercase;margin-bottom:10px}
+.coach-body{font-size:12px;color:rgba(237,232,216,.82);line-height:1.75}
+.footer-hint{font-family:var(--mono);font-size:8px;color:var(--mut);letter-spacing:.8px;text-align:center;padding:6px 0}
+
+/* Sidebar */
+.sb-section{padding:12px 14px 5px;font-size:10px;letter-spacing:.06em;color:var(--t3);text-transform:uppercase}
+.gpill{font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid rgba(237,232,216,.15);color:rgba(237,232,216,.55);background:rgba(255,255,255,.03)}
+.gpill.active{border-color:rgba(201,168,76,.4);color:#c9a84c;background:rgba(255,255,255,.07)}
+
+.section-hdr{font-size:18px;font-weight:400;font-family:var(--syne);color:var(--t1);margin:40px 0 16px;padding-top:24px;border-top:1px solid rgba(201,168,76,.1)}
+.section-hdr:first-of-type{margin-top:8px;padding-top:0;border-top:none}
+.section-hdr em{font-style:normal;color:var(--gold)}
+</style>
+</head>
+<body>
+
+<h1>DotVerse &mdash; Every Fix Preview</h1>
+<h2>All 14 pages &middot; All 47 fixes &middot; Before <span style="color:var(--red)">red border</span> &middot; After <span style="color:var(--grn)">green border</span></h2>
+
+<!-- ═══════════ SECTION 1: SIZE PAGE ═══════════ -->
+<div class="section-hdr">Size Page <em>— 12 fixes</em></div>
+
+<!-- F1: gap:0 -->
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">1</span><span class="fix-title">.sz-right gap:0 → gap:12px</span><span class="fix-loc">L2439</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE</div>
+      <div class="sz-right" style="gap:0;padding:4px;">
+        <div class="coach"><div class="coach-hdr">SIZING GUIDE</div><div class="coach-body">Enter your account and risk %. I'll calculate position size.</div></div>
+        <div class="sz-sonar-box"><div class="sz-sonar-hdr"><span class="sz-sonar-sym">BTC</span><span style="font-size:12px;color:var(--mut)">$82,300</span></div><div class="sz-sonar-grid"><div class="sz-sonar-cell"><div class="sz-sonar-lbl">Balance</div><div class="sz-sonar-val sm">$10,000</div></div><div class="sz-sonar-cell"><div class="sz-sonar-lbl">Risk %</div><div class="sz-sonar-val sm">2%</div></div><div class="sz-sonar-cell"><div class="sz-sonar-lbl">Money at Risk</div><div class="sz-sonar-val amber">$200</div></div></div></div>
+        <div style="border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)"><div style="padding:6px 12px;font-family:var(--mono);font-size:9px;color:var(--mut);font-weight:700;border-bottom:1px solid rgba(255,255,255,.06)">Your Risk vs Reward</div><div class="rr-grid"><div class="sz-rr-box"><div class="sz-rr-box-lbl">Worst Case</div><div class="sz-rr-box-val red">−$200</div><div class="sz-rr-box-sub">if SL hit</div><div class="sz-rr-box-hint">details</div></div><div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 1</div><div class="sz-rr-box-val grn">+$500</div><div class="sz-rr-box-sub">1:2.5</div><div class="sz-rr-box-hint">details</div></div><div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 2</div><div class="sz-rr-box-val grn">+$700</div><div class="sz-rr-box-sub">1:3.5</div><div class="sz-rr-box-hint">details</div></div><div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 3</div><div class="sz-rr-box-val grn">+$900</div><div class="sz-rr-box-sub">1:4.5</div><div class="sz-rr-box-hint">details</div></div></div></div>
+      </div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER · gap:12px</div>
+      <div class="sz-right" style="gap:12px;padding:4px;">
+        <div class="coach"><div class="coach-hdr">SIZING GUIDE</div><div class="coach-body">Enter your account and risk %. I'll calculate position size.</div></div>
+        <div class="sz-sonar-box"><div class="sz-sonar-hdr"><span class="sz-sonar-sym">BTC</span><span style="font-size:12px;color:var(--mut)">$82,300</span></div><div class="sz-sonar-grid"><div class="sz-sonar-cell"><div class="sz-sonar-lbl">Balance</div><div class="sz-sonar-val sm">$10,000</div></div><div class="sz-sonar-cell"><div class="sz-sonar-lbl">Risk %</div><div class="sz-sonar-val sm">2%</div></div><div class="sz-sonar-cell"><div class="sz-sonar-lbl">Money at Risk</div><div class="sz-sonar-val amber">$200</div></div></div></div>
+        <div style="border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03)"><div style="padding:6px 12px;font-family:var(--mono);font-size:9px;color:var(--mut);font-weight:700;border-bottom:1px solid rgba(255,255,255,.06)">Your Risk vs Reward</div><div class="rr-grid"><div class="sz-rr-box"><div class="sz-rr-box-lbl">Worst Case</div><div class="sz-rr-box-val red">−$200</div><div class="sz-rr-box-sub">if SL hit</div><div class="sz-rr-box-hint">details</div></div><div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 1</div><div class="sz-rr-box-val grn">+$500</div><div class="sz-rr-box-sub">1:2.5</div><div class="sz-rr-box-hint">details</div></div><div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 2</div><div class="sz-rr-box-val grn">+$700</div><div class="sz-rr-box-sub">1:3.5</div><div class="sz-rr-box-hint">details</div></div><div class="sz-rr-box"><div class="sz-rr-box-lbl">TP 3</div><div class="sz-rr-box-val grn">+$900</div><div class="sz-rr-box-sub">1:4.5</div><div class="sz-rr-box-hint">details</div></div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- F2: 8px fonts → 10px -->
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">2</span><span class="fix-title">Size labels 8px → 10px (Sonar + R:R + TP expand)</span><span class="fix-loc">L2447, L2459, L2464, L2477, L2498</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE · 8px</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <div class="sz-sonar-lbl" style="font-size:8px">Balance</div>
+          <div class="sz-sonar-lbl" style="font-size:8px">Money at Risk</div>
+          <div class="sz-sonar-lbl" style="font-size:8px">Lots / Units</div>
+        </div>
+        <div>
+          <div class="sz-rr-box-lbl" style="font-size:8px">Worst Case</div>
+          <div class="sz-rr-box-lbl" style="font-size:8px">TP 1</div>
+        </div>
+      </div>
+      <div style="font-size:8px;color:rgba(255,255,255,.2);margin-top:4px;font-family:var(--mono)">▼ DETAILS</div>
+      <div class="sz-sonar-lbl" style="font-size:8px">SCALP  ·  DAY  ·  SWING  ·  POSITION</div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER · 10px</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <div class="sz-sonar-lbl" style="font-size:10px">Balance</div>
+          <div class="sz-sonar-lbl" style="font-size:10px">Money at Risk</div>
+          <div class="sz-sonar-lbl" style="font-size:10px">Lots / Units</div>
+        </div>
+        <div>
+          <div class="sz-rr-box-lbl" style="font-size:10px">Worst Case</div>
+          <div class="sz-rr-box-lbl" style="font-size:10px">TP 1</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:rgba(237,232,216,.35);margin-top:4px;font-family:var(--mono)">▼ DETAILS</div>
+      <div class="sz-sonar-lbl" style="font-size:10px">SCALP  ·  DAY  ·  SWING  ·  POSITION</div>
+    </div>
+  </div>
+</div>
+
+<!-- F3: Card padding + field gap -->
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">3</span><span class="fix-title">.sz-card padding:14→18px · .sz-field gap:4→6px · .sz-lbl font:9→10px · .sz-card-title font:9→11px · add divider between Trade Levels &amp; Account</span><span class="fix-loc">L2421,L2428,L2430,L2422</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE · 14px pad · no divider</div>
+      <div class="sz-card" style="padding:14px;">
+        <div class="sz-card-title" style="font-size:9px;border-bottom:none;margin-bottom:6px">Trade Levels</div>
+        <div class="sz-fields" style="margin-bottom:4px">
+          <div class="sz-field full"><div class="sz-lbl" style="font-size:9px">Entry Price</div><input class="sz-inp" value="82,312" readonly></div>
+          <div class="sz-field"><div class="sz-lbl" style="font-size:9px">Stop Loss</div><input class="sz-inp" value="79,009" readonly></div>
+          <div class="sz-field"><div class="sz-lbl" style="font-size:9px">TP 1</div><input class="sz-inp" value="90,406" readonly></div>
+        </div>
+        <div class="sz-card-title" style="font-size:9px;margin-top:2px;padding-top:0;border-top:none">Account & Risk</div>
+        <div class="sz-fields">
+          <div class="sz-field"><div class="sz-lbl" style="font-size:9px">Account ($)</div><input class="sz-inp" value="10,000" readonly></div>
+          <div class="sz-field"><div class="sz-lbl" style="font-size:9px">Risk %</div><input class="sz-inp" value="2" readonly></div>
+        </div>
+      </div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER · 18px pad · divider · bigger labels</div>
+      <div class="sz-card" style="padding:18px;">
+        <div class="sz-card-title" style="font-size:11px;border-bottom:none;margin-bottom:10px">Trade Levels</div>
+        <div class="sz-fields" style="gap:10px;margin-bottom:6px">
+          <div class="sz-field full" style="gap:6px"><div class="sz-lbl" style="font-size:10px">Entry Price</div><input class="sz-inp" value="82,312" readonly></div>
+          <div class="sz-field" style="gap:6px"><div class="sz-lbl" style="font-size:10px">Stop Loss</div><input class="sz-inp" value="79,009" readonly></div>
+          <div class="sz-field" style="gap:6px"><div class="sz-lbl" style="font-size:10px">TP 1</div><input class="sz-inp" value="90,406" readonly></div>
+        </div>
+        <hr style="border:none;border-top:1px solid rgba(201,168,76,.12);margin:6px 0 14px">
+        <div class="sz-card-title" style="font-size:11px;margin-bottom:10px;padding-bottom:6px;">Account & Risk</div>
+        <div class="sz-fields">
+          <div class="sz-field" style="gap:6px"><div class="sz-lbl" style="font-size:10px">Account ($)</div><input class="sz-inp" value="10,000" readonly></div>
+          <div class="sz-field" style="gap:6px"><div class="sz-lbl" style="font-size:10px">Risk %</div><input class="sz-inp" value="2" readonly></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 2: MARKET ═══════════ -->
+<div class="section-hdr">Market Page <em>— 4 fixes</em></div>
+
+<!-- F4: Live Signals min-height -->
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">4</span><span class="fix-title">#mktSigList min-height:80px → auto</span><span class="fix-loc">L8656</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE · 80px void</div>
+      <div class="mkt-section-card">
+        <div class="mkt-sc-head"><span class="mkt-sc-title">Live Signals</span><span style="font-size:10px;color:var(--t3)">3 active</span></div>
+        <div class="mkt-sig-row"><span class="mkt-sig-badge buy">BUY</span><span style="font-size:13px;font-weight:500;width:52px">BTC</span><span style="font-size:11px;color:var(--t3);flex:1">4H · 2.4R</span></div>
+        <div style="min-height:80px;border:2px dashed rgba(232,112,110,.35);margin:4px 16px 16px;display:flex;align-items:center;justify-content:center;color:var(--red);font-size:10px;font-family:var(--mono)">80px empty void ↓</div>
+      </div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER · no void</div>
+      <div class="mkt-section-card">
+        <div class="mkt-sc-head"><span class="mkt-sc-title">Live Signals</span><span style="font-size:10px;color:var(--t3)">3 active</span></div>
+        <div class="mkt-sig-row"><span class="mkt-sig-badge buy">BUY</span><span style="font-size:13px;font-weight:500;width:52px">BTC</span><span style="font-size:11px;color:var(--t3);flex:1">4H · 2.4R</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- F5: Heatmap → Scan -->
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">5</span><span class="fix-title">Heatmap "→ Scan" 7px → 9px</span><span class="fix-loc">L2693</span></div>
+  <div class="fix-body">
+    <div class="before" style="display:flex;align-items:center;gap:12px">
+      <div class="mkt-heat-cell"><div class="mkt-heat-sym">AAPL</div><div class="mkt-heat-val">+2.66%</div><div class="mkt-heat-scan">→ Scan</div></div>
+      <div style="font-size:9px;color:var(--red);font-family:var(--mono)">← 7px<br>invisible</div>
+    </div>
+    <div class="after" style="display:flex;align-items:center;gap:12px">
+      <div class="mkt-heat-cell"><div class="mkt-heat-sym">AAPL</div><div class="mkt-heat-val">+2.66%</div><div style="font-size:9px;color:rgba(237,232,216,.35);margin-top:4px">→ Scan</div></div>
+      <div style="font-size:9px;color:var(--grn);font-family:var(--mono)">← 9px<br>readable</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 3: OPPORTUNITY CARDS ═══════════ -->
+<div class="section-hdr">Signal / Opportunity Cards <em>— 3 fixes</em></div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">6</span><span class="fix-title">.opp-conf-lbl 8.5px→10px · .opp-badge 3px→4px · .opp-levels gap 3px→5px</span><span class="fix-loc">L2143,L2133,L2144</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE</div>
+      <div style="border:1px solid rgba(237,232,216,.09);border-radius:10px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 10px;">
+          <span style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.22);">01</span>
+          <div style="flex:1"><div style="font-size:14px;font-weight:600">ETHUSD</div><div style="font-size:10px;color:var(--t3)">Day Trade · 4H</div></div>
+          <span class="opp-badge-buy">BUY</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;padding:0 16px 12px">
+          <div style="width:52px;height:52px;border-radius:50%;background:rgba(93,232,160,.1);border:3px solid rgba(93,232,160,.35);display:flex;align-items:center;justify-content:center"><span style="font-family:var(--mono);font-size:11px">70</span></div>
+          <div style="flex:1">
+            <div style="font-family:var(--mono);font-size:18px;color:rgba(237,232,216,.82)">1:2.4</div>
+            <div class="opp-conf-lbl">LIKELY</div>
+            <div class="opp-levels">
+              <div style="display:flex;gap:8px"><span style="font-size:9.5px;color:var(--t3);width:28px">E</span><span style="font-family:var(--mono);font-size:10.5px">2,408</span></div>
+              <div style="display:flex;gap:8px"><span style="font-size:9.5px;color:var(--t3);width:28px">SL</span><span style="font-family:var(--mono);font-size:10.5px;color:var(--red)">2,353</span></div>
+              <div style="display:flex;gap:8px"><span style="font-size:9.5px;color:var(--t3);width:28px">TP</span><span style="font-family:var(--mono);font-size:10.5px;color:var(--grn)">2,540</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER</div>
+      <div style="border:1px solid rgba(237,232,216,.09);border-radius:10px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 10px;">
+          <span style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.22);">01</span>
+          <div style="flex:1"><div style="font-size:14px;font-weight:600">ETHUSD</div><div style="font-size:10px;color:var(--t3)">Day Trade · 4H</div></div>
+          <span class="opp-badge-buy" style="font-size:10px;padding:4px 10px">BUY</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;padding:0 16px 12px">
+          <div style="width:52px;height:52px;border-radius:50%;background:rgba(93,232,160,.1);border:3px solid rgba(93,232,160,.35);display:flex;align-items:center;justify-content:center"><span style="font-family:var(--mono);font-size:11px">70</span></div>
+          <div style="flex:1">
+            <div style="font-family:var(--mono);font-size:18px;color:rgba(237,232,216,.82)">1:2.4</div>
+            <div class="opp-conf-lbl" style="font-size:10px">LIKELY</div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <div style="display:flex;gap:8px"><span style="font-size:9.5px;color:var(--t3);width:28px">E</span><span style="font-family:var(--mono);font-size:10.5px">2,408</span></div>
+              <div style="display:flex;gap:8px"><span style="font-size:9.5px;color:var(--t3);width:28px">SL</span><span style="font-family:var(--mono);font-size:10.5px;color:var(--red)">2,353</span></div>
+              <div style="display:flex;gap:8px"><span style="font-size:9.5px;color:var(--t3);width:28px">TP</span><span style="font-family:var(--mono);font-size:10.5px;color:var(--grn)">2,540</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 4: NAVIGATION + PILLS ═══════════ -->
+<div class="section-hdr">Navigation + Pills <em>— 5 fixes</em></div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">7</span><span class="fix-title">Pipeline nav: padding 2px→4px · font 9px→10px · gap 3px→6px</span><span class="fix-loc">L2071,L2076,L2081</span></div>
+  <div class="fix-body">
+    <div class="before" style="display:flex;align-items:center;gap:3px;padding:12px 14px;border-bottom:1px solid rgba(237,232,216,.07)">
+      <span class="npp-pill">MKT</span><span style="font-size:9px;color:rgba(237,232,216,.18)">›</span>
+      <span class="npp-pill">SIG</span><span style="font-size:9px;color:rgba(237,232,216,.18)">›</span>
+      <span class="npp-pill" style="color:rgba(237,232,216,.82);border:1px solid rgba(201,168,76,.45)">UND</span><span style="font-size:9px;color:rgba(237,232,216,.18)">›</span>
+      <span class="npp-pill">SZE</span><span style="font-size:9px;color:rgba(237,232,216,.18)">›</span>
+      <span class="npp-pill">ACT</span>
+    </div>
+    <div class="after" style="display:flex;align-items:center;gap:6px;padding:12px 14px;border-bottom:1px solid rgba(237,232,216,.07)">
+      <span class="npp-pill" style="font-size:10px;padding:4px 8px">MKT</span><span style="font-size:9px;color:rgba(237,232,216,.18)">›</span>
+      <span class="npp-pill" style="font-size:10px;padding:4px 8px">SIG</span><span style="font-size:9px;color:rgba(237,232,216,.18)">›</span>
+      <span class="npp-pill" style="font-size:10px;padding:4px 8px;color:rgba(237,232,216,.82);border:1px solid rgba(201,168,76,.45)">UND</span><span style="font-size:9px;color:rgba(237,232,216,.18)">›</span>
+      <span class="npp-pill" style="font-size:10px;padding:4px 8px">SZE</span><span style="font-size:9px;color:rgba(237,232,216,.18)">›</span>
+      <span class="npp-pill" style="font-size:10px;padding:4px 8px">ACT</span>
+    </div>
+  </div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">8</span><span class="fix-title">Scanner pills: padding 2px→3px · font 9px→10px</span><span class="fix-loc">L2339</span></div>
+  <div class="fix-body">
+    <div class="before" style="display:flex;gap:6px">
+      <span class="sc-pill sc-pill-buy">BUY</span>
+      <span class="sc-pill sc-pill-sell">SELL</span>
+      <span class="sc-pill sc-pill-hold">HOLD</span>
+    </div>
+    <div class="after" style="display:flex;gap:6px">
+      <span class="sc-pill sc-pill-buy" style="font-size:10px;padding:3px 8px">BUY</span>
+      <span class="sc-pill sc-pill-sell" style="font-size:10px;padding:3px 8px">SELL</span>
+      <span class="sc-pill sc-pill-hold" style="font-size:10px;padding:3px 8px">HOLD</span>
+    </div>
+  </div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">9</span><span class="fix-title">Sidebar: .dsb-sec padding bottom 5px → 12px</span><span class="fix-loc">L2746</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE</div><div class="sb-section">PIPELINE</div></div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER</div><div class="sb-section" style="padding:12px 14px 12px">PIPELINE</div></div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 5: AUTH / LANDING ═══════════ -->
+<div class="section-hdr">Auth / Landing <em>— 3 fixes</em></div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">10</span><span class="fix-title">Auth heading margin 4px→8px · footer margin 6px→12px · demo padding 6px→8px</span><span class="fix-loc">L4031,L4042,L4045</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE</div>
+      <div class="auth-box"><div class="auth-h1">Welcome back</div><div class="auth-sub">Sign in to your account</div><input class="auth-inp" placeholder="you@dotverse.ai"><input class="auth-inp" placeholder="Password" type="password"><button class="auth-btn">Sign In →</button><div class="auth-foot">Don't have an account? <span style="color:rgba(201,168,76,.85);cursor:pointer">Sign up</span></div></div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER</div>
+      <div class="auth-box"><div class="auth-h1" style="margin-bottom:8px">Welcome back</div><div class="auth-sub">Sign in to your account</div><input class="auth-inp" placeholder="you@dotverse.ai"><input class="auth-inp" placeholder="Password" type="password"><button class="auth-btn" style="margin-bottom:12px">Sign In →</button><div class="auth-foot">Don't have an account? <span style="color:rgba(201,168,76,.85);cursor:pointer">Sign up</span></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 6: BUTTONS ═══════════ -->
+<div class="section-hdr">Interactive Elements <em>— 4 fixes</em></div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">11</span><span class="fix-title">Buttons: .dv-rb-btn 9px→10px · .bt-ticker-btn 4px→5px · .dv-inst-chip 4px→5px</span><span class="fix-loc">L2783,L3492,L2790</span></div>
+  <div class="fix-body">
+    <div class="before" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:9px;padding:4px 7px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:4px;color:var(--gold);font-family:var(--mono)">DV 9px</span>
+      <span style="font-size:10px;padding:4px 8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:var(--t2);font-family:var(--mono)">Backtest 10px</span>
+      <span style="font-size:10px;padding:4px 10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:var(--t2);font-family:var(--mono)">CHIP 4px</span>
+    </div>
+    <div class="after" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:10px;padding:5px 10px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:4px;color:var(--gold);font-family:var(--mono)">DV 10px</span>
+      <span style="font-size:10px;padding:5px 10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:var(--t2);font-family:var(--mono)">Backtest 10px</span>
+      <span style="font-size:10px;padding:5px 10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:var(--t2);font-family:var(--mono)">CHIP 5px</span>
+    </div>
+  </div>
+</div>
+
+<!-- F12: Glow -->
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">12</span><span class="fix-title">Add subtle electric glow to all interactive elements</span><span class="fix-loc">L2957 + multiple</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE · flat</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        <span class="gpill" style="margin:0">15M</span>
+        <span class="gpill" style="margin:0">1H</span>
+        <span class="gpill active" style="margin:0">4H</span>
+        <span class="gpill" style="margin:0">1D</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <span class="sc-pill sc-pill-buy" style="margin:0">BUY</span>
+        <span class="sc-pill sc-pill-sell" style="margin:0">SELL</span>
+      </div>
+      <button class="flow-btn">View All Signals →</button>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER · subtle electric glow</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        <span class="gpill glow-subtle" style="margin:0">15M</span>
+        <span class="gpill glow-subtle" style="margin:0">1H</span>
+        <span class="gpill active glow-active" style="margin:0">4H</span>
+        <span class="gpill glow-subtle" style="margin:0">1D</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <span class="sc-pill sc-pill-buy" style="margin:0;font-size:10px;padding:3px 8px;box-shadow:0 0 8px rgba(93,232,160,.08)">BUY</span>
+        <span class="sc-pill sc-pill-sell" style="margin:0;font-size:10px;padding:3px 8px;box-shadow:0 0 8px rgba(232,112,110,.08)">SELL</span>
+      </div>
+      <button class="flow-btn-subtle">View All Signals →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 7: BRAND ═══════════ -->
+<div class="section-hdr">Brand <em>— 5 fixes</em></div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">13</span><span class="fix-title">Hero: slogan · AI removal · logo (dot+ripples) · brand gold</span><span class="fix-loc">L4056-4073</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE</div>
+      <div class="land-card" style="padding:24px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+          <svg width="28" height="28" viewBox="0 0 28 28"><circle cx="5" cy="5" r="2.5" fill="#b8814a" opacity=".9"/><circle cx="23" cy="8" r="2" fill="#b8814a" opacity=".6"/><circle cx="14" cy="22" r="2" fill="#b8814a" opacity=".7"/><circle cx="20" cy="18" r="1.5" fill="#7c6fe0" opacity=".7"/><circle cx="8" cy="16" r="1.5" fill="#62f29d" opacity=".6"/><line x1="5" y1="5" x2="23" y2="8" stroke="#b8814a" opacity=".3"/><line x1="23" y1="8" x2="20" y2="18" stroke="#7c6fe0" opacity=".25"/><line x1="5" y1="5" x2="8" y2="16" stroke="#62f29d" opacity=".25"/><line x1="8" y1="16" x2="14" y2="22" stroke="#b8814a" opacity=".2"/><line x1="20" y1="18" x2="14" y2="22" stroke="#b8814a" opacity=".2"/></svg>
+          <span style="font-family:var(--syne);font-size:18px">Dotverse</span>
+        </div>
+        <div style="font-family:var(--syne);font-size:32px;line-height:1.15;margin-bottom:12px">Connect all the dots<br><span style="color:var(--gold)">of intelligence.</span></div>
+        <div style="font-size:14px;color:var(--t2);max-width:340px">AI-powered signals, portfolio analytics, and market intelligence — unified into one trading workflow.</div>
+      </div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER</div>
+      <div class="land-card" style="padding:24px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:20px">
+          <svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="3" fill="#c9a84c" opacity=".95"/><circle cx="14" cy="14" r="6.5" stroke="#c9a84c" stroke-width=".7" opacity=".35" fill="none"/><circle cx="14" cy="14" r="10" stroke="#c9a84c" stroke-width=".5" opacity=".2" fill="none"/><circle cx="14" cy="14" r="13" stroke="#c9a84c" stroke-width=".35" opacity=".1" fill="none"/></svg>
+          <span style="display:flex;align-items:center;gap:3px"><svg width="7" height="7" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3.5" fill="#c9a84c"/></svg><span style="font-family:var(--syne);font-size:18px;color:var(--t1)">Dot</span><span style="font-family:var(--syne);font-size:18px;color:var(--gold)">Verse</span></span>
+        </div>
+        <div style="font-family:var(--syne);font-size:32px;line-height:1.15;margin-bottom:12px">Connect the Dot<br><span style="color:var(--gold)">intelligently</span></div>
+        <div style="font-size:14px;color:var(--t2);max-width:340px">Trade like you know</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">14</span><span class="fix-title">Remove all "AI" from UI text (8 occurrences)</span><span class="fix-loc">L4073,L6077,L6462-L6486,L7949,L10531,L15370</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE</div>
+      <div style="font-size:11px;color:var(--t3);line-height:2.2">
+        <div>❌ <span style="color:var(--red)">AI-</span>ranked by confluence score</div>
+        <div>❌ <span style="color:var(--red)">AI</span> signals and alerts will be filtered</div>
+        <div>❌ <span style="color:var(--red)">AI-</span>filtered · sentiment scored</div>
+        <div>❌ Momentum <span style="color:var(--red)">AI</span> · 4m ago</div>
+        <div>❌ <span style="color:var(--red)">AI</span> Trade Assistant</div>
+      </div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER</div>
+      <div style="font-size:11px;color:var(--t3);line-height:2.2">
+        <div>✓ Ranked by confluence score</div>
+        <div>✓ Signals and alerts will be filtered</div>
+        <div>✓ Curated · sentiment scored</div>
+        <div>✓ Momentum · 4m ago</div>
+        <div>✓ Trade Assistant</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">15</span><span class="fix-title">Name casing: Dotverse→DotVerse (15 places) · email domain: .io→.ai</span><span class="fix-loc">L4068,L4130,L4863...</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE</div>
+      <div style="font-size:12px;color:var(--t3);line-height:2.2">
+        <div>❌ Logo: <span style="color:var(--red)">Dotverse</span></div>
+        <div>❌ Settings: "How often <span style="color:var(--red)">Dotverse</span> generates…"</div>
+        <div>❌ Sign-up: "Set up <span style="color:var(--red)">Dotverse</span> in 2 minutes"</div>
+        <div>❌ Email: you@<span style="color:var(--red)">dotverse.io</span></div>
+      </div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER</div>
+      <div style="font-size:12px;color:var(--t3);line-height:2.2">
+        <div>✓ Logo: <span style="color:var(--grn)">DotVerse</span></div>
+        <div>✓ Settings: "How often <span style="color:var(--grn)">DotVerse</span> generates…"</div>
+        <div>✓ Sign-up: "Set up <span style="color:var(--grn)">DotVerse</span> in 2 minutes"</div>
+        <div>✓ Email: you@<span style="color:var(--grn)">dotverse.ai</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">16</span><span class="fix-title">Sidebar: Pipeline "Track Record" → "Backtest"</span><span class="fix-loc">L4199</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE · 2x "Track Record"</div>
+      <div style="display:flex;gap:8px;flex-direction:column;font-size:12px;color:var(--t2)">
+        <div>Pipeline:   Market · Signal · Scanner · Understand · Size · Act · Automations · <span style="color:var(--red)">Track Record</span> ← Backtest</div>
+        <div>Account:   Risk Manager · Portfolio · <span style="color:var(--t2)">Track Record</span> ← Performance</div>
+      </div>
+    </div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER · one Backtest, one Track Record</div>
+      <div style="display:flex;gap:8px;flex-direction:column;font-size:12px;color:var(--t2)">
+        <div>Pipeline:   Market · Signal · Scanner · Understand · Size · Act · Automations · <span style="color:var(--grn)">Backtest</span></div>
+        <div>Account:   Risk Manager · Portfolio · <span style="color:var(--t2)">Track Record</span> ← Performance</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 8: OTHER PAGES (compact summary) ═══════════ -->
+<div class="section-hdr">All Other Pages <em>— 6 fixes</em></div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">17</span><span class="fix-title">"RESULTS UPDATE AS YOU TYPE" 8px→9px · opacity .5→.7 · color→gold</span><span class="fix-loc">L12317 (inline)</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE</div><div class="footer-hint" style="font-size:8px;opacity:.38">RESULTS UPDATE AS YOU TYPE</div></div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER</div><div class="footer-hint" style="font-size:9px;opacity:.65;color:var(--gold)">RESULTS UPDATE AS YOU TYPE</div></div>
+  </div>
+  <div class="note-stripe"><code>inline style</code> · font-size:8px opacity:.5 → font-size:9px opacity:.65 color:var(--gold)</div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">18</span><span class="fix-title">All buttons: .dv-rb-btn 4px→5px · .bt-ticker-btn 4px→5px · .bt-refresh-btn 4px→5px · uniform 5px min</span><span class="fix-loc">L2783,L3492,L3497</span></div>
+  <div class="note-stripe"><code>.dv-rb-btn padding:4px 7px</code> → <code>padding:5px 10px</code> · <code>.bt-ticker-btn padding:4px 8px</code> → <code>padding:5px 10px</code></div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">19</span><span class="fix-title">.nav-pipeline margin-bottom 6px→10px</span><span class="fix-loc">L2074</span></div>
+  <div class="fix-body">
+    <div class="before"><div class="b-lbl"><span class="b-dot"></span> BEFORE · 6px</div><div style="padding:12px 14px 10px;border-bottom:1px solid rgba(237,232,216,.07);margin-bottom:6px;font-size:12px">Pipeline nav</div><div style="font-size:12px;background:rgba(255,255,255,.03);padding:14px;border-radius:6px;border:1px solid rgba(232,112,110,.2)">Next content — glued</div></div>
+    <div class="after"><div class="a-lbl"><span class="a-dot"></span> AFTER · 10px</div><div style="padding:12px 14px 10px;border-bottom:1px solid rgba(237,232,216,.07);margin-bottom:10px;font-size:12px">Pipeline nav</div><div style="font-size:12px;background:rgba(255,255,255,.03);padding:14px;border-radius:6px;border:1px solid rgba(93,232,160,.2)">Next content — room to breathe</div></div>
+  </div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">20</span><span class="fix-title">.sz-sonar-hdr padding 8px→10px · .sz-sonar-cell padding 9px→10px · .sz-rr-box-hint 8px→9px</span><span class="fix-loc">L2441,L2445,L2464</span></div>
+  <div class="note-stripe"><code>.sz-sonar-hdr padding:8px 12px</code> → <code>padding:10px 14px</code> · <code>.sz-rr-box-hint font-size:8px</code> → <code>font-size:9px</code></div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">21</span><span class="fix-title">Card padding consistency: sz 14→16px, opp 16px→16px (OK), cv-theme-card 12px→14px</span><span class="fix-loc">L2421,L2112,L2421...</span></div>
+  <div class="note-stripe">Standardize all content cards to 16px padding. Stat-only compact cards can stay at 12px.</div>
+</div>
+
+<div class="fix-block">
+  <div class="fix-hdr"><span class="fix-num">22</span><span class="fix-title">Label font size normalization: All 9px labels → 10px (12 selectors)</span><span class="fix-loc">L2430,L2370,L2380,L2526...</span></div>
+  <div class="note-stripe"><code>.und-sig-lbl</code> · <code>.und-dur-lbl</code> · <code>.sz-lbl</code> · <code>.act-detail-lbl</code> · <code>.act-mgmt-lbl</code> · <code>.act-lbl</code> · <code>.act-timer-lbl</code> · <code>.sz-bar-lbl</code> · <code>.sz-bar-val</code> · <code>.dv-ic-lbl</code> · <code>.strat-mode-lbl</code> · <code>.ctx-card-label</code> → all 9px to 10px</div>
+</div>
+
+<!-- Summary -->
+<div style="margin-top:60px;padding:20px;border:1px solid var(--bd);border-radius:10px;background:rgba(9,8,13,.7)">
+  <div style="font-family:var(--syne);font-size:16px;margin-bottom:8px">Summary: <span style="color:var(--gold)">22 fixes</span> across <span style="color:var(--gold)">14 pages</span></div>
+  <div style="font-size:12px;color:var(--t3);line-height:1.8">
+    <strong style="color:var(--t1)">Size page</strong> — 8 fixes (gap, padding, fonts, divider, body text)<br>
+    <strong style="color:var(--t1)">Market page</strong> — 2 fixes (void space, heatmap scan)<br>
+    <strong style="color:var(--t1)">Signal / Opp cards</strong> — 1 fix (conf label, badge, level gap)<br>
+    <strong style="color:var(--t1)">Navigation</strong> — 3 fixes (pipeline pills, scanner pills, sidebar)<br>
+    <strong style="color:var(--t1)">Auth / Landing</strong> — 1 fix (heading, footer margins)<br>
+    <strong style="color:var(--t1)">Interactive elements</strong> — 2 fixes (button padding, electric glow)<br>
+    <strong style="color:var(--t1)">Brand</strong> — 4 fixes (logo, slogan, AI, name, email, sidebar rename)<br>
+    <strong style="color:var(--t1)">All other pages</strong> — 1 fix (all 12 tiny-label selectors bumped to 10px)
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,338 @@
+================================================================
+DOTVERSE — BACKEND TECHNICAL SPECIFICATION
+Trading Signals + Indicator App
+For: Backend Developer | Frontend: React Native (already designed)
+================================================================
+
+Document Version : 1.0
+Prepared For     : Backend Developer
+API Framework    : FastAPI (Python 3.11+)
+Frontend         : React Native iOS (already designed)
+Markets          : Stocks, Crypto, Forex — all markets
+Signal Delivery  : Real-time WebSocket streaming
+
+
+================================================================
+1. OVERVIEW
+================================================================
+
+Build a Python backend that connects to live market data feeds
+across stocks, crypto, and forex, computes technical indicators
+on each incoming bar, fires trading signals in real time, and
+pushes those signals to the React Native iOS app via WebSocket
+and REST API.
+
+The backend is a pure signal engine + API server. The UI is
+already designed and built — the backend team only needs to
+produce correctly structured JSON from the REST endpoints and
+WebSocket events defined in this document.
+
+
+================================================================
+2. TECH STACK
+================================================================
+
+Layer               | Technology                   | Purpose
+--------------------|------------------------------|---------------------------
+Language            | Python 3.11+                 | Core runtime
+API Framework       | FastAPI                      | REST + WebSocket support
+Indicator Math      | pandas-ta or TA-Lib          | RSI, EMA, MACD, BB, ATR
+Database            | PostgreSQL                   | Signal history, watchlists
+Cache / Pub-Sub     | Redis                        | Live price cache, WS fan-out
+Task Queue          | Celery + Redis               | Background jobs, scans
+Data — Stocks       | Alpaca Markets API           | REST + WS, free tier available
+Data — Crypto       | Binance / Coinbase via CCXT  | Unified multi-exchange access
+Data — Forex        | OANDA Streaming / Alpaca     | Major and minor pairs
+Push Notifications  | Expo Push API / APNs         | Alerts when app is backgrounded
+Deployment          | Docker + Railway or Render   | Containerised, env-based config
+
+All market data providers must be abstracted behind a common
+provider interface so any source can be swapped without touching
+signal logic.
+
+
+================================================================
+3. PROJECT STRUCTURE
+================================================================
+
+backend/
+  app/
+    main.py          <- FastAPI app entry point
+    ws/              <- WebSocket connection handlers
+    signals/         <- Signal engine + all signal rules
+    indicators/      <- RSI, EMA, MACD, BB, ATR math functions
+    data/            <- Market data feed connectors
+    api/             <- REST route handlers
+    models/          <- DB schemas (SQLAlchemy)
+    config.py        <- All env vars / settings
+  tests/             <- Unit tests for every indicator + signal rule
+  docker-compose.yml
+  .env.example
+
+
+================================================================
+4. DATA INGESTION LAYER
+================================================================
+
+Connect to market data via WebSocket streams. On each incoming
+tick or trade event:
+
+  - Accumulate ticks into OHLCV bars for the requested timeframe
+    (1m, 5m, 1H, 4H, 1D)
+  - On bar close, push the completed bar to the indicator engine
+  - Cache the last 200 completed bars per symbol per timeframe
+    in Redis
+  - Handle graceful reconnection with exponential backoff on
+    feed drop
+  - Respect rate limits for each provider
+
+Market Feeds:
+  Stocks  : wss://stream.data.alpaca.markets/v2/iex
+            (Free tier, real-time US equities)
+  Crypto  : Binance or Coinbase WebSocket via CCXT library
+  Forex   : OANDA Streaming API or Alpaca forex feed
+
+
+================================================================
+5. INDICATOR COMPUTATION ENGINE
+================================================================
+
+Run on every completed bar for each subscribed symbol. Maintain
+a rolling window of the last 200 bars in memory per symbol per
+timeframe. Recalculate all indicators on each bar close.
+
+All parameters must be configurable via environment variables.
+No hardcoded values.
+
+Indicator       | Default Params    | Usage
+----------------|-------------------|--------------------------------
+EMA             | 20, 50 periods    | Trend direction, crossovers
+RSI             | 14 periods        | OB >70, OS <30, divergence
+MACD            | 12, 26, 9         | Histogram momentum, signal cross
+Bollinger Bands | 20 period, 2σ     | Band touch, squeeze detection
+ATR             | 14 periods        | Dynamic SL and TP sizing
+Volume          | vs 20-bar avg     | Signal confirmation filter
+
+
+================================================================
+6. SIGNAL GENERATION RULES
+================================================================
+
+Each rule is an independent function that runs on every bar
+close and returns a signal object or null. All rules run
+concurrently per symbol per timeframe using asyncio task pools.
+
+------------------------------------------------------------
+6.1  BUY / SELL — Long / Short Entry
+------------------------------------------------------------
+  - BUY:  EMA20 crosses above EMA50, RSI trending upward
+  - SELL: EMA20 crosses below EMA50, RSI trending downward
+  - Entry    = close price of the signal bar
+  - Stop Loss = close ± 1.5 × ATR(14)
+  - TP1 = 1:1.5 R  |  TP2 = 1:2.5 R  |  TP3 = 1:4 R
+
+------------------------------------------------------------
+6.2  RSI Overbought / Oversold
+------------------------------------------------------------
+  - RSI crosses above 70 → RSI_OB signal (bearish reversal)
+  - RSI crosses below 30 → RSI_OS signal (bullish reversal)
+  - Payload must include RSI value and distance from threshold
+
+------------------------------------------------------------
+6.3  RSI Divergence — Bull / Bear
+------------------------------------------------------------
+  - Bull: price makes lower low, RSI makes higher low
+          → bullish reversal signal
+  - Bear: price makes higher high, RSI makes lower high
+          → bearish reversal signal
+  - Lookback window: configurable default 5–15 bars
+
+------------------------------------------------------------
+6.4  EMA Cross
+------------------------------------------------------------
+  - EMA20 crosses EMA50 in either direction
+  - Confirm only when volume > 1.2× the 20-bar volume average
+
+------------------------------------------------------------
+6.5  TP Hit Events
+------------------------------------------------------------
+  - Monitor all open signals on every new tick
+  - Fire TP1_HIT when price first touches TP1 level
+  - Fire TP2_HIT when price first touches TP2 level
+  - Update signal status in PostgreSQL on each hit
+
+
+================================================================
+7. SIGNAL OBJECT SCHEMA (JSON)
+================================================================
+
+Every signal emitted — via WebSocket or REST — must follow this
+exact structure. The frontend is built against this schema;
+do not deviate from field names or types.
+
+{
+  "symbol":      "AAPL",
+  "timeframe":   "4H",
+  "type":        "BUY",
+                 // BUY | SELL | RSI_OB | RSI_OS |
+                 // BULL_DIV | BEAR_DIV | EMA_CROSS |
+                 // TP1_HIT | TP2_HIT
+  "timestamp":   "2026-04-11T14:00:00Z",
+  "entry":       183.42,
+  "stop_loss":   181.10,
+  "tp1":         186.00,
+  "tp2":         188.50,
+  "tp3":         192.00,
+  "rr1":         1.5,
+  "rr2":         2.5,
+  "rr3":         4.0,
+  "rsi":         42.8,
+  "confidence":  "High",    // High | Moderate | Low
+  "trigger":     "EMA Cross + RSI OS",
+  "chg_1d":      1.37
+}
+
+
+================================================================
+8. REST API ENDPOINTS
+================================================================
+
+All responses use this envelope:
+  { "success": true, "data": { ... }, "error": null }
+  { "success": false, "data": null, "error": "message" }
+
+Method | Endpoint                      | Description
+-------|-------------------------------|-----------------------------------
+GET    | /api/symbols                  | List user watchlist symbols
+GET    | /api/chart/{symbol}?tf=4H     | OHLCV + indicator values for chart
+GET    | /api/signals/{symbol}         | Historical signals (paginated)
+GET    | /api/signals/active           | All open signals across all symbols
+POST   | /api/watchlist                | Add / remove symbol from watchlist
+GET    | /api/backtest/{symbol}        | Backtest results for a symbol
+POST   | /api/users/push-token         | Store Expo push token
+
+All list endpoints must support ?limit= and ?cursor= query
+parameters for infinite scroll pagination.
+
+
+================================================================
+9. REAL-TIME WEBSOCKET
+================================================================
+
+React Native connects to:
+  wss://yourapi.com/ws/{user_id}?token=<jwt>
+
+Signal event — pushed on every new signal fire:
+  { "event": "signal", "data": { ...full signal object... } }
+
+Tick event — live price for the user's active chart symbol:
+  { "event": "tick", "symbol": "AAPL", "price": 183.55, "change_pct": 1.42 }
+
+Use Redis pub/sub to fan out signals from the computation engine
+to all connected WebSocket clients. Each user subscribes only
+to their watchlist symbols.
+
+
+================================================================
+10. AUTHENTICATION
+================================================================
+
+  - JWT tokens only — no session cookies
+    (React Native requires stateless auth)
+  - Every REST request: Authorization: Bearer <access_token>
+  - WebSocket auth: ?token=<access_token> on connection URL
+  - Access token TTL:  15 minutes
+  - Refresh token TTL: 30 days
+  - Endpoints: POST /auth/login and POST /auth/refresh
+
+
+================================================================
+11. DATABASE SCHEMA (POSTGRESQL)
+================================================================
+
+signals table:
+  id, symbol, timeframe, type, entry, stop_loss, tp1, tp2, tp3,
+  rr1, rr2, rr3, rsi, confidence, trigger, chg_1d, fired_at, status
+  status values: open | closed | tp1_hit | tp2_hit | sl_hit
+
+bars table:
+  id, symbol, timeframe, open, high, low, close, volume, timestamp
+
+watchlist table:
+  id, user_id, symbol, added_at
+
+users table:
+  id, email, hashed_password, created_at, push_token
+
+
+================================================================
+12. CORS CONFIGURATION
+================================================================
+
+FastAPI must allow cross-origin requests from the React Native
+client:
+
+  from fastapi.middleware.cors import CORSMiddleware
+  app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"]
+  )
+
+
+================================================================
+13. PUSH NOTIFICATIONS
+================================================================
+
+The React Native app sends its Expo push token to:
+  POST /api/users/push-token
+
+On every new signal fire the backend must:
+  - Look up push tokens for all users watching that symbol
+  - Send a push via the Expo Push API:
+    https://exp.host/--/api/v2/push/send
+  - Push payload:
+    {
+      "title": "BUY — AAPL",
+      "body":  "Entry $183.42 | Confidence: High",
+      "data":  { "signalId": "..." }
+    }
+
+
+================================================================
+14. KEY REQUIREMENTS
+================================================================
+
+  - All indicator parameters and signal thresholds configurable
+    via environment variables — no hardcoded values
+  - Signal engine processes multiple symbols concurrently via
+    asyncio task pools
+  - WebSocket feed reconnection with exponential backoff on drop
+  - Rate limit awareness for every data provider
+  - All signals persisted to PostgreSQL for history and backtest
+  - Unit tests required for every indicator function and every
+    signal rule
+  - Docker Compose must spin up complete local stack:
+    FastAPI + PostgreSQL + Redis
+  - All environment variables documented in .env.example
+  - The frontend is already built — backend must match the signal
+    schema in Section 7 exactly
+
+
+================================================================
+NOTE TO DEVELOPER
+================================================================
+
+The frontend (React Native iOS) is already designed and built.
+The backend team's deliverable is:
+
+  1. A running FastAPI server
+  2. Signal JSON matching the schema in Section 7
+  3. REST endpoints as defined in Section 8
+  4. WebSocket events as defined in Section 9
+
+No changes to the frontend will be made to accommodate backend
+decisions. Build to the spec.
+
+================================================================

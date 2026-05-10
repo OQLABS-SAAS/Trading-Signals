@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DotVerse — Design Preview v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@400;600;700;900&family=Fira+Code:wght@400;500;600&family=Sora:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+/* ── AUDIT IMPROVEMENT #1: steel token ── */
+:root {
+  --bg: #0C0A08; --surface: #141210; --card: #1A1815;
+  --border: #2a2620; --border2: #332e28;
+  --amber: #f5a623; --amber-dim: rgba(245,166,35,0.12); --amber-glow: rgba(245,166,35,0.25);
+  --green: #00c98d; --green-dim: rgba(0,201,141,0.12);
+  --red: #ff4459; --red-dim: rgba(255,68,89,0.12);
+  --blue: #4a9eff; --blue-dim: rgba(74,158,255,0.12);
+  /* AUDIT #1 — second accent for neutral states */
+  --steel: #4a8fc4; --steel-dim: rgba(74,143,196,0.12); --steel-glow: rgba(74,143,196,0.25);
+  --text: #e8e2d9; --text2: #9a9080; --text3: #5a5248;
+  --font-display: 'Anybody', sans-serif;
+  --font-mono: 'Fira Code', monospace;
+  --font-body: 'Sora', sans-serif;
+  --r: 8px; --r2: 12px;
+  /* spring + ease-out motion tokens */
+  --spring: cubic-bezier(0.68,-0.55,0.265,1.55);
+  --ease-out: cubic-bezier(0.0,0.0,0.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* AUDIT #11 — noise texture: SVG opacity 1 inside SVG, outer element 0.5 */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  opacity: 0.04; /* effective: 1.0 * 0.04 — good grain */
+  pointer-events: none; z-index: 1;
+}
+
+/* ── NAV ── */
+.nav {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 20px; height: 52px;
+  position: sticky; top: 0; z-index: 100; gap: 4px;
+}
+.nav-logo {
+  font-family: var(--font-display); font-weight: 900; font-size: 18px;
+  color: var(--amber); letter-spacing: 0.04em; margin-right: 20px; flex-shrink: 0;
+}
+.nav-logo span { color: var(--text3); font-size: 11px; font-family: var(--font-mono); font-weight: 400; margin-left: 6px; }
+.nav-tab {
+  padding: 6px 14px; border-radius: var(--r); cursor: pointer;
+  font-family: var(--font-display); font-size: 13px; font-weight: 600;
+  color: var(--text2); border: none; background: transparent;
+  transition: all 0.15s; letter-spacing: 0.02em;
+}
+.nav-tab:hover { color: var(--amber); background: var(--amber-dim); box-shadow: 0 0 8px var(--amber-glow); }
+.nav-tab.active { color: var(--amber); background: var(--amber-dim); border: 1px solid rgba(245,166,35,0.3); }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.nav-user { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); }
+.nav-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--amber-dim); border: 1px solid var(--amber);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-size: 12px; color: var(--amber); font-weight: 700;
+}
+.badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+/* ── LAYOUT ── */
+.app { display: flex; min-height: calc(100vh - 52px); }
+.main-col { flex: 1; padding: 20px; overflow: auto; }
+.side-col { width: 300px; border-left: 1px solid var(--border); padding: 16px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── CARDS ── */
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r2); padding: 16px; }
+
+/* AUDIT #7 — section headers at 50% amber not full amber */
+.card-title {
+  font-family: var(--font-display); font-size: 12px; font-weight: 700;
+  color: rgba(245,166,35,0.5); text-transform: uppercase;
+  letter-spacing: 0.08em; margin-bottom: 12px;
+}
+.section-title {
+  font-family: var(--font-display); font-size: 13px; font-weight: 700;
+  color: rgba(245,166,35,0.5); text-transform: uppercase;
+  letter-spacing: 0.08em; margin-bottom: 10px;
+}
+
+/* ── CMD BAR ── */
+.cmd-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.cmd-input {
+  background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r);
+  padding: 8px 14px; color: var(--text); font-family: var(--font-mono); font-size: 13px;
+  width: 140px; outline: none;
+}
+.cmd-input:focus { border-color: var(--amber); }
+.pill-group { display: flex; gap: 4px; flex-wrap: wrap; }
+.gpill {
+  padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border2);
+  font-family: var(--font-display); font-size: 11px; font-weight: 600;
+  color: var(--text2); background: transparent; cursor: pointer;
+  letter-spacing: 0.04em; transition: all 0.15s;
+}
+.gpill:hover { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 8px var(--amber-glow); }
+.gpill.active { border-color: var(--amber); color: var(--amber); background: var(--amber-dim); box-shadow: 0 0 10px var(--amber-glow); }
+.btn-primary {
+  padding: 8px 18px; border-radius: var(--r); border: none;
+  background: var(--amber); color: #0C0A08;
+  font-family: var(--font-display); font-size: 13px; font-weight: 700;
+  cursor: pointer; letter-spacing: 0.04em; transition: all 0.15s;
+}
+.btn-primary:hover { background: #ffc04a; box-shadow: 0 0 12px var(--amber-glow); }
+.btn-ghost {
+  padding: 7px 14px; border-radius: var(--r); border: 1px solid var(--border2);
+  background: transparent; color: var(--text2); font-family: var(--font-display);
+  font-size: 12px; font-weight: 600; cursor: pointer; letter-spacing: 0.04em; transition: all 0.15s;
+}
+.btn-ghost:hover { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 8px var(--amber-glow); }
+.inst-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.inst-chip {
+  padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border2);
+  background: transparent; font-family: var(--font-display); font-size: 11px; font-weight: 600;
+  color: var(--text2); cursor: pointer; transition: all 0.15s;
+}
+.inst-chip:hover, .inst-chip.active { border-color: var(--amber); color: var(--amber); background: var(--amber-dim); box-shadow: 0 0 8px var(--amber-glow); }
+
+/* ── CHART ── */
+.chart-area {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r2);
+  height: 320px; display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden; margin-bottom: 14px;
+}
+.chart-inner { position: relative; width: 100%; height: 100%; }
+.chart-label { position: absolute; top: 12px; left: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--amber); }
+.chart-price { position: absolute; top: 12px; right: 14px; font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--text); }
+.chart-svg { width: 100%; height: 100%; }
+
+/* ── SIGNAL HERO — AUDIT #5: spring entrance, AUDIT #12: scanline 12s ── */
+@keyframes sigEntrance {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes scanH {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 0.5; }
+  90%  { opacity: 0.5; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+.signal-hero {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r2);
+  padding: 20px; margin-bottom: 14px; position: relative; overflow: hidden;
+  animation: sigEntrance var(--spring) 420ms both;
+}
+.signal-hero::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 20% 50%, rgba(0,201,141,0.06) 0%, transparent 60%);
+  pointer-events: none;
+}
+/* AUDIT #12 — scanline at 12s not 5s */
+.signal-hero::after {
+  content: ''; position: absolute; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(245,166,35,0.15), transparent);
+  animation: scanH 12s ease-in-out infinite 1s;
+  pointer-events: none;
+}
+
+/* AUDIT #6 — staggered level entrance */
+@keyframes levelIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.sig-header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+.sig-direction {
+  font-family: var(--font-display); font-size: 52px; font-weight: 900;
+  color: var(--green); line-height: 1; letter-spacing: -0.02em;
+  text-shadow: 0 0 30px rgba(0,201,141,0.4);
+  animation: levelIn var(--ease-out) 200ms both;
+}
+.sig-direction.sell { color: var(--red); text-shadow: 0 0 30px rgba(255,68,89,0.4); }
+.sig-direction.hold { color: var(--amber); text-shadow: 0 0 30px var(--amber-glow); }
+.sig-meta { flex: 1; }
+.sig-ticker { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--text); }
+.sig-sub { font-size: 12px; color: var(--text2); font-family: var(--font-mono); margin-top: 2px; }
+.sig-conf-ring { position: relative; width: 64px; height: 64px; flex-shrink: 0; }
+.sig-conf-ring svg { width: 64px; height: 64px; transform: rotate(-90deg); }
+.sig-conf-pct {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--green);
+}
+
+/* AUDIT #6 — staggered: direction 0ms, entry 80ms, SL 160ms, TP 240ms */
+.sig-levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.sig-level {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 10px 12px;
+  animation: levelIn var(--ease-out) 300ms both;
+}
+.sig-level:nth-child(1) { animation-delay: 80ms; }
+.sig-level:nth-child(2) { animation-delay: 160ms; }
+.sig-level:nth-child(3) { animation-delay: 240ms; }
+.sig-level:nth-child(4) { animation-delay: 320ms; }
+.sig-level-lbl { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-display); font-weight: 700; }
+.sig-level-val { font-family: var(--font-mono); font-size: 14px; font-weight: 600; color: var(--text); margin-top: 2px; }
+.sig-level.entry .sig-level-val { color: var(--amber); }
+.sig-level.sl .sig-level-val { color: var(--red); }
+.sig-level.tp .sig-level-val { color: var(--green); }
+.sig-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.sig-btn {
+  padding: 7px 14px; border-radius: var(--r); border: 1px solid var(--border2);
+  background: transparent; color: var(--text2); font-family: var(--font-display);
+  font-size: 11px; font-weight: 700; cursor: pointer; letter-spacing: 0.04em; transition: all 0.15s;
+}
+.sig-btn:hover { border-color: var(--amber); color: var(--amber); }
+
+/* ── WIN BADGE — AUDIT #10: spring easing ── */
+.win-badge {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 10px 14px; display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+}
+.wb-label { font-family: var(--font-display); font-size: 11px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
+.wb-bar-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+/* AUDIT #10 — spring easing on bar fill */
+.wb-bar-fill { height: 100%; border-radius: 3px; background: var(--green); width: 63%; transition: width 0.9s var(--spring); }
+.wb-pct { font-family: var(--font-mono); font-size: 14px; font-weight: 600; color: var(--green); }
+.wb-n { font-family: var(--font-mono); font-size: 11px; color: var(--text3); }
+
+/* ── CONFIDENCE — AUDIT #13: opacity transition ── */
+.conf-label {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px;
+  font-family: var(--font-display); font-size: 11px; font-weight: 700;
+  background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,201,141,0.3);
+  margin-bottom: 10px; transition: opacity 0.3s ease;
+}
+.conf-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+/* ── INDICATORS — AUDIT #15: stagger, AUDIT #3: neutral=steel ── */
+@keyframes indIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.ind-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.ind-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 12px;
+  animation: indIn var(--ease-out) 300ms both;
+  animation-delay: calc(var(--ind-index, 0) * 40ms);
+}
+.ind-name { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-display); font-weight: 700; }
+.ind-val { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--text); margin-top: 4px; }
+.ind-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-family: var(--font-display); font-size: 10px; font-weight: 700; margin-top: 4px; }
+.ind-badge.bull { background: var(--green-dim); color: var(--green); }
+.ind-badge.bear { background: var(--red-dim); color: var(--red); }
+/* AUDIT #3 — neutral badges use steel, not amber */
+.ind-badge.neut { background: var(--steel-dim); color: var(--steel); }
+
+/* ── MTF — AUDIT #2: HOLD=steel ── */
+.mtf-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 14px; }
+.mtf-cell { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 8px; text-align: center; }
+.mtf-tf { font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; }
+.mtf-sig { font-family: var(--font-display); font-size: 11px; font-weight: 700; margin-top: 4px; }
+.mtf-sig.buy { color: var(--green); }
+.mtf-sig.sell { color: var(--red); }
+/* AUDIT #2 — HOLD uses steel not amber */
+.mtf-sig.hold { color: var(--steel); }
+.mtf-cell.current { border-color: var(--amber); background: var(--amber-dim); }
+
+/* ── JOURNEY — AUDIT #14: distinct CTA class ── */
+.journey {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r2);
+  padding: 16px; margin-bottom: 14px;
+}
+.journey-title {
+  font-family: var(--font-display); font-size: 12px; font-weight: 700;
+  color: rgba(245,166,35,0.5); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px;
+}
+.journey-steps { display: flex; flex-direction: column; gap: 8px; }
+.jstep { display: flex; align-items: flex-start; gap: 10px; }
+.jstep-num {
+  width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--amber);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--amber);
+  flex-shrink: 0; margin-top: 1px;
+}
+.jstep-num.done { background: var(--amber); color: #0C0A08; }
+.jstep-text { font-size: 13px; color: var(--text); font-family: var(--font-body); line-height: 1.4; }
+/* AUDIT #14 — distinct CTA styling inside journey */
+.journey-cta {
+  display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: var(--r);
+  border: 1px solid rgba(245,166,35,0.4); background: var(--amber-dim);
+  color: var(--amber); font-family: var(--font-display); font-size: 11px; font-weight: 700;
+  cursor: pointer; letter-spacing: 0.04em; transition: all 0.15s;
+}
+.journey-cta:hover { border-color: var(--amber); box-shadow: 0 0 10px var(--amber-glow); }
+
+/* ── SIGNAL HISTORY ── */
+.sig-hist table { width: 100%; border-collapse: collapse; }
+.sig-hist th { font-family: var(--font-display); font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.sig-hist td { padding: 8px; border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; color: var(--text2); }
+.sig-hist tr:hover td { background: var(--surface); color: var(--text); cursor: pointer; }
+.sh-sig { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; font-family: var(--font-display); }
+.sh-sig.buy { background: var(--green-dim); color: var(--green); }
+.sh-sig.sell { background: var(--red-dim); color: var(--red); }
+.sh-sig.hold { background: var(--steel-dim); color: var(--steel); }
+
+/* ── CALCULATOR ── */
+.calc-section { background: var(--card); border: 1px solid var(--border); border-radius: var(--r2); overflow: hidden; margin-bottom: 14px; }
+.calc-header { padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; border-bottom: 1px solid var(--border); }
+.calc-header h3 { font-family: var(--font-display); font-size: 12px; font-weight: 700; color: rgba(245,166,35,0.5); text-transform: uppercase; letter-spacing: 0.08em; }
+.calc-body { padding: 16px; }
+.calc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.calc-field { display: flex; flex-direction: column; gap: 4px; }
+.calc-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-display); font-weight: 700; }
+.calc-input { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r); padding: 8px 10px; color: var(--amber); font-family: var(--font-mono); font-size: 13px; outline: none; }
+.calc-input:focus { border-color: var(--amber); }
+.rr-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+.rr-cell { background: var(--surface); border-radius: var(--r); padding: 10px; text-align: center; }
+.rr-lbl { font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.rr-val { font-family: var(--font-mono); font-size: 16px; font-weight: 600; margin-top: 4px; }
+.rr-val.loss { color: var(--red); } .rr-val.gain { color: var(--green); }
+.tp-rows { display: flex; flex-direction: column; gap: 6px; }
+.tp-row { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; }
+.tp-lbl { font-family: var(--font-display); font-size: 11px; font-weight: 700; color: var(--text2); }
+.tp-net { font-family: var(--font-mono); font-size: 12px; color: var(--green); }
+
+/* ── SCANNER — AUDIT #8: display ticker font, AUDIT #9: row stagger ── */
+@keyframes rowIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+.scan-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.scan-select { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r); padding: 8px 12px; color: var(--text); font-family: var(--font-body); font-size: 13px; outline: none; }
+.scan-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.scan-filter-btn { padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border2); background: transparent; color: var(--text2); font-family: var(--font-display); font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; letter-spacing: 0.04em; }
+.scan-filter-btn:hover { border-color: var(--amber); color: var(--amber); }
+.scan-filter-btn.active { border-color: var(--amber); color: var(--amber); background: var(--amber-dim); }
+.scan-table { width: 100%; border-collapse: collapse; }
+.scan-table th { font-family: var(--font-display); font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+.scan-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+/* AUDIT #9 — row stagger via --row-index */
+.scan-table tbody tr {
+  animation: rowIn var(--ease-out) 250ms both;
+  animation-delay: calc(var(--row-index, 0) * 40ms);
+}
+.scan-table tr:hover td { background: var(--surface); cursor: pointer; }
+/* AUDIT #8 — display font for scanner tickers */
+.scan-ticker { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text); border-bottom: 1px dotted var(--border2); cursor: pointer; }
+.scan-ticker:hover { color: var(--amber); }
+.scan-asset { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.scan-pill { display: inline-block; padding: 4px 10px; border-radius: 12px; font-family: var(--font-display); font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.15s; border: none; }
+.scan-pill.buy { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,201,141,0.3); }
+.scan-pill.sell { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,68,89,0.3); }
+.scan-pill.hold { background: var(--steel-dim); color: var(--steel); border: 1px solid rgba(74,143,196,0.3); }
+.scan-pill:hover { transform: scale(1.05); }
+.scan-levels { font-family: var(--font-mono); font-size: 10px; color: var(--text3); margin-top: 3px; }
+.scan-expand { background: var(--surface); }
+.scan-expand td { padding: 14px 16px; }
+.expand-inner { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.expand-cell { background: var(--card); border: 1px solid var(--border); border-radius: var(--r); padding: 10px; }
+.expand-lbl { font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; }
+.expand-val { font-family: var(--font-mono); font-size: 13px; color: var(--text); margin-top: 4px; }
+
+/* ── BACKTEST ── */
+.bt-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+.bt-ticker-btn { padding: 6px 14px; border-radius: var(--r); border: 1px solid var(--border2); background: transparent; color: var(--text2); font-family: var(--font-display); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.bt-ticker-btn:hover, .bt-ticker-btn.active { border-color: var(--amber); color: var(--amber); background: var(--amber-dim); }
+.bt-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.bt-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 12px; }
+.bt-stat-lbl { font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.bt-stat-val { font-family: var(--font-mono); font-size: 18px; font-weight: 600; color: var(--text); margin-top: 4px; }
+.bt-stat-val.pos { color: var(--green); } .bt-stat-val.neg { color: var(--red); } .bt-stat-val.amb { color: var(--amber); }
+.bt-chart { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r2); height: 200px; display: flex; align-items: flex-end; padding: 10px; gap: 2px; margin-bottom: 14px; overflow: hidden; }
+.bt-bar { flex: 1; border-radius: 2px 2px 0 0; min-width: 6px; opacity: 0.85; }
+.pine-box { background: #0A0F1A; border: 1px solid var(--blue-dim); border-radius: var(--r2); padding: 14px 16px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; overflow-x: auto; }
+.pine-kw { color: #569cd6; } .pine-fn { color: #dcdcaa; } .pine-str { color: #ce9178; } .pine-cmt { color: #6a9955; } .pine-num { color: #b5cea8; }
+
+/* ── SIMULATION ── */
+.sim-svg-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r2); height: 220px; margin-bottom: 14px; overflow: hidden; position: relative; }
+.scenario-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.sc-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r2); padding: 16px; text-align: center; }
+.sc-card.bull { border-color: rgba(0,201,141,0.3); }
+.sc-card.base { border-color: rgba(245,166,35,0.3); }
+.sc-card.bear { border-color: rgba(255,68,89,0.3); }
+.sc-type { font-family: var(--font-display); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+.sc-card.bull .sc-type { color: var(--green); }
+.sc-card.base .sc-type { color: var(--amber); }
+.sc-card.bear .sc-type { color: var(--red); }
+.sc-target { font-family: var(--font-mono); font-size: 22px; font-weight: 600; color: var(--text); }
+.sc-pct { font-family: var(--font-display); font-size: 13px; font-weight: 700; margin-top: 4px; }
+.sc-card.bull .sc-pct { color: var(--green); }
+.sc-card.base .sc-pct { color: var(--amber); }
+.sc-card.bear .sc-pct { color: var(--red); }
+.sc-prob { font-size: 12px; color: var(--text2); margin-top: 6px; font-family: var(--font-body); }
+
+/* ── INTELLIGENCE ── */
+.intel-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.intel-kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 12px; }
+.intel-kpi-lbl { font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.intel-kpi-val { font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--amber); margin-top: 4px; }
+.intel-kpi-chg { font-family: var(--font-mono); font-size: 11px; margin-top: 2px; }
+.intel-kpi-chg.up { color: var(--green); } .intel-kpi-chg.dn { color: var(--red); }
+.cb-rates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.cb-cell { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 10px; text-align: center; }
+.cb-bank { font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.cb-rate { font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--text); margin-top: 4px; }
+.cb-chg { font-size: 10px; font-family: var(--font-mono); margin-top: 2px; }
+.cb-chg.hold { color: var(--steel); } .cb-chg.cut { color: var(--green); } .cb-chg.hike { color: var(--red); }
+.news-feed { display: flex; flex-direction: column; gap: 8px; }
+.news-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; display: flex; gap: 12px; cursor: pointer; transition: all 0.15s; }
+.news-item:hover { border-color: var(--border2); }
+.news-tag { padding: 2px 8px; border-radius: 10px; font-family: var(--font-display); font-size: 10px; font-weight: 700; flex-shrink: 0; height: fit-content; }
+.news-tag.bull { background: var(--green-dim); color: var(--green); }
+.news-tag.bear { background: var(--red-dim); color: var(--red); }
+.news-tag.neut { background: var(--steel-dim); color: var(--steel); }
+.news-headline { font-size: 13px; color: var(--text); font-family: var(--font-body); line-height: 1.4; }
+.news-meta { font-size: 11px; color: var(--text3); font-family: var(--font-mono); margin-top: 4px; }
+
+/* ── PORTFOLIO ── */
+.pf-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.pf-kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 12px; }
+.pf-kpi-lbl { font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.pf-kpi-val { font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--amber); margin-top: 4px; }
+.pf-kpi-val.pos { color: var(--green); } .pf-kpi-val.neg { color: var(--red); }
+.pf-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+.pf-table th { font-family: var(--font-display); font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+.pf-table td { padding: 10px; border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; }
+.pf-table tr:hover td { background: var(--surface); }
+.heatmap-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 14px; }
+.hm-cell { border-radius: 4px; padding: 8px 4px; text-align: center; font-family: var(--font-mono); font-size: 10px; font-weight: 500; }
+.hm-cell.label { background: transparent; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; }
+.hm-cell.pos-high { background: rgba(0,201,141,0.6); color: #fff; }
+.hm-cell.pos-mid { background: rgba(0,201,141,0.3); color: var(--green); }
+.hm-cell.pos-low { background: rgba(0,201,141,0.12); color: var(--green); }
+.hm-cell.neg-low { background: rgba(255,68,89,0.12); color: var(--red); }
+.hm-cell.neg-mid { background: rgba(255,68,89,0.3); color: var(--red); }
+.hm-cell.neg-high { background: rgba(255,68,89,0.6); color: #fff; }
+.hm-cell.diag { background: var(--amber-dim); color: var(--amber); }
+.var-display { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r2); padding: 16px; margin-bottom: 14px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.var-block { text-align: center; }
+.var-lbl { font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.var-val { font-family: var(--font-mono); font-size: 18px; font-weight: 600; color: var(--red); margin-top: 6px; }
+.var-sub { font-size: 11px; color: var(--text3); font-family: var(--font-mono); margin-top: 2px; }
+.stress-rows { display: flex; flex-direction: column; gap: 6px; }
+.stress-row { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; }
+.stress-asset { font-family: var(--font-display); font-size: 12px; font-weight: 700; color: var(--text); }
+.stress-shock { font-family: var(--font-mono); font-size: 12px; color: var(--amber); }
+.stress-pnl { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--red); }
+
+/* ── SIDE ── */
+.side-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r2); padding: 14px; }
+.side-title { font-family: var(--font-display); font-size: 11px; font-weight: 700; color: rgba(245,166,35,0.5); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+.fg-display { text-align: center; padding: 10px 0; }
+.fg-value { font-family: var(--font-display); font-size: 42px; font-weight: 900; color: var(--amber); line-height: 1; }
+.fg-label { font-size: 12px; color: var(--amber); font-family: var(--font-body); margin-top: 4px; }
+.fg-bar { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--red), var(--amber), var(--green)); margin: 10px 0 4px; position: relative; }
+.fg-needle { position: absolute; top: -4px; width: 2px; height: 14px; background: var(--text); border-radius: 1px; left: 54%; transform: translateX(-50%); }
+.fg-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); font-family: var(--font-display); font-weight: 700; }
+.auto-refresh { display: flex; gap: 4px; flex-wrap: wrap; }
+.rb-btn { padding: 4px 10px; border-radius: 12px; border: 1px solid var(--border2); background: transparent; color: var(--text2); font-family: var(--font-mono); font-size: 10px; cursor: pointer; transition: all 0.15s; }
+.rb-btn:hover { border-color: var(--amber); color: var(--amber); }
+.rb-btn.active { border-color: var(--amber); color: var(--amber); background: var(--amber-dim); }
+.alert-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.alert-row:last-child { border-bottom: none; }
+.alert-name { font-size: 12px; color: var(--text); font-family: var(--font-body); }
+.alert-val { font-family: var(--font-mono); font-size: 12px; color: var(--text2); }
+.alert-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 4px var(--amber); }
+.divider { height: 1px; background: var(--border); margin: 16px 0; }
+.tag { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-family: var(--font-display); font-weight: 700; }
+.tag.green { background: var(--green-dim); color: var(--green); }
+.tag.red { background: var(--red-dim); color: var(--red); }
+.tag.amber { background: var(--amber-dim); color: var(--amber); }
+.tag.steel { background: var(--steel-dim); color: var(--steel); }
+
+/* ── AUDIT #16 — MOBILE RESPONSIVE for ALL tabs ── */
+@media (max-width: 768px) {
+  .side-col { display: none; }
+  .main-col { padding: 12px; }
+  .sig-levels { grid-template-columns: 1fr 1fr; }
+  .ind-grid { grid-template-columns: 1fr 1fr; }
+  .mtf-grid { grid-template-columns: repeat(3, 1fr); }
+  .bt-stats { grid-template-columns: 1fr 1fr; }
+  .pf-summary { grid-template-columns: 1fr 1fr; }
+  .scenario-cards { grid-template-columns: 1fr; }
+  .cb-rates { grid-template-columns: 1fr 1fr; }
+  .intel-grid { grid-template-columns: 1fr 1fr; }
+  .var-display { grid-template-columns: 1fr; }
+  /* scanner: stack columns */
+  .scan-table { font-size: 11px; }
+  .scan-table th:nth-child(n+7), .scan-table td:nth-child(n+7) { display: none; }
+  /* portfolio: hide less critical columns */
+  .pf-table th:nth-child(n+5), .pf-table td:nth-child(n+5) { display: none; }
+  .expand-inner { grid-template-columns: 1fr 1fr; }
+  .heatmap-grid { grid-template-columns: repeat(3, 1fr); font-size: 9px; }
+  .nav { padding: 0 10px; gap: 2px; }
+  .nav-tab { padding: 5px 8px; font-size: 11px; }
+  .calc-row { grid-template-columns: 1fr; }
+  .rr-bar { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .sig-direction { font-size: 38px; }
+  .sig-levels { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .mtf-grid { grid-template-columns: repeat(2, 1fr); }
+  .bt-stats { grid-template-columns: 1fr; }
+}
+
+/* ── AUDIT NOTE BANNER ── */
+.audit-banner {
+  background: var(--steel-dim); border: 1px solid rgba(74,143,196,0.3);
+  border-radius: var(--r); padding: 8px 14px; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--steel);
+}
+.audit-banner strong { color: var(--steel); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-logo">DotVerse <span>v2 · design preview</span></div>
+  <button class="nav-tab active" onclick="switchTab('signals')">Signals</button>
+  <button class="nav-tab" onclick="switchTab('scanner')">Scanner</button>
+  <button class="nav-tab" onclick="switchTab('backtest')">Backtest</button>
+  <button class="nav-tab" onclick="switchTab('simulation')">Simulation</button>
+  <button class="nav-tab" onclick="switchTab('news')">Intelligence</button>
+  <button class="nav-tab" onclick="switchTab('portfolio')">Portfolio</button>
+  <div class="nav-right">
+    <div class="badge-dot"></div>
+    <div class="nav-user">
+      <div class="nav-avatar">OQ</div>
+      <span>omar</span>
+    </div>
+  </div>
+</nav>
+
+<div class="app">
+
+<!-- ═══════════════════ SIGNALS TAB ═══════════════════ -->
+<div id="tab-signals" class="tab-panel active" style="display:flex;flex:1;min-height:0;">
+  <div class="main-col">
+
+    <div class="audit-banner">
+      <strong>Design Preview v2</strong> — 15 audit improvements applied. Steel accent · spring animations · stagger · noise fix · mobile responsive.
+    </div>
+
+    <div class="cmd-bar">
+      <input class="cmd-input" value="BTC-USD" placeholder="Ticker">
+      <div class="pill-group">
+        <button class="gpill">Crypto</button>
+        <button class="gpill active">Stock</button>
+        <button class="gpill">Forex</button>
+        <button class="gpill">Index</button>
+      </div>
+      <div class="pill-group">
+        <button class="gpill">15M</button>
+        <button class="gpill">1H</button>
+        <button class="gpill active">4H</button>
+        <button class="gpill">1D</button>
+        <button class="gpill">1W</button>
+        <button class="gpill">1M</button>
+      </div>
+      <button class="btn-primary">Analyse</button>
+    </div>
+
+    <div class="inst-chips">
+      <button class="inst-chip active">BTC</button>
+      <button class="inst-chip">ETH</button>
+      <button class="inst-chip">SOL</button>
+      <button class="inst-chip">AAPL</button>
+      <button class="inst-chip">NVDA</button>
+      <button class="inst-chip">TSLA</button>
+      <button class="inst-chip">EURUSD</button>
+      <button class="inst-chip">GOLD</button>
+      <button class="inst-chip">SPX</button>
+    </div>
+
+    <div class="chart-area">
+      <div class="chart-inner">
+        <div class="chart-label">BTC-USD · 4H · Binance</div>
+        <div class="chart-price">$84,230.50 <span style="color:var(--green);font-size:11px;">▲ +2.34%</span></div>
+        <svg class="chart-svg" viewBox="0 0 900 320" preserveAspectRatio="none">
+          <line x1="0" y1="64" x2="900" y2="64" stroke="#2a2620" stroke-width="1"/>
+          <line x1="0" y1="128" x2="900" y2="128" stroke="#2a2620" stroke-width="1"/>
+          <line x1="0" y1="192" x2="900" y2="192" stroke="#2a2620" stroke-width="1"/>
+          <line x1="0" y1="256" x2="900" y2="256" stroke="#2a2620" stroke-width="1"/>
+          <polyline points="0,200 50,195 100,188 150,192 200,185 250,178 300,170 350,162 400,168 450,155 500,148 550,140 600,135 650,125 700,118 750,110 800,105 850,98 900,95" fill="none" stroke="#f5a623" stroke-width="1.5" opacity="0.6"/>
+          <polyline points="0,220 50,210 100,205 150,215 200,200 250,190 300,185 350,175 400,182 450,168 500,160 550,152 600,142 650,130 700,122 750,112 800,105 850,96 900,88" fill="none" stroke="#00c98d" stroke-width="2"/>
+          <line x1="0" y1="95" x2="900" y2="95" stroke="#f5a623" stroke-width="1" stroke-dasharray="6,4" opacity="0.7"/>
+          <text x="8" y="91" fill="#f5a623" font-size="10" font-family="Fira Code">ENTRY $84,230</text>
+          <line x1="0" y1="240" x2="900" y2="240" stroke="#ff4459" stroke-width="1" stroke-dasharray="4,4" opacity="0.6"/>
+          <text x="8" y="236" fill="#ff4459" font-size="10" font-family="Fira Code">SL $80,918</text>
+          <line x1="0" y1="40" x2="900" y2="40" stroke="#00c98d" stroke-width="1" stroke-dasharray="4,4" opacity="0.6"/>
+          <text x="8" y="36" fill="#00c98d" font-size="10" font-family="Fira Code">TP1 $91,000</text>
+          <rect x="0" y="270" width="900" height="50" fill="#0f0d0b"/>
+          <text x="8" y="284" fill="#5a5248" font-size="10" font-family="Fira Code">RSI(10)</text>
+          <polyline points="0,310 60,308 120,305 180,300 240,295 300,290 360,285 420,288 480,282 540,276 600,270 660,278 720,273 780,280 840,286 900,290" fill="none" stroke="#4a9eff" stroke-width="1.5"/>
+          <line x1="0" y1="286" x2="900" y2="286" stroke="#ff4459" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.5"/>
+          <line x1="0" y1="296" x2="900" y2="296" stroke="#00c98d" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.5"/>
+          <line x1="540" y1="276" x2="840" y2="286" stroke="#f5a623" stroke-width="1.5" opacity="0.8"/>
+          <circle cx="540" cy="276" r="4" fill="#f5a623" opacity="0.9"/>
+          <circle cx="840" cy="286" r="4" fill="#f5a623" opacity="0.9"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Signal Hero — AUDIT #5 spring entrance, #12 scanline 12s -->
+    <div class="signal-hero">
+      <div class="sig-header">
+        <div class="sig-direction">BUY</div>
+        <div class="sig-meta">
+          <div class="sig-ticker">BTC-USD</div>
+          <div class="sig-sub">Bitcoin · Crypto · 4H · Binance · 2026-04-14 09:00 UTC</div>
+          <!-- AUDIT #13 — confidence label has opacity transition -->
+          <div style="margin-top:8px;">
+            <span class="conf-label"><span class="conf-dot"></span>CONFIRMED</span>
+          </div>
+        </div>
+        <div class="sig-conf-ring">
+          <svg viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="26" fill="none" stroke="#1A1815" stroke-width="6"/>
+            <circle cx="32" cy="32" r="26" fill="none" stroke="#00c98d" stroke-width="6" stroke-dasharray="114" stroke-dashoffset="39" stroke-linecap="round"/>
+          </svg>
+          <div class="sig-conf-pct">78%</div>
+        </div>
+      </div>
+
+      <!-- AUDIT #6 — staggered entrance via nth-child delays -->
+      <div class="sig-levels">
+        <div class="sig-level entry">
+          <div class="sig-level-lbl">Entry</div>
+          <div class="sig-level-val">$84,230</div>
+        </div>
+        <div class="sig-level sl">
+          <div class="sig-level-lbl">Stop Loss</div>
+          <div class="sig-level-val">$80,918</div>
+        </div>
+        <div class="sig-level tp">
+          <div class="sig-level-lbl">TP 1 (50%)</div>
+          <div class="sig-level-val">$91,000</div>
+        </div>
+        <div class="sig-level tp">
+          <div class="sig-level-lbl">TP 2 (30%)</div>
+          <div class="sig-level-val">$96,800</div>
+        </div>
+      </div>
+
+      <!-- AUDIT #10 — spring easing on bar fill -->
+      <div class="win-badge">
+        <div class="wb-label">Win Rate</div>
+        <div class="wb-bar-track"><div class="wb-bar-fill" id="wbFill"></div></div>
+        <div>
+          <div class="wb-pct">63%</div>
+          <div class="wb-n">n=47 trades</div>
+        </div>
+      </div>
+
+      <div class="sig-btns">
+        <button class="sig-btn">📋 Pine Script</button>
+        <button class="sig-btn">⭐ Watch</button>
+        <button class="sig-btn">🔔 Alert</button>
+        <button class="sig-btn">📊 Backtest</button>
+        <button class="sig-btn">📈 Simulate</button>
+        <span class="tag amber" style="margin-left:auto;">Position: 2.8% of account</span>
+      </div>
+    </div>
+
+    <!-- Journey — AUDIT #14: .journey-cta class -->
+    <div class="journey">
+      <div class="journey-title">⚡ What To Do Next</div>
+      <div class="journey-steps">
+        <div class="jstep">
+          <div class="jstep-num done">✓</div>
+          <div><div class="jstep-text" style="color:var(--text2);">Understand your risk — max loss is $331 at 1% of $33,100 account</div></div>
+        </div>
+        <div class="jstep">
+          <div class="jstep-num" style="background:var(--amber);color:#0C0A08;">2</div>
+          <div>
+            <div class="jstep-text">Set your position size in the <strong style="color:var(--amber);">Calculator</strong> below</div>
+            <button class="journey-cta">Open Calculator ↓</button>
+          </div>
+        </div>
+        <div class="jstep">
+          <div class="jstep-num">3</div>
+          <div>
+            <div class="jstep-text" style="color:var(--text2);">Check track record — run <strong>Backtest</strong> on BTC 4H</div>
+            <button class="journey-cta" onclick="switchTab('backtest')">Run Backtest →</button>
+          </div>
+        </div>
+        <div class="jstep">
+          <div class="jstep-num">4</div>
+          <div>
+            <div class="jstep-text" style="color:var(--text2);">Copy exact levels to TradingView via Pine Script — Entry $84,230 · SL $80,918 · TP1 $91,000</div>
+            <button class="journey-cta">Copy Pine Script →</button>
+          </div>
+        </div>
+        <div class="jstep">
+          <div class="jstep-num">5</div>
+          <div>
+            <div class="jstep-text" style="color:var(--text2);">Set a <strong>DotVerse Alert</strong> for price approaching entry</div>
+            <button class="journey-cta">Set Alert →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Indicators — AUDIT #15: --ind-index stagger, AUDIT #3: neut=steel -->
+    <div class="section-title">Indicators</div>
+    <div class="ind-grid">
+      <div class="ind-card" style="--ind-index:0">
+        <div class="ind-name">RSI (10)</div>
+        <div class="ind-val">58.4</div>
+        <div class="ind-badge bull">Bullish</div>
+      </div>
+      <div class="ind-card" style="--ind-index:1">
+        <div class="ind-name">EMA 9 / 21</div>
+        <div class="ind-val">83,100 / 79,400</div>
+        <div class="ind-badge bull">Above EMA</div>
+      </div>
+      <div class="ind-card" style="--ind-index:2">
+        <div class="ind-name">MACD</div>
+        <div class="ind-val">+1,240</div>
+        <div class="ind-badge bull">Bullish Cross</div>
+      </div>
+      <div class="ind-card" style="--ind-index:3">
+        <div class="ind-name">ATR (14)</div>
+        <div class="ind-val">3,312</div>
+        <!-- AUDIT #3 — neutral badge is steel not amber -->
+        <div class="ind-badge neut">Moderate Vol</div>
+      </div>
+      <div class="ind-card" style="--ind-index:4">
+        <div class="ind-name">Bollinger</div>
+        <div class="ind-val">Mid-Band</div>
+        <div class="ind-badge bull">Breakout ↑</div>
+      </div>
+      <div class="ind-card" style="--ind-index:5">
+        <div class="ind-name">Volume</div>
+        <div class="ind-val">18.4K BTC</div>
+        <div class="ind-badge bull">Above Avg</div>
+      </div>
+    </div>
+
+    <!-- MTF — AUDIT #2: HOLD=steel -->
+    <div class="section-title" style="margin-top:14px;">Multi-Timeframe Alignment</div>
+    <div class="mtf-grid">
+      <div class="mtf-cell"><div class="mtf-tf">15M</div><div class="mtf-sig buy">BUY</div></div>
+      <div class="mtf-cell"><div class="mtf-tf">1H</div><div class="mtf-sig buy">BUY</div></div>
+      <div class="mtf-cell current"><div class="mtf-tf">4H ●</div><div class="mtf-sig buy">BUY</div></div>
+      <div class="mtf-cell"><div class="mtf-tf">1D</div><div class="mtf-sig buy">BUY</div></div>
+      <!-- AUDIT #2 — HOLD renders in steel -->
+      <div class="mtf-cell"><div class="mtf-tf">1W</div><div class="mtf-sig hold">HOLD</div></div>
+      <div class="mtf-cell"><div class="mtf-tf">1M</div><div class="mtf-sig buy">BUY</div></div>
+    </div>
+
+    <div class="section-title" style="margin-top:14px;">Signal History</div>
+    <div class="sig-hist card">
+      <table>
+        <thead><tr><th>Ticker</th><th>TF</th><th>Signal</th><th>Entry</th><th>Confidence</th><th>Time</th></tr></thead>
+        <tbody>
+          <tr><td>BTC-USD</td><td>4H</td><td><span class="sh-sig buy">BUY</span></td><td>$84,230</td><td><span class="tag green">CONFIRMED</span></td><td>09:00</td></tr>
+          <tr><td>EURUSD</td><td>1H</td><td><span class="sh-sig sell">SELL</span></td><td>1.08420</td><td><span class="tag amber">LIKELY</span></td><td>08:00</td></tr>
+          <tr><td>AAPL</td><td>1D</td><td><span class="sh-sig buy">BUY</span></td><td>$192.40</td><td><span class="tag green">CONFIRMED</span></td><td>Apr 13</td></tr>
+          <tr><td>GOLD</td><td>4H</td><td><span class="sh-sig hold">HOLD</span></td><td>$3,230</td><td><span class="tag steel">LIKELY</span></td><td>Apr 13</td></tr>
+          <tr><td>ETH-USD</td><td>4H</td><td><span class="sh-sig buy">BUY</span></td><td>$1,610</td><td><span class="tag green">CONFIRMED</span></td><td>Apr 12</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="calc-section" style="margin-top:14px;">
+      <div class="calc-header">
+        <h3>⚖️ Position Size Calculator</h3>
+        <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">RESULTS UPDATE AS YOU TYPE</span>
+      </div>
+      <div class="calc-body">
+        <div class="calc-row">
+          <div class="calc-field">
+            <div class="calc-label">Account Size ($)</div>
+            <input class="calc-input" value="33100" type="number">
+          </div>
+          <div class="calc-field">
+            <div class="calc-label">Risk % per trade</div>
+            <input class="calc-input" value="1" type="number">
+            <div style="font-size:11px;color:var(--amber);font-family:var(--font-mono);margin-top:2px;">= $331 max loss</div>
+          </div>
+        </div>
+        <div class="calc-row">
+          <div class="calc-field"><div class="calc-label">Entry Price</div><input class="calc-input" value="84230"></div>
+          <div class="calc-field"><div class="calc-label">Stop Loss</div><input class="calc-input" value="80918"></div>
+        </div>
+        <div class="rr-bar">
+          <div class="rr-cell"><div class="rr-lbl">Money at Risk</div><div class="rr-val loss">−$331</div></div>
+          <div class="rr-cell"><div class="rr-lbl">Position Size</div><div class="rr-val" style="color:var(--amber);">0.0998 BTC</div></div>
+        </div>
+        <div class="tp-rows">
+          <div class="tp-row">
+            <div><div class="tp-lbl">TP1 — Take 50% at $91,000</div><div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);">RR 2.03 : 1</div></div>
+            <div style="text-align:right;"><div class="tp-net">+$337 net</div><div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">after 0.1% fee</div></div>
+          </div>
+          <div class="tp-row">
+            <div><div class="tp-lbl">TP2 — Take 30% at $96,800</div><div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);">RR 3.80 : 1</div></div>
+            <div style="text-align:right;"><div class="tp-net">+$631 net</div></div>
+          </div>
+          <div class="tp-row">
+            <div><div class="tp-lbl">TP3 — Take rest at $104,200</div><div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);">RR 6.03 : 1</div></div>
+            <div style="text-align:right;"><div class="tp-net">+$1,000 net</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-col -->
+
+  <div class="side-col">
+    <div class="side-card">
+      <div class="side-title">Fear &amp; Greed Index</div>
+      <div class="fg-display">
+        <div class="fg-value">54</div>
+        <div class="fg-label">Greed</div>
+        <div class="fg-bar"><div class="fg-needle"></div></div>
+        <div class="fg-labels"><span>Fear</span><span>Neutral</span><span>Greed</span></div>
+      </div>
+    </div>
+    <div class="side-card">
+      <div class="side-title">Auto Refresh</div>
+      <div class="auto-refresh">
+        <button class="rb-btn active">OFF</button>
+        <button class="rb-btn">15s</button>
+        <button class="rb-btn">30s</button>
+        <button class="rb-btn">1m</button>
+        <button class="rb-btn">5m</button>
+        <button class="rb-btn">15m</button>
+      </div>
+    </div>
+    <div class="side-card">
+      <div class="side-title">Price Alerts</div>
+      <div class="alert-row"><span class="alert-name">BTC Entry</span><div style="display:flex;align-items:center;gap:6px;"><span class="alert-val">$84,230</span><div class="alert-dot"></div></div></div>
+      <div class="alert-row"><span class="alert-name">ETH TP1</span><div style="display:flex;align-items:center;gap:6px;"><span class="alert-val">$1,810</span><div class="alert-dot" style="background:var(--green);box-shadow:0 0 4px var(--green);"></div></div></div>
+      <div class="alert-row"><span class="alert-name">GOLD SL</span><div style="display:flex;align-items:center;gap:6px;"><span class="alert-val">$3,190</span><div class="alert-dot" style="background:var(--red);box-shadow:0 0 4px var(--red);"></div></div></div>
+    </div>
+    <div class="side-card">
+      <div class="side-title">BTC Scenarios (7 days)</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;justify-content:space-between;padding:8px;background:var(--green-dim);border-radius:var(--r);border:1px solid rgba(0,201,141,0.2);"><span style="font-family:var(--font-display);font-size:11px;font-weight:700;color:var(--green);">BULL</span><span style="font-family:var(--font-mono);font-size:12px;color:var(--green);">$96,800 (+15%)</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px;background:var(--amber-dim);border-radius:var(--r);border:1px solid rgba(245,166,35,0.2);"><span style="font-family:var(--font-display);font-size:11px;font-weight:700;color:var(--amber);">BASE</span><span style="font-family:var(--font-mono);font-size:12px;color:var(--amber);">$88,100 (+5%)</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px;background:var(--red-dim);border-radius:var(--r);border:1px solid rgba(255,68,89,0.2);"><span style="font-family:var(--font-display);font-size:11px;font-weight:700;color:var(--red);">BEAR</span><span style="font-family:var(--font-mono);font-size:12px;color:var(--red);">$78,400 (−7%)</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ SCANNER TAB ═══════════════════ -->
+<div id="tab-scanner" class="tab-panel">
+  <div class="main-col" style="max-width:100%;">
+
+    <div class="scan-controls">
+      <select class="scan-select"><option>Crypto Top 20</option><option>US Large Caps</option><option>Forex Majors</option><option>All Instruments</option></select>
+      <select class="scan-select"><option>Multi-TF (All)</option><option>15M</option><option>1H</option><option>4H</option><option>1D</option></select>
+      <button class="btn-primary">▶ Run Scan</button>
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--text3);">Last scan: 09:14 UTC · 23 results</span>
+    </div>
+
+    <div class="scan-filters">
+      <button class="scan-filter-btn active">All</button>
+      <button class="scan-filter-btn">BUY Only</button>
+      <button class="scan-filter-btn">SELL Only</button>
+      <button class="scan-filter-btn">High Conf</button>
+      <button class="scan-filter-btn">Crypto</button>
+      <button class="scan-filter-btn">Stocks</button>
+      <button class="scan-filter-btn">Forex</button>
+    </div>
+
+    <div style="font-size:11px;color:var(--text3);font-family:var(--font-body);margin-bottom:10px;padding:8px 12px;background:var(--surface);border-radius:var(--r);border:1px solid var(--border);">
+      Full DotVerse analysis (65% confluence gate). Click a TF cell → expand details. Click ticker → open on Signals tab.
+    </div>
+
+    <!-- AUDIT #8: display font ticker, AUDIT #9: --row-index stagger -->
+    <table class="scan-table">
+      <thead><tr>
+        <th>Instrument</th>
+        <th>15M</th><th>1H</th><th>4H</th><th>1D</th><th>1W</th>
+        <th>Price</th><th>Confidence</th>
+      </tr></thead>
+      <tbody>
+        <tr style="--row-index:0">
+          <td><div class="scan-ticker">BTC-USD</div><div class="scan-asset">Crypto · Binance</div></td>
+          <td><button class="scan-pill buy">BUY</button><div class="scan-levels">E: 84,230</div></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill buy">BUY</button><div class="scan-levels">SL: 80,918 · TP: 91,000</div></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill hold">HOLD</button></td>
+          <td style="font-family:var(--font-mono);">$84,230</td>
+          <td><span class="tag green">HIGH</span></td>
+        </tr>
+        <tr style="--row-index:1">
+          <td><div class="scan-ticker">ETH-USD</div><div class="scan-asset">Crypto · Binance</div></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill hold">HOLD</button></td>
+          <td><button class="scan-pill buy">BUY</button><div class="scan-levels">E: 1,612 · TP: 1,810</div></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td style="font-family:var(--font-mono);">$1,612</td>
+          <td><span class="tag green">HIGH</span></td>
+        </tr>
+        <tr style="--row-index:2">
+          <td><div class="scan-ticker">EURUSD</div><div class="scan-asset">Forex</div></td>
+          <td><button class="scan-pill sell">SELL</button></td>
+          <td><button class="scan-pill sell">SELL</button><div class="scan-levels">E: 1.0842 · SL: 1.0910</div></td>
+          <td><button class="scan-pill sell">SELL</button></td>
+          <td><button class="scan-pill hold">HOLD</button></td>
+          <td><button class="scan-pill hold">HOLD</button></td>
+          <td style="font-family:var(--font-mono);">1.08420</td>
+          <td><span class="tag amber">MEDIUM</span></td>
+        </tr>
+        <tr style="--row-index:3">
+          <td><div class="scan-ticker">GOLD</div><div class="scan-asset">Commodity · GC=F</div></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill buy">BUY</button><div class="scan-levels">E: 3,232 · TP: 3,310</div></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td style="font-family:var(--font-mono);">$3,232</td>
+          <td><span class="tag green">HIGH</span></td>
+        </tr>
+        <tr style="--row-index:4">
+          <td><div class="scan-ticker">AAPL</div><div class="scan-asset">Stock · NASDAQ</div></td>
+          <td><button class="scan-pill hold">HOLD</button></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill buy">BUY</button><div class="scan-levels">E: 192.40 · TP: 206.00</div></td>
+          <td><button class="scan-pill buy">BUY</button></td>
+          <td><button class="scan-pill hold">HOLD</button></td>
+          <td style="font-family:var(--font-mono);">$192.40</td>
+          <td><span class="tag amber">MEDIUM</span></td>
+        </tr>
+        <tr style="--row-index:5">
+          <td><div class="scan-ticker">SOL-USD</div><div class="scan-asset">Crypto · Binance</div></td>
+          <td><button class="scan-pill sell">SELL</button></td>
+          <td><button class="scan-pill sell">SELL</button></td>
+          <td><button class="scan-pill sell">SELL</button><div class="scan-levels">E: 118.40 · SL: 125.00</div></td>
+          <td><button class="scan-pill hold">HOLD</button></td>
+          <td><button class="scan-pill hold">HOLD</button></td>
+          <td style="font-family:var(--font-mono);">$118.40</td>
+          <td><span class="tag green">HIGH</span></td>
+        </tr>
+        <tr class="scan-expand" style="--row-index:6">
+          <td colspan="8">
+            <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;">
+              <span style="font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text);">BTC-USD · 4H</span>
+              <span class="scan-pill buy" style="cursor:default;">BUY</span>
+              <span class="conf-label" style="font-size:10px;padding:2px 8px;"><span class="conf-dot"></span>CONFIRMED · 78%</span>
+            </div>
+            <div class="expand-inner">
+              <div class="expand-cell"><div class="expand-lbl">Entry</div><div class="expand-val" style="color:var(--amber);">$84,230</div></div>
+              <div class="expand-cell"><div class="expand-lbl">Stop Loss</div><div class="expand-val" style="color:var(--red);">$80,918</div></div>
+              <div class="expand-cell"><div class="expand-lbl">TP 1</div><div class="expand-val" style="color:var(--green);">$91,000</div></div>
+              <div class="expand-cell"><div class="expand-lbl">TP 2</div><div class="expand-val" style="color:var(--green);">$96,800</div></div>
+              <div class="expand-cell"><div class="expand-lbl">RR</div><div class="expand-val">2.03×</div></div>
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--text2);font-family:var(--font-body);">RSI trending up · EMA 9/21 bullish cross · MACD histogram positive · Volume above 20-bar average · 78% sub-indicator agreement</div>
+            <button class="btn-primary" style="margin-top:10px;font-size:12px;">Open on Signals →</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════ BACKTEST TAB ═══════════════════ -->
+<div id="tab-backtest" class="tab-panel">
+  <div class="main-col">
+    <div class="bt-controls">
+      <span style="font-family:var(--font-display);font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;">Instrument</span>
+      <button class="bt-ticker-btn active">BTC-USD</button>
+      <button class="bt-ticker-btn">ETH-USD</button>
+      <button class="bt-ticker-btn">SOL-USD</button>
+      <button class="bt-ticker-btn">AAPL</button>
+      <button class="bt-ticker-btn">NVDA</button>
+      <button class="bt-ticker-btn">EURUSD</button>
+      <button class="bt-ticker-btn">GOLD</button>
+    </div>
+    <div class="bt-controls">
+      <span style="font-family:var(--font-display);font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;">Timeframe</span>
+      <button class="bt-ticker-btn">15M</button>
+      <button class="bt-ticker-btn">1H</button>
+      <button class="bt-ticker-btn active">4H</button>
+      <button class="bt-ticker-btn">1D</button>
+      <button class="btn-primary" style="margin-left:auto;">▶ Run Backtest</button>
+    </div>
+    <div class="bt-stats">
+      <div class="bt-stat"><div class="bt-stat-lbl">Total Trades</div><div class="bt-stat-val amb">47</div></div>
+      <div class="bt-stat"><div class="bt-stat-lbl">Win Rate</div><div class="bt-stat-val pos">63.8%</div></div>
+      <div class="bt-stat"><div class="bt-stat-lbl">Profit Factor</div><div class="bt-stat-val pos">2.14</div></div>
+      <div class="bt-stat"><div class="bt-stat-lbl">Max Drawdown</div><div class="bt-stat-val neg">−12.4%</div></div>
+      <div class="bt-stat"><div class="bt-stat-lbl">Sharpe Ratio</div><div class="bt-stat-val pos">1.82</div></div>
+      <div class="bt-stat"><div class="bt-stat-lbl">Avg RR</div><div class="bt-stat-val amb">2.3:1</div></div>
+      <div class="bt-stat"><div class="bt-stat-lbl">Net Return</div><div class="bt-stat-val pos">+68.4%</div></div>
+      <div class="bt-stat"><div class="bt-stat-lbl">Period</div><div class="bt-stat-val" style="font-size:12px;">Apr '24 – Apr '26</div></div>
+    </div>
+    <div class="section-title">Equity Curve</div>
+    <div class="bt-chart">
+      <div class="bt-bar" style="height:30%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:45%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:25%;background:var(--red);"></div>
+      <div class="bt-bar" style="height:60%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:35%;background:var(--red);"></div>
+      <div class="bt-bar" style="height:70%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:55%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:20%;background:var(--red);"></div>
+      <div class="bt-bar" style="height:80%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:65%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:40%;background:var(--red);"></div>
+      <div class="bt-bar" style="height:90%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:75%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:50%;background:var(--red);"></div>
+      <div class="bt-bar" style="height:85%;background:var(--green);"></div>
+      <div class="bt-bar" style="height:95%;background:var(--green);"></div>
+    </div>
+    <div class="section-title">Research Script · ATR-based · for backtesting only · not for live trades</div>
+    <div class="pine-box">
+      <span class="pine-cmt">// DotVerse Research Script — BTC-USD 4H · Wilder ATR14 · 4× Stop</span><br>
+      <span class="pine-cmt">// For backtesting only. Use Signals tab exact levels for live trades.</span><br>
+      <span class="pine-kw">//@version</span>=<span class="pine-num">5</span><br>
+      <span class="pine-fn">strategy</span>(<span class="pine-str">"DotVerse ATR Strategy"</span>, overlay=<span class="pine-kw">true</span>)<br><br>
+      atr_raw = <span class="pine-fn">ta.rma</span>(ta.tr(<span class="pine-kw">true</span>), <span class="pine-num">14</span>)<br>
+      atr     = <span class="pine-fn">ta.sma</span>(atr_raw, <span class="pine-num">100</span>)<br>
+      rsi     = <span class="pine-fn">ta.rsi</span>(close, <span class="pine-num">10</span>)<br>
+      ema_f   = <span class="pine-fn">ta.ema</span>(close, <span class="pine-num">9</span>)<br>
+      ema_s   = <span class="pine-fn">ta.ema</span>(close, <span class="pine-num">21</span>)<br><br>
+      buy_sig = ema_f > ema_s <span class="pine-kw">and</span> rsi > <span class="pine-num">50</span> <span class="pine-kw">and</span> close > ema_f<br>
+      sl_dist = atr * <span class="pine-num">4.0</span><br><br>
+      <span class="pine-kw">if</span> buy_sig<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="pine-fn">strategy.entry</span>(<span class="pine-str">"Long"</span>, strategy.long)<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="pine-fn">strategy.exit</span>(<span class="pine-str">"TP/SL"</span>, stop=close - sl_dist, limit=close + sl_dist * <span class="pine-num">2.0</span>)<br>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ SIMULATION TAB ═══════════════════ -->
+<div id="tab-simulation" class="tab-panel">
+  <div class="main-col">
+    <div class="cmd-bar">
+      <input class="cmd-input" value="BTC-USD" placeholder="Ticker">
+      <button class="btn-primary">▶ Run Simulation</button>
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--text3);">Monte Carlo · 500 paths · 30 days</span>
+    </div>
+    <div class="sim-svg-wrap">
+      <svg width="100%" height="220" viewBox="0 0 900 220" preserveAspectRatio="none">
+        <line x1="0" y1="55" x2="900" y2="55" stroke="#2a2620" stroke-width="1"/>
+        <line x1="0" y1="110" x2="900" y2="110" stroke="#2a2620" stroke-width="1"/>
+        <line x1="0" y1="165" x2="900" y2="165" stroke="#2a2620" stroke-width="1"/>
+        <polyline points="450,110 550,75 650,50 750,40 850,30 900,25" fill="none" stroke="#00c98d" stroke-width="1.5" opacity="0.7"/>
+        <polyline points="450,110 550,95 650,90 750,88 850,82 900,78" fill="none" stroke="#f5a623" stroke-width="2"/>
+        <polyline points="450,110 550,125 650,145 750,160 850,175 900,185" fill="none" stroke="#ff4459" stroke-width="1.5" opacity="0.7"/>
+        <polygon points="450,110 550,75 650,50 750,40 850,30 900,25 900,185 850,175 750,160 650,145 550,125 450,110" fill="rgba(74,143,196,0.04)"/>
+        <polyline points="0,190 80,180 160,165 240,155 320,148 400,135 450,110" fill="none" stroke="#5a5248" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="905" y="28" fill="#00c98d" font-size="11" font-family="Fira Code">Bull</text>
+        <text x="905" y="82" fill="#f5a623" font-size="11" font-family="Fira Code">Base</text>
+        <text x="905" y="188" fill="#ff4459" font-size="11" font-family="Fira Code">Bear</text>
+        <line x1="450" y1="0" x2="450" y2="220" stroke="#5a5248" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="453" y="12" fill="#5a5248" font-size="10" font-family="Fira Code">Now</text>
+      </svg>
+    </div>
+    <div class="scenario-cards">
+      <div class="sc-card bull"><div class="sc-type">🐂 Bull</div><div class="sc-target">$96,800</div><div class="sc-pct">+14.9%</div><div class="sc-prob">Probability: 28%</div></div>
+      <div class="sc-card base"><div class="sc-type">➡ Base</div><div class="sc-target">$88,100</div><div class="sc-pct">+4.6%</div><div class="sc-prob">Probability: 52%</div></div>
+      <div class="sc-card bear"><div class="sc-type">🐻 Bear</div><div class="sc-target">$78,400</div><div class="sc-pct">−7.0%</div><div class="sc-prob">Probability: 20%</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Trade Plan — Base Scenario</div>
+      <div style="font-family:var(--font-body);font-size:13px;color:var(--text2);line-height:1.7;">
+        <strong style="color:var(--amber);">Entry zone:</strong> $83,500–$84,500<br>
+        <strong style="color:var(--red);">Stop loss:</strong> $80,918 — 4× ATR below entry<br>
+        <strong style="color:var(--green);">TP1 (50%):</strong> $88,100 — base target<br>
+        <strong style="color:var(--green);">TP2 (rest):</strong> $91,000–$93,000 — breakout extension<br>
+        <span style="font-size:11px;color:var(--text3);">Monte Carlo · 500 paths · log-normal returns · historical vol 42% annualised</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ INTELLIGENCE TAB ═══════════════════ -->
+<div id="tab-news" class="tab-panel">
+  <div style="display:flex;flex:1;min-height:0;">
+  <div class="main-col">
+    <div class="section-title">Central Bank Rates</div>
+    <div class="cb-rates">
+      <div class="cb-cell"><div class="cb-bank">Fed</div><div class="cb-rate">4.25%</div><div class="cb-chg hold">→ HOLD</div></div>
+      <div class="cb-cell"><div class="cb-bank">ECB</div><div class="cb-rate">2.50%</div><div class="cb-chg cut">↓ CUT −25bp</div></div>
+      <div class="cb-cell"><div class="cb-bank">BOE</div><div class="cb-rate">4.50%</div><div class="cb-chg hold">→ HOLD</div></div>
+      <div class="cb-cell"><div class="cb-bank">BOJ</div><div class="cb-rate">0.50%</div><div class="cb-chg hike">↑ HIKE +25bp</div></div>
+    </div>
+    <div class="section-title">Market KPIs</div>
+    <div class="intel-grid">
+      <div class="intel-kpi"><div class="intel-kpi-lbl">US CPI (YoY)</div><div class="intel-kpi-val">2.8%</div><div class="intel-kpi-chg dn">▼ prev 3.1%</div></div>
+      <div class="intel-kpi"><div class="intel-kpi-lbl">DXY</div><div class="intel-kpi-val">102.40</div><div class="intel-kpi-chg dn">▼ −0.84%</div></div>
+      <div class="intel-kpi"><div class="intel-kpi-lbl">VIX</div><div class="intel-kpi-val">18.3</div><div class="intel-kpi-chg up">▲ +2.1pts</div></div>
+      <div class="intel-kpi"><div class="intel-kpi-lbl">10Y UST</div><div class="intel-kpi-val">4.12%</div><div class="intel-kpi-chg dn">▼ −8bp</div></div>
+      <div class="intel-kpi"><div class="intel-kpi-lbl">BTC Dom.</div><div class="intel-kpi-val">54.2%</div><div class="intel-kpi-chg up">▲ +1.1%</div></div>
+      <div class="intel-kpi"><div class="intel-kpi-lbl">Oil WTI</div><div class="intel-kpi-val">$61.40</div><div class="intel-kpi-chg dn">▼ −1.8%</div></div>
+    </div>
+    <div class="section-title">Analysis Feed</div>
+    <div class="news-feed">
+      <div class="news-item"><span class="news-tag bull">Bullish</span><div><div class="news-headline">Bitcoin breaks above $84K as DXY continues week-long decline — technicals support continuation to $88–91K</div><div class="news-meta">Crypto · 14 Apr 2026 · 08:42 UTC</div></div></div>
+      <div class="news-item"><span class="news-tag bear">Bearish</span><div><div class="news-headline">Fed minutes signal "higher for longer" unchanged — rate cut expectations pushed to Q4 2026</div><div class="news-meta">Macro · 14 Apr 2026 · 06:30 UTC</div></div></div>
+      <div class="news-item"><span class="news-tag bull">Bullish</span><div><div class="news-headline">Gold hits fresh all-time high at $3,245 — safe haven demand driven by geopolitical uncertainty</div><div class="news-meta">Commodities · 14 Apr 2026 · 05:15 UTC</div></div></div>
+      <div class="news-item"><span class="news-tag neut">Neutral</span><div><div class="news-headline">Ethereum network upgrade scheduled Q3 — developer activity at 18-month high, price reaction muted</div><div class="news-meta">Crypto · 13 Apr 2026 · 20:00 UTC</div></div></div>
+      <div class="news-item"><span class="news-tag bear">Bearish</span><div><div class="news-headline">China retaliates with 125% tariff on US goods — risk-off sentiment weighing on equities</div><div class="news-meta">Macro · 13 Apr 2026 · 14:20 UTC</div></div></div>
+    </div>
+  </div>
+  <div class="side-col">
+    <div class="side-card">
+      <div class="side-title">Economic Calendar</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="alert-row"><div><div style="font-size:12px;color:var(--text);font-family:var(--font-body);">US Retail Sales MoM</div><div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">Today 13:30 UTC</div></div><span class="tag red">HIGH</span></div>
+        <div class="alert-row"><div><div style="font-size:12px;color:var(--text);font-family:var(--font-body);">ECB Rate Decision</div><div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">Tomorrow 12:15 UTC</div></div><span class="tag red">HIGH</span></div>
+        <div class="alert-row" style="border-bottom:none;"><div><div style="font-size:12px;color:var(--text);font-family:var(--font-body);">US Initial Jobless Claims</div><div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">Thu 13:30 UTC</div></div><span class="tag amber">MED</span></div>
+      </div>
+    </div>
+    <div class="side-card">
+      <div class="side-title">Sentiment Overview</div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div class="alert-row"><span class="alert-name">BTC</span><span class="tag green">Greed 72</span></div>
+        <div class="alert-row"><span class="alert-name">ETH</span><span class="tag steel">Neutral 48</span></div>
+        <div class="alert-row"><span class="alert-name">Stocks</span><span class="tag steel">Neutral 44</span></div>
+        <div class="alert-row" style="border-bottom:none;"><span class="alert-name">Forex</span><span class="tag red">Fear 31</span></div>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ PORTFOLIO TAB ═══════════════════ -->
+<div id="tab-portfolio" class="tab-panel">
+  <div class="main-col">
+    <div class="section-title">Portfolio Risk Manager</div>
+    <div class="pf-summary">
+      <div class="pf-kpi"><div class="pf-kpi-lbl">Portfolio Value</div><div class="pf-kpi-val">$33,480</div></div>
+      <div class="pf-kpi"><div class="pf-kpi-lbl">Unrealised P&amp;L</div><div class="pf-kpi-val pos">+$1,240 (+3.8%)</div></div>
+      <div class="pf-kpi"><div class="pf-kpi-lbl">VaR 95% (1D)</div><div class="pf-kpi-val neg">−$824 (2.46%)</div></div>
+      <div class="pf-kpi"><div class="pf-kpi-lbl">Portfolio Std</div><div class="pf-kpi-val" style="color:var(--amber);">1.50%</div></div>
+    </div>
+    <div class="section-title">Open Positions</div>
+    <table class="pf-table">
+      <thead><tr><th>Ticker</th><th>Direction</th><th>Size</th><th>Entry</th><th>Current</th><th>P&amp;L</th><th>Opened</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr>
+          <td style="font-family:var(--font-display);font-weight:700;color:var(--text);">AAPL</td>
+          <td><span class="tag green">BUY</span></td><td>5 shares</td><td>$192.40</td>
+          <td style="color:var(--green);">$197.80</td><td style="color:var(--green);">+$27.00</td>
+          <td>2026-04-13</td><td><button class="btn-ghost" style="font-size:11px;padding:4px 10px;">Close</button></td>
+        </tr>
+        <tr>
+          <td style="font-family:var(--font-display);font-weight:700;color:var(--text);">BTC-USD</td>
+          <td><span class="tag green">BUY</span></td><td>0.0998 BTC</td><td>$82,100</td>
+          <td style="color:var(--green);">$84,230</td><td style="color:var(--green);">+$212.57</td>
+          <td>2026-04-12</td><td><button class="btn-ghost" style="font-size:11px;padding:4px 10px;">Close</button></td>
+        </tr>
+        <tr>
+          <td style="font-family:var(--font-display);font-weight:700;color:var(--text);">EURUSD</td>
+          <td><span class="tag red">SELL</span></td><td>0.1 lot</td><td>1.09100</td>
+          <td style="color:var(--green);">1.08420</td><td style="color:var(--green);">+$68.00</td>
+          <td>2026-04-11</td><td><button class="btn-ghost" style="font-size:11px;padding:4px 10px;">Close</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+      <div class="card">
+        <div class="card-title">Add Position</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div class="calc-field"><div class="calc-label">Ticker</div><input class="calc-input" placeholder="e.g. AAPL"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="calc-field"><div class="calc-label">Direction</div><input class="calc-input" value="BUY"></div>
+            <div class="calc-field"><div class="calc-label">Size</div><input class="calc-input" value="1"></div>
+          </div>
+          <div class="calc-field"><div class="calc-label">Entry Price</div><input class="calc-input" placeholder="0.00"></div>
+          <button class="btn-primary" style="width:100%;">+ Add Position</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Stress Test</div>
+        <div class="stress-rows">
+          <div class="stress-row"><div class="stress-asset">BTC-USD</div><div class="stress-shock">−20% shock</div><div class="stress-pnl">−$1,679</div></div>
+          <div class="stress-row"><div class="stress-asset">AAPL</div><div class="stress-shock">−20% shock</div><div class="stress-pnl">−$192</div></div>
+          <div class="stress-row"><div class="stress-asset">EURUSD</div><div class="stress-shock">+200 pips</div><div class="stress-pnl">−$200</div></div>
+          <div class="stress-row" style="border-top:1px solid var(--border);padding-top:8px;"><div class="stress-asset" style="color:var(--red);">Total Impact</div><div></div><div class="stress-pnl" style="font-size:15px;">−$2,071</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="section-title">Value at Risk</div>
+    <div class="var-display">
+      <div class="var-block"><div class="var-lbl">95% VaR (1D)</div><div class="var-val">−$824</div><div class="var-sub">2.46% of portfolio</div></div>
+      <div class="var-block"><div class="var-lbl">99% VaR (1D)</div><div class="var-val">−$1,190</div><div class="var-sub">3.56% of portfolio</div></div>
+      <div class="var-block"><div class="var-lbl">Portfolio Std Dev</div><div class="var-val" style="color:var(--amber);">1.50%</div><div class="var-sub">252-day rolling</div></div>
+    </div>
+    <div class="section-title">Correlation Heatmap</div>
+    <div class="heatmap-grid">
+      <div class="hm-cell label"></div><div class="hm-cell label">BTC</div><div class="hm-cell label">AAPL</div><div class="hm-cell label">GC=F</div><div class="hm-cell label">^GSPC</div><div class="hm-cell label">EUR</div>
+      <div class="hm-cell label">BTC</div><div class="hm-cell diag">1.00</div><div class="hm-cell pos-low">0.31</div><div class="hm-cell neg-low">−0.12</div><div class="hm-cell pos-mid">0.44</div><div class="hm-cell neg-low">−0.08</div>
+      <div class="hm-cell label">AAPL</div><div class="hm-cell pos-low">0.31</div><div class="hm-cell diag">1.00</div><div class="hm-cell neg-mid">−0.28</div><div class="hm-cell pos-high">0.82</div><div class="hm-cell pos-low">0.14</div>
+      <div class="hm-cell label">Gold</div><div class="hm-cell neg-low">−0.12</div><div class="hm-cell neg-mid">−0.28</div><div class="hm-cell diag">1.00</div><div class="hm-cell neg-low">−0.19</div><div class="hm-cell pos-mid">0.38</div>
+      <div class="hm-cell label">SPX</div><div class="hm-cell pos-mid">0.44</div><div class="hm-cell pos-high">0.82</div><div class="hm-cell neg-low">−0.19</div><div class="hm-cell diag">1.00</div><div class="hm-cell pos-low">0.22</div>
+      <div class="hm-cell label">EUR</div><div class="hm-cell neg-low">−0.08</div><div class="hm-cell pos-low">0.14</div><div class="hm-cell pos-mid">0.38</div><div class="hm-cell pos-low">0.22</div><div class="hm-cell diag">1.00</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Parameter Optimisation</div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;">
+        <select class="scan-select"><option>Crypto</option><option>Stocks</option><option>Forex</option></select>
+        <button class="btn-primary">▶ Run Optimisation</button>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--text3);">RQ worker · ~45s</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;">
+        <div class="bt-stat"><div class="bt-stat-lbl">RSI Period</div><div class="bt-stat-val amb">10</div></div>
+        <div class="bt-stat"><div class="bt-stat-lbl">ATR Mult</div><div class="bt-stat-val amb">4.0×</div></div>
+        <div class="bt-stat"><div class="bt-stat-lbl">EMA Fast</div><div class="bt-stat-val amb">9</div></div>
+        <div class="bt-stat"><div class="bt-stat-lbl">EMA Slow</div><div class="bt-stat-val amb">21</div></div>
+        <div class="bt-stat"><div class="bt-stat-lbl">Sharpe</div><div class="bt-stat-val pos">1.82</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /app -->
+
+<script>
+function switchTab(id) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  const tabs = ['signals','scanner','backtest','simulation','news','portfolio'];
+  const idx = tabs.indexOf(id);
+  if (idx >= 0) document.querySelectorAll('.nav-tab')[idx].classList.add('active');
+  const panel = document.getElementById('tab-' + id);
+  if (panel) panel.style.display = (id === 'signals') ? 'flex' : 'block';
+}
+document.querySelectorAll('.gpill').forEach(b => {
+  b.addEventListener('click', function() {
+    this.closest('.pill-group')?.querySelectorAll('.gpill').forEach(x => x.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+document.querySelectorAll('.rb-btn').forEach(b => {
+  b.addEventListener('click', function() {
+    this.closest('.auto-refresh').querySelectorAll('.rb-btn').forEach(x => x.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+document.querySelectorAll('.inst-chip').forEach(b => {
+  b.addEventListener('click', function() {
+    document.querySelectorAll('.inst-chip').forEach(x => x.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+document.querySelectorAll('.scan-filter-btn').forEach(b => {
+  b.addEventListener('click', function() {
+    document.querySelectorAll('.scan-filter-btn').forEach(x => x.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+document.querySelectorAll('.bt-ticker-btn').forEach(b => {
+  b.addEventListener('click', function() {
+    this.closest('.bt-controls').querySelectorAll('.bt-ticker-btn').forEach(x => x.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+// Trigger win badge spring animation after load
+window.addEventListener('load', () => {
+  const fill = document.getElementById('wbFill');
+  if (fill) { fill.style.width = '0'; requestAnimationFrame(() => { fill.style.width = '63%'; }); }
+});
+</script>
+</body>
+</html>

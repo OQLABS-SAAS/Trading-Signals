@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DotVerse — Full UI Design Audit</title>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:ital,wght@0,400;0,700;0,900;1,900&family=Fira+Code:wght@300;400;500;600&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0C0A08;--bg1:#111009;--bg2:#1a1710;--bg3:#231f17;--bg4:#2c271d;
+  --amber:#f5a623;--amber2:#ffc054;--amber-glow:rgba(245,166,35,.13);--amber-dim:rgba(245,166,35,.07);
+  --green:#00c98d;--green-bg:rgba(0,201,141,.09);--red:#ff4459;--red-bg:rgba(255,68,89,.09);
+  --white:#ede6d6;--white2:rgba(237,230,214,.75);--muted:#6b6050;--muted2:#9a8e7e;
+  --border:rgba(245,166,35,.1);--border2:rgba(245,166,35,.2);
+  --disp:'Anybody',sans-serif;--mono:'Fira Code',monospace;--body:'Sora',sans-serif;
+  --r:3px;--r2:6px;--ease:cubic-bezier(.4,0,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--white);font-family:var(--body);padding:32px 40px;line-height:1.6;}
+body::after{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(245,166,35,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(245,166,35,.025) 1px,transparent 1px);background-size:64px 64px;pointer-events:none;z-index:0;}
+
+/* ── PAGE ── */
+.page-title{font-family:var(--disp);font-size:28px;font-weight:900;letter-spacing:-1px;margin-bottom:4px;}
+.page-sub{font-family:var(--mono);font-size:11px;color:var(--muted2);letter-spacing:1.5px;margin-bottom:40px;padding-bottom:20px;border-bottom:1px solid var(--border);}
+.section{margin-bottom:52px;position:relative;z-index:1;}
+.section-title{font-family:var(--mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:rgba(245,166,35,.6);margin-bottom:18px;display:flex;align-items:center;gap:10px;}
+.section-title::after{content:'';flex:1;height:1px;background:rgba(245,166,35,.12);}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:1000px;}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;max-width:1000px;}
+.col-lbl{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;margin-bottom:10px;}
+.before{opacity:.32;}
+.tag-b{font-family:var(--mono);font-size:9px;color:var(--muted);background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:2px;padding:1px 6px;margin-left:6px;}
+.tag-a{font-family:var(--mono);font-size:9px;color:var(--amber);background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.25);border-radius:2px;padding:1px 6px;margin-left:6px;}
+.note{font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:10px;line-height:1.7;}
+
+/* ══════════════════════════════════════
+   1. SECTION HEADERS
+══════════════════════════════════════ */
+.sec-hdr-before{display:flex;align-items:center;gap:8px;padding:14px 20px 10px;font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--amber);}
+.sec-hdr-before::after{content:'';flex:1;height:1px;background:var(--border);}
+
+.sec-hdr{display:flex;align-items:center;gap:10px;padding:12px 0 8px;font-family:var(--mono);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:var(--amber);}
+.sec-hdr::before{content:'';width:3px;height:14px;background:var(--amber);border-radius:2px;flex-shrink:0;box-shadow:0 0 8px rgba(245,166,35,.4);}
+.sec-hdr::after{content:'';flex:1;height:1px;background:linear-gradient(to right,rgba(245,166,35,.2),transparent);}
+
+/* ══════════════════════════════════════
+   2. INDICATOR CARDS
+══════════════════════════════════════ */
+@keyframes barFill{from{width:0}to{width:var(--w,50%)}}
+@keyframes badgePop{0%{transform:scale(.7);opacity:0}70%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+@keyframes valIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes cardIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes glowPulse{0%,100%{box-shadow:0 0 0 1px rgba(245,166,35,.35),0 0 0px rgba(245,166,35,0)}50%{box-shadow:0 0 0 1px rgba(245,166,35,.5),0 0 12px rgba(245,166,35,.1)}}
+
+.ind-grid-before{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);}
+.ind-card-b{background:var(--bg1);padding:16px 18px;}
+.ind-badge-b{font-family:var(--mono);font-size:10px;font-weight:700;padding:3px 9px;border-radius:2px;text-transform:uppercase;letter-spacing:.5px;background:rgba(0,201,141,.12);color:var(--green);border:1px solid rgba(0,201,141,.26);}
+
+.ind-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.ind-card{
+  background:var(--bg2);
+  border:1px solid rgba(245,166,35,.08);
+  border-radius:var(--r2);padding:16px;
+  cursor:pointer;position:relative;overflow:hidden;
+  transition:border-color .2s var(--ease), background .2s var(--ease), transform .2s var(--ease), box-shadow .2s var(--ease);
+  animation:cardIn .35s ease both;
+}
+.ind-card:nth-child(1){animation-delay:.04s}
+.ind-card:nth-child(2){animation-delay:.08s}
+.ind-card:nth-child(3){animation-delay:.12s}
+.ind-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(245,166,35,.2),transparent);opacity:0;transition:opacity .2s;}
+.ind-card:hover{border-color:rgba(245,166,35,.28);background:var(--bg3);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4);}
+.ind-card:hover::before{opacity:1;}
+.ind-card.bull{border-color:rgba(0,201,141,.18);}
+.ind-card.bear{border-color:rgba(255,68,89,.15);}
+.ind-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;}
+.ind-label{font-size:13px;font-weight:600;color:var(--white);}
+.ind-sub{font-family:var(--mono);font-size:10px;color:rgba(245,190,80,.45);margin-top:2px;}
+.ind-badge{font-family:var(--mono);font-size:10px;font-weight:700;padding:3px 9px;border-radius:2px;letter-spacing:.5px;text-transform:uppercase;animation:badgePop .4s cubic-bezier(.34,1.56,.64,1) .3s both;}
+.ind-badge.bull{background:rgba(0,201,141,.12);color:var(--green);border:1px solid rgba(0,201,141,.26);}
+.ind-badge.bear{background:rgba(255,68,89,.12);color:#ff6b7a;border:1px solid rgba(255,68,89,.24);}
+.ind-badge.neut{background:rgba(245,166,35,.1);color:var(--amber);border:1px solid rgba(245,166,35,.25);}
+.ind-val{font-family:var(--disp);font-size:24px;font-weight:900;color:var(--white);letter-spacing:-.5px;animation:valIn .3s ease .1s both;}
+.ind-desc{font-size:11.5px;color:var(--white2);line-height:1.5;margin:6px 0;}
+.bar-track{background:var(--bg4);border-radius:3px;height:4px;overflow:hidden;margin-top:10px;}
+.bar-fill{height:100%;border-radius:3px;animation:barFill .9s cubic-bezier(.4,0,.2,1) .2s both;}
+.bar-fill.bull{background:linear-gradient(90deg,var(--green),rgba(0,201,141,.5));}
+.bar-fill.bear{background:linear-gradient(90deg,var(--red),rgba(255,68,89,.5));}
+.bar-fill.neut{background:linear-gradient(90deg,var(--amber),rgba(245,166,35,.5));}
+
+/* ══════════════════════════════════════
+   3. MTF GRID
+══════════════════════════════════════ */
+@keyframes cellIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+
+.mtf-before{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;}
+.mtfc-b{background:var(--bg2);border:1px solid var(--border);border-radius:2px;padding:10px 8px;text-align:center;}
+
+.mtf-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;}
+.mtfc{
+  border:1px solid transparent;border-radius:var(--r);padding:10px 6px;text-align:center;cursor:pointer;
+  transition:transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s;
+  animation:cellIn .3s ease both;position:relative;overflow:hidden;
+}
+.mtfc:nth-child(1){animation-delay:.04s}.mtfc:nth-child(2){animation-delay:.08s}.mtfc:nth-child(3){animation-delay:.12s}
+.mtfc:nth-child(4){animation-delay:.16s}.mtfc:nth-child(5){animation-delay:.20s}.mtfc:nth-child(6){animation-delay:.24s}
+.mtfc.buy{background:rgba(0,201,141,.07);border-color:rgba(0,201,141,.2);}
+.mtfc.sell{background:rgba(255,68,89,.07);border-color:rgba(255,68,89,.18);}
+.mtfc.hold{background:rgba(245,166,35,.06);border-color:rgba(245,166,35,.18);}
+.mtfc:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,.4);}
+.mtfc.buy:hover{box-shadow:0 4px 14px rgba(0,201,141,.12);}
+.mtfc.sell:hover{box-shadow:0 4px 14px rgba(255,68,89,.12);}
+.mtfc-tf{font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:5px;letter-spacing:.5px;}
+.mtfc-sig{font-family:var(--disp);font-size:13px;font-weight:700;letter-spacing:-.3px;}
+.mtfc-sig.buy{color:var(--green);}
+.mtfc-sig.sell{color:var(--red);}
+.mtfc-sig.hold{color:var(--amber);}
+.mtfc-dot{width:5px;height:5px;border-radius:50%;margin:4px auto 0;}
+.mtfc.buy .mtfc-dot{background:var(--green);box-shadow:0 0 5px rgba(0,201,141,.5);}
+.mtfc.sell .mtfc-dot{background:var(--red);box-shadow:0 0 5px rgba(255,68,89,.5);}
+.mtfc.hold .mtfc-dot{background:var(--amber);}
+
+/* ══════════════════════════════════════
+   4. SCANNER TABLE
+══════════════════════════════════════ */
+@keyframes rowIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
+
+.scan-table-b{width:100%;border-collapse:collapse;}
+.scan-table-b th{font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase;text-align:left;padding:9px 14px;border-bottom:1px solid var(--border);}
+.scan-table-b td{font-family:var(--mono);font-size:13px;padding:12px 14px;border-bottom:1px solid rgba(245,166,35,.05);}
+.scan-table-b tr:hover td{background:var(--amber-dim);}
+
+.scan-table{width:100%;border-collapse:collapse;}
+.scan-table th{font-family:var(--mono);font-size:9.5px;color:var(--muted2);letter-spacing:2px;text-transform:uppercase;text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap;}
+.scan-table tbody tr{
+  cursor:pointer;transition:background .15s;position:relative;
+  animation:rowIn .25s ease both;
+}
+.scan-table tbody tr:nth-child(1){animation-delay:.03s}
+.scan-table tbody tr:nth-child(2){animation-delay:.06s}
+.scan-table tbody tr:nth-child(3){animation-delay:.09s}
+.scan-table tbody tr::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:transparent;transition:background .15s;}
+.scan-table tbody tr.buy-row::before,.scan-table tbody tr:hover.buy-row::before{background:var(--green);}
+.scan-table tbody tr.sell-row::before{background:var(--red);}
+.scan-table tbody tr.sell-row:hover::before{background:var(--red);}
+.scan-table tbody tr:hover{background:rgba(245,166,35,.04);}
+.scan-table td{font-family:var(--mono);font-size:12.5px;padding:11px 14px;border-bottom:1px solid rgba(245,166,35,.04);vertical-align:middle;}
+.st-sym{color:var(--amber);font-weight:600;letter-spacing:.3px;}
+.sig-sm{display:inline-flex;align-items:center;padding:3px 10px;border-radius:2px;font-size:10px;font-weight:700;letter-spacing:1px;}
+.sig-sm.buy{background:rgba(0,201,141,.12);color:var(--green);border:1px solid rgba(0,201,141,.2);}
+.sig-sm.sell{background:rgba(255,68,89,.1);color:var(--red);border:1px solid rgba(255,68,89,.18);}
+.sig-sm.hold{background:var(--amber-glow);color:var(--amber);border:1px solid var(--border2);}
+.conf-bar{height:3px;border-radius:2px;background:var(--border);width:60px;overflow:hidden;margin-top:3px;}
+.conf-fill{height:100%;border-radius:2px;background:var(--amber);animation:barFill .6s ease .3s both;}
+
+/* ══════════════════════════════════════
+   5. BACKTEST STAT CARDS
+══════════════════════════════════════ */
+@keyframes countUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+.bt-grid-b{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+.bt-stat-b{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;}
+.bt-lbl-b{font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;}
+.bt-val-b{font-family:var(--disp);font-size:24px;font-weight:900;}
+
+.bt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.bt-stat{
+  background:var(--bg2);border:1px solid rgba(245,166,35,.08);
+  border-radius:var(--r2);padding:14px 16px;
+  position:relative;overflow:hidden;
+  transition:transform .18s var(--ease), box-shadow .18s var(--ease);
+  animation:cardIn .3s ease both;
+}
+.bt-stat:nth-child(1){animation-delay:.05s}.bt-stat:nth-child(2){animation-delay:.1s}.bt-stat:nth-child(3){animation-delay:.15s}
+.bt-stat.pos{border-color:rgba(0,201,141,.15);}
+.bt-stat.neg{border-color:rgba(255,68,89,.12);}
+.bt-stat.neu{border-color:rgba(245,166,35,.18);}
+.bt-stat::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.bt-stat.pos::before{background:linear-gradient(90deg,var(--green),rgba(0,201,141,.2));}
+.bt-stat.neg::before{background:linear-gradient(90deg,var(--red),rgba(255,68,89,.2));}
+.bt-stat.neu::before{background:linear-gradient(90deg,var(--amber),rgba(245,166,35,.2));}
+.bt-stat:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4);}
+.bt-lbl{font-family:var(--mono);font-size:9.5px;color:var(--muted2);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;}
+.bt-val{font-family:var(--disp);font-size:26px;font-weight:900;letter-spacing:-.5px;animation:countUp .5s ease .2s both;}
+.bt-val.pos{color:var(--green);}
+.bt-val.neg{color:var(--red);}
+.bt-val.neu{color:var(--amber);}
+.bt-sub{font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:4px;}
+
+/* ══════════════════════════════════════
+   6. NAVIGATION TABS
+══════════════════════════════════════ */
+.nav-before{display:flex;gap:1px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:3px;padding:3px;width:fit-content;}
+.nav-tab-b{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;padding:7px 16px;border-radius:2px;color:var(--muted2);background:transparent;border:none;}
+.nav-tab-b.active{background:var(--amber);color:#0C0A08;font-weight:700;}
+
+.nav-wrap{display:flex;gap:1px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:3px;padding:3px;width:fit-content;}
+.nav-tab{
+  font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;
+  padding:7px 16px;border-radius:2px;color:var(--muted2);background:transparent;border:none;cursor:pointer;
+  transition:color .15s, background .15s, box-shadow .15s;position:relative;
+}
+.nav-tab:hover{color:var(--white2);background:rgba(245,166,35,.06);}
+.nav-tab.active{
+  background:var(--amber);color:#0C0A08;font-weight:700;
+  box-shadow:0 2px 10px rgba(245,166,35,.35), inset 0 1px 0 rgba(255,255,255,.2);
+}
+.nav-tab.active::after{
+  content:'';position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);
+  width:16px;height:2px;background:var(--amber);border-radius:1px;opacity:.5;
+}
+
+/* ══════════════════════════════════════
+   7. INPUT FOCUS STATE
+══════════════════════════════════════ */
+.input-b{width:100%;background:var(--bg2);border:1px solid var(--border2);color:var(--white);padding:8px 10px;border-radius:2px;font-family:var(--mono);font-size:13px;outline:none;}
+.input-b:focus{border-color:var(--amber);}
+
+.input-field{
+  width:100%;background:var(--bg2);border:1px solid rgba(245,166,35,.18);color:var(--white);
+  padding:8px 12px;border-radius:var(--r);font-family:var(--mono);font-size:13px;outline:none;
+  transition:border-color .18s, box-shadow .18s;
+}
+.input-field:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(245,166,35,.12), 0 0 0 1px var(--amber);}
+
+/* ══════════════════════════════════════
+   8. SIDEBAR SECTIONS
+══════════════════════════════════════ */
+@keyframes sideIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}
+@keyframes needleSpin{from{transform:rotate(-90deg) rotate(0deg)}to{transform:rotate(-90deg) rotate(var(--angle,0deg))}}
+
+.side-b{background:var(--bg1);border-bottom:1px solid var(--border);padding:16px;}
+.side-head-b{font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--amber);margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.side-head-b::after{content:'';flex:1;height:1px;background:var(--border);}
+
+.side-sect{
+  background:var(--bg1);border-bottom:1px solid var(--border);padding:16px;
+  animation:sideIn .35s ease both;
+}
+.side-head{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:2.5px;text-transform:uppercase;
+  color:var(--amber);margin-bottom:14px;
+  display:flex;align-items:center;gap:8px;
+}
+.side-head::before{content:'';width:2px;height:10px;background:var(--amber);border-radius:1px;box-shadow:0 0 6px rgba(245,166,35,.4);}
+.side-head::after{content:'';flex:1;height:1px;background:linear-gradient(to right,rgba(245,166,35,.2),transparent);}
+
+/* news items */
+.news-item{
+  padding:10px 0;border-bottom:1px solid rgba(245,166,35,.06);cursor:pointer;
+  transition:padding-left .18s;position:relative;
+}
+.news-item::before{content:'';position:absolute;left:-16px;top:0;bottom:0;width:2px;background:var(--amber);transform:scaleY(0);transform-origin:top;transition:transform .18s;}
+.news-item:hover{padding-left:8px;}
+.news-item:hover::before{transform:scaleY(1);}
+.ni-time{font-family:var(--mono);font-size:9.5px;color:var(--muted);letter-spacing:.5px;margin-bottom:3px;}
+.ni-head{font-size:12px;color:var(--white2);line-height:1.4;}
+.ni-sent{font-family:var(--mono);font-size:9px;padding:2px 6px;border-radius:2px;margin-top:4px;display:inline-block;}
+.ni-sent.bull{background:rgba(0,201,141,.1);color:var(--green);}
+.ni-sent.bear{background:rgba(255,68,89,.1);color:var(--red);}
+
+/* ══════════════════════════════════════
+   9. AUTO-REFRESH BUTTONS
+══════════════════════════════════════ */
+.rb-b{font-family:var(--mono);font-size:10px;font-weight:600;padding:4px 10px;border-radius:2px;border:1px solid var(--border2);background:transparent;color:var(--muted2);}
+.rb-b.active{background:var(--amber-glow);border-color:var(--amber);color:var(--amber);}
+
+.rb-btn{
+  font-family:var(--mono);font-size:10px;font-weight:600;padding:4px 10px;border-radius:2px;border:1px solid rgba(255,255,255,.07);
+  background:transparent;color:var(--muted2);cursor:pointer;
+  transition:color .15s, border-color .15s, background .15s, box-shadow .15s, transform .12s;
+}
+.rb-btn:hover{color:var(--amber);border-color:rgba(245,166,35,.3);}
+.rb-btn.active{
+  background:var(--amber);color:#0C0A08;border-color:var(--amber);font-weight:700;
+  box-shadow:0 2px 10px rgba(245,166,35,.3);
+  transform:translateY(-1px);
+}
+
+/* ══════════════════════════════════════
+   10. SIGNAL HERO LABEL
+══════════════════════════════════════ */
+@keyframes heroIn{
+  0%{opacity:0;transform:scale(.85) translateY(10px);filter:blur(4px);}
+  60%{filter:blur(0);}
+  100%{opacity:1;transform:scale(1) translateY(0);filter:blur(0);}
+}
+@keyframes levelIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes scanH{0%,100%{top:-2px;opacity:0;}8%{opacity:1;}92%{opacity:1;}100%{top:100%;opacity:0;}}
+
+.sig-hero-b{padding:20px 24px;border-bottom:1px solid var(--border);}
+.sig-lbl-b{font-family:var(--disp);font-size:54px;font-weight:900;color:var(--green);letter-spacing:-2px;line-height:1;}
+.sig-sub-b{font-family:var(--mono);font-size:11px;color:var(--muted2);letter-spacing:2px;text-transform:uppercase;}
+
+.sig-hero{padding:20px 24px;border-bottom:1px solid var(--border);position:relative;overflow:hidden;}
+.sig-hero::after{content:'';position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--amber),transparent);animation:scanH 5s ease-in-out infinite 1s;z-index:5;}
+.sig-lbl{
+  font-family:var(--disp);font-size:54px;font-weight:900;color:var(--green);letter-spacing:-2px;line-height:1;
+  animation:heroIn .6s cubic-bezier(.34,1.26,.64,1) forwards;
+  text-shadow:0 0 40px rgba(0,201,141,.3),0 0 80px rgba(0,201,141,.1);
+}
+.sig-sub-new{font-family:var(--mono);font-size:11px;color:var(--muted2);letter-spacing:2px;text-transform:uppercase;margin-top:4px;animation:levelIn .4s ease .2s both;}
+.sig-lvl{animation:levelIn .4s ease .35s both;}
+.sig-lvl-val{font-family:var(--disp);font-size:22px;font-weight:700;letter-spacing:-.5px;}
+
+/* ══════════════════════════════════════
+   11. TOAST
+══════════════════════════════════════ */
+@keyframes toastIn{from{opacity:0;transform:translateY(20px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
+
+.toast-b{background:var(--bg3);border:1px solid var(--border);padding:10px 16px;border-radius:var(--r);font-family:var(--mono);font-size:12px;color:var(--white2);}
+
+.toast{
+  background:var(--bg3);border:1px solid rgba(245,166,35,.25);
+  border-left:3px solid var(--amber);
+  padding:10px 16px 10px 14px;border-radius:var(--r);
+  font-family:var(--mono);font-size:12px;color:var(--white);
+  animation:toastIn .3s cubic-bezier(.34,1.26,.64,1) forwards;
+  display:inline-flex;align-items:center;gap:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+}
+.toast.success{border-color:rgba(0,201,141,.3);border-left-color:var(--green);}
+.toast.error{border-color:rgba(255,68,89,.3);border-left-color:var(--red);}
+
+/* ══════════════════════════════════════
+   12. CONFIDENCE RING
+══════════════════════════════════════ */
+@keyframes ringFill{from{stroke-dashoffset:204}to{stroke-dashoffset:var(--target,51)}}
+@keyframes ringFadeIn{from{opacity:0;transform:rotate(-90deg) scale(.8)}to{opacity:1;transform:rotate(-90deg) scale(1)}}
+
+.conf-ring-wrap{display:flex;align-items:center;gap:16px;}
+.conf-ring{position:relative;width:80px;height:80px;}
+.conf-ring svg{width:80px;height:80px;}
+.cr-track-b{fill:none;stroke:rgba(255,255,255,.07);stroke-width:5;}
+.cr-fill-b{fill:none;stroke:var(--amber);stroke-width:5;stroke-linecap:round;stroke-dasharray:204;stroke-dashoffset:51;}
+.cr-svg{transform:rotate(-90deg);animation:ringFadeIn .4s ease forwards;}
+.cr-track{fill:none;stroke:rgba(255,255,255,.06);stroke-width:6;}
+.cr-fill{fill:none;stroke:var(--amber);stroke-width:6;stroke-linecap:round;stroke-dasharray:204;stroke-dashoffset:51;animation:ringFill .9s cubic-bezier(.4,0,.2,1) .3s both;filter:drop-shadow(0 0 4px rgba(245,166,35,.4));}
+.conf-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.conf-pct{font-family:var(--disp);font-size:20px;font-weight:900;color:var(--amber);line-height:1;}
+.conf-lbl{font-family:var(--mono);font-size:7.5px;color:var(--muted2);letter-spacing:1px;margin-top:1px;}
+
+</style>
+</head>
+<body>
+
+<div class="page-title">DotVerse — Full UI Design Audit</div>
+<div class="page-sub">12 component improvements · Frontend-Design Skill applied · Before → After</div>
+
+<!-- 1. SECTION HEADERS -->
+<div class="section">
+  <div class="section-title">1 · Section headers — everywhere in app</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">flat amber text</span></div>
+      <div class="sec-hdr-before before">What the indicators say</div>
+      <div class="sec-hdr-before before" style="margin-top:4px;">Multi-Timeframe Alignment</div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">amber bar + gradient line</span></div>
+      <div class="sec-hdr">What the indicators say</div>
+      <div class="sec-hdr" style="margin-top:4px;">Multi-Timeframe Alignment</div>
+      <p class="note">Amber left-bar with glow · gradient fade-right line · 2.5px letter-spacing</p>
+    </div>
+  </div>
+</div>
+
+<!-- 2. INDICATOR CARDS -->
+<div class="section">
+  <div class="section-title">2 · Indicator cards — Signals tab</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">flat grid, background only hover</span></div>
+      <div class="ind-grid-before before">
+        <div class="ind-card-b">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;"><div><div style="font-size:13px;font-weight:600;">Momentum Tracker</div><div style="font-family:var(--mono);font-size:10px;color:rgba(245,190,80,.5);">RSI (14)</div></div><span class="ind-badge-b">BULL</span></div>
+          <div style="font-family:var(--disp);font-size:22px;font-weight:700;">62.4</div>
+          <div style="height:4px;background:var(--bg4);border-radius:3px;margin-top:8px;"><div style="width:62%;height:100%;background:var(--green);border-radius:3px;"></div></div>
+        </div>
+        <div class="ind-card-b">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;"><div><div style="font-size:13px;font-weight:600;">Trend Strength</div><div style="font-family:var(--mono);font-size:10px;color:rgba(245,190,80,.5);">ADX (14)</div></div><span class="ind-badge-b" style="background:rgba(245,166,35,.1);color:var(--amber);border:1px solid rgba(245,166,35,.25);">NEUT</span></div>
+          <div style="font-family:var(--disp);font-size:22px;font-weight:700;">28.1</div>
+        </div>
+        <div class="ind-card-b">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;"><div><div style="font-size:13px;font-weight:600;">Trend Direction</div><div style="font-family:var(--mono);font-size:10px;color:rgba(245,190,80,.5);">EMA 9/21</div></div><span class="ind-badge-b">BULL</span></div>
+          <div style="font-family:var(--disp);font-size:22px;font-weight:700;">Above</div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">lift hover · badge spring · bar animate · signal-tinted border</span></div>
+      <div class="ind-grid">
+        <div class="ind-card bull">
+          <div class="ind-top"><div><div class="ind-label">Momentum Tracker</div><div class="ind-sub">RSI (14)</div></div><span class="ind-badge bull">BULL</span></div>
+          <div class="ind-val">62.4</div>
+          <div class="bar-track"><div class="bar-fill bull" style="--w:62%;width:var(--w)"></div></div>
+        </div>
+        <div class="ind-card" style="animation-delay:.08s;">
+          <div class="ind-top"><div><div class="ind-label">Trend Strength</div><div class="ind-sub">ADX (14)</div></div><span class="ind-badge neut">NEUT</span></div>
+          <div class="ind-val">28.1</div>
+          <div class="bar-track"><div class="bar-fill neut" style="--w:28%;width:var(--w)"></div></div>
+        </div>
+        <div class="ind-card bull" style="animation-delay:.12s;">
+          <div class="ind-top"><div><div class="ind-label">Trend Direction</div><div class="ind-sub">EMA 9/21</div></div><span class="ind-badge bull">BULL</span></div>
+          <div class="ind-val">Above</div>
+          <div class="bar-track"><div class="bar-fill bull" style="--w:75%;width:var(--w)"></div></div>
+        </div>
+      </div>
+      <p class="note">Signal-tinted border · Lift + shadow on hover · Badge spring-in · Bar animated fill · Top shimmer line on hover</p>
+    </div>
+  </div>
+</div>
+
+<!-- 3. MTF GRID -->
+<div class="section">
+  <div class="section-title">3 · Multi-timeframe alignment grid</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">flat cells, no signal color</span></div>
+      <div class="mtf-before before" style="max-width:420px;">
+        <div class="mtfc-b"><div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:4px;">15M</div><div style="font-family:var(--disp);font-size:13px;font-weight:700;color:var(--green);">BUY</div></div>
+        <div class="mtfc-b"><div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:4px;">1H</div><div style="font-family:var(--disp);font-size:13px;font-weight:700;color:var(--green);">BUY</div></div>
+        <div class="mtfc-b"><div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:4px;">4H</div><div style="font-family:var(--disp);font-size:13px;font-weight:700;color:var(--amber);">HOLD</div></div>
+        <div class="mtfc-b"><div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:4px;">1D</div><div style="font-family:var(--disp);font-size:13px;font-weight:700;color:var(--green);">BUY</div></div>
+        <div class="mtfc-b"><div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:4px;">1W</div><div style="font-family:var(--disp);font-size:13px;font-weight:700;color:var(--red);">SELL</div></div>
+        <div class="mtfc-b"><div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:4px;">1M</div><div style="font-family:var(--disp);font-size:13px;font-weight:700;color:var(--green);">BUY</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">signal-tinted bg · glow dot · staggered reveal · hover lift</span></div>
+      <div class="mtf-grid" style="max-width:420px;">
+        <div class="mtfc buy"><div class="mtfc-tf">15M</div><div class="mtfc-sig buy">BUY</div><div class="mtfc-dot"></div></div>
+        <div class="mtfc buy"><div class="mtfc-tf">1H</div><div class="mtfc-sig buy">BUY</div><div class="mtfc-dot"></div></div>
+        <div class="mtfc hold"><div class="mtfc-tf">4H</div><div class="mtfc-sig hold">HOLD</div><div class="mtfc-dot" style="background:var(--amber);"></div></div>
+        <div class="mtfc buy"><div class="mtfc-tf">1D</div><div class="mtfc-sig buy">BUY</div><div class="mtfc-dot"></div></div>
+        <div class="mtfc sell"><div class="mtfc-tf">1W</div><div class="mtfc-sig sell">SELL</div><div class="mtfc-dot" style="background:var(--red);box-shadow:0 0 5px rgba(255,68,89,.5);"></div></div>
+        <div class="mtfc buy"><div class="mtfc-tf">1M</div><div class="mtfc-sig buy">BUY</div><div class="mtfc-dot"></div></div>
+      </div>
+      <p class="note">Tinted background per signal · Glowing signal dot · Staggered scale-in · Hover lift with signal-colour shadow</p>
+    </div>
+  </div>
+</div>
+
+<!-- 4. SCANNER TABLE -->
+<div class="section">
+  <div class="section-title">4 · Scanner table rows</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">amber-dim hover only</span></div>
+      <div class="before" style="max-width:420px;">
+        <table class="scan-table-b" style="width:100%">
+          <thead><tr><th>Symbol</th><th>Signal</th><th>Confidence</th></tr></thead>
+          <tbody>
+            <tr><td class="st-sym">BTC-USD</td><td><span class="sig-sm buy">BUY</span></td><td style="font-family:var(--mono)">78%</td></tr>
+            <tr><td class="st-sym">ETH-USD</td><td><span class="sig-sm sell">SELL</span></td><td style="font-family:var(--mono)">65%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">signal border · confidence bar · row slide-in</span></div>
+      <div style="max-width:420px;">
+        <table class="scan-table" style="width:100%">
+          <thead><tr><th>Symbol</th><th>Signal</th><th>Confidence</th></tr></thead>
+          <tbody>
+            <tr class="buy-row"><td><span class="st-sym">BTC-USD</span></td><td><span class="sig-sm buy">BUY</span></td><td><div style="font-family:var(--mono);font-size:12px;">78%</div><div class="conf-bar"><div class="conf-fill" style="width:78%;background:var(--green);"></div></div></td></tr>
+            <tr class="sell-row" style="animation-delay:.06s"><td><span class="st-sym">ETH-USD</span></td><td><span class="sig-sm sell">SELL</span></td><td><div style="font-family:var(--mono);font-size:12px;">65%</div><div class="conf-bar"><div class="conf-fill" style="width:65%;background:var(--red);"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Signal-coloured left border on hover · Confidence mini-bar under % · Rows slide in sequentially</p>
+    </div>
+  </div>
+</div>
+
+<!-- 5. BACKTEST STATS -->
+<div class="section">
+  <div class="section-title">5 · Backtest stat cards</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">flat border, no direction cue</span></div>
+      <div class="bt-grid-b before" style="max-width:420px;">
+        <div class="bt-stat-b"><div class="bt-lbl-b">Win Rate</div><div class="bt-val-b" style="color:var(--green);">67%</div></div>
+        <div class="bt-stat-b"><div class="bt-lbl-b">Avg R:R</div><div class="bt-val-b" style="color:var(--amber);">2.4x</div></div>
+        <div class="bt-stat-b"><div class="bt-lbl-b">Max DD</div><div class="bt-val-b" style="color:var(--red);">−12%</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">top bar · lift hover · count-up animation</span></div>
+      <div class="bt-grid" style="max-width:420px;">
+        <div class="bt-stat pos"><div class="bt-lbl">Win Rate</div><div class="bt-val pos">67%</div><div class="bt-sub">of 144 trades</div></div>
+        <div class="bt-stat neu" style="animation-delay:.1s;"><div class="bt-lbl">Avg R:R</div><div class="bt-val neu">2.4x</div><div class="bt-sub">risk to reward</div></div>
+        <div class="bt-stat neg" style="animation-delay:.15s;"><div class="bt-lbl">Max DD</div><div class="bt-val neg">−12%</div><div class="bt-sub">max drawdown</div></div>
+      </div>
+      <p class="note">Coloured top border line per direction · Lift on hover · Count-up animation on values · Subtitle line added</p>
+    </div>
+  </div>
+</div>
+
+<!-- 6. NAVIGATION -->
+<div class="section">
+  <div class="section-title">6 · Navigation tabs</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">flat amber fill</span></div>
+      <div class="nav-before before">
+        <button class="nav-tab-b active">Signals</button>
+        <button class="nav-tab-b">Scanner</button>
+        <button class="nav-tab-b">Backtest</button>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">gloss overlay + drop shadow + indicator pip</span></div>
+      <div class="nav-wrap">
+        <button class="nav-tab active" onclick="this.parentNode.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">Signals</button>
+        <button class="nav-tab" onclick="this.parentNode.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">Scanner</button>
+        <button class="nav-tab" onclick="this.parentNode.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">Backtest</button>
+      </div>
+      <p class="note">Inner gloss gradient · Amber drop shadow · Pip indicator below active tab · Hover bg tint</p>
+    </div>
+  </div>
+</div>
+
+<!-- 7. INPUT FOCUS -->
+<div class="section">
+  <div class="section-title">7 · Input focus state — calculator, search fields</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">border-color only</span></div>
+      <div class="before" style="max-width:280px;">
+        <input class="input-b" value="10000" style="margin-bottom:8px;display:block;">
+        <input class="input-b" style="border-color:var(--amber);" value="BTC-USD" placeholder="focused">
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">amber halo glow on focus</span></div>
+      <div style="max-width:280px;">
+        <input class="input-field" value="10000" style="margin-bottom:8px;display:block;">
+        <input class="input-field" value="BTC-USD" style="border-color:var(--amber);box-shadow:0 0 0 3px rgba(245,166,35,.12), 0 0 0 1px var(--amber);">
+      </div>
+      <p class="note">3px amber halo ring on focus · Double ring: outer soft glow + inner solid border</p>
+    </div>
+  </div>
+</div>
+
+<!-- 8. SIDEBAR SECTIONS -->
+<div class="section">
+  <div class="section-title">8 · Right sidebar sections (RSI Momentum, Fear & Greed, News)</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">flat header, plain news items</span></div>
+      <div class="side-b before" style="max-width:260px;">
+        <div class="side-head-b">Latest News</div>
+        <div style="padding:8px 0;border-bottom:1px solid rgba(245,166,35,.06);cursor:pointer;">
+          <div style="font-family:var(--mono);font-size:9.5px;color:var(--muted);">2 min ago</div>
+          <div style="font-size:12px;color:var(--white2);margin-top:2px;">BTC breaks $84k resistance on high volume</div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">amber-bar heading · reveal-bar on hover · slide-in animation</span></div>
+      <div class="side-sect" style="max-width:260px;overflow:hidden;">
+        <div class="side-head">Latest News</div>
+        <div class="news-item">
+          <div class="ni-time">2 min ago</div>
+          <div class="ni-head">BTC breaks $84k resistance on high volume</div>
+          <span class="ni-sent bull">BULLISH</span>
+        </div>
+        <div class="news-item" style="animation-delay:.1s;">
+          <div class="ni-time">14 min ago</div>
+          <div class="ni-head">Fed minutes show caution on rate cuts in 2026</div>
+          <span class="ni-sent bear">BEARISH</span>
+        </div>
+      </div>
+      <p class="note">Amber-bar heading matches section headers · Left reveal bar on news hover · Slide-in from right on load · Sentiment badge on each item</p>
+    </div>
+  </div>
+</div>
+
+<!-- 9. REFRESH BUTTONS -->
+<div class="section">
+  <div class="section-title">9 · Auto-refresh interval buttons</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">flat border change</span></div>
+      <div style="display:flex;gap:3px;" class="before">
+        <button class="rb-b">OFF</button><button class="rb-b active">15s</button><button class="rb-b">30s</button><button class="rb-b">1m</button>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">solid amber active · lift · drop shadow</span></div>
+      <div style="display:flex;gap:3px;">
+        <button class="rb-btn" onclick="this.parentNode.querySelectorAll('.rb-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">OFF</button>
+        <button class="rb-btn active" onclick="this.parentNode.querySelectorAll('.rb-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">15s</button>
+        <button class="rb-btn" onclick="this.parentNode.querySelectorAll('.rb-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">30s</button>
+        <button class="rb-btn" onclick="this.parentNode.querySelectorAll('.rb-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">1m</button>
+      </div>
+      <p class="note">Active: solid amber fill with drop shadow + 1px lift · Hover: amber border tint</p>
+    </div>
+  </div>
+</div>
+
+<!-- 10. SIGNAL HERO -->
+<div class="section">
+  <div class="section-title">10 · Signal hero — BUY/SELL label entrance</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">static render, no entrance</span></div>
+      <div class="sig-hero-b before">
+        <div class="sig-lbl-b">BUY</div>
+        <div class="sig-sub-b">Strong momentum signal</div>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">scale + blur entrance · text-shadow glow · scan line</span></div>
+      <div class="sig-hero">
+        <div class="sig-lbl">BUY</div>
+        <div class="sig-sub-new">Strong momentum signal</div>
+      </div>
+      <p class="note">Scale + blur entrance animation · Amplified text-shadow glow · Levels stagger in after label</p>
+    </div>
+  </div>
+</div>
+
+<!-- 11. CONFIDENCE RING -->
+<div class="section">
+  <div class="section-title">11 · Confidence ring — animated fill on signal load</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">static pre-set dashoffset</span></div>
+      <div class="conf-ring-wrap before">
+        <div class="conf-ring" style="width:76px;height:76px;">
+          <svg width="76" height="76" style="transform:rotate(-90deg)"><circle cx="38" cy="38" r="32" class="cr-track-b"/><circle cx="38" cy="38" r="32" class="cr-fill-b" style="stroke-dasharray:201;stroke-dashoffset:50;"/></svg>
+          <div class="conf-inner"><div class="conf-pct" style="font-size:18px;">75%</div><div class="conf-lbl">CONF</div></div>
+        </div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted2);">No animation on load</div>
+      </div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">sweep animation + glow filter + fade-in</span></div>
+      <div class="conf-ring-wrap">
+        <div class="conf-ring">
+          <svg class="cr-svg" width="80" height="80"><circle cx="40" cy="40" r="32" class="cr-track"/><circle cx="40" cy="40" r="32" class="cr-fill" style="--target:51;"/></svg>
+          <div class="conf-inner"><div class="conf-pct">75%</div><div class="conf-lbl">CONF</div></div>
+        </div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted2);">Sweeps in from 0→75% on load</div>
+      </div>
+      <p class="note">Stroke animates from 0 → value over 0.9s · Drop-shadow filter adds amber glow · Ring fades+scales in</p>
+    </div>
+  </div>
+</div>
+
+<!-- 12. TOAST -->
+<div class="section">
+  <div class="section-title">12 · Toast notifications</div>
+  <div class="grid2">
+    <div>
+      <div class="col-lbl">Before<span class="tag-b">flat dark card</span></div>
+      <div class="toast-b before">BTC-USD analysis complete — BUY signal</div>
+    </div>
+    <div>
+      <div class="col-lbl">After<span class="tag-a">amber left-bar · spring entrance · signal variants</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="toast"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>BTC-USD — BUY signal at $83,241</div>
+        <div class="toast success" style="animation-delay:.1s;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Alert set for BTC-USD 4H</div>
+        <div class="toast error" style="animation-delay:.2s;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>Analysis failed — try again</div>
+      </div>
+      <p class="note">Amber/green/red left border accent · SVG icon per type · Spring bounce entrance · Dark shadow for depth</p>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:40px;padding:16px 20px;background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.15);border-left:3px solid var(--amber);border-radius:var(--r2);max-width:1000px;position:relative;z-index:1;">
+  <div style="font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--amber);margin-bottom:10px;text-transform:uppercase;">Summary — 12 improvements ready to implement</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 20px;">
+    <div style="font-family:var(--mono);font-size:10.5px;color:var(--muted2);line-height:1.9;">
+      1. Section headers — amber bar<br>
+      2. Indicator cards — lift + badge anim<br>
+      3. MTF grid — signal tints + dots<br>
+      4. Scanner rows — border + conf bar
+    </div>
+    <div style="font-family:var(--mono);font-size:10.5px;color:var(--muted2);line-height:1.9;">
+      5. Backtest stats — top bar + hover<br>
+      6. Navigation — gloss + shadow<br>
+      7. Input focus — amber halo ring<br>
+      8. Sidebar — reveal bar + sent badge
+    </div>
+    <div style="font-family:var(--mono);font-size:10.5px;color:var(--muted2);line-height:1.9;">
+      9. Refresh buttons — solid active<br>
+      10. Signal hero — blur entrance<br>
+      11. Confidence ring — sweep anim<br>
+      12. Toasts — left bar + icon variants
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

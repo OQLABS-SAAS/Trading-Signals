@@ -8456,6 +8456,56 @@ def verdict_queue_clear():
     })
 
 
+def _build_fallback_structured(state, decision):
+    """
+    Build structured verdict data directly from TradingAgents state reports
+    when _extract_verdict_structure fails or DEEPSEEK_API_KEY is missing.
+    Guaranteed to return a non-None dict with agents[] always populated.
+    """
+    def _snip(text, n=240):
+        t = str(text or "").strip()
+        if not t or t.lower() in ("none", ""):
+            return "Report not available for this analysis run."
+        return t[:n] + "…" if len(t) > n else t
+
+    st = state or {}
+    debate = st.get("investment_debate_state", {}) if isinstance(st, dict) else {}
+
+    # Derive action from decision text keyword frequency
+    d_low = str(decision or "").lower()
+    bull_words = sum(1 for w in ["buy","bullish","long","upside","positive","strong"] if w in d_low)
+    bear_words = sum(1 for w in ["sell","bearish","short","downside","negative","weak"] if w in d_low)
+    if bull_words > bear_words:
+        action = "BUY"
+    elif bear_words > bull_words:
+        action = "SELL"
+    else:
+        action = "HOLD"
+
+    agents = [
+        {"name": "Market Analyst",         "vote": action, "argument": _snip(st.get("market_report",""))},
+        {"name": "Sentiment Analyst",       "vote": action, "argument": _snip(st.get("sentiment_report",""))},
+        {"name": "News Researcher",         "vote": "HOLD", "argument": _snip(st.get("news_report",""))},
+        {"name": "Fundamentals Researcher", "vote": action, "argument": _snip(st.get("fundamentals_report",""))},
+        {"name": "Bull Researcher",         "vote": "BUY",  "argument": _snip(debate.get("bull_history",""))},
+        {"name": "Bear Researcher",         "vote": "SELL", "argument": _snip(debate.get("bear_history",""))},
+        {"name": "Research Manager",        "vote": action, "argument": _snip(st.get("investment_plan",""))},
+        {"name": "Risk Team",               "vote": action, "argument": _snip(st.get("final_trade_decision",""))},
+    ]
+
+    return {
+        "action": action,
+        "confidence": "MEDIUM",
+        "summary": _snip(str(decision or ""), 500),
+        "risk_team_notes": _snip(st.get("final_trade_decision",""), 300),
+        "positions": 3,
+        "risk_ladder": [0.5, 1.0, 1.5],
+        "tp_r_multiples": [1.5, 2.5, 3.5],
+        "trailing": ["0.5x ATR after +1.5R", "0.5x ATR after +1.5R", "0.75x ATR after +2R"],
+        "agents": agents,
+    }
+
+
 def _extract_verdict_structure(verdict_text, state, ticker):
     """
     Post-processes the raw TradingAgents verdict into structured trade plan fields
@@ -8566,6 +8616,11 @@ def _run_verdict_job(ticker, trade_date_str):
         ta = TradingAgentsGraph(debug=False, config=config)
         state, decision = ta.propagate(ticker, trade_date_str)
         structured = _extract_verdict_structure(decision, state, ticker)
+        # Always guarantee a structured dict — if DeepSeek extraction fails
+        # (missing key, JSON parse error, network issue) fall back to building
+        # agent cards directly from the TradingAgents state reports.
+        if not structured:
+            structured = _build_fallback_structured(state, decision)
         return {"ticker": ticker, "verdict": decision, "structured": structured, "status": "complete"}
     except Exception as e:
         return {"error": str(e), "status": "failed"}

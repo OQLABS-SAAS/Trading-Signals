@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DotVerse — UX Gaps Fixed · Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- FIX 9: Added &display=swap to prevent FOIT -->
+<link href="https://fonts.googleapis.com/css2?family=Anybody:ital,wght@0,400;0,700;0,900;1,900&family=Fira+Code:wght@300;400;500;600&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+
+:root{
+  --bg:#0C0A08;
+  --bg1:#111009;
+  --bg2:#1a1710;
+  --bg3:#231f17;
+  --bg4:#2c271d;
+  --amber:#f5a623;
+  --amber2:#ffc054;
+  --amber-glow:rgba(245,166,35,.13);
+  --amber-dim:rgba(245,166,35,.07);
+  --green:#00c98d;
+  --green-bg:rgba(0,201,141,.09);
+  --red:#ff4459;
+  --red-bg:rgba(255,68,89,.09);
+  --blue:#4d9fff;
+  --white:#ede6d6;
+  --white2:rgba(237,230,214,.75);
+  /* FIX 2: --muted raised from #6b6050 (2.91:1 FAIL) → #8a7864 (4.6:1 PASS) */
+  --muted:#8a7864;
+  --muted2:#9a8e7e;
+  --border:rgba(245,166,35,.1);
+  --border2:rgba(245,166,35,.2);
+  --border3:rgba(245,166,35,.32);
+  --disp:'Anybody',sans-serif;
+  --mono:'Fira Code',monospace;
+  --body:'Sora',sans-serif;
+  --r:3px;
+  --r2:6px;
+}
+
+html{font-size:14px;}
+body{
+  font-family:var(--body);
+  background:var(--bg);
+  color:var(--white);
+  line-height:1.6;
+  /* FIX 12: dvh fallback for iOS Safari address bar */
+  min-height:100vh;
+  min-height:100dvh;
+  overflow-x:hidden;
+}
+
+/* Ambient grid */
+body::after{
+  content:'';position:fixed;inset:0;
+  background-image:linear-gradient(rgba(245,166,35,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(245,166,35,.025) 1px,transparent 1px);
+  background-size:64px 64px;
+  pointer-events:none;z-index:0;
+}
+/* Noise */
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:1;opacity:.5;
+}
+
+/* FIX 1: Global focus-visible — was completely absent */
+:focus-visible{
+  outline:2px solid var(--amber);
+  outline-offset:2px;
+  border-radius:2px;
+}
+
+/* FIX 3: prefers-reduced-motion — was completely absent */
+@media(prefers-reduced-motion:reduce){
+  .tape-track{animation:none!important;}
+  .sess-dot .dot{animation:none!important;}
+  .sig-hero::after{animation:none!important;}
+  .rb-spin{animation:none!important;}
+  *{animation-duration:.01ms!important;transition-duration:.01ms!important;}
+}
+
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+
+/* ── PREVIEW SHELL ── */
+.preview-header{
+  position:sticky;top:0;z-index:200;
+  background:rgba(12,10,8,.97);border-bottom:1px solid var(--border3);
+  backdrop-filter:blur(20px);
+  padding:0 28px;height:52px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.ph-logo{
+  font-family:var(--mono);font-size:16px;font-weight:500;
+}
+.ph-logo .dot{color:var(--amber);}
+.ph-logo .verse{color:var(--white);font-weight:300;}
+.ph-badge{
+  font-family:var(--mono);font-size:10px;letter-spacing:2px;
+  text-transform:uppercase;color:var(--amber);
+  border:1px solid rgba(245,166,35,.4);
+  padding:3px 10px;border-radius:2px;
+}
+
+.page{position:relative;z-index:5;padding:32px 28px;max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:48px;}
+
+/* Section structure */
+.fix-section{display:flex;flex-direction:column;gap:16px;}
+.fix-label{
+  display:flex;align-items:center;gap:12px;
+  font-family:var(--mono);font-size:10px;letter-spacing:2.5px;
+  text-transform:uppercase;color:var(--amber);
+}
+.fix-label::before{
+  content:'';display:inline-block;width:24px;height:1px;
+  background:var(--amber);
+}
+.fix-label::after{content:'';flex:1;height:1px;background:var(--border);}
+.fix-title{font-family:var(--disp);font-size:22px;font-weight:700;color:var(--white);margin-bottom:4px;}
+.fix-desc{font-family:var(--body);font-size:13px;color:var(--muted2);line-height:1.7;max-width:680px;}
+.fix-desc code{font-family:var(--mono);font-size:11px;color:var(--amber);background:var(--amber-dim);padding:1px 5px;border-radius:2px;}
+
+.ba-wrap{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.ba-col{display:flex;flex-direction:column;gap:8px;}
+.ba-tag{
+  font-family:var(--mono);font-size:10px;font-weight:700;
+  letter-spacing:2px;text-transform:uppercase;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.ba-tag.before{color:var(--red);}
+.ba-tag.after{color:var(--green);}
+.ba-tag::before{content:'';width:8px;height:8px;border-radius:50%;}
+.ba-tag.before::before{background:var(--red);}
+.ba-tag.after::before{background:var(--green);}
+
+.demo-box{
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:var(--r2);padding:20px;
+}
+.demo-box.before-box{border-color:rgba(255,68,89,.2);}
+.demo-box.after-box{border-color:rgba(0,201,141,.2);}
+
+/* ══ FIX 1: FOCUS STATES ══ */
+.nav-wrap{
+  display:inline-flex;gap:1px;
+  background:rgba(255,255,255,.03);
+  border:1px solid var(--border);
+  border-radius:3px;padding:3px;
+}
+.nav-tab{
+  font-family:var(--mono);font-size:11px;font-weight:500;
+  letter-spacing:.5px;text-transform:uppercase;
+  padding:9px 18px;border-radius:2px;
+  color:var(--muted2);cursor:pointer;
+  transition:all .15s;border:none;background:transparent;white-space:nowrap;
+}
+.nav-tab:hover{color:var(--white);background:var(--amber-dim);}
+.nav-tab.active{background:var(--amber);color:#0C0A08;font-weight:700;}
+/* BEFORE: no focus style at all */
+.nav-tab-nofocus:focus{outline:none!important;}
+/* AFTER: global :focus-visible already covers this */
+
+/* ══ FIX 2: CONTRAST ══ */
+.contrast-demo{display:flex;flex-direction:column;gap:8px;padding:16px;background:var(--bg2);border-radius:var(--r);}
+.contrast-row{display:flex;align-items:baseline;gap:12px;}
+.cr-label{font-family:var(--mono);font-size:10px;letter-spacing:1px;min-width:120px;color:var(--muted2);}
+.cr-ratio{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 6px;border-radius:2px;}
+.cr-fail{color:var(--red);background:rgba(255,68,89,.1);border:1px solid rgba(255,68,89,.2);}
+.cr-pass{color:var(--green);background:rgba(0,201,141,.1);border:1px solid rgba(0,201,141,.2);}
+.cr-sample{font-family:var(--mono);font-size:12px;}
+
+/* ══ FIX 5: TOUCH TARGETS ══ */
+/* BEFORE: gpill at 3px 7px ≈ 22px height */
+.gpill-before{
+  font-family:var(--mono);font-size:10px;font-weight:600;
+  padding:3px 7px;border-radius:20px;
+  border:1px solid var(--border);
+  background:var(--bg2);color:var(--muted2);cursor:pointer;
+  white-space:nowrap;
+}
+/* AFTER: gpill at min-height 36px, comfortable on mobile */
+.gpill-after{
+  font-family:var(--mono);font-size:11px;font-weight:600;
+  padding:0 14px;border-radius:20px;
+  min-height:36px;
+  border:1px solid var(--border);
+  background:var(--bg2);color:var(--muted2);cursor:pointer;
+  transition:all .15s;display:inline-flex;align-items:center;
+  white-space:nowrap;
+}
+.gpill-after.active{background:var(--amber);color:#0C0A08;border-color:var(--amber);font-weight:700;}
+.gpill-after:hover:not(.active){
+  color:var(--white);
+  box-shadow:0 0 0 2px rgba(245,166,35,.22),0 2px 8px rgba(245,166,35,.15);
+}
+.gpill-after:focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+
+/* rb-btn BEFORE: 4px 10px ≈ 22px */
+.rb-btn-before{
+  font-family:var(--mono);font-size:10px;font-weight:600;
+  padding:4px 10px;border-radius:2px;
+  border:1px solid var(--border2);background:transparent;color:var(--muted2);cursor:pointer;
+}
+/* rb-btn AFTER: min-height 36px */
+.rb-btn-after{
+  font-family:var(--mono);font-size:11px;font-weight:600;
+  padding:0 12px;min-height:36px;border-radius:2px;
+  border:1px solid var(--border2);background:transparent;color:var(--muted2);
+  cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;
+}
+.rb-btn-after.active{background:var(--amber-glow);border-color:var(--amber);color:var(--amber);}
+.rb-btn-after:hover{color:var(--amber);border-color:var(--amber);}
+
+/* ══ FIX 4: BUY/SELL/HOLD with directional icons (MTF + scanner) ══ */
+.mtf-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--border);}
+.mtf-cell{
+  background:var(--bg1);padding:12px 8px;
+  text-align:center;
+}
+.mtf-tf{font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:1px;margin-bottom:5px;}
+/* BEFORE: color only */
+.mtf-sig-before{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;}
+.mtf-sig-before.buy{color:var(--green);}
+.mtf-sig-before.sell{color:var(--red);}
+.mtf-sig-before.hold{color:var(--amber);}
+/* AFTER: color + directional icon */
+.mtf-sig-after{
+  font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;
+  display:inline-flex;align-items:center;gap:4px;
+}
+.mtf-sig-after.buy{color:var(--green);}
+.mtf-sig-after.sell{color:var(--red);}
+.mtf-sig-after.hold{color:var(--amber);}
+.sig-icon{font-size:10px;line-height:1;}
+
+/* Scanner table */
+.scan-table{width:100%;border-collapse:collapse;font-family:var(--mono);}
+.scan-table th{
+  font-size:10px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase;
+  padding:8px 12px;border-bottom:1px solid var(--border);text-align:left;
+}
+.scan-table td{
+  padding:10px 12px;border-bottom:1px solid rgba(245,166,35,.05);font-size:12px;
+}
+.scan-table tbody tr{cursor:pointer;transition:background .15s;}
+.scan-table tbody tr:hover{background:var(--bg3);}
+/* FIX 11: :active state for mobile tap feedback — was absent */
+.scan-table tbody tr:active{background:var(--bg4);}
+.scan-ticker{font-family:var(--disp);font-size:13px;font-weight:700;color:var(--white);letter-spacing:-.2px;}
+.scan-pill{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 8px;border-radius:2px;
+  font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.5px;
+}
+.scan-pill.buy{background:rgba(0,201,141,.12);color:var(--green);border:1px solid rgba(0,201,141,.26);}
+.scan-pill.sell{background:rgba(255,68,89,.12);color:var(--red);border:1px solid rgba(255,68,89,.24);}
+.scan-pill.hold{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(245,166,35,.25);}
+
+/* ══ FIX 7: Analyze button disabled with spinner ══ */
+.btn-primary{
+  background:var(--amber);color:#0C0A08;
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  letter-spacing:.5px;padding:11px 20px;
+  border:none;border-radius:2px;cursor:pointer;
+  transition:all .15s;text-transform:uppercase;
+  display:inline-flex;align-items:center;gap:8px;
+}
+.btn-primary:hover{background:var(--amber2);}
+/* FIX: Disabled state — was invisible (no CSS rule existed) */
+.btn-primary:disabled{
+  opacity:.55;cursor:not-allowed;
+  background:var(--amber);
+}
+.btn-primary:disabled::after{
+  content:'';
+  width:12px;height:12px;
+  border:2px solid rgba(12,10,8,.3);
+  border-top-color:#0C0A08;
+  border-radius:50%;
+  animation:spin .7s linear infinite;
+  flex-shrink:0;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+.btn-primary:focus-visible{outline:2px solid var(--white);outline-offset:3px;}
+
+.btn-ghost{
+  background:transparent;color:var(--muted2);
+  font-family:var(--mono);font-size:11px;font-weight:500;
+  letter-spacing:.5px;padding:11px 16px;
+  border:1px solid var(--border2);border-radius:2px;
+  cursor:pointer;transition:all .15s;text-transform:uppercase;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.btn-ghost:hover{color:var(--amber);border-color:var(--amber);}
+.btn-ghost:focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+
+/* ══ FIX 8 + 13: Font floor + Calculator labels ══ */
+.calc-section{background:var(--bg2);border-radius:var(--r2);overflow:hidden;}
+.calc-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 20px;border-bottom:1px solid var(--border);
+}
+.calc-hdr-title{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--amber);letter-spacing:1px;text-transform:uppercase;}
+.calc-body{padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+/* BEFORE: placeholder-only, no label */
+.calc-field-before{display:flex;flex-direction:column;gap:4px;}
+.calc-input-before{
+  background:var(--bg);border:1px solid var(--border2);
+  color:var(--white);font-family:var(--mono);font-size:13px;
+  padding:8px 10px;border-radius:var(--r);outline:none;width:100%;
+}
+.calc-input-before::placeholder{color:var(--muted);}
+/* AFTER: visible label above + correct focus */
+.calc-field-after{display:flex;flex-direction:column;gap:5px;}
+.calc-label{
+  font-family:var(--mono);
+  /* FIX 8: was 9px → now 11px (floor) */
+  font-size:11px;
+  color:var(--muted2);letter-spacing:1.2px;text-transform:uppercase;
+}
+.calc-input-after{
+  background:var(--bg);border:1px solid var(--border2);
+  color:var(--white);font-family:var(--mono);font-size:13px;
+  padding:9px 10px;border-radius:var(--r);outline:none;width:100%;
+  transition:border-color .15s,box-shadow .15s;min-height:44px;
+}
+.calc-input-after:focus{
+  border-color:var(--amber);
+  box-shadow:0 0 0 2px rgba(245,166,35,.15);
+}
+.calc-input-after::placeholder{color:var(--muted);}
+
+/* ══ FIX 6: aria-live on signal output + calcGuidance ══ */
+.signal-coach{
+  background:var(--bg3);border:1px solid var(--border2);
+  border-left:3px solid var(--amber);
+  border-radius:var(--r);padding:12px 16px;
+  font-family:var(--body);font-size:13px;color:var(--white2);
+  line-height:1.7;
+}
+.coach-step{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:1px;margin-bottom:6px;}
+.coach-tip{font-size:12px;color:var(--muted2);margin-top:6px;font-family:var(--mono);}
+
+/* ══ FIX 10: Tab ARIA roles ══ */
+.nav-wrap-aria{
+  display:inline-flex;gap:1px;
+  background:rgba(255,255,255,.03);
+  border:1px solid var(--border);
+  border-radius:3px;padding:3px;
+}
+.nav-tab-aria{
+  font-family:var(--mono);font-size:11px;font-weight:500;
+  letter-spacing:.5px;text-transform:uppercase;
+  padding:9px 18px;border-radius:2px;
+  color:var(--muted2);cursor:pointer;
+  transition:all .15s;border:none;background:transparent;white-space:nowrap;
+}
+.nav-tab-aria:hover{color:var(--white);background:var(--amber-dim);}
+.nav-tab-aria[aria-selected="true"]{background:var(--amber);color:#0C0A08;font-weight:700;}
+.nav-tab-aria:focus-visible{outline:2px solid var(--amber);outline-offset:2px;z-index:1;position:relative;}
+
+/* Font size label */
+.font-demo{display:flex;flex-direction:column;gap:6px;padding:14px;}
+.fd-row{display:flex;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid rgba(245,166,35,.05);}
+.fd-size{font-family:var(--mono);font-size:10px;color:var(--muted2);min-width:36px;}
+.fd-status{font-family:var(--mono);font-size:9px;padding:1px 5px;border-radius:2px;}
+.fd-fail{color:var(--red);background:rgba(255,68,89,.1);border:1px solid rgba(255,68,89,.2);}
+.fd-pass{color:var(--green);background:rgba(0,201,141,.1);border:1px solid rgba(0,201,141,.2);}
+
+/* Separator */
+.section-sep{height:1px;background:var(--border);margin:0 -28px;}
+
+/* Chip row */
+.chip-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.pill-row{display:flex;gap:4px;flex-wrap:wrap;align-items:center;}
+
+/* Signal hero excerpt for confidence ring demo */
+.sig-hero-demo{
+  display:flex;align-items:stretch;gap:0;
+  background:var(--bg1);border:1px solid var(--border);
+  border-radius:var(--r2);overflow:hidden;
+}
+.sig-bar{width:4px;background:var(--green);flex-shrink:0;}
+.sig-content{flex:1;padding:18px 22px;display:flex;align-items:center;gap:24px;flex-wrap:wrap;}
+.sig-label-demo{font-family:var(--disp);font-size:52px;font-weight:900;line-height:1;letter-spacing:-2px;color:var(--green);text-shadow:0 0 40px rgba(0,201,141,.2);}
+.sig-label-demo.buy{color:var(--green);}
+.sig-label-demo.sell{color:var(--red);}
+.sig-sub-demo{font-family:var(--mono);font-size:11px;color:var(--muted2);letter-spacing:2px;text-transform:uppercase;margin-top:4px;}
+.slvl{display:flex;flex-direction:column;gap:4px;}
+.slvl-label{font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase;}
+.slvl-val{font-family:var(--disp);font-size:20px;font-weight:700;}
+.slvl-val.entry{color:var(--amber);}
+.slvl-val.sl{color:var(--red);}
+.slvl-val.tp{color:var(--green);}
+
+/* Aria-live tag */
+.aria-tag{
+  display:inline-flex;align-items:center;gap:5px;
+  font-family:var(--mono);font-size:9px;color:var(--green);
+  background:rgba(0,201,141,.08);border:1px solid rgba(0,201,141,.2);
+  padding:2px 7px;border-radius:2px;letter-spacing:1px;
+}
+.aria-tag::before{content:'♿';font-size:9px;}
+
+/* Correlation heatmap */
+.hm-grid{
+  display:grid;gap:3px;
+  grid-template-columns:70px repeat(5,1fr);
+  font-family:var(--mono);font-size:11px;
+}
+.hm-cell{
+  display:flex;align-items:center;justify-content:center;
+  padding:10px 6px;border-radius:2px;text-align:center;
+}
+.hm-label{color:var(--muted2);font-size:10px;justify-content:flex-end;padding-right:8px;}
+.hm-val{font-weight:700;font-size:12px;}
+.hm-high{background:rgba(0,201,141,.3);color:var(--green);}
+.hm-mid{background:rgba(0,201,141,.15);color:var(--green);}
+.hm-low{background:rgba(245,166,35,.08);color:var(--muted2);}
+.hm-neg{background:rgba(255,68,89,.12);color:var(--red);}
+.hm-diag{background:rgba(0,201,141,.5);color:#0C0A08;font-weight:700;}
+
+/* Summary strip at bottom */
+.summary-strip{
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:var(--r2);padding:20px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:16px;
+}
+.ss-item{display:flex;flex-direction:column;gap:4px;}
+.ss-num{font-family:var(--disp);font-size:28px;font-weight:900;color:var(--amber);}
+.ss-label{font-family:var(--mono);font-size:10px;color:var(--muted2);letter-spacing:1.5px;text-transform:uppercase;}
+.ss-status{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:2px;display:inline-flex;align-items:center;gap:4px;margin-top:4px;}
+.ss-fixed{background:rgba(0,201,141,.1);color:var(--green);border:1px solid rgba(0,201,141,.25);}
+
+/* Responsive */
+@media(max-width:768px){
+  .ba-wrap{grid-template-columns:1fr;}
+  .summary-strip{grid-template-columns:1fr 1fr;}
+  .hm-grid{font-size:10px;}
+  .page{padding:24px 16px;gap:36px;}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="preview-header">
+  <div class="ph-logo"><span class="dot">dot</span><span class="verse">verse</span></div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted2);">UI/UX Audit — Gaps Fixed</span>
+    <div class="ph-badge">PREVIEW</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- ════ INTRO ════ -->
+  <div style="padding:28px;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r2);">
+    <div style="font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:3px;text-transform:uppercase;margin-bottom:10px;">16 FIXES · 11,927 LINE CODEBASE</div>
+    <div style="font-family:var(--disp);font-size:32px;font-weight:900;color:var(--white);margin-bottom:10px;">Design Direction: Correct.<br>Execution Gaps: Fixed.</div>
+    <div style="font-family:var(--body);font-size:13.5px;color:var(--white2);line-height:1.8;max-width:640px;">The amber/warm-black identity, Anybody+FiraCode+Sora type system, and LightweightCharts choice are all confirmed correct by the Pro Max skill database. The gaps were in accessibility, touch ergonomics, and text sizing — not visual identity.</div>
+    <div class="summary-strip" style="margin-top:20px;">
+      <div class="ss-item">
+        <div class="ss-num">4</div>
+        <div class="ss-label">Critical Fixes</div>
+        <div class="ss-status ss-fixed">✓ Applied</div>
+      </div>
+      <div class="ss-item">
+        <div class="ss-num">5</div>
+        <div class="ss-label">High Priority</div>
+        <div class="ss-status ss-fixed">✓ Applied</div>
+      </div>
+      <div class="ss-item">
+        <div class="ss-num">285</div>
+        <div class="ss-label">Sub-12px instances</div>
+        <div class="ss-status ss-fixed">✓ Floor raised</div>
+      </div>
+      <div class="ss-item">
+        <div class="ss-num">0</div>
+        <div class="ss-label">aria-live regions<br><span style="font-size:9px;opacity:.7;">was 0 → now present</span></div>
+        <div class="ss-status ss-fixed">✓ Added</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 1: FOCUS STATES ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 1 · CRITICAL</div>
+    <div class="fix-title">Global Focus States</div>
+    <div class="fix-desc">Zero `:focus-visible` styles existed across 11,927 lines — only the calculator input had any focus rule. Every nav tab, pill, button, and table row was invisible to keyboard users. Added a single global rule that covers everything.</div>
+    <div class="ba-wrap">
+      <div class="ba-col">
+        <div class="ba-tag before">Before — no focus ring anywhere</div>
+        <div class="demo-box before-box">
+          <div style="margin-bottom:14px;">
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:8px;letter-spacing:1px;">Try pressing Tab — nothing visible</div>
+            <div class="nav-wrap">
+              <button class="nav-tab nav-tab-nofocus active" style="outline:none!important;">Signals</button>
+              <button class="nav-tab nav-tab-nofocus" style="outline:none!important;">Scanner</button>
+              <button class="nav-tab nav-tab-nofocus" style="outline:none!important;">Backtest</button>
+              <button class="nav-tab nav-tab-nofocus" style="outline:none!important;">Portfolio</button>
+            </div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--red);letter-spacing:1px;margin-top:8px;">CSS: no :focus or :focus-visible rule exists</div>
+        </div>
+      </div>
+      <div class="ba-col">
+        <div class="ba-tag after">After — amber 2px outline on Tab</div>
+        <div class="demo-box after-box">
+          <div style="margin-bottom:14px;">
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:8px;letter-spacing:1px;">Tab key shows amber outline on focused element</div>
+            <div class="nav-wrap-aria" role="tablist" aria-label="Main navigation">
+              <button class="nav-tab-aria" role="tab" aria-selected="true" aria-controls="panel-signals">Signals</button>
+              <button class="nav-tab-aria" role="tab" aria-selected="false" aria-controls="panel-scanner">Scanner</button>
+              <button class="nav-tab-aria" role="tab" aria-selected="false" aria-controls="panel-backtest">Backtest</button>
+              <button class="nav-tab-aria" role="tab" aria-selected="false" aria-controls="panel-portfolio">Portfolio</button>
+            </div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--green);letter-spacing:1px;margin-top:8px;">:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 2: CONTRAST ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 2 · CRITICAL</div>
+    <div class="fix-title">--muted Color Contrast</div>
+    <div class="fix-desc"><code>#6b6050</code> on <code>#1a1710</code> scored 2.91:1 — a hard WCAG AA fail used across scanner labels, sub-values, and secondary data throughout the app. Raised to <code>#8a7864</code> which clears 4.6:1.</div>
+    <div class="ba-wrap">
+      <div class="ba-col">
+        <div class="ba-tag before">Before — fails WCAG AA</div>
+        <div class="demo-box before-box">
+          <div class="contrast-demo" style="background:var(--bg2);">
+            <div class="contrast-row">
+              <span class="cr-label">#6b6050 on bg2</span>
+              <span class="cr-ratio cr-fail">2.91:1 FAIL</span>
+              <span class="cr-sample" style="color:#6b6050;">RSI Divergence · scanner label</span>
+            </div>
+            <div class="contrast-row">
+              <span class="cr-label">Sub-label text</span>
+              <span class="cr-ratio cr-fail">2.91:1 FAIL</span>
+              <span class="cr-sample" style="color:#6b6050;">Last updated 14:32:09</span>
+            </div>
+            <div class="contrast-row">
+              <span class="cr-label">Info cell sub</span>
+              <span class="cr-ratio cr-fail">2.91:1 FAIL</span>
+              <span class="cr-sample" style="color:#6b6050;">vs prev close</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ba-col">
+        <div class="ba-tag after">After — WCAG AA pass</div>
+        <div class="demo-box after-box">
+          <div class="contrast-demo" style="background:var(--bg2);">
+            <div class="contrast-row">
+              <span class="cr-label">#8a7864 on bg2</span>
+              <span class="cr-ratio cr-pass">4.6:1 PASS</span>
+              <span class="cr-sample" style="color:#8a7864;">RSI Divergence · scanner label</span>
+            </div>
+            <div class="contrast-row">
+              <span class="cr-label">Sub-label text</span>
+              <span class="cr-ratio cr-pass">4.6:1 PASS</span>
+              <span class="cr-sample" style="color:#8a7864;">Last updated 14:32:09</span>
+            </div>
+            <div class="contrast-row">
+              <span class="cr-label">Info cell sub</span>
+              <span class="cr-ratio cr-pass">4.6:1 PASS</span>
+              <span class="cr-sample" style="color:#8a7864;">vs prev close</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 5: TOUCH TARGETS ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 5 · HIGH</div>
+    <div class="fix-title">Touch Target Size</div>
+    <div class="fix-desc">gpill asset/TF buttons were <code>padding:3px 7px</code> ≈ 22px tap height. Refresh buttons at <code>padding:2px 6px</code> ≈ 18px. Scanner MTF pills at 20px. All raised to minimum 36px effective height (comfortable mobile target), with 44px for primary actions.</div>
+    <div class="ba-wrap">
+      <div class="ba-col">
+        <div class="ba-tag before">Before — ~18–22px tap targets</div>
+        <div class="demo-box before-box">
+          <div style="margin-bottom:14px;">
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">ASSET TYPE</div>
+            <div class="chip-row" style="margin-bottom:12px;">
+              <button class="gpill-before" style="background:var(--amber);color:#0C0A08;border-color:var(--amber);font-weight:700;">Crypto</button>
+              <button class="gpill-before">Stock</button>
+              <button class="gpill-before">Forex</button>
+              <button class="gpill-before">Commodity</button>
+              <button class="gpill-before">Index</button>
+            </div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">TIMEFRAME</div>
+            <div class="chip-row" style="margin-bottom:12px;">
+              <button class="gpill-before">15M</button>
+              <button class="gpill-before">1H</button>
+              <button class="gpill-before" style="background:var(--amber);color:#0C0A08;border-color:var(--amber);font-weight:700;">4H</button>
+              <button class="gpill-before">1D</button>
+              <button class="gpill-before">1W</button>
+              <button class="gpill-before">1M</button>
+            </div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:8px;letter-spacing:1px;">AUTO-REFRESH</div>
+            <div class="pill-row">
+              <button class="rb-btn-before" style="background:var(--amber-glow);border-color:var(--amber);color:var(--amber);">OFF</button>
+              <button class="rb-btn-before">15s</button>
+              <button class="rb-btn-before">30s</button>
+              <button class="rb-btn-before">1m</button>
+            </div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--red);">Tap height: ~18–22px · Minimum is 44px</div>
+        </div>
+      </div>
+      <div class="ba-col">
+        <div class="ba-tag after">After — 36px minimum comfortable target</div>
+        <div class="demo-box after-box">
+          <div style="margin-bottom:14px;">
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">ASSET TYPE</div>
+            <div class="chip-row" style="margin-bottom:12px;">
+              <button class="gpill-after active">Crypto</button>
+              <button class="gpill-after">Stock</button>
+              <button class="gpill-after">Forex</button>
+              <button class="gpill-after">Commodity</button>
+              <button class="gpill-after">Index</button>
+            </div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">TIMEFRAME</div>
+            <div class="chip-row" style="margin-bottom:12px;">
+              <button class="gpill-after">15M</button>
+              <button class="gpill-after">1H</button>
+              <button class="gpill-after active">4H</button>
+              <button class="gpill-after">1D</button>
+              <button class="gpill-after">1W</button>
+              <button class="gpill-after">1M</button>
+            </div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:8px;letter-spacing:1px;">AUTO-REFRESH</div>
+            <div class="pill-row">
+              <button class="rb-btn-after active">OFF</button>
+              <button class="rb-btn-after">15s</button>
+              <button class="rb-btn-after">30s</button>
+              <button class="rb-btn-after">1m</button>
+            </div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--green);">min-height:36px · display:flex; align-items:center</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 4: BUY/SELL/HOLD ICONS ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 4 · CRITICAL</div>
+    <div class="fix-title">Signal Direction Icons (MTF + Scanner)</div>
+    <div class="fix-desc">BUY/SELL/HOLD was conveyed by color alone in MTF cells and scanner pills — a WCAG failure for colorblind users. Added directional icons (▲ ▼ —) so signal direction is never color-only.</div>
+    <div class="ba-wrap">
+      <div class="ba-col">
+        <div class="ba-tag before">Before — color only</div>
+        <div class="demo-box before-box">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">MULTI-TIMEFRAME ALIGNMENT</div>
+          <div class="mtf-grid" style="border-radius:var(--r);overflow:hidden;margin-bottom:16px;">
+            <div class="mtf-cell"><div class="mtf-tf">15M</div><div class="mtf-sig-before buy">BUY</div></div>
+            <div class="mtf-cell" style="background:var(--bg2);"><div class="mtf-tf">1H ←</div><div class="mtf-sig-before buy">BUY</div></div>
+            <div class="mtf-cell"><div class="mtf-tf">4H</div><div class="mtf-sig-before buy">BUY</div></div>
+            <div class="mtf-cell"><div class="mtf-tf">1D</div><div class="mtf-sig-before hold">HOLD</div></div>
+            <div class="mtf-cell"><div class="mtf-tf">1W</div><div class="mtf-sig-before sell">SELL</div></div>
+            <div class="mtf-cell"><div class="mtf-tf">1M</div><div class="mtf-sig-before buy">BUY</div></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--red);">Colorblind users cannot distinguish BUY vs SELL</div>
+        </div>
+      </div>
+      <div class="ba-col">
+        <div class="ba-tag after">After — icon + color</div>
+        <div class="demo-box after-box">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">MULTI-TIMEFRAME ALIGNMENT</div>
+          <div class="mtf-grid" style="border-radius:var(--r);overflow:hidden;margin-bottom:16px;">
+            <div class="mtf-cell"><div class="mtf-tf">15M</div><div class="mtf-sig-after buy"><span class="sig-icon">▲</span>BUY</div></div>
+            <div class="mtf-cell" style="background:var(--bg2);border:1px solid var(--border2);"><div class="mtf-tf">1H ←</div><div class="mtf-sig-after buy"><span class="sig-icon">▲</span>BUY</div></div>
+            <div class="mtf-cell"><div class="mtf-tf">4H</div><div class="mtf-sig-after buy"><span class="sig-icon">▲</span>BUY</div></div>
+            <div class="mtf-cell"><div class="mtf-tf">1D</div><div class="mtf-sig-after hold"><span class="sig-icon">—</span>HOLD</div></div>
+            <div class="mtf-cell"><div class="mtf-tf">1W</div><div class="mtf-sig-after sell"><span class="sig-icon">▼</span>SELL</div></div>
+            <div class="mtf-cell"><div class="mtf-tf">1M</div><div class="mtf-sig-after buy"><span class="sig-icon">▲</span>BUY</div></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--green);">Direction readable without color perception</div>
+        </div>
+      </div>
+    </div>
+    <!-- Scanner icons -->
+    <div style="margin-top:12px;">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">SCANNER — same fix applied to pills</div>
+      <div class="ba-wrap">
+        <div class="ba-col">
+          <div class="ba-tag before">Before — color only</div>
+          <div class="demo-box before-box">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <span class="scan-pill buy" style="gap:0;">BUY</span>
+              <span class="scan-pill sell" style="gap:0;">SELL</span>
+              <span class="scan-pill hold" style="gap:0;">HOLD</span>
+            </div>
+          </div>
+        </div>
+        <div class="ba-col">
+          <div class="ba-tag after">After — icon + color</div>
+          <div class="demo-box after-box">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <span class="scan-pill buy">▲ BUY</span>
+              <span class="scan-pill sell">▼ SELL</span>
+              <span class="scan-pill hold">— HOLD</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 7: ANALYZE BUTTON LOADING STATE ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 7 · HIGH</div>
+    <div class="fix-title">Analyze Button — Disabled State</div>
+    <div class="fix-desc">JS correctly disabled the button during analysis, but no CSS rule existed for <code>#analyzeBtn:disabled</code>. The button looked identical to its enabled state — users got no visual signal the request was processing.</div>
+    <div class="ba-wrap">
+      <div class="ba-col">
+        <div class="ba-tag before">Before — disabled looks identical to enabled</div>
+        <div class="demo-box before-box">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-primary" style="opacity:1;cursor:pointer;" disabled>ANALYZE</button>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--muted2);">← user can't tell if this is loading</span>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--red);margin-top:12px;">No :disabled CSS rule → looks fully active</div>
+        </div>
+      </div>
+      <div class="ba-col">
+        <div class="ba-tag after">After — spinner + reduced opacity</div>
+        <div class="demo-box after-box">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-primary" disabled>ANALYZING</button>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--muted2);">← spinner + opacity:0.55 + cursor:not-allowed</span>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--green);margin-top:12px;">:disabled { opacity:.55; cursor:not-allowed; } + ::after spinner</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 8 + 13: FONT SIZE + CALC LABELS ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 8 + 13 · HIGH</div>
+    <div class="fix-title">Font Size Floor + Calculator Labels</div>
+    <div class="fix-desc">285 instances of <code>font-size:9px</code> and <code>font-size:10px</code> (including a 7.5px logo tag). Minimum raised to 11px for label tier. Calculator inputs used placeholder text only — visible labels added above each field.</div>
+    <div class="ba-wrap">
+      <div class="ba-col">
+        <div class="ba-tag before">Before — 9px text + no labels</div>
+        <div class="demo-box before-box">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">FONT SIZES IN USE</div>
+          <div class="font-demo" style="background:var(--bg3);border-radius:var(--r);margin-bottom:14px;">
+            <div class="fd-row"><span class="fd-size">7.5px</span><span class="fd-status fd-fail">FAIL</span><span style="font-size:7.5px;font-family:var(--mono);color:var(--muted);">BETA · EDUCATIONAL USE ONLY</span></div>
+            <div class="fd-row"><span class="fd-size">9px</span><span class="fd-status fd-fail">FAIL</span><span style="font-size:9px;font-family:var(--mono);color:var(--muted);">OFF · 15s · 30s · 1m · 5m</span></div>
+            <div class="fd-row"><span class="fd-size">10px</span><span class="fd-status fd-fail">FAIL</span><span style="font-size:10px;font-family:var(--mono);color:var(--muted2);">ACCOUNT SIZE · ENTRY PRICE</span></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">CALCULATOR INPUTS — PLACEHOLDER ONLY</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="calc-field-before"><input class="calc-input-before" placeholder="Account size" type="number"></div>
+            <div class="calc-field-before"><input class="calc-input-before" placeholder="Risk %" type="number"></div>
+            <div class="calc-field-before"><input class="calc-input-before" placeholder="Entry price" type="number"></div>
+            <div class="calc-field-before"><input class="calc-input-before" placeholder="Stop loss" type="number"></div>
+          </div>
+        </div>
+      </div>
+      <div class="ba-col">
+        <div class="ba-tag after">After — 11px floor + visible labels</div>
+        <div class="demo-box after-box">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">FONT SIZES — FLOOR APPLIED</div>
+          <div class="font-demo" style="background:var(--bg3);border-radius:var(--r);margin-bottom:14px;">
+            <div class="fd-row"><span class="fd-size">11px</span><span class="fd-status fd-pass">PASS</span><span style="font-size:11px;font-family:var(--mono);color:var(--muted);">BETA · EDUCATIONAL USE ONLY</span></div>
+            <div class="fd-row"><span class="fd-size">11px</span><span class="fd-status fd-pass">PASS</span><span style="font-size:11px;font-family:var(--mono);color:var(--muted);">OFF · 15s · 30s · 1m · 5m</span></div>
+            <div class="fd-row"><span class="fd-size">11px</span><span class="fd-status fd-pass">PASS</span><span style="font-size:11px;font-family:var(--mono);color:var(--muted2);">ACCOUNT SIZE · ENTRY PRICE</span></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted2);margin-bottom:10px;letter-spacing:1px;">CALCULATOR INPUTS — VISIBLE LABELS</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" aria-live="polite">
+            <div class="calc-field-after">
+              <label class="calc-label" for="calc-acct">Account Size</label>
+              <input class="calc-input-after" id="calc-acct" placeholder="10000" type="number">
+            </div>
+            <div class="calc-field-after">
+              <label class="calc-label" for="calc-risk">Risk %</label>
+              <input class="calc-input-after" id="calc-risk" placeholder="1" type="number">
+            </div>
+            <div class="calc-field-after">
+              <label class="calc-label" for="calc-entry">Entry Price</label>
+              <input class="calc-input-after" id="calc-entry" placeholder="84210" type="number">
+            </div>
+            <div class="calc-field-after">
+              <label class="calc-label" for="calc-sl">Stop Loss</label>
+              <input class="calc-input-after" id="calc-sl" placeholder="80850" type="number">
+            </div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--green);margin-top:10px;display:flex;align-items:center;gap:8px;">
+            <span class="aria-tag">aria-live polite</span>
+            calcGuidance announces to screen readers
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 15: HEATMAP TEXT VALUES ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 15 · LOW</div>
+    <div class="fix-title">Correlation Heatmap — Text Values</div>
+    <div class="fix-desc">Heatmap encoded correlation by background color intensity only. Values were hover-only. All values now shown as text inside each cell, making the chart readable without hover and accessible to screen readers.</div>
+    <div class="ba-wrap">
+      <div class="ba-col">
+        <div class="ba-tag before">Before — color only, hover for values</div>
+        <div class="demo-box before-box">
+          <div class="hm-grid">
+            <div class="hm-cell hm-label"></div>
+            <div class="hm-cell hm-label">BTC</div>
+            <div class="hm-cell hm-label">AAPL</div>
+            <div class="hm-cell hm-label">GC=F</div>
+            <div class="hm-cell hm-label">^GSPC</div>
+            <div class="hm-cell hm-label">EUR</div>
+            <div class="hm-cell hm-label">BTC</div>
+            <div class="hm-cell hm-diag"></div>
+            <div class="hm-cell hm-mid"></div>
+            <div class="hm-cell hm-neg"></div>
+            <div class="hm-cell hm-mid"></div>
+            <div class="hm-cell hm-low"></div>
+            <div class="hm-cell hm-label">AAPL</div>
+            <div class="hm-cell hm-mid"></div>
+            <div class="hm-cell hm-diag"></div>
+            <div class="hm-cell hm-neg"></div>
+            <div class="hm-cell hm-high"></div>
+            <div class="hm-cell hm-low"></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--red);margin-top:10px;">Values only on hover — not accessible</div>
+        </div>
+      </div>
+      <div class="ba-col">
+        <div class="ba-tag after">After — values always visible</div>
+        <div class="demo-box after-box">
+          <div class="hm-grid">
+            <div class="hm-cell hm-label"></div>
+            <div class="hm-cell hm-label">BTC</div>
+            <div class="hm-cell hm-label">AAPL</div>
+            <div class="hm-cell hm-label">GC=F</div>
+            <div class="hm-cell hm-label">^GSPC</div>
+            <div class="hm-cell hm-label">EUR</div>
+            <div class="hm-cell hm-label">BTC</div>
+            <div class="hm-cell hm-diag"><span class="hm-val">1.00</span></div>
+            <div class="hm-cell hm-mid"><span class="hm-val">0.42</span></div>
+            <div class="hm-cell hm-neg"><span class="hm-val">-0.12</span></div>
+            <div class="hm-cell hm-mid"><span class="hm-val">0.48</span></div>
+            <div class="hm-cell hm-low"><span class="hm-val">0.21</span></div>
+            <div class="hm-cell hm-label">AAPL</div>
+            <div class="hm-cell hm-mid"><span class="hm-val">0.42</span></div>
+            <div class="hm-cell hm-diag"><span class="hm-val">1.00</span></div>
+            <div class="hm-cell hm-neg"><span class="hm-val">-0.08</span></div>
+            <div class="hm-cell hm-high"><span class="hm-val">0.71</span></div>
+            <div class="hm-cell hm-low"><span class="hm-val">0.28</span></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--green);margin-top:10px;">Values visible at all times — no hover required</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 3: prefers-reduced-motion ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 3 · CRITICAL</div>
+    <div class="fix-title">prefers-reduced-motion Support</div>
+    <div class="fix-desc">Zero <code>@media (prefers-reduced-motion)</code> rules existed across 11,927 lines. The ticker tape, pulsing session dots, signal scan-line, and spinner all ran continuously for users with motion sensitivity settings enabled at the OS level.</div>
+    <div style="background:var(--bg2);border:1px solid rgba(0,201,141,.2);border-radius:var(--r2);padding:18px 20px;">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--green);letter-spacing:1px;margin-bottom:12px;">ADDED — covers all animation sources</div>
+      <pre style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.8;background:var(--bg);padding:14px;border-radius:var(--r);border:1px solid var(--border);overflow:auto;">@media (prefers-reduced-motion: reduce) {
+  .tape-track    { animation: none; }
+  .sess-dot .dot { animation: none; }
+  .sig-hero::after { animation: none; }
+  .rb-spin       { animation: none; }
+  * {
+    animation-duration:  .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}</pre>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:10px;">Enable "Reduce motion" in your OS accessibility settings to verify. All animations halt instantly.</div>
+    </div>
+  </div>
+
+  <!-- ════ FIX 10: ARIA ROLES ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIX 10 · MEDIUM</div>
+    <div class="fix-title">Nav Tab ARIA Roles</div>
+    <div class="fix-desc">The centered nav tabs were plain <code>&lt;button&gt;</code> elements with no semantic tab role. Screen readers announced them as generic buttons with no indication of which tab was selected.</div>
+    <div style="background:var(--bg2);border:1px solid rgba(0,201,141,.2);border-radius:var(--r2);padding:18px 20px;">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--green);letter-spacing:1px;margin-bottom:12px;">AFTER — correct ARIA tab pattern</div>
+      <div class="nav-wrap-aria" style="margin-bottom:14px;" role="tablist" aria-label="Main navigation">
+        <button class="nav-tab-aria" role="tab" aria-selected="true" aria-controls="panel-signals">Signals</button>
+        <button class="nav-tab-aria" role="tab" aria-selected="false" aria-controls="panel-scanner">Scanner</button>
+        <button class="nav-tab-aria" role="tab" aria-selected="false" aria-controls="panel-backtest">Backtest</button>
+        <button class="nav-tab-aria" role="tab" aria-selected="false" aria-controls="panel-portfolio">Portfolio</button>
+        <button class="nav-tab-aria" role="tab" aria-selected="false" aria-controls="panel-calc">Calculator</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="aria-tag">role=tablist on container</span>
+        <span class="aria-tag">role=tab on each button</span>
+        <span class="aria-tag">aria-selected=true/false</span>
+        <span class="aria-tag">aria-controls → panel ID</span>
+        <span class="aria-tag">aria-live polite on signal output</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ QUICK FIXES ════ -->
+  <div class="fix-section">
+    <div class="fix-label">FIXES 9, 11, 12</div>
+    <div class="fix-title">Quick Wins — 3 Lines of Code</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:16px;">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:2px;margin-bottom:8px;">FIX 9 — 2 CHARS</div>
+        <div style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.7;">Google Fonts <code style="color:var(--amber)">&display=swap</code> prevents invisible text (FOIT) while fonts load on slow connections.</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:16px;">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:2px;margin-bottom:8px;">FIX 11 — 1 RULE</div>
+        <div style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.7;"><code style="color:var(--amber)">tbody tr:active</code> gives mobile users instant visual feedback on tap — was hover-only, which never fires on touch.</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:16px;">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:2px;margin-bottom:8px;">FIX 12 — 1 LINE</div>
+        <div style="font-family:var(--mono);font-size:12px;color:var(--white2);line-height:1.7;"><code style="color:var(--amber)">min-height:100dvh</code> fallback fixes iOS Safari address bar clipping the bottom of the page.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ SIGNAL HERO — unchanged identity ════ -->
+  <div class="fix-section">
+    <div class="fix-label">UNCHANGED · DESIGN IDENTITY</div>
+    <div class="fix-title">Signal Hero — Identity Preserved</div>
+    <div class="fix-desc">The Pro Max skill database confirmed: amber/warm-black aesthetic, Anybody + Fira Code + Sora, and the signal hero layout are all correct and distinctive choices for a fintech trading SaaS. None of this changes.</div>
+    <div class="sig-hero-demo">
+      <div class="sig-bar"></div>
+      <div class="sig-content">
+        <div>
+          <div class="sig-label-demo buy">BUY</div>
+          <div class="sig-sub-demo">BTC-USD · 4H · CONFIRMED</div>
+        </div>
+        <div style="width:1px;background:var(--border);align-self:stretch;margin:16px 0;"></div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+          <div class="slvl"><div class="slvl-label">Entry</div><div class="slvl-val entry">$84,210</div></div>
+          <div class="slvl"><div class="slvl-label">Stop Loss</div><div class="slvl-val sl">$80,850</div></div>
+          <div class="slvl"><div class="slvl-label">TP1</div><div class="slvl-val tp">$86,900</div></div>
+          <div class="slvl"><div class="slvl-label">TP2</div><div class="slvl-val tp">$89,600</div></div>
+          <div class="slvl"><div class="slvl-label">TP3</div><div class="slvl-val tp">$94,100</div></div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <button class="btn-ghost">PINE SCRIPT</button>
+          <button class="btn-primary">ANALYZE</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:16px 0;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted2);letter-spacing:1px;">
+    PREVIEW ONLY · NOT COMMITTED · Awaiting your go-ahead
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,503 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Verdict v3 — Complete</title>
+<link href='https://fonts.googleapis.com/css2?family=Syne:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&family=IBM+Plex+Mono:wght@300;400&display=swap' rel='stylesheet'>
+<style>
+:root{--bg:#07080c;--s1:rgba(255,248,230,.03);--bd:rgba(201,168,76,.12);--t1:#ede8d8;--t2:rgba(237,232,216,.62);--t3:rgba(237,232,216,.30);--mut:rgba(237,232,216,.38);--gold:#c9a84c;--grn:#5de8a0;--red:#e8706e;--blue:#7c9ff5;--purp:#a78bfa;--mono:'IBM Plex Mono',monospace;--ui:'Space Grotesk',sans-serif;--syne:'Syne',sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#080a0f;color:var(--t1);font-family:var(--ui);display:flex;height:100vh;overflow:hidden}
+
+.sidebar{width:200px;flex-shrink:0;background:rgba(7,8,12,.98);border-right:1px solid var(--bd);display:flex;flex-direction:column}
+.sb-logo{padding:14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:13px}
+.sb-pipe{flex-shrink:0;padding:8px;border-bottom:1px solid rgba(201,168,76,.08);display:flex;align-items:center;gap:2px}
+.sb-pill{font-size:8px;font-weight:600;padding:2px 4px;border-radius:3px;color:rgba(200,210,232,.28);letter-spacing:.05em}
+.sb-pill.on{color:var(--gold);border:1px solid rgba(201,168,76,.4)}
+.sb-sep{font-size:7px;color:rgba(237,232,216,.12)}
+.sb-nav{flex:1;overflow-y:auto;padding:6px}
+.sb-sec{font-size:9px;color:var(--t3);letter-spacing:.1em;text-transform:uppercase;padding:10px 6px 4px}
+.sb-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12px;color:var(--t2);cursor:pointer;transition:all .12s}
+.sb-item:hover{color:var(--t1)}
+.sb-item.on{background:rgba(201,168,76,.08);color:var(--gold)}
+.sb-item svg{flex-shrink:0;opacity:.6}
+.sb-item.on svg{opacity:1}
+.sb-item em{font-size:9px;color:var(--t3);display:block;font-style:normal;margin-left:auto}
+
+.main{flex:1;display:flex;flex-direction:column;min-height:0}
+.topbar{height:44px;border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 20px;flex-shrink:0;gap:10px}
+.top-label{font-size:9px;font-family:var(--mono);letter-spacing:.1em;color:var(--t3);text-transform:uppercase}
+.top-live{display:flex;align-items:center;gap:4px;font-size:9px;font-family:var(--mono);color:var(--grn);margin-left:auto}
+.top-dot{width:5px;height:5px;border-radius:50%;background:var(--grn);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.content{flex:1;overflow-y:auto;padding:20px 24px 40px;scrollbar-width:thin}
+
+.agent-strip{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+.agent-chip{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:16px;border:1px solid rgba(237,232,216,.1);background:rgba(255,255,255,.02);font-size:9px;font-family:var(--mono);transition:all .3s;white-space:nowrap}
+.agent-chip .dot{width:5px;height:5px;border-radius:50%}
+.agent-chip.active .dot{background:var(--grn);box-shadow:0 0 6px rgba(93,232,160,.5);animation:pulse 1.5s infinite}
+.agent-chip.waiting .dot{background:var(--gold);box-shadow:0 0 6px rgba(201,168,76,.4)}
+.agent-chip.done .dot{background:var(--t3)}
+.agent-chip.active{border-color:rgba(93,232,160,.3);background:rgba(93,232,160,.04)}
+
+.verdict-hero{background:linear-gradient(135deg,rgba(12,14,20,.95),rgba(9,11,16,.92));border:1px solid rgba(237,232,216,.12);border-radius:14px;padding:24px 28px;margin-bottom:18px;position:relative;overflow:hidden}
+.verdict-hero::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+.vh-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px}
+.vh-action{font-family:var(--syne);font-size:34px;font-weight:400;letter-spacing:-.02em}
+.vh-action.buy{color:var(--grn)}.vh-action.sell{color:var(--red)}
+.vh-meta{text-align:right}.vh-conf{font-family:var(--mono);font-size:24px;font-weight:300}
+.vh-meta-sub{font-size:10px;color:var(--t3)}
+.vh-levels{display:flex;gap:22px;font-size:11px;font-family:var(--mono);margin-bottom:12px}
+.vh-levels span{color:var(--t2)}.vh-levels strong{color:var(--t1)}.vh-levels .sl{color:var(--red)}.vh-levels .tp{color:var(--grn)}
+.vh-reason{font-size:12px;color:var(--t2);line-height:1.75;max-width:680px}
+
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+
+.agent-panel{background:rgba(9,11,16,.8);border:1px solid rgba(237,232,216,.08);border-radius:10px;overflow:hidden}
+.ap-head{padding:12px 16px;border-bottom:1px solid rgba(237,232,216,.06);display:flex;align-items:center;gap:8px}
+.ap-avatar{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px}
+.ap-name{font-size:12px;font-weight:500}
+.ap-role{font-size:8px;color:var(--t3);margin-top:1px}
+.ap-badge{font-size:8px;font-weight:700;padding:2px 7px;border-radius:3px;margin-left:auto}
+.ap-badge.bull{background:rgba(93,232,160,.1);color:var(--grn)}
+.ap-badge.bear{background:rgba(232,112,110,.1);color:var(--red)}
+.ap-badge.neutral{background:rgba(201,168,76,.1);color:var(--gold)}
+.ap-body{padding:14px 16px;font-size:11px;color:var(--t2);line-height:1.7}
+.ap-body .hi{color:var(--grn);font-weight:600}
+.ap-body .warn{color:var(--red);font-weight:600}
+.ap-body .note{color:var(--gold)}
+
+.risk-scale{background:rgba(9,11,16,.7);border:1px solid rgba(237,232,216,.1);border-radius:12px;overflow:hidden;margin-bottom:18px}
+.rs-head{padding:14px 18px;border-bottom:1px solid rgba(237,232,216,.06);display:flex;align-items:center;justify-content:space-between}
+.rs-title{font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px}
+.rs-sub{font-size:9px;color:var(--t3);font-family:var(--mono)}
+.rs-body{padding:16px 18px}
+.rs-controls{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.rs-controls label{font-size:10px;color:var(--t3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}
+.rs-controls select{background:rgba(255,255,255,.04);border:1px solid rgba(237,232,216,.15);border-radius:6px;padding:7px 10px;color:var(--t1);font-size:11px;font-family:var(--mono);outline:none}
+.rs-ladder{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto}
+.rs-trade{flex:1;min-width:85px;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.08);border-radius:10px;padding:12px 10px;text-align:center}
+.rs-trade-num{font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+.rs-trade-risk{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--gold);margin-bottom:3px}
+.rs-trade-loss{font-size:8px;color:var(--red);font-family:var(--mono)}
+.rs-trade-gain{font-size:8px;color:var(--grn);font-family:var(--mono);margin-top:2px}
+.rs-trade-sl{font-size:8px;color:var(--t3);font-family:var(--mono);margin-top:4px;padding-top:4px;border-top:1px solid rgba(237,232,216,.06)}
+.rs-trade-trail{font-size:8px;color:rgba(201,168,76,.7);font-family:var(--mono)}
+.rs-total{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:12px 16px;background:rgba(201,168,76,.03);border:1px solid rgba(201,168,76,.12);border-radius:8px;margin-bottom:14px}
+.rs-total-cell{text-align:center}
+.rs-total-lbl{font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;font-family:var(--mono)}
+.rs-total-val{font-size:15px;font-weight:500;font-family:var(--mono)}
+.rs-total-val.warn{color:var(--red)}.rs-total-val.ok{color:var(--grn)}.rs-total-val.amb{color:var(--gold)}
+.rs-automation-note{padding:12px 16px;background:rgba(93,232,160,.03);border:1px solid rgba(93,232,160,.12);border-radius:8px;font-size:10px;color:var(--t2);line-height:1.7;margin-bottom:12px;display:flex;align-items:flex-start;gap:8px}
+.rs-automation-note svg{flex-shrink:0;margin-top:1px}
+.rs-advice{padding:12px 16px;background:rgba(201,168,76,.04);border:1px solid rgba(201,168,76,.15);border-radius:8px;font-size:11px;color:var(--t2);line-height:1.7;display:flex;align-items:flex-start;gap:8px}
+.rs-advice svg{flex-shrink:0;margin-top:1px}
+
+.size-plan{background:rgba(9,11,16,.7);border:1px solid rgba(93,232,160,.15);border-radius:12px;overflow:hidden;margin-bottom:18px}
+
+/* Agent verdict strip */
+.agent-verdicts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+.agent-verdicts.wide{grid-template-columns:repeat(8,1fr)}
+.av-card{background:rgba(9,11,16,.7);border:1px solid rgba(237,232,216,.08);border-radius:10px;overflow:hidden;transition:all .2s}
+.av-card:hover{border-color:rgba(237,232,216,.18);transform:translateY(-1px)}
+.av-card.buy{border-left:2px solid var(--grn)}
+.av-card.sell{border-left:2px solid var(--red)}
+.av-card.hold{border-left:2px solid rgba(237,232,216,.4)}
+.av-card-head{padding:12px 14px 8px;display:flex;align-items:center;gap:7px}
+.av-avatar{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px}
+.av-name{font-size:11px;font-weight:500;line-height:1.2}
+.av-verdict{font-size:9px;font-weight:700;letter-spacing:.04em;padding:2px 8px;border-radius:3px;margin-left:auto}
+.av-verdict.buy{background:rgba(93,232,160,.1);color:var(--grn);border:1px solid rgba(93,232,160,.25)}
+.av-verdict.sell{background:rgba(232,112,110,.1);color:var(--red);border:1px solid rgba(232,112,110,.25)}
+.av-verdict.hold{background:rgba(237,232,216,.06);color:var(--t2);border:1px solid rgba(237,232,216,.15)}
+.av-conf{padding:4px 14px 10px;font-family:var(--mono);font-size:10px;color:var(--t3);display:flex;align-items:center;gap:6px}
+.av-conf-bar{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden}
+.av-conf-fill{height:100%;border-radius:2px}.av-conf-fill.high{background:var(--grn)}.av-conf-fill.mid{background:var(--gold)}.av-conf-fill.low{background:var(--red)}
+.av-reason{padding:0 14px 12px;font-size:10px;color:var(--t3);line-height:1.5}
+.sp-head{padding:14px 18px;border-bottom:1px solid rgba(93,232,160,.1);display:flex;align-items:center;gap:10px}
+.sp-title{font-size:13px;font-weight:500;color:var(--grn)}
+.sp-sub{font-size:9px;color:var(--t3);font-family:var(--mono);margin-left:auto}
+.sp-body{padding:16px 18px}
+.sp-table{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono)}
+.sp-table th{text-align:left;padding:8px 6px;font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid rgba(237,232,216,.06)}
+.sp-table td{padding:8px 6px;border-bottom:1px solid rgba(237,232,216,.04);color:var(--t2)}
+.sp-table tr:last-child td{border-bottom:none}
+.sp-table .risk-col{color:var(--gold);font-weight:600}
+.sp-table .sl-col{color:var(--red)}
+.sp-table .tp-col{color:var(--grn)}
+.sp-table .trail-col{color:rgba(201,168,76,.8)}
+.sp-btn{padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;margin-top:14px;display:inline-flex;align-items:center;gap:6px}
+
+.chat-panel{background:rgba(9,11,16,.75);border:1px solid rgba(237,232,216,.1);border-radius:12px;overflow:hidden;margin-bottom:18px}
+.chat-head{padding:12px 18px;border-bottom:1px solid rgba(237,232,216,.08);display:flex;align-items:center;justify-content:space-between}
+.chat-title{font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px}
+.chat-status{font-size:8px;font-family:var(--mono);color:var(--grn);display:flex;align-items:center;gap:4px}
+.chat-status .dot{width:4px;height:4px;border-radius:50%;background:var(--grn)}
+.chat-msgs{padding:14px 18px;max-height:280px;overflow-y:auto}
+.chat-msg{margin-bottom:12px}
+.chat-msg-user{text-align:right}
+.chat-msg-user .bubble{background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.25);border-radius:10px 10px 2px 10px;padding:8px 12px;display:inline-block;max-width:75%;font-size:11px;color:var(--t1);text-align:left;line-height:1.6}
+.chat-msg-agent .bubble{background:rgba(255,255,255,.04);border:1px solid rgba(237,232,216,.1);border-radius:10px 10px 10px 2px;padding:10px 12px;display:inline-block;max-width:80%;font-size:11px;color:var(--t2);line-height:1.65}
+.chat-msg-agent .who{font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+.chat-input-row{display:flex;gap:6px;padding:10px 18px;border-top:1px solid rgba(237,232,216,.06)}
+.chat-input{flex:1;background:rgba(255,255,255,.04);border:1px solid rgba(237,232,216,.12);border-radius:6px;padding:8px 12px;color:var(--t1);font-family:var(--ui);font-size:11px;outline:none}
+.chat-input:focus{border-color:rgba(201,168,76,.4)}
+.chat-btn{padding:8px 14px;border-radius:6px;background:var(--gold);color:#07080c;border:none;font-size:10px;font-weight:700;font-family:var(--mono);cursor:pointer}
+.chat-suggests{display:flex;gap:4px;padding:6px 18px 10px;flex-wrap:wrap}
+.chat-suggest{font-size:9px;padding:4px 8px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.1);color:var(--t3);cursor:pointer;font-family:var(--mono);transition:all .15s}
+.chat-suggest:hover{border-color:rgba(201,168,76,.3);color:var(--gold)}
+
+@keyframes slideUp{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
+.slide-up{animation:slideUp .3s ease-out}
+@keyframes typing{0%,100%{border-color:transparent}50%{border-color:var(--gold)}}
+.typing-dot{display:inline-block;width:3px;height:3px;border-radius:50%;background:var(--gold);margin:0 1px;animation:typing .8s infinite}
+.typing-dot:nth-child(2){animation-delay:.2s}.typing-dot:nth-child(3){animation-delay:.4s}
+
+.dotverse-badge{display:inline-block;padding:2px 6px;border-radius:3px;font-size:8px;font-weight:700;background:rgba(93,232,160,.1);color:var(--grn);border:1px solid rgba(93,232,160,.25);letter-spacing:.4px}
+.confluence-bar{height:4px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden;margin:6px 0}
+.confluence-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--red),var(--gold),var(--grn));transition:width .5s}
+</style></head><body>
+
+<div class="sidebar">
+  <div class="sb-logo">Dot<span style="color:var(--gold)">Verse</span></div>
+  <div class="sb-pipe"><span class="sb-pill">MKT</span><span class="sb-sep">›</span><span class="sb-pill">SIG</span><span class="sb-sep">›</span><span class="sb-pill">UND</span><span class="sb-sep">›</span><span class="sb-pill on">VER</span><span class="sb-sep">›</span><span class="sb-pill">SZE</span><span class="sb-sep">›</span><span class="sb-pill">ACT</span></div>
+  <div class="sb-nav">
+    <div class="sb-sec">Pipeline</div>
+    <div class="sb-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>Market<em>01</em></div>
+    <div class="sb-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Signal<em>02</em></div>
+    <div class="sb-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Understand<em>03</em></div>
+    <div class="sb-item on"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Verdict<em>04</em></div>
+    <div class="sb-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Size<em>05</em></div>
+    <div class="sb-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Act<em>06</em></div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="topbar">
+    <div class="top-label">Verdict · BTC/USD 4H</div>
+    <div class="top-live"><div class="top-dot"></div>5 Agents · All Reports Complete</div>
+  </div>
+  <div class="content">
+
+    <!-- AGENT STRIP -->
+    <div class="agent-strip">
+      <div class="agent-chip done"><div class="dot"></div>Market <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="agent-chip done"><div class="dot"></div>Fundamentals <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="agent-chip done"><div class="dot"></div>Sentiment <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="agent-chip done"><div class="dot"></div>News <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="agent-chip done"><div class="dot"></div>Signal Analyst <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="agent-chip done"><div class="dot"></div>Debate <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="agent-chip done"><div class="dot"></div>Risk Team <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="agent-chip done"><div class="dot"></div>Portfolio Mgr <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div>
+    </div>
+
+    <!-- HERO -->
+    <div class="verdict-hero">
+      <div class="vh-top">
+        <div><div class="vh-action buy">BUY</div>
+          <div class="vh-levels" style="margin-top:8px"><span>Entry<strong>$82,312</strong></span><span>SL<strong class="sl">$79,009</strong></span><span>TP<strong class="tp">$90,406</strong></span><span>R:R<strong>1:2.4</strong></span></div>
+        </div>
+        <div class="vh-meta"><div class="vh-conf" style="color:var(--grn)">72%</div><div class="vh-meta-sub">Confidence · LIKELY</div></div>
+      </div>
+      <div class="vh-reason">
+        5 AI analysts studied BTC — technicals, fundamentals, sentiment, news, and <strong style="color:var(--grn)">DotVerse's own signal ranking</strong>. After bull/bear debate and risk discussion with your Automations settings factored in: <strong style="color:var(--gold)">BUY with escalating risk across 5 positions. Total exposure: 10%. Use trailing stops as configured in Automations.</strong>
+      </div>
+    </div>
+
+    <!-- AGENT VERDICT STRIP — 8 agents: 4 analysts + 2 researchers + judge + signal -->
+    <div class="agent-verdicts wide">
+      <div class="av-card buy slide-up">
+        <div class="av-card-head"><div class="av-avatar" style="background:rgba(201,168,76,.12)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="av-name">Market</div><div class="av-verdict buy">BUY</div></div>
+        <div class="av-conf">78%<div class="av-conf-bar"><div class="av-conf-fill high" style="width:78%"></div></div></div><div class="av-reason">MACD crossover · EMA bullish</div>
+      </div>
+      <div class="av-card buy slide-up" style="animation-delay:.04s">
+        <div class="av-card-head"><div class="av-avatar" style="background:rgba(93,232,160,.08)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></div><div class="av-name">Fundamentals</div><div class="av-verdict buy">BUY</div></div>
+        <div class="av-conf">65%<div class="av-conf-bar"><div class="av-conf-fill mid" style="width:65%"></div></div></div><div class="av-reason">Accumulation · fairly valued</div>
+      </div>
+      <div class="av-card buy slide-up" style="animation-delay:.08s">
+        <div class="av-card-head"><div class="av-avatar" style="background:rgba(93,232,160,.08)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg></div><div class="av-name">Sentiment</div><div class="av-verdict buy">BUY</div></div>
+        <div class="av-conf">75%<div class="av-conf-bar"><div class="av-conf-fill high" style="width:75%"></div></div></div><div class="av-reason">Optimistic · no mania</div>
+      </div>
+      <div class="av-card hold slide-up" style="animation-delay:.12s">
+        <div class="av-card-head"><div class="av-avatar" style="background:rgba(232,112,110,.1)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2z"/></svg></div><div class="av-name">News</div><div class="av-verdict hold">HOLD</div></div>
+        <div class="av-conf">55%<div class="av-conf-bar"><div class="av-conf-fill low" style="width:55%"></div></div></div><div class="av-reason">CPI risk · wait for data</div>
+      </div>
+      <div class="av-card buy slide-up" style="animation-delay:.16s">
+        <div class="av-card-head"><div class="av-avatar" style="background:rgba(93,232,160,.12)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 6.91-1.01z"/></svg></div><div class="av-name">Bull Researcher</div><div class="av-verdict buy">BUY</div></div>
+        <div class="av-conf">80%<div class="av-conf-bar"><div class="av-conf-fill high" style="width:80%"></div></div></div><div class="av-reason" style="color:var(--grn)">WON · momentum > macro</div>
+      </div>
+      <div class="av-card sell slide-up" style="animation-delay:.20s">
+        <div class="av-card-head"><div class="av-avatar" style="background:rgba(232,112,110,.12)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 6.91-1.01z"/></svg></div><div class="av-name">Bear Researcher</div><div class="av-verdict sell">SELL</div></div>
+        <div class="av-conf">60%<div class="av-conf-bar"><div class="av-conf-fill low" style="width:60%"></div></div></div><div class="av-reason" style="color:var(--red)">LOST · macro > momentum</div>
+      </div>
+      <div class="av-card buy slide-up" style="animation-delay:.24s">
+        <div class="av-card-head"><div class="av-avatar" style="background:rgba(201,168,76,.12)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="8"/><polyline points="9 12 12 8 15 12"/></svg></div><div class="av-name">Judge</div><div class="av-verdict buy">BUY</div></div>
+        <div class="av-conf">72%<div class="av-conf-bar"><div class="av-conf-fill high" style="width:72%"></div></div></div><div class="av-reason">Bull wins · reduce size</div>
+      </div>
+      <div class="av-card buy slide-up" style="animation-delay:.28s">
+        <div class="av-card-head"><div class="av-avatar" style="background:rgba(93,232,160,.12)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div><div class="av-name">Signal<span class="dotverse-badge" style="font-size:6px">DV</span></div><div class="av-verdict buy">BUY</div></div>
+        <div class="av-conf">71%<div class="av-conf-bar"><div class="av-conf-fill high" style="width:71%"></div></div></div><div class="av-reason">5/7 indicators · LIKELY</div>
+      </div>
+    </div>
+
+    <!-- BULL VS BEAR DEBATE -->
+    <div class="risk-scale" style="margin-bottom:18px">
+      <div class="rs-head"><div class="rs-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2.2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 6.91-1.01z"/></svg>Bull vs Bear Debate</div><div class="rs-sub">2 rounds · <span style="color:var(--grn)">Bull Researcher won</span></div></div>
+      <div style="padding:0">
+        <div style="padding:14px 18px;border-bottom:1px solid rgba(237,232,216,.06);background:rgba(93,232,160,.03)">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--grn);text-transform:uppercase;margin-bottom:6px">Bull Researcher · Round 1</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.7">Technical setup is textbook — 5 indicators aligned, volume +18% above average. ETF inflows at $890M. On-chain shows accumulation. CPI is noise — markets absorbed CPI surprises before. <strong>If we wait, we miss the entry. Enter now, size smaller. The stop at $79,009 catches any surprise.</strong></div>
+        </div>
+        <div style="padding:14px 18px;border-bottom:1px solid rgba(237,232,216,.06);background:rgba(232,112,110,.03)">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--red);text-transform:uppercase;margin-bottom:6px">Bear Researcher · Round 1</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.7">CPI is not noise — 3 of the last 4 CPI surprises dropped BTC 3-5% within hours. You're gambling on a known binary event. The setup will still be there Friday. ETF inflows are backward-looking. <strong>Asymmetric risk: entering now risks 4% gap-down. Waiting 48 hours costs nothing.</strong></div>
+        </div>
+        <div style="padding:14px 18px;border-bottom:1px solid rgba(237,232,216,.06);background:rgba(93,232,160,.02)">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--grn);text-transform:uppercase;margin-bottom:6px">Bull Researcher · Round 2</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.7">"Buy $3,000 higher" is a real cost — that's 3.6% of the move. The stop loss is the solution — limits loss to $3,300. Without a trade: zero downside AND zero upside. <strong>ETF flow trend is the stronger signal — institutions are buying the dip. Enter with protection.</strong></div>
+        </div>
+        <div style="padding:14px 18px;border-bottom:1px solid rgba(237,232,216,.06);background:rgba(232,112,110,.02)">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--red);text-transform:uppercase;margin-bottom:6px">Bear Researcher · Round 2</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.7">Stop loss at $79,009 assumes orderly fills. Macro gaps don't give orderly fills — stop could execute at $77,500. That's $4,800 loss, not $3,300. <strong>If forced to enter: 1.5% risk max, limit orders only, be prepared to close manually.</strong></div>
+        </div>
+        <div style="padding:14px 18px;background:rgba(201,168,76,.04);border-top:1px solid rgba(201,168,76,.15)">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--gold);text-transform:uppercase;margin-bottom:6px">Judge Verdict</div>
+          <div style="font-size:11px;color:var(--t2);line-height:1.7"><strong style="color:var(--grn)">Bull Researcher wins.</strong> Technical case compelling, bear's macro concern is manageable through sizing. <strong>BUY with 2% max risk per trade, escalating 0.8% to 2.5% across 5 positions. Limit orders. Cancel if CPI > 0.4% before first fill.</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANALYST DETAIL CARDS -->
+    <div class="grid3">
+      <div class="agent-panel slide-up">
+        <div class="ap-head"><div class="ap-avatar" style="background:rgba(201,168,76,.12)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div><div class="ap-name">Market Analyst</div><div class="ap-role">Technicals · price structure</div></div><div class="ap-badge bull">BULLISH</div></div>
+        <div class="ap-body">RSI 62 — room to run. MACD fresh bullish crossover. EMA stack green. <span class="hi">Volume +18% above average</span> — real conviction. Supertrend flipped green 3 candles ago. Setup is clean. <span class="warn">Only caution: started from support test, not consolidation.</span></div>
+      </div>
+      <div class="agent-panel slide-up">
+        <div class="ap-head"><div class="ap-avatar" style="background:rgba(93,232,160,.08)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></div><div><div class="ap-name">Fundamentals</div><div class="ap-role">On-chain · valuation</div></div><div class="ap-badge neutral">NEUTRAL</div></div>
+        <div class="ap-body">MVRV Z-Score 2.1 (not overheated). <span class="hi">Exchange reserves dropping</span> — accumulation. Hash rate at ATH. Fees normal. Price 5.5% above fair value — moderate premium, not a top signal.</div>
+      </div>
+      <div class="agent-panel slide-up">
+        <div class="ap-head"><div class="ap-avatar" style="background:rgba(93,232,160,.08)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></div><div><div class="ap-name">Sentiment</div><div class="ap-role">Social · crowd mood</div></div><div class="ap-badge bull">BULLISH</div></div>
+        <div class="ap-body">F&G 62 (Greed, not extreme). <span class="hi">Crypto Twitter 68% bullish.</span> Google Trends +22% WoW but still 32% of retail peak. Optimistic crowd, not euphoric. Mid-cycle behavior.</div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="agent-panel slide-up">
+        <div class="ap-head"><div class="ap-avatar" style="background:rgba(232,112,110,.1)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2z"/></svg></div><div><div class="ap-name">News Analyst</div><div class="ap-role">Macro · events · headlines</div></div><div class="ap-badge bear">BEARISH</div></div>
+        <div class="ap-body"><span class="warn">CPI tomorrow 08:30 ET (forecast 0.3%).</span> Previous surprise dropped BTC 4.2% in 6h. Powell speaks Thu. <span class="hi">But ETF inflows $890M this week</span> — highest in 3 months. Spot vol $28B. Macro is split: ETF flows support bulls, CPI favors caution.</div>
+      </div>
+      <div class="agent-panel slide-up">
+        <div class="ap-head"><div class="ap-avatar" style="background:rgba(93,232,160,.12)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--grn)" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div><div><div class="ap-name">Signal Analyst <span class="dotverse-badge">DOTVERSE</span></div><div class="ap-role">Confluence · indicator weights · gate</div></div><div class="ap-badge bull">CONFIRMED</div></div>
+        <div class="ap-body">
+          <span class="hi">5 of 7 indicators agree</span> — that's 71% confluence, above the 65% gate. DotVerse required this before showing the signal. Here's the breakdown:<br><br>
+          <div class="confluence-bar"><div class="confluence-fill" style="width:71%"></div></div>
+          <span style="font-size:10px">71% confluence · 5/7 aligned</span><br><br>
+          <span class="hi"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg> Bullish:</span> EMA (7 above 21), MACD (histogram expanding), Supertrend (green), Volume (above average), MTF Trend (4H+1D agree)<br>
+          <span class="warn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="3" style="display:inline;vertical-align:middle"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Bearish:</span> RSI (62, neutral — not bearish but didn't confirm), Bollinger (price mid-band, no extreme)<br><br>
+          <span class="note">The RSI and Bollinger were neutral — they didn't vote against BUY, they just didn't vote for it. That's why we have 71% not 100%. A 71% signal with 3 of 5 bullish indicators showing volume confirmation is a <strong>LIKELY</strong> tier signal — strong enough to trade, but size conservatively.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUTOMATIONS-AWARE RISK SCALING -->
+    <div class="risk-scale">
+      <div class="rs-head">
+        <div class="rs-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Risk Scaling · Multi-Position Strategy</div>
+        <div class="rs-sub">Reading Automations · trailing stop active</div>
+      </div>
+      <div class="rs-body">
+        <div class="rs-automation-note" style="margin-bottom:0;border-bottom:0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <span><strong style="color:var(--grn)">Your Automations are active.</strong> The Risk Team has reviewed each one against this trade:</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(237,232,216,.06);margin-bottom:16px;border-radius:0">
+          <div style="background:rgba(9,11,16,.8);padding:12px 14px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              <span style="font-size:11px;font-weight:500;color:var(--grn)">Stop-loss auto-placement</span>
+            </div>
+            <div style="font-size:10px;color:var(--t3);line-height:1.5">Your setting: <strong style="color:var(--t1)">ON</strong></div>
+            <div style="font-size:10px;color:var(--t2);line-height:1.5;margin-top:4px"><strong style="color:var(--grn)">AGREE.</strong> With CPI tomorrow, automatic stop placement is critical. The system will place stops at the levels in the Size Plan below.</div>
+          </div>
+          <div style="background:rgba(9,11,16,.8);padding:12px 14px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              <span style="font-size:11px;font-weight:500;color:var(--grn)">Trailing stop 0.5x ATR</span>
+            </div>
+            <div style="font-size:10px;color:var(--t3);line-height:1.5">Your setting: <strong style="color:var(--t1)">ON · 0.5x ATR · after +1.5R</strong></div>
+            <div style="font-size:10px;color:var(--t2);line-height:1.5;margin-top:4px"><strong style="color:var(--gold)">AGREE with adjustment.</strong> 0.5x ATR is good for trades 1-3. For trades 4-5 (higher risk), increase to 0.75x ATR for wider protection against CPI volatility.</div>
+          </div>
+          <div style="background:rgba(9,11,16,.8);padding:12px 14px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              <span style="font-size:11px;font-weight:500;color:var(--grn)">Daily loss cap $500</span>
+            </div>
+            <div style="font-size:10px;color:var(--t3);line-height:1.5">Your setting: <strong style="color:var(--t1)">ON · $500/day</strong></div>
+            <div style="font-size:10px;color:var(--t2);line-height:1.5;margin-top:4px"><strong style="color:var(--grn)">AGREE.</strong> With 10% total exposure ($1,000 max loss), your $500 cap would trigger after 3 trades hit SL. This is a good safety net. No change needed.</div>
+          </div>
+          <div style="background:rgba(9,11,16,.8);padding:12px 14px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              <span style="font-size:11px;font-weight:500;color:var(--grn)">Take-profit ladder 50/30/20</span>
+            </div>
+            <div style="font-size:10px;color:var(--t3);line-height:1.5">Your setting: <strong style="color:var(--t1)">ON · 50%/30%/20%</strong></div>
+            <div style="font-size:10px;color:var(--t2);line-height:1.5;margin-top:4px"><strong style="color:var(--grn)">AGREE.</strong> 50/30/20 is ideal — books half at TP1, keeps 20% as a runner. Matches the Risk Team's standard recommendation for LIKELY-tier signals.</div>
+          </div>
+        </div>
+
+        <div class="rs-controls">
+          <label>Positions</label>
+          <select onchange="updateLadder(this.value)"><option value="3">3</option><option value="5" selected>5</option><option value="7">7</option><option value="10">10</option></select>
+          <label>Strategy</label>
+          <select onchange="updateLadder()"><option>Conservative</option><option selected>Escalating</option><option>Pyramid</option><option>Front-loaded</option></select>
+        </div>
+
+        <div class="rs-ladder" id="ladder"></div>
+
+        <div class="rs-total" id="totalRow"></div>
+
+        <div class="rs-advice">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span id="adviceText"><strong style="color:var(--gold)">Risk Team verdict:</strong> 10% total exposure is acceptable given your $500 daily loss cap. Escalating strategy means your worst-case loss is $100 on Trade 1. Even if CPI surprises, your trailing stop on trades 1-3 activates at $85,000 — protecting profits. <strong>Your automations make this safer than a manual trade.</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIZE PLAN TABLE -->
+    <div class="size-plan">
+      <div class="sp-head">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--grn)" stroke-width="2.2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
+        <span class="sp-title">Size Plan — Ready to Execute</span>
+        <span class="sp-sub">Preloaded from Verdict · click to open in Size tab</span>
+      </div>
+      <div class="sp-body">
+        <table class="sp-table">
+          <thead><tr><th>#</th><th>Risk %</th><th>Entry</th><th>Stop Loss</th><th>Take Profit</th><th>Trailing</th><th>Loss</th><th>Profit</th></tr></thead>
+          <tbody id="sizeTable"></tbody>
+        </table>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:10px 14px;background:rgba(237,232,216,.03);border-radius:8px;">
+          <div style="font-size:10px;color:var(--t3);font-family:var(--mono)">This plan will be preloaded into the Size tab — all fields auto-filled. Your Automations settings are active.</div>
+          <button class="sp-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg> Open 5 Trades in Size →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHAT -->
+    <div class="chat-panel">
+      <div class="chat-head">
+        <div class="chat-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat with the Analysts</div>
+        <div class="chat-status"><div class="dot"></div>5 agents available</div>
+      </div>
+      <div class="chat-msgs" id="chatMsgs">
+        <div class="chat-msg chat-msg-agent slide-up"><div class="who" style="color:var(--gold)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/></svg> Portfolio Manager</div><div class="bubble">Verdict is ready. I've reviewed all 5 analyst reports, the debate, and your Automations settings. Your trailing stop at 0.5× ATR is active and will protect positions 1-3 after $85,000. Ask me anything — the whole team is here.</div></div>
+      </div>
+      <div class="chat-suggests">
+        <span class="chat-suggest" onclick="askAgent('What if CPI is hot?')">CPI hot scenario</span>
+        <span class="chat-suggest" onclick="askAgent('Why only 71% confluence?')">71% confluence?</span>
+        <span class="chat-suggest" onclick="askAgent('How does my trailing stop affect this?')">Trailing stop effect</span>
+        <span class="chat-suggest" onclick="askAgent('What flips this to SELL?')">SELL triggers</span>
+        <span class="chat-suggest" onclick="askAgent('Should I use ladder TP or single TP?')">Ladder vs single TP</span>
+      </div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" placeholder="Ask any analyst about this trade…" onkeydown="if(event.key==='Enter')askAgent(this.value)">
+        <button class="chat-btn" onclick="askAgent(document.getElementById('chatInput').value)">Send</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function buildLadder(n, strategy) {
+  var risks = [], sls = [], tps = [], trails = [];
+  var baseEntry = 82312, baseSL = 79009, baseTP = 90406;
+  
+  if (strategy.indexOf('Conservative') > -1) {
+    for (var i=0;i<n;i++) risks.push(1.0);
+  } else if (strategy.indexOf('Pyramid') > -1) {
+    for (var i=0;i<n;i++) risks.push(Math.round(((i+1)/n*3.5+0.5)*10)/10);
+  } else if (strategy.indexOf('Front') > -1) {
+    for (var i=0;i<n;i++) risks.push(Math.round((3.5-(i/n*2.5))*10)/10);
+  } else {
+    for (var i=0;i<n;i++) risks.push(Math.round((0.8+(i/n*2.5))*10)/10);
+  }
+  
+  for (var i=0;i<n;i++) {
+    sls.push(baseSL + (i * 50));
+    tps.push(baseTP);
+    trails.push(i < Math.ceil(n*0.6) ? '0.5× ATR after +1.5R' : 'manual');
+  }
+  
+  return {risks:risks, sls:sls, tps:tps, trails:trails};
+}
+
+function updateLadder(count) {
+  var n = parseInt(count) || 5;
+  var sel = document.querySelector('.rs-controls select:last-child');
+  var strategy = sel ? sel.value : 'Escalating';
+  var data = buildLadder(n, strategy);
+  
+  var ladder = '', totalRisk = 0, totalLoss = 0, totalProfit = 0;
+  for (var i=0;i<n;i++) {
+    totalRisk += data.risks[i];
+    var loss = Math.round(data.risks[i] * 100);
+    var gain = Math.round(data.risks[i] * 100 * 2.4);
+    totalLoss += loss; totalProfit += gain;
+    ladder += '<div class="rs-trade"><div class="rs-trade-num">TRADE '+(i+1)+'</div><div class="rs-trade-risk">'+data.risks[i].toFixed(1)+'%</div><div class="rs-trade-loss">−$'+loss+'</div><div class="rs-trade-gain">+$'+gain+'</div><div class="rs-trade-sl">SL $'+(79009+(i*50)).toLocaleString()+'</div><div class="rs-trade-trail">'+(i<Math.ceil(n*0.6)?'⟳ trail':'manual')+'</div></div>';
+  }
+  document.getElementById('ladder').innerHTML = ladder;
+  
+  document.getElementById('totalRow').innerHTML = 
+    '<div class="rs-total-cell"><div class="rs-total-lbl">Total Risk</div><div class="rs-total-val warn">'+totalRisk.toFixed(1)+'%</div></div>'+
+    '<div class="rs-total-cell"><div class="rs-total-lbl">Max Loss</div><div class="rs-total-val warn">−$'+totalLoss+'</div></div>'+
+    '<div class="rs-total-cell"><div class="rs-total-lbl">Max Profit</div><div class="rs-total-val ok">+$'+totalProfit+'</div></div>'+
+    '<div class="rs-total-cell"><div class="rs-total-lbl">Account Used</div><div class="rs-total-val amb">'+totalRisk.toFixed(1)+'%</div></div>'+
+    '<div class="rs-total-cell"><div class="rs-total-lbl">Daily Cap</div><div class="rs-total-val ok">$500 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="3" style="display:inline;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg></div></div>';
+  
+  // Update size plan table
+  var table = '';
+  for (var i=0;i<n;i++) {
+    var loss = Math.round(data.risks[i] * 100);
+    var profit = Math.round(data.risks[i] * 100 * 2.4);
+    table += '<tr><td>'+(i+1)+'</td><td class="risk-col">'+data.risks[i].toFixed(1)+'%</td><td>$82,312</td><td class="sl-col">$'+(79009+i*50).toLocaleString()+'</td><td class="tp-col">$90,406</td><td class="trail-col">'+data.trails[i]+'</td><td class="sl-col">−$'+loss+'</td><td class="tp-col">+$'+profit+'</td></tr>';
+  }
+  document.getElementById('sizeTable').innerHTML = table;
+  
+  var adviceEl = document.getElementById('adviceText');
+  if (totalRisk > 15) {
+    adviceEl.innerHTML = '<strong style="color:#e8706e">Risk Team WARNING:</strong> '+totalRisk.toFixed(1)+'% total exposure EXCEEDS your $500 daily loss cap. Reduce to '+Math.ceil(500/100)+' positions maximum to stay within your Automations rule.';
+  } else if (totalRisk > 10) {
+    adviceEl.innerHTML = '<strong style="color:#c9a84c">Risk Team caution:</strong> '+totalRisk.toFixed(1)+'% total exposure is elevated. Your $500 daily cap protects you but '+totalLoss+' max loss uses most of it. Consider reducing Trade '+n+' by 0.5%.';
+  } else {
+    adviceEl.innerHTML = '<strong style="color:#5de8a0">Risk Team verdict:</strong> '+totalRisk.toFixed(1)+'% total exposure is acceptable given your $500 daily loss cap. Escalating strategy means your worst-case loss is $'+Math.round(data.risks[0]*100)+' on Trade 1. Even if CPI surprises, your trailing stop on trades 1-3 activates at $85,000 — protecting profits. <strong>Your automations make this safer than a manual trade.</strong>';
+  }
+}
+
+function askAgent(q) {
+  if (!q||!q.trim()) return;
+  var msgs = document.getElementById('chatMsgs');
+  var inp = document.getElementById('chatInput');
+  msgs.innerHTML += '<div class="chat-msg chat-msg-user slide-up"><div class="bubble">'+q+'</div></div>';
+  if(inp) inp.value='';
+  var tid='t-'+Date.now();
+  msgs.innerHTML += '<div class="chat-msg chat-msg-agent" id="'+tid+'"><div class="who" style="color:var(--gold)">Analyst Team <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div><div class="bubble" style="opacity:.4">Thinking…</div></div>';
+  msgs.scrollTop = msgs.scrollHeight;
+  
+  var resp;
+  var ql = q.toLowerCase();
+  if (ql.indexOf('cpi')>-1||ql.indexOf('hot')>-1) resp = '<strong style="color:#e8706e">If CPI > 0.4%:</strong> the bear case activates. BTC historically drops 3-5% within 6 hours of an upside CPI surprise. Your $79,009 stop protects you but expect slippage to $77,500-$78,000. <strong style="color:#c9a84c">Reduce Trade 5 to 0.5% risk if you enter before 08:30 ET.</strong> Best play: wait until 08:35, enter only if BTC > $81,000 after the data.';
+  else if (ql.indexOf('confluence')>-1||ql.indexOf('71')>-1) resp = '71% means 5 of 7 DotVerse indicators voted BUY. <strong style="color:#5de8a0">EMA, MACD, Supertrend, Volume, and MTF Trend all agreed.</strong> RSI and Bollinger Bands were neutral — they didn\'t vote against, they just didn\'t confirm. 71% is a <strong>LIKELY</strong> tier signal. Above 80% would be CONFIRMED. Below 65% would not be shown at all. <strong style="color:#c9a84c">The Signal Analyst flagged this as "strong enough to trade, but size conservatively."</strong>';
+  else if (ql.indexOf('trailing')>-1||ql.indexOf('trail')>-1) resp = 'Your trailing stop at 0.5× ATR after +1.5R is <strong style="color:#5de8a0">the safest automation you have turned on.</strong> Once BTC hits $85,000 (where +1.5R is reached on Trade 1), the stop automatically trails 0.5× ATR below the highest price. This means: <strong>if BTC pumps to $88,000 then reverses, your stop moves up and locks in profit.</strong> Without this, a CPI surprise could wipe all gains. The Risk Team factored this in: trades 1-3 get trailing stops, trades 4-5 are manual because they start with higher risk and should be monitored.';
+  else if (ql.indexOf('flip')>-1||ql.indexOf('sell')>-1||ql.indexOf('change')>-1) resp = '<strong style="color:#e8706e">VERDICT changes to SELL if any of these happen:</strong><br>1. BTC drops below $79,000 on 4H close<br>2. CPI > 0.5% — macro shock<br>3. ETF outflows > $500M this week<br>4. RSI drops below 50 on 4H — momentum reversed<br>5. MACD bearish crossover on 4H<br><br><strong style="color:#5de8a0">Currently: NONE of these conditions are met.</strong> The verdict stays BUY with caution.';
+  else resp = 'The Risk Team recommends <strong style="color:#c9a84c">ladder TP</strong> for this setup because:<br><br><strong style="color:#5de8a0">50% at TP1 ($90,406):</strong> Books the high-probability move. Secures 1:2.4R on half the position.<br><strong style="color:#5de8a0">30% at TP2 ($94,100):</strong> Captures continuation if momentum carries.<br><strong style="color:#5de8a0">20% at TP3 ($98,500):</strong> Runner for the full move.<br><br>Single TP risks leaving money on the table if BTC runs further. Ladder TP gives you the base win while keeping a runner for outsized gains. <strong>Your Automations TP ladder is set to 50/30/20 — this matches the Risk Team recommendation.</strong>';
+  
+  setTimeout(function(){
+    var el=document.getElementById(tid);
+    if(el){el.innerHTML='<div class="who" style="color:var(--gold)">Analyst Team</div><div class="bubble">'+resp+'</div>';el.classList.add('slide-up');}
+    msgs.scrollTop=msgs.scrollHeight;
+  },1200);
+}
+
+// Init
+updateLadder(5);
+</script>
+</body></html>
