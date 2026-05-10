@@ -12350,7 +12350,7 @@ function _vUpdateProgress(polls){
   }
 }
 function _vPollResult(jobId, sig){
-  var polls = 0, maxPolls = 200;
+  var polls = 0, maxPolls = 200, notFoundStreak = 0, maxNotFoundStreak = 15;
   // Store on window so tab changes don't kill the interval
   if (window._verdictPollInterval) clearInterval(window._verdictPollInterval);
   _vUpdateProgress(0);
@@ -12372,10 +12372,19 @@ function _vPollResult(jobId, sig){
           var errMsg = (r.result && r.result.error) ? r.result.error : 'Analysis returned no verdict.';
           _vShowBanner('error', 'Analysis failed: ' + errMsg);
         }
-      }
-      if (r.status === 'failed'){
+      } else if (r.status === 'failed'){
         clearInterval(window._verdictPollInterval); window._verdictPollInterval = null;
         _vShowBanner('error', 'Analysis failed — the AI engine ran out of time or memory. Please try again in a few minutes.');
+      } else if (r.status === 'not_found'){
+        notFoundStreak++;
+        if (notFoundStreak >= maxNotFoundStreak){
+          clearInterval(window._verdictPollInterval); window._verdictPollInterval = null;
+          _vShowBanner('error', 'Analysis could not be started — the worker may be offline. Please try again in a few minutes.');
+        }
+        // else: job may still be queued/starting, keep polling
+      } else {
+        // queued or started — reset streak, keep polling
+        notFoundStreak = 0;
       }
     }).catch(function(){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; });
   }, 2000);

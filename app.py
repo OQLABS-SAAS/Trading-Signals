@@ -8534,8 +8534,22 @@ def verdict_result(job_id):
     if not _rq_queue:
         return jsonify({"error": "Queue not available"}), 503
     try:
+        from rq.job import Job as RQJob
+        from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegistry
         job = _rq_queue.fetch_job(job_id)
         if not job:
+            # Job hash missing from Redis — check registries for more precise status.
+            # This happens when the worker was OOM-killed and the hash was cleaned up
+            # before the registry entry expired.
+            try:
+                failed_reg = FailedJobRegistry(queue=_rq_queue, connection=_rq_conn)
+                if job_id in failed_reg:
+                    return jsonify({"status": "failed", "error": "Worker was killed — out of memory or timeout."})
+                started_reg = StartedJobRegistry(queue=_rq_queue, connection=_rq_conn)
+                if job_id in started_reg:
+                    return jsonify({"status": "running"})
+            except Exception:
+                pass
             return jsonify({"status": "not_found"})
         if job.is_finished:
             result = job.result
