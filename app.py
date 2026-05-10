@@ -8350,8 +8350,8 @@ import math as _math
 
 VERDICT_CONFIG = {
     "llm_provider": "deepseek",
-    "deep_think_llm": "deepseek-v4-pro",
-    "quick_think_llm": "deepseek-v4-flash",
+    "deep_think_llm": "deepseek-chat",       # was deepseek-v4-pro — switched for speed (60-90s vs 5-10min)
+    "quick_think_llm": "deepseek-chat",
     "max_debate_rounds": 0,
     "max_risk_discuss_rounds": 0,
     "data_cache_dir": "/tmp/ta_cache",
@@ -8456,6 +8456,51 @@ def verdict_queue_clear():
     })
 
 
+def _extract_verdict_structure(verdict_text, ticker):
+    """
+    Post-processes the raw TradingAgents verdict into structured trade plan fields.
+    Uses deepseek-chat (fast, cheap ~1-2s) to extract JSON from the raw text.
+    Returns None if extraction fails — callers must handle gracefully.
+    """
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        import openai as _oai
+        client = _oai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        raw = str(verdict_text)[:4000]
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Extract a structured trade plan from this analysis of {ticker}. "
+                    "Return ONLY valid JSON with these exact keys:\n"
+                    '{"action":"BUY|SELL|HOLD",'
+                    '"confidence":"HIGH|MEDIUM|LOW",'
+                    '"summary":"2-3 sentences plain English for a beginner",'
+                    '"risk_team_notes":"1-2 sentences about stop loss management and risk controls",'
+                    '"positions":3,'
+                    '"risk_ladder":[0.5,1.0,1.5],'
+                    '"tp_r_multiples":[1.5,2.5,3.5],'
+                    '"trailing":["0.5x ATR after +1.5R","0.5x ATR after +1.5R","0.75x ATR after +2R"]}\n\n'
+                    "Rules: positions=3-5 (HIGH=5,MEDIUM=4,LOW=3). "
+                    "risk_ladder must sum ≤8%. Start small (0.5-1%), scale up. "
+                    "tp_r_multiples: TP as multiples of initial R. TP1 min 1.5R. "
+                    "HOLD: positions=1, risk_ladder=[0.5], trailing=['manual'], tp_r_multiples=[1.5].\n\n"
+                    f"ANALYSIS:\n{raw}"
+                )
+            }],
+            response_format={"type": "json_object"},
+            max_tokens=500,
+            temperature=0.1,
+        )
+        return json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        print(f"[verdict] structure extraction failed: {e}")
+        return None
+
+
 def _run_verdict_job(ticker, trade_date_str):
     """Runs TradingAgents deep analysis. Called by RQ worker."""
     if not TA_AVAILABLE:
@@ -8488,7 +8533,8 @@ def _run_verdict_job(ticker, trade_date_str):
         config = VERDICT_CONFIG.copy()
         ta = TradingAgentsGraph(debug=False, config=config)
         _, decision = ta.propagate(ticker, trade_date_str)
-        return {"ticker": ticker, "verdict": decision, "status": "complete"}
+        structured = _extract_verdict_structure(decision, ticker)
+        return {"ticker": ticker, "verdict": decision, "structured": structured, "status": "complete"}
     except Exception as e:
         return {"error": str(e), "status": "failed"}
 

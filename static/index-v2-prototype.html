@@ -6769,9 +6769,17 @@ async function dvRunAnalyze(){
       volatility_p95:      data.volatility_p95,
       tv_signal_used:      data.tv_signal_used === true,
     };
+    // Clear any stale verdict pre-warm from a previous signal
+    window._verdictPrewarmJobId = null;
+    window._verdictPrewarmResult = null;
+    window._verdictPrewarmStructured = null;
+    window._structuredVerdict = null;
+    window._verdictPlan = null;
     showUnderstand();
     // Auto-run backtest silently to populate win rate badge (non-blocking)
     setTimeout(function(){ undRunBacktest(true); }, 300);
+    // Pre-warm Verdict job so it's ready when user navigates there
+    if (data.signal !== 'HOLD') setTimeout(_vPrewarm, 1500);
   } else {
     const t=document.createElement('div');
     t.style.cssText='position:fixed;bottom:24px;right:24px;background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.3);color:rgba(201,168,76,.9);font-family:var(--mono);font-size:11px;padding:10px 14px;border-radius:6px;z-index:9999;';
@@ -12296,10 +12304,41 @@ function _vRunAnalysis(){
     + '</div>';
   _vFetchLive(sig);
 }
+function _vPrewarm(){
+  var sig = window._activeSignal || {};
+  if (!sig.sym || sig.sig === 'HOLD') return;
+  if (window._verdictPrewarmJobId || window._verdictPrewarmResult) return; // already warming or done
+  var ticker = (sig.sym || '').replace('/','').replace('-','');
+  dvFetch('/api/verdict', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ticker: ticker, timeframe: sig.tf||'4H'})
+  }).then(function(r){
+    if (!r) return;
+    if (r.job_id) {
+      window._verdictPrewarmJobId = r.job_id;
+    } else if (r.verdict) {
+      // Cache hit — result immediately available
+      window._verdictPrewarmResult = r.verdict;
+      window._verdictPrewarmStructured = r.structured || null;
+    }
+  }).catch(function(){});
+}
 function _vFetchLive(sig){
   if (!sig.sym) return;
   var ticker = (sig.sym || '').replace('/','').replace('-','');
   if (!ticker) return;
+  // If pre-warm already has a finished result, render immediately
+  if (window._verdictPrewarmResult) {
+    _vRenderLive(sig, window._verdictPrewarmResult, window._verdictPrewarmStructured);
+    return;
+  }
+  // If pre-warm job is already running, just poll it
+  if (window._verdictPrewarmJobId) {
+    _vShowBanner('loading','Analysis running — 8 agents studying the market…');
+    _vPollResult(window._verdictPrewarmJobId, sig);
+    return;
+  }
+  // No pre-warm — enqueue fresh
   dvFetch('/api/verdict', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ticker:ticker, timeframe:sig.tf||'4H'})
@@ -12308,9 +12347,9 @@ function _vFetchLive(sig){
     if (r.status==='unavailable') { _vShowBanner('error','TradingAgents could not start. This usually means Python 3.10+ is not available on the server. Check Railway deploy logs for package install errors.'); return; }
     if (r.error) { _vShowBanner('error','Server error: '+r.error); return; }
     if (r.job_id) { _vShowBanner('loading','Analysis running — 8 agents studying the market…'); _vPollResult(r.job_id, sig); }
-    else if (r.verdict) { _vRenderLive(sig, r.verdict); } // cache hit — backend returned result directly
+    else if (r.verdict) { _vRenderLive(sig, r.verdict, r.structured||null); } // cache hit
     else { _vShowBanner('error', 'Unexpected server response. Try again.'); }
-  }).catch(function(e){ _vShowBanner('error','Network error reaching the analysis server.'); });
+  }).catch(function(){ _vShowBanner('error','Network error reaching the analysis server.'); });
 }
 var _verdictStages = [
   { at:  0, pct:  4, label: 'Queueing job on analysis worker…' },
@@ -12367,7 +12406,7 @@ function _vPollResult(jobId, sig){
       if (r.status === 'finished'){
         clearInterval(window._verdictPollInterval); window._verdictPollInterval = null;
         if (r.result && r.result.verdict){
-          _vRenderLive(sig, r.result.verdict);
+          _vRenderLive(sig, r.result.verdict, r.result.structured||null);
         } else {
           var errMsg = (r.result && r.result.error) ? r.result.error : 'Analysis returned no verdict.';
           _vShowBanner('error', 'Analysis failed: ' + errMsg);
@@ -12389,20 +12428,70 @@ function _vPollResult(jobId, sig){
     }).catch(function(){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; });
   }, 2000);
 }
-function _vRenderLive(sig, verdict){
-  var decision = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || JSON.stringify(verdict));
+function _vRenderLive(sig, verdict, structured){
+  window._verdictRunning = false;
+  window._verdictPrewarmJobId = null;
+  window._lastVerdict = verdict;
+  window._structuredVerdict = structured || null;
+  var s = structured || {};
+  var decisionText = typeof verdict === 'string' ? verdict : (verdict.decision || verdict.action || JSON.stringify(verdict));
   var main = document.getElementById('verdictMain');
   var results = document.getElementById('verdictResults');
   if (main) main.style.display = 'none';
-  if (results){
-    results.style.display = 'block';
-    results.innerHTML = '<div style="background:rgba(9,11,16,.8);border:1px solid rgba(237,232,216,.1);border-radius:12px;padding:24px;margin-bottom:20px">'+
-      '<div style="font-family:var(--syne);font-size:16px;font-weight:400;color:var(--t1);margin-bottom:16px;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Analysis Complete</div>'+
-      '<div style="font-size:12px;color:var(--t2);line-height:1.9">'+decision.replace(/\n/g,'<br>')+'</div>'+
-      '</div>'+
-      '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
+  if (!results) return;
+
+  var action = s.action || sig.sig || 'HOLD';
+  var actionColor = action==='BUY' ? '#5de8a0' : action==='SELL' ? '#e8706e' : '#c9a84c';
+  var confColor = s.confidence==='HIGH' ? '#5de8a0' : s.confidence==='MEDIUM' ? '#c9a84c' : '#e8706e';
+
+  // Build position plan rows from structured data
+  var planHtml = '';
+  if (s.positions && s.risk_ladder && s.risk_ladder.length >= s.positions){
+    var rows = '', totalRisk = 0;
+    for (var i = 0; i < s.positions; i++){
+      totalRisk += s.risk_ladder[i];
+      rows += '<div style="text-align:center;flex:1;min-width:70px">'
+        + '<div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">#'+(i+1)+'</div>'
+        + '<div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--gold)">'+s.risk_ladder[i].toFixed(1)+'%</div>'
+        + '<div style="font-size:8px;color:var(--grn);font-family:var(--mono);margin-top:1px">TP '+(s.tp_r_multiples&&s.tp_r_multiples[i]?s.tp_r_multiples[i].toFixed(1)+'R':'—')+'</div>'
+        + '<div style="font-size:7px;color:rgba(201,168,76,.6);font-family:var(--mono);margin-top:2px">'+(s.trailing&&s.trailing[i]?s.trailing[i]:'—')+'</div>'
+        + '</div>';
+    }
+    planHtml = '<div style="margin-bottom:14px;border-radius:8px;border:1px solid rgba(93,232,160,.2);background:rgba(93,232,160,.04);padding:14px 16px">'
+      + '<div style="font-size:9px;font-weight:700;color:var(--grn);letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase">Position Plan · '+s.positions+' Entries · '+totalRisk.toFixed(1)+'% Total Risk</div>'
+      + '<div style="display:flex;gap:8px;overflow-x:auto">'+rows+'</div>'
+      + '<div style="margin-top:8px;font-size:9px;color:var(--t3);line-height:1.5">Risk % per entry, TP targets (as R multiples), and trailing stop settings are from the AI analysis. Adjust in Size.</div>'
+      + '</div>';
   }
-  _vShowBanner('live','Live Analysis Complete. Powered by DeepSeek V4 Pro.');
+
+  results.style.display = 'block';
+  results.innerHTML =
+    '<div style="background:rgba(9,11,16,.8);border:1px solid rgba(237,232,216,.1);border-radius:12px;padding:24px;margin-bottom:16px">'
+    // Header row: checkmark + title + action badge + confidence badge
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
+    + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="'+actionColor+'" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+    + '<span style="font-family:var(--syne);font-size:15px;color:var(--t1)">Analysis Complete</span>'
+    + '<span style="margin-left:auto;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;background:'+actionColor+'22;color:'+actionColor+';font-family:var(--mono)">'+action+'</span>'
+    + (s.confidence ? '<span style="padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;background:'+confColor+'18;color:'+confColor+';font-family:var(--mono)">'+s.confidence+'</span>' : '')
+    + '</div>'
+    // Summary — plain English if structured, raw text fallback
+    + '<div style="font-size:13px;color:rgba(237,232,216,.82);line-height:1.75;margin-bottom:14px">'
+    + (s.summary ? s.summary : decisionText.replace(/\n/g,'<br>').substring(0,1200))
+    + '</div>'
+    // Risk Team box
+    + (s.risk_team_notes
+      ? '<div style="padding:10px 14px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:7px;margin-bottom:14px">'
+        + '<div style="font-size:9px;font-weight:700;color:var(--amb);letter-spacing:.07em;margin-bottom:5px;text-transform:uppercase">Risk Team</div>'
+        + '<div style="font-size:11px;color:rgba(237,232,216,.72);line-height:1.65">'+s.risk_team_notes+'</div>'
+        + '</div>'
+      : '')
+    // Position plan
+    + planHtml
+    + '</div>'
+    + '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px">'
+    + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
+
+  _vShowBanner('live','Live Analysis Complete. Powered by DeepSeek.');
 }
 function _vShowBanner(status, msg){
   // On error: unlock the button so the user can retry.
@@ -12497,19 +12586,41 @@ function _vBuildLadder(){
 }
 function _vPreloadSize(){
   var sig = window._activeSignal || {};
+  var s = window._structuredVerdict || {};
   var entry = parseFloat(String(sig.entry||'0').replace(/,/g,'')) || 0;
   var baseSL = parseFloat(String(sig.sl||'0').replace(/,/g,'')) || 0;
-  var tp = parseFloat(String(sig.tp||'0').replace(/,/g,'')) || 0;
+  var isBuy = (s.action || sig.sig || 'BUY') !== 'SELL';
+  var rDist = Math.abs(entry - baseSL) || 1; // 1R in price terms
+
+  // Use AI-extracted values if available; otherwise sensible defaults
+  var positions = s.positions || 3;
+  var riskLadder = (s.risk_ladder && s.risk_ladder.length >= positions)
+    ? s.risk_ladder.slice(0, positions)
+    : [0.5, 1.0, 1.5, 2.0, 2.5].slice(0, positions);
+  var tpMultiples = (s.tp_r_multiples && s.tp_r_multiples.length >= positions)
+    ? s.tp_r_multiples.slice(0, positions)
+    : [1.5, 2.5, 3.5, 4.0, 5.0].slice(0, positions);
+  var trailing = (s.trailing && s.trailing.length >= positions)
+    ? s.trailing.slice(0, positions)
+    : Array(positions).fill('0.5x ATR after +1.5R');
+
+  // Convert R multiples to actual price targets
+  var tps = tpMultiples.map(function(mult){
+    return isBuy ? entry + rDist * mult : entry - rDist * mult;
+  });
+  // All positions use signal SL — user can adjust in Size tab
+  var stops = Array(positions).fill(baseSL);
+
   window._verdictPlan = {
-    positions: 5,
-    strategy: 'escalating',
+    positions: positions,
+    strategy: s.action === 'HOLD' ? 'manual' : 'escalating',
     sym: sig.sym || '',
     tf: sig.tf || '4H',
     entry: entry,
-    risks: [0.8, 1.2, 1.5, 2.0, 2.5],
-    stops: [baseSL, baseSL+50, baseSL+100, baseSL+150, baseSL+200],
-    tps: [tp, tp, tp, tp, tp],
-    trailing: ['0.5x ATR after +1.5R', '0.5x ATR after +1.5R', '0.5x ATR after +1.5R', '0.75x ATR after +1.5R', '0.75x ATR after +1.5R'],
+    risks: riskLadder,
+    stops: stops,
+    tps: tps,
+    trailing: trailing,
     tpSplit: [50, 30, 20]
   };
   setNav('size'); showSize();
@@ -13456,6 +13567,27 @@ function showAct(){
     <div class="sf-breadcrumb">MARKET › SIGNAL › UNDERSTAND › VERDICT › SIZE › <em>ACT</em></div>
     <div style="font-size:11px;color:rgba(237,232,216,.45);margin-top:6px;line-height:1.5;">Execute your trade — send it to MT5 for live execution, log it to your portfolio, or copy details to your broker manually.</div>
   </div>
+
+  <!-- Verdict multi-position plan (shown only when user came through Verdict → Size → Act) -->
+  ${(window._verdictPlan && window._verdictPlan.positions > 1) ? (function(p){
+    var rows='', totalRisk=0;
+    for(var i=0;i<p.positions;i++){
+      totalRisk+=p.risks[i];
+      var tp=p.tps[i];
+      var tpFmt=tp>=100?tp.toLocaleString(undefined,{maximumFractionDigits:2}):tp.toFixed(4);
+      rows+='<div style="text-align:center;flex:1;min-width:60px">'
+        +'<div style="font-size:8px;color:var(--t3);letter-spacing:.06em;margin-bottom:3px">ENTRY #'+(i+1)+'</div>'
+        +'<div style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--gold)">'+p.risks[i].toFixed(1)+'%</div>'
+        +'<div style="font-size:8px;color:var(--grn);font-family:var(--mono);margin-top:1px">TP '+tpFmt+'</div>'
+        +'<div style="font-size:7px;color:rgba(201,168,76,.5);font-family:var(--mono);margin-top:1px">'+p.trailing[i]+'</div>'
+        +'</div>';
+    }
+    return '<div style="margin-bottom:16px;border-radius:10px;border:1px solid rgba(93,232,160,.2);background:rgba(93,232,160,.04);padding:14px 16px">'
+      +'<div style="font-size:9px;font-weight:700;color:var(--grn);letter-spacing:.07em;margin-bottom:8px;text-transform:uppercase">Verdict Plan · '+p.strategy+' · '+p.positions+' Positions · '+totalRisk.toFixed(1)+'% Total Risk</div>'
+      +'<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:6px">'+rows+'</div>'
+      +'<div style="font-size:9px;color:var(--t3);line-height:1.5">Execute each entry separately. Use the lot size from your SIZE calculation for each position number. Trailing stop activates automatically once each position reaches its R target.</div>'
+      +'</div>';
+  })(window._verdictPlan) : ''}
 
   <!-- Execute new trade — beginner-first design -->
   <div class="act-exec-card">
