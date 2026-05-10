@@ -8521,7 +8521,7 @@ def verdict_enqueue():
     try:
         job = _rq_queue.enqueue(
             _run_verdict_job, ticker, trade_date,
-            job_timeout=180, result_ttl=3600,
+            job_timeout=600, result_ttl=3600,
         )
         return jsonify({"job_id": job.id, "status": "enqueued"})
     except Exception as e:

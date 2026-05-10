@@ -12350,14 +12350,18 @@ function _vUpdateProgress(polls){
   }
 }
 function _vPollResult(jobId, sig){
-  var polls = 0, maxPolls = 90;
+  var polls = 0, maxPolls = 200;
   // Store on window so tab changes don't kill the interval
   if (window._verdictPollInterval) clearInterval(window._verdictPollInterval);
   _vUpdateProgress(0);
   window._verdictPollInterval = setInterval(function(){
     polls++;
     _vUpdateProgress(polls);
-    if (polls > maxPolls){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; return; }
+    if (polls > maxPolls){
+      clearInterval(window._verdictPollInterval); window._verdictPollInterval = null;
+      _vShowBanner('error', 'Analysis is taking too long — the AI agents may be overloaded. Please try again in a few minutes.');
+      return;
+    }
     dvFetch('/api/verdict/result/'+jobId).then(function(r){
       if (!r) return;
       if (r.status === 'finished'){
@@ -12369,7 +12373,10 @@ function _vPollResult(jobId, sig){
           _vShowBanner('error', 'Analysis failed: ' + errMsg);
         }
       }
-      if (r.status === 'failed'){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; _vShowBanner('error', 'Worker error — check Railway logs.'); }
+      if (r.status === 'failed'){
+        clearInterval(window._verdictPollInterval); window._verdictPollInterval = null;
+        _vShowBanner('error', 'Analysis failed — the AI engine ran out of time or memory. Please try again in a few minutes.');
+      }
     }).catch(function(){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; });
   }, 2000);
 }
