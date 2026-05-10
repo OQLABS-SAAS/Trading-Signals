@@ -12310,15 +12310,15 @@ function _vPollResult(jobId, sig){
   if (window._verdictPollInterval) clearInterval(window._verdictPollInterval);
   window._verdictPollInterval = setInterval(function(){
     polls++;
-    if (polls > maxPolls){ clearInterval(iv); return; }
+    if (polls > maxPolls){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; return; }
     dvFetch('/api/verdict/result/'+jobId).then(function(r){
       if (!r) return;
       if (r.status === 'finished' && r.result && r.result.verdict){
-        clearInterval(iv);
+        clearInterval(window._verdictPollInterval); window._verdictPollInterval = null;
         _vRenderLive(sig, r.result.verdict);
       }
-      if (r.status === 'failed') clearInterval(iv);
-    }).catch(function(){ clearInterval(iv); });
+      if (r.status === 'failed'){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; }
+    }).catch(function(){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; });
   }, 2000);
 }
 function _vRenderLive(sig, verdict){
