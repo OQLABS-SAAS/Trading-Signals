@@ -2,7 +2,7 @@
 
 Invoked by Procfile via start.sh — gunicorn runs in the foreground, this worker
 runs alongside it as a background subprocess. Both inherit the web service's
-env vars (REDIS_URL, DATABASE_URL, OPENROUTER_API_KEY, ...).
+env vars (REDIS_URL, DATABASE_URL, DEEPSEEK_API_KEY, ...).
 
 Compatible with rq 1.x and rq 2.x — Connection() was removed in 2.x, so we pass
 the connection straight to Queue/Worker and skip the context manager.
@@ -25,6 +25,7 @@ print(f"[worker] connecting to redis at {redis_url[:30]}...", flush=True)
 conn  = Redis.from_url(redis_url)
 queue = Queue("default", connection=conn)
 print(f"[worker] queue 'default' depth at start: {queue.count}", flush=True)
+print(f"[worker] DEEPSEEK_API_KEY configured: {'yes' if os.environ.get('DEEPSEEK_API_KEY','').strip() else 'NO — verdict jobs will fail'}", flush=True)
 print("[worker] starting worker — listening for jobs", flush=True)
 
 # `with_scheduler=True` lets us schedule deferred jobs in the future without

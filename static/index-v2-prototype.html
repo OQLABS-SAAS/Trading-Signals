@@ -12302,6 +12302,8 @@ function _vFetchLive(sig){
     if (r.status==='unavailable') { _vShowBanner('error','TradingAgents could not start. This usually means Python 3.10+ is not available on the server. Check Railway deploy logs for package install errors.'); return; }
     if (r.error) { _vShowBanner('error','Server error: '+r.error); return; }
     if (r.job_id) { _vShowBanner('loading','Analysis running — 8 agents studying the market…'); _vPollResult(r.job_id, sig); }
+    else if (r.verdict) { _vRenderLive(sig, r.verdict); } // cache hit — backend returned result directly
+    else { _vShowBanner('error', 'Unexpected server response. Try again.'); }
   }).catch(function(e){ _vShowBanner('error','Network error reaching the analysis server.'); });
 }
 function _vPollResult(jobId, sig){
@@ -12339,9 +12341,15 @@ function _vRenderLive(sig, verdict){
       '</div>'+
       '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
   }
-  _vShowBanner('live','Live Analysis Complete. DeepSeek V4 + Llama 3.3 70B via OpenRouter.');
+  _vShowBanner('live','Live Analysis Complete. Powered by DeepSeek V4 Pro.');
 }
 function _vShowBanner(status, msg){
+  // On error: unlock the button so the user can retry.
+  if (status === 'error') {
+    window._verdictRunning = false;
+    var _btn = document.getElementById('verdictRunBtn');
+    if (_btn){ _btn.disabled = false; _btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Analysis'; }
+  }
   var heroEl = document.querySelector('.verdict-hero');
   if (!heroEl) return;
   var banner = heroEl.previousElementSibling;

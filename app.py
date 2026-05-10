@@ -8385,10 +8385,25 @@ def verdict_status():
             from rq import Worker as _RQWorker
             workers_alive = _RQWorker.count(connection=_rq_conn)
             queue_depth   = _rq_queue.count
-            from rq.registry import FailedJobRegistry as _FJR
-            queue_failed  = _FJR(queue=_rq_queue).count
+            from rq.registry import FailedJobRegistry as _FJR, StartedJobRegistry as _SJR, FinishedJobRegistry as _FNJR
+            queue_failed   = _FJR(_rq_queue.name, connection=_rq_conn).count
+            jobs_started   = _SJR(_rq_queue.name, connection=_rq_conn).count
+            jobs_finished  = _FNJR(_rq_queue.name, connection=_rq_conn).count
+            # Last finished job result for quick diagnosis
+            last_result = None
+            finished_ids = _FNJR(_rq_queue.name, connection=_rq_conn).get_job_ids()
+            if finished_ids:
+                from rq.job import Job as _RQJob
+                try:
+                    last_job = _RQJob.fetch(finished_ids[-1], connection=_rq_conn)
+                    r = last_job.result
+                    last_result = {"status": r.get("status") if isinstance(r, dict) else str(type(r)), "has_verdict": bool(isinstance(r, dict) and r.get("verdict")), "error": r.get("error") if isinstance(r, dict) else None}
+                except Exception:
+                    pass
         except Exception as _qe:
             workers_alive = -1   # marker: query failed
+            jobs_started = jobs_finished = None
+            last_result = None
     return jsonify({
         "ta_available": TA_AVAILABLE,
         "ta_error": TA_ERROR or None,
@@ -8398,6 +8413,9 @@ def verdict_status():
         "rq_workers_alive":   workers_alive,
         "rq_queue_depth":     queue_depth,
         "rq_queue_failed":    queue_failed,
+        "rq_jobs_started":    jobs_started,
+        "rq_jobs_finished":   jobs_finished,
+        "last_job_result":    last_result,
     })
 
 @app.route("/api/verdict/queue/clear", methods=["POST"])
@@ -8442,6 +8460,30 @@ def _run_verdict_job(ticker, trade_date_str):
     """Runs TradingAgents deep analysis. Called by RQ worker."""
     if not TA_AVAILABLE:
         return {"error": "TradingAgents not installed — requires Python 3.10+", "status": "unavailable"}
+    # Fail fast with a clear message if the LLM provider's API key is not in
+    # this process's environment. Without this guard, the ChatOpenAI SDK throws
+    # a cryptic "OPENAI_API_KEY not set" error even when using DeepSeek, because
+    # it falls back to looking for OPENAI_API_KEY when the real key is absent.
+    # If you're seeing this error, the most likely cause is that the Railway
+    # service running this worker (which may be a separate service from the web
+    # process) does not have the key in its environment variables.
+    _key_map = {
+        "deepseek":   "DEEPSEEK_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "openai":     "OPENAI_API_KEY",
+        "xai":        "XAI_API_KEY",
+    }
+    provider = VERDICT_CONFIG.get("llm_provider", "")
+    required_env = _key_map.get(provider)
+    if required_env and not os.environ.get(required_env, "").strip():
+        return {
+            "error": (
+                f"{required_env} is not set in this worker's environment. "
+                f"Open Railway → your worker service → Variables and add {required_env}. "
+                f"The web service has the key but the worker process running this job does not."
+            ),
+            "status": "failed",
+        }
     try:
         config = VERDICT_CONFIG.copy()
         ta = TradingAgentsGraph(debug=False, config=config)

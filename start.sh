@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # DotVerse boot — starts the RQ worker as a background process and gunicorn as
 # the foreground (PID 1) process. Both inherit the web service's env vars
-# (REDIS_URL, DATABASE_URL, OPENROUTER_API_KEY, etc.) automatically.
+# (REDIS_URL, DATABASE_URL, DEEPSEEK_API_KEY, etc.) automatically.
 #
 # Why a separate process for the worker (not a thread inside gunicorn):
 #   - RQ's Worker.work() forks child processes for each job; fork() inside a
@@ -22,7 +22,7 @@ echo "[boot] DotVerse starting"
 echo "[boot] PORT=$PORT WORKERS=$WORKERS TIMEOUT=$TIMEOUT"
 echo "[boot] REDIS_URL configured: $([ -n "$REDIS_URL" ] && echo yes || echo no)"
 echo "[boot] DATABASE_URL configured: $([ -n "$DATABASE_URL" ] && echo yes || echo no)"
-echo "[boot] OPENROUTER_API_KEY configured: $([ -n "$OPENROUTER_API_KEY" ] && echo yes || echo no)"
+echo "[boot] DEEPSEEK_API_KEY configured: $([ -n "$DEEPSEEK_API_KEY" ] && echo yes || echo no)"
 
 # Start RQ worker in the background so jobs (verdict / backtest) actually run.
 echo "[boot] Launching RQ worker process"
