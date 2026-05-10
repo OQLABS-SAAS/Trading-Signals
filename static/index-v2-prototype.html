@@ -12313,11 +12313,16 @@ function _vPollResult(jobId, sig){
     if (polls > maxPolls){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; return; }
     dvFetch('/api/verdict/result/'+jobId).then(function(r){
       if (!r) return;
-      if (r.status === 'finished' && r.result && r.result.verdict){
+      if (r.status === 'finished'){
         clearInterval(window._verdictPollInterval); window._verdictPollInterval = null;
-        _vRenderLive(sig, r.result.verdict);
+        if (r.result && r.result.verdict){
+          _vRenderLive(sig, r.result.verdict);
+        } else {
+          var errMsg = (r.result && r.result.error) ? r.result.error : 'Analysis returned no verdict.';
+          _vShowBanner('error', 'Analysis failed: ' + errMsg);
+        }
       }
-      if (r.status === 'failed'){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; }
+      if (r.status === 'failed'){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; _vShowBanner('error', 'Worker error — check Railway logs.'); }
     }).catch(function(){ clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; });
   }, 2000);
 }
