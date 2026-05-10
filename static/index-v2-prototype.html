@@ -7078,6 +7078,9 @@ function updateFlowBadge() {
     + '</button>';
 
   badge.style.display = 'block';
+  // Store grade for agent sizing card, then render it
+  window._flowGrade = grade;
+  if (typeof szRenderAgentSizingCard === 'function') szRenderAgentSizingCard();
 }
 function applyKellyRisk(btn) {
   var inp = document.getElementById('szRisk');
@@ -7101,6 +7104,99 @@ function applyKellyRisk(btn) {
   }
 }
 function applyFlowMult() { applyKellyRisk(null); } // backward compat
+
+function szRenderAgentSizingCard() {
+  var el = document.getElementById('szAgentSizingCard');
+  if (!el) return;
+  var grade    = window._flowGrade;
+  var sugRisk  = window._kellyPct;
+  var mult     = window._flowMult;
+  var sv       = window._structuredVerdict;
+  // Need both flow scale data and agent data to show the card
+  if (!grade || sugRisk == null || !sv || !sv.agents || !sv.agents.length) {
+    el.style.display = 'none'; return;
+  }
+  // Count agent votes
+  var buyCount = 0, sellCount = 0, holdCount = 0;
+  sv.agents.forEach(function(a) {
+    var v = (a.vote||'').toUpperCase();
+    if (v === 'BUY') buyCount++;
+    else if (v === 'SELL') sellCount++;
+    else holdCount++;
+  });
+  var total = sv.agents.length;
+  var majority = Math.max(buyCount, sellCount);
+  var majorityDir = buyCount >= sellCount ? 'BUY' : 'SELL';
+  var majorityPct = total > 0 ? Math.round(majority / total * 100) : 0;
+  var consensusLevel, consensusColor;
+  if (majorityPct >= 75) { consensusLevel = 'STRONG';   consensusColor = 'rgba(93,232,160,.9)'; }
+  else if (majorityPct >= 50) { consensusLevel = 'MODERATE'; consensusColor = 'rgba(201,168,76,.9)'; }
+  else { consensusLevel = 'WEAK';     consensusColor = 'rgba(232,112,110,.9)'; }
+  // Determine sizing verdict based on grade + consensus alignment
+  var verdict, verdictColor, verdictBg, verdictBdr, explanation;
+  if (grade === 'SCALE UP') {
+    if (consensusLevel === 'STRONG') {
+      verdict = 'USE IT — SCALE UP'; verdictColor = 'rgba(93,232,160,.95)';
+      verdictBg = 'rgba(93,232,160,.07)'; verdictBdr = 'rgba(93,232,160,.3)';
+      explanation = majorityPct + '% of agents voted ' + majorityDir + '. Both agent consensus and signal quality support going larger. The research team backs this trade with strong conviction — ' + sugRisk + '% risk is justified.';
+    } else if (consensusLevel === 'MODERATE') {
+      verdict = 'CAUTION — VERIFY FIRST'; verdictColor = 'rgba(201,168,76,.95)';
+      verdictBg = 'rgba(201,168,76,.07)'; verdictBdr = 'rgba(201,168,76,.3)';
+      explanation = 'Signal quality says scale up but only ' + majorityPct + '% of agents agree. Consider starting at your base risk % and scaling up only once price confirms direction. Do not jump straight to ' + sugRisk + '%.';
+    } else {
+      verdict = 'DO NOT SCALE UP'; verdictColor = 'rgba(232,112,110,.95)';
+      verdictBg = 'rgba(232,112,110,.07)'; verdictBdr = 'rgba(232,112,110,.3)';
+      explanation = 'Only ' + majorityPct + '% agent agreement. Signal quality alone is not enough reason to scale up when the research team is this divided. Use your base risk % or less — do not use ' + sugRisk + '%.';
+    }
+  } else if (grade === 'FULL SIZE') {
+    if (consensusLevel !== 'WEAK') {
+      verdict = 'USE IT — FULL SIZE'; verdictColor = 'rgba(93,232,160,.95)';
+      verdictBg = 'rgba(93,232,160,.07)'; verdictBdr = 'rgba(93,232,160,.3)';
+      explanation = majorityPct + '% of agents voted ' + majorityDir + ' and signal quality supports standard sizing at ' + sugRisk + '%. No reason to deviate — your base position size is appropriate here.';
+    } else {
+      verdict = 'REDUCE SLIGHTLY'; verdictColor = 'rgba(201,168,76,.95)';
+      verdictBg = 'rgba(201,168,76,.07)'; verdictBdr = 'rgba(201,168,76,.3)';
+      explanation = 'Signal quality says full size but agent consensus is weak (' + majorityPct + '%). Consider 0.5–0.75× of ' + sugRisk + '% until more agents align. Protect capital while signals mature.';
+    }
+  } else { // SCALE DOWN
+    verdict = 'USE IT — SCALE DOWN'; verdictColor = 'rgba(93,232,160,.95)';
+    verdictBg = 'rgba(93,232,160,.07)'; verdictBdr = 'rgba(93,232,160,.3)';
+    if (consensusLevel === 'WEAK') {
+      explanation = 'Both signal quality and agent consensus point to caution. Scaling down to ' + sugRisk + '% risk is the right call — this protects your account if the trade fails. Do not fight the sizing engine here.';
+    } else {
+      explanation = 'Signal quality says scale down (multiplier ' + (mult != null ? mult.toFixed(2) : '—') + '×) even with ' + majorityPct + '% agent agreement. Accept the smaller size — sizing discipline on weaker setups is what keeps you in the game long-term.';
+    }
+  }
+  var gradeColor = grade === 'SCALE UP' ? 'rgba(93,232,160,.9)' : grade === 'SCALE DOWN' ? 'rgba(237,232,216,.7)' : 'rgba(201,168,76,.9)';
+  el.style.display = 'block';
+  el.innerHTML =
+    '<div style="border-radius:10px;border:1px solid rgba(237,232,216,.1);background:rgba(9,11,16,.85);padding:14px 16px;">'
+    + '<div style="font-size:10px;font-weight:700;color:rgba(237,232,216,.6);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px;">Sizing Assessment · Agents vs Flow Scale</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
+    + '<div style="padding:9px 11px;border-radius:7px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);">'
+    + '<div style="font-size:8px;color:rgba(237,232,216,.4);letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px;">Flow Scale Says</div>'
+    + '<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:' + gradeColor + '">' + grade + '</div>'
+    + '<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);margin-top:3px;">' + sugRisk + '% risk &nbsp;·&nbsp; ' + (mult != null ? mult.toFixed(2) + '×' : '—') + '</div>'
+    + '</div>'
+    + '<div style="padding:9px 11px;border-radius:7px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);">'
+    + '<div style="font-size:8px;color:rgba(237,232,216,.4);letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px;">Agent Consensus</div>'
+    + '<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:' + consensusColor + '">' + consensusLevel + '</div>'
+    + '<div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">'
+    + '<span style="font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.8);">' + buyCount + ' BUY</span>'
+    + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.35);">·</span>'
+    + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);">' + holdCount + ' HOLD</span>'
+    + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.35);">·</span>'
+    + '<span style="font-family:var(--mono);font-size:9px;color:rgba(232,112,110,.8);">' + sellCount + ' SELL</span>'
+    + '</div>'
+    + '</div>'
+    + '</div>'
+    + '<div style="padding:10px 12px;border-radius:7px;background:' + verdictBg + ';border:1px solid ' + verdictBdr + ';">'
+    + '<div style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + verdictColor + ';letter-spacing:.04em;margin-bottom:5px;">' + verdict + '</div>'
+    + '<div style="font-size:11.5px;color:rgba(237,232,216,.78);line-height:1.65;">' + explanation + '</div>'
+    + '</div>'
+    + '</div>';
+}
+
 function renderOrderFlow(sig) {
   var _s = function(id,v){ var e=document.getElementById(id); if(e) e.textContent=v; };
   var _c = function(id,v){ var e=document.getElementById(id); if(e) e.style.color=v; };
@@ -13346,6 +13442,9 @@ function showSize(){
     <div id="szLadderStatus" style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);min-height:14px;"></div>
   </div>
 
+  <!-- Agent Sizing Assessment card — populated by szRenderAgentSizingCard() after flow badge updates -->
+  <div id="szAgentSizingCard" style="margin-top:12px;display:none;"></div>
+
   ${(function(){
     // Verdict agent cards section — show if a verdict has been run for this signal.
     // The Size tab is the final checkpoint before trade execution, so the agents'
@@ -13490,23 +13589,34 @@ function szLadderRender() {
     const tpCell = (val, label) => val
       ? `<div style="font-family:var(--mono);font-size:10px;color:rgba(93,232,160,.85);text-align:right;line-height:1.2;"><div style="font-size:8.5px;color:rgba(237,232,216,.4);letter-spacing:.4px;">${label}</div>+$${val.toLocaleString(undefined,{maximumFractionDigits:0})}</div>`
       : `<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.3);text-align:right;line-height:1.2;"><div style="font-size:8.5px;color:rgba(237,232,216,.3);letter-spacing:.4px;">${label}</div>—</div>`;
-    return `<div style="display:grid;grid-template-columns:38px 120px 110px 110px 70px 70px 70px 24px;gap:7px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:5px;">
+    const slFmt = sl ? (sl >= 100 ? '$'+sl.toLocaleString(undefined,{maximumFractionDigits:2}) : '$'+sl.toFixed(sl >= 1 ? 4 : 6)) : '—';
+    const autoText = (window._verdictPlan && window._verdictPlan.trailing && window._verdictPlan.trailing[i]) ? window._verdictPlan.trailing[i] : 'Manual';
+    return `<div style="display:grid;grid-template-columns:38px 120px 130px 110px 70px 70px 70px 140px 24px;gap:7px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:5px;">
       <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
       <div style="display:flex;align-items:center;gap:6px;">
         <input type="number" step="0.1" min="0.1" max="10" value="${risk}" onchange="szLadderUpdate(${i}, this.value)"
           style="width:55px;padding:5px 7px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
         <span style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">% risk</span>
       </div>
-      <div style="font-family:var(--mono);font-size:10.5px;color:rgba(232,112,110,.85);">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}<div style="font-size:8.5px;color:rgba(237,232,216,.4);letter-spacing:.4px;">if SL hit</div></div>
+      <div style="font-family:var(--mono);font-size:10px;color:rgba(232,112,110,.85);line-height:1.4;">
+        <div style="font-weight:600;">${slFmt}</div>
+        <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;">SL price</div>
+        <div style="margin-top:2px;">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+        <div style="font-size:8px;color:rgba(237,232,216,.35);">if hit</div>
+      </div>
       <div style="font-family:var(--mono);font-size:10.5px;color:rgba(201,168,76,.95);">${lotsStr}<div style="font-size:8.5px;color:rgba(237,232,216,.4);letter-spacing:.4px;">units/lots</div></div>
       ${tpCell(p1, 'TP1')}
       ${tpCell(p2, 'TP2')}
       ${tpCell(p3, 'TP3')}
+      <div style="font-family:var(--mono);font-size:9px;line-height:1.4;">
+        <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;margin-bottom:2px;">AUTOMATION</div>
+        ${autoText === 'Manual' ? '<span style="color:rgba(237,232,216,.35);">Manual — none</span>' : '<span style="color:rgba(201,168,76,.85);">' + autoText + '</span>'}
+      </div>
       <button onclick="szLadderRemove(${i})" style="background:none;border:none;color:rgba(232,112,110,.6);cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button>
     </div>`;
   }).join('') +
   // Totals row — sums across all ladder rows
-  `<div style="display:grid;grid-template-columns:38px 120px 110px 110px 70px 70px 70px 24px;gap:7px;align-items:center;padding:9px 9px;margin-top:4px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.22);border-radius:6px;">
+  `<div style="display:grid;grid-template-columns:38px 120px 130px 110px 70px 70px 70px 140px 24px;gap:7px;align-items:center;padding:9px 9px;margin-top:4px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.22);border-radius:6px;">
     <div style="font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);font-weight:700;letter-spacing:.5px;">SUM</div>
     <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">${(window._szLadder||[]).length} trade(s)</div>
     <div style="font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.95);font-weight:700;">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:2})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total at risk</div></div>
@@ -13514,6 +13624,7 @@ function szLadderRender() {
     <div style="font-family:var(--mono);font-size:11px;color:${tp1Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp1Dist?('+$'+totalTp1.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP1</div></div>
     <div style="font-family:var(--mono);font-size:11px;color:${tp2Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp2Dist?('+$'+totalTp2.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP2</div></div>
     <div style="font-family:var(--mono);font-size:11px;color:${tp3Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp3Dist?('+$'+totalTp3.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP3</div></div>
+    <div></div>
     <div></div>
   </div>` +
   // Combined / scenario row — what you actually take home depending on exit style
