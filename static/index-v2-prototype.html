@@ -6792,6 +6792,11 @@ async function dvRunAnalyze(){
     window._verdictPrewarmStructured = null;
     window._structuredVerdict = null;
     window._verdictPlan = null;
+    window._verdictChatJobId = null;         // also clear preserved chat job id
+    window._lastVerdict = null;              // clear cached verdict for new signal
+    window._verdictChatHistory = [];         // clear chat history for new signal
+    window._verdictAutoReviewCache = null;   // clear auto-review cache
+    window._verdictSignalAssessmentCache = null; // clear signal assessment cache
     showUnderstand();
     // Auto-run backtest silently to populate win rate badge (non-blocking)
     setTimeout(function(){ undRunBacktest(true); }, 300);
@@ -7439,8 +7444,26 @@ function showSignalFeed(){
   const el=document.getElementById('dashContent');
   el.innerHTML=_sfRender();
   setTimeout(()=>document.addEventListener('click',_sfOutsideClick,{once:true}),10);
-  setTimeout(function(){ _sfFetchSignals(); }, 50);
   if(typeof loadSigHistory === 'function') setTimeout(loadSigHistory, 100);
+
+  // Restore cached results instantly if less than 5 minutes old — no re-scan needed
+  var _cache = window._sfResultCache;
+  var _CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  if (_cache && _cache.html && _cache.ts && (Date.now() - _cache.ts < _CACHE_TTL)) {
+    var listEl = document.getElementById('sfOppsList');
+    if (listEl) listEl.innerHTML = _cache.html;
+    if (_cache.opps) {
+      window._rmOpps = _cache.opps;
+      _sfUpdateMetrics(_cache.opps);
+    }
+    // Hide progress bar — not needed when restoring from cache
+    var btBar = document.getElementById('sfBtBar');
+    if (btBar) btBar.style.display = 'none';
+    return; // skip re-fetch
+  }
+
+  // No valid cache — run full scan
+  setTimeout(function(){ _sfFetchSignals(); }, 50);
 }
 
 /* ── Backtest scan cache: {key → {data, ts}} — 30-min TTL ── */
@@ -7806,8 +7829,11 @@ async function _sfFetchSignals(){
       + '</div></div>';
   }).join('');
 
+  var _finalHtml = '<div class="opp-list">' + oppCards + '</div>';
   const listNow = document.getElementById('sfOppsList');
-   if(listNow) listNow.innerHTML = '<div class="opp-list">' + oppCards + '</div>';
+  if(listNow) listNow.innerHTML = _finalHtml;
+  // Cache results so navigating away and back restores instantly (5-min TTL)
+  window._sfResultCache = { html: _finalHtml, opps: verifiedOpps, ts: Date.now() };
   // Update metric cards with real data
   _sfUpdateMetrics(verifiedOpps);
 
@@ -12308,6 +12334,11 @@ function showVerdict(){
 
   // ── Live API integration ──
   _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy);
+  // If a verdict was already completed, restore it immediately instead of showing empty state
+  if (window._lastVerdict) {
+    _vRenderLive(sig, window._lastVerdict, window._structuredVerdict || null);
+    return;
+  }
   // Analysis runs only when user clicks "Run Analysis" button
 }
 
@@ -12328,6 +12359,18 @@ function _vRunAnalysis(){
     + '</div>';
   _vFetchLive(sig);
 }
+function _vBuildSignalPayload(sig) {
+  // Build a compact signal object to send to the backend for agent context
+  if (!sig || !sig.entry) return null;
+  return {
+    sig: sig.sig, tf: sig.tf || '4H',
+    entry: sig.entry, sl: sig.sl,
+    tp: sig.tp, tp2: sig.tp2, tp3: sig.tp3,
+    rr: sig.rr, rr2: sig.rr2, rr3: sig.rr3,
+    conf: sig.conf, confLbl: sig.confLbl,
+    sym: sig.sym
+  };
+}
 function _vPrewarm(){
   var sig = window._activeSignal || {};
   if (!sig.sym || sig.sig === 'HOLD') return;
@@ -12335,7 +12378,7 @@ function _vPrewarm(){
   var ticker = (sig.sym || '').replace('/','').replace('-','');
   dvFetch('/api/verdict', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ticker: ticker, timeframe: sig.tf||'4H'})
+    body: JSON.stringify({ticker: ticker, timeframe: sig.tf||'4H', signal: _vBuildSignalPayload(sig)})
   }).then(function(r){
     if (!r) return;
     if (r.job_id) {
@@ -12365,7 +12408,7 @@ function _vFetchLive(sig){
   // No pre-warm — enqueue fresh
   dvFetch('/api/verdict', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ticker:ticker, timeframe:sig.tf||'4H'})
+    body:JSON.stringify({ticker:ticker, timeframe:sig.tf||'4H', signal: _vBuildSignalPayload(sig)})
   }).then(function(r){
     if (!r) { _vShowBanner('error','Could not reach the analysis server. Check your connection and try again.'); return; }
     if (r.status==='unavailable') { _vShowBanner('error','TradingAgents could not start. This usually means Python 3.10+ is not available on the server. Check Railway deploy logs for package install errors.'); return; }
@@ -12491,6 +12534,12 @@ function _vBuildAutoReview(s) {
 
 function _vRenderLive(sig, verdict, structured){
   window._verdictRunning = false;
+  // Preserve job_id for chat context BEFORE clearing it — chat endpoint needs it
+  // to retrieve individual agent votes + arguments (not just the verdict text).
+  // Without this, DeepSeek only gets raw verdict text from Redis, not agent reasoning.
+  if (window._verdictPrewarmJobId) {
+    window._verdictChatJobId = window._verdictPrewarmJobId;
+  }
   window._verdictPrewarmJobId = null;
   window._lastVerdict = verdict;
   window._structuredVerdict = structured || null;
@@ -12522,6 +12571,11 @@ function _vRenderLive(sig, verdict, structured){
       + '<div style="font-size:9px;font-weight:700;color:var(--grn);letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase">Position Plan · '+s.positions+' Entries · '+totalRisk.toFixed(1)+'% Total Risk</div>'
       + '<div style="display:flex;gap:8px;overflow-x:auto">'+rows+'</div>'
       + '<div style="margin-top:8px;font-size:9px;color:var(--t3);line-height:1.5">Risk % per entry, TP targets (as R multiples), and trailing stop settings are from the AI analysis. Adjust in Size.</div>'
+      + '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      + '<span style="font-size:9px;color:var(--t3)">Want different number of positions?</span>'
+      + '<input id="verdictLadderN" type="number" min="1" max="5" value="'+s.positions+'" style="width:44px;background:rgba(255,255,255,.06);border:1px solid rgba(237,232,216,.15);border-radius:4px;padding:4px 6px;color:var(--t1);font-family:var(--mono);font-size:11px;text-align:center;outline:none" />'
+      + '<button onclick="_vAdjustLadder()" style="padding:4px 11px;border-radius:4px;font-size:9px;font-weight:700;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.28);color:var(--amb);cursor:pointer;font-family:var(--mono);letter-spacing:.04em">Ask Agents to Redistribute</button>'
+      + '</div>'
       + '</div>';
   }
 
@@ -12558,21 +12612,30 @@ function _vRenderLive(sig, verdict, structured){
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+cardItems+'</div>'
     + '</div>';
 
-  // Build automations review from user's current settings vs verdict plan
-  var autoLines = _vBuildAutoReview(s);
-  var autoLineItems = autoLines.map(function(l){
-    var col = l.ok ? '#5de8a0' : '#c9a84c';
-    var icon = l.ok
-      ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="'+col+'" stroke-width="2.5" style="flex-shrink:0;margin-top:2px"><polyline points="20 6 9 17 4 12"/></svg>'
-      : '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="'+col+'" stroke-width="2.5" style="flex-shrink:0;margin-top:2px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-    return '<div style="display:flex;align-items:flex-start;gap:7px;padding:5px 0;border-bottom:1px solid rgba(237,232,216,.06)">'
-      + icon+'<span style="font-size:10px;color:rgba(237,232,216,.72);line-height:1.6">'+l.text+'</span></div>';
-  }).join('');
+  // Build automations review — AI-powered, fires after render via _vAutoReviewAI()
   var autoReviewHtml = '<div style="margin-bottom:14px;border-radius:8px;border:1px solid rgba(201,168,76,.18);background:rgba(201,168,76,.04);padding:14px 16px">'
     + '<div style="font-size:9px;font-weight:700;color:var(--amb);letter-spacing:.07em;text-transform:uppercase;margin-bottom:10px">Automations Review</div>'
-    + autoLineItems
-    + '<div style="margin-top:10px;font-size:9px;color:var(--t3);line-height:1.5">Based on your current Automations settings. '
-    + '<span style="color:var(--crys);cursor:pointer" onclick="setNav(\'automations\');showAutomations()">Review Automations →</span></div>'
+    + '<div id="verdictAutoReviewContent" style="min-height:28px;display:flex;align-items:center">'
+    + '<span style="font-size:9px;color:rgba(237,232,216,.4)">Agents are reviewing your settings…</span>'
+    + '</div>'
+    + '<div style="margin-top:10px;font-size:9px;color:var(--t3);line-height:1.5">'
+    + '<span style="color:var(--crys);cursor:pointer" onclick="setNav(\'automations\');showAutomations()">Open Automations to change settings →</span></div>'
+    + '</div>';
+
+  var chatHtml = '<div class="verdict-chat" style="margin-top:4px">'
+    + '<div style="padding:12px 18px 4px;font-size:9px;font-weight:700;color:var(--t3);letter-spacing:.07em;text-transform:uppercase">Ask the Agents</div>'
+    + '<div style="padding:2px 18px 8px;font-size:9px;color:rgba(237,232,216,.45);line-height:1.5">Powered by DeepSeek · has access to verdict, agent votes &amp; ' + (sig.sym||'this ticker') + ' analysis</div>'
+    + '<div class="verdict-chat-suggests">'
+    + '<button class="verdict-chat-suggest" onclick="_vChat(\'Why did the team vote ' + action + '?\')">Why ' + action + '?</button>'
+    + '<button class="verdict-chat-suggest" onclick="_vChat(\'What is the biggest risk in this trade?\')">Biggest risk?</button>'
+    + '<button class="verdict-chat-suggest" onclick="_vChat(\'What if macro conditions change?\')">Macro shift?</button>'
+    + '<button class="verdict-chat-suggest" onclick="_vChat(\'How confident are you in this signal?\')">Confidence?</button>'
+    + '</div>'
+    + '<div class="verdict-chat-msgs" id="verdictChatMsgs"></div>'
+    + '<div class="verdict-chat-input-row">'
+    + '<input class="verdict-chat-input" id="verdictChatInput" type="text" placeholder="Ask a follow-up question…" onkeydown="if(event.key===\'Enter\'){_vChat(this.value)}" />'
+    + '<button class="verdict-chat-btn" onclick="_vChat(document.getElementById(\'verdictChatInput\').value)">Ask</button>'
+    + '</div>'
     + '</div>';
 
   results.style.display = 'block';
@@ -12602,12 +12665,159 @@ function _vRenderLive(sig, verdict, structured){
     + planHtml
     // Automations review
     + autoReviewHtml
+    // Agent chat box
+    + chatHtml
     + '</div>'
     + '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px">'
     + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
 
+  // Restore chat history after innerHTML (innerHTML wipes the DOM)
+  var _chatMsgs = document.getElementById('verdictChatMsgs');
+  if (_chatMsgs && window._verdictChatHistory && window._verdictChatHistory.length) {
+    _chatMsgs.innerHTML = window._verdictChatHistory.join('');
+    _chatMsgs.scrollTop = _chatMsgs.scrollHeight;
+  }
+
+  // Fire AI reviews after DOM is ready (non-blocking)
+  // 150ms: auto-review (always fires if no cache)
+  // 300ms: signal assessment (only fires if no backend-extracted text and no cache)
+  setTimeout(function(){ _vAutoReviewAI(s); }, 150);
+  setTimeout(function(){ _vSignalAssessmentAI(s, sig); }, 300);
+
   _vShowBanner('live','Live Analysis Complete. Powered by DeepSeek.');
 }
+function _vAutoReviewAI(s) {
+  // Calls /api/verdict/chat with the user's actual Automations settings.
+  // DeepSeek has the full verdict + agent arguments as context, so its review
+  // is grounded in the actual analysis — not hardcoded if/else logic.
+  // Cached per-signal so navigating away and back doesn't re-fire DeepSeek.
+  var el = document.getElementById('verdictAutoReviewContent');
+  if (!el) return;
+  var auto = window._autoSettings || {};
+  var sig  = window._activeSignal || {};
+  // Cache check — use cached result if available for this signal
+  if (window._verdictAutoReviewCache) {
+    el.innerHTML = '<div style="font-size:10px;color:rgba(237,232,216,.78);line-height:1.65">'
+      + window._verdictAutoReviewCache.replace(/\n/g, '<br>') + '</div>';
+    return;
+  }
+  var ticker = (sig.sym || '').replace('/', '').replace('-', '');
+  var action = ((s && s.action) || sig.sig || 'HOLD').toUpperCase();
+  var tpCount = [auto.autoTP1, auto.autoTP2, auto.autoTP3].filter(Boolean).length;
+  var settingsSummary = [
+    'trailing stop: ' + (auto.trailing   ? 'ON' : 'OFF'),
+    'move-to-breakeven: ' + (auto.breakeven ? 'ON' : 'OFF'),
+    'TP levels active: ' + tpCount + ' of 3',
+    auto.dailyLossLimit ? 'daily loss cap: ' + (auto.dailyLossMax || 3) + '%' : 'daily loss cap: OFF'
+  ].join(', ');
+  // Include actual trade levels so DeepSeek can reason about specific prices,
+  // not just abstract settings. Without these, trailing stop / breakeven
+  // recommendations are meaningless (e.g. "+1.5R" only makes sense if DeepSeek
+  // knows where 1R is in price terms for this trade).
+  var tradeLevels = '';
+  if (sig.entry) tradeLevels += ' Entry: ' + sig.entry + '.';
+  if (sig.sl)    tradeLevels += ' Stop loss: ' + sig.sl + '.';
+  if (sig.tp)    tradeLevels += ' TP1: ' + sig.tp + '.';
+  if (sig.tp2)   tradeLevels += ' TP2: ' + sig.tp2 + '.';
+  if (sig.tp3)   tradeLevels += ' TP3: ' + sig.tp3 + '.';
+  if (sig.rr)    tradeLevels += ' R:R 1:' + sig.rr + '.';
+  if (sig.tf)    tradeLevels += ' Timeframe: ' + sig.tf + '.';
+  var question = 'Review my automations settings for this ' + action + ' trade on ' + (sig.sym || ticker)
+    + '.' + tradeLevels
+    + ' My automations: ' + settingsSummary
+    + '. Based on your analysis and these exact trade levels, are these settings appropriate?'
+    + ' Give specific price-level recommendations where relevant (e.g. activate trailing stop at X, move to breakeven at Y). Under 90 words.';
+  dvFetch('/api/verdict/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ job_id: window._verdictChatJobId || '', question: question, ticker: ticker })
+  }).then(function(r) {
+    var el2 = document.getElementById('verdictAutoReviewContent');
+    if (!el2) return;
+    if (r && r.answer) {
+      window._verdictAutoReviewCache = r.answer; // cache so navigation re-use works
+      el2.innerHTML = '<div style="font-size:10px;color:rgba(237,232,216,.78);line-height:1.65">'
+        + r.answer.replace(/\n/g, '<br>') + '</div>';
+    } else {
+      var errMsg = (r && r.error) ? r.error : 'Could not load AI review.';
+      el2.innerHTML = '<div style="font-size:9px;color:var(--t3)">' + errMsg + '</div>';
+    }
+  }).catch(function() {
+    var el2 = document.getElementById('verdictAutoReviewContent');
+    if (el2) el2.innerHTML = '<div style="font-size:9px;color:var(--t3)">Network error — could not load review.</div>';
+  });
+}
+
+function _vSignalAssessmentAI(s, sig) {
+  // Pre-caches the agents' evaluation of DotVerse's entry/SL/TP/R:R so the
+  // Size tab can render it instantly as a 9th agent card without an extra wait.
+  // Does NOT render anything on the Verdict tab — display is on Size tab only.
+  sig = sig || window._activeSignal || {};
+  if (!sig.entry || !sig.sl) return;
+  // Already have a cached answer or backend-extracted review — nothing to do
+  if (window._verdictSignalAssessmentCache) return;
+  if (s && s.dotverse_signal_review && s.dotverse_signal_review !== 'N/A') {
+    window._verdictSignalAssessmentCache = s.dotverse_signal_review;
+    return;
+  }
+  var ticker = (sig.sym || '').replace('/','').replace('-','');
+  var levels = [];
+  if (sig.sig)     levels.push('Direction: ' + sig.sig);
+  if (sig.tf)      levels.push('Timeframe: ' + sig.tf);
+  if (sig.entry)   levels.push('Entry: ' + sig.entry);
+  if (sig.sl)      levels.push('Stop loss: ' + sig.sl);
+  if (sig.tp)      levels.push('TP1: ' + sig.tp);
+  if (sig.tp2)     levels.push('TP2: ' + sig.tp2);
+  if (sig.tp3)     levels.push('TP3: ' + sig.tp3);
+  if (sig.rr)      levels.push('R:R 1:' + sig.rr);
+  if (sig.confLbl) levels.push('DotVerse confidence: ' + sig.confLbl);
+  var question = 'Separately from your verdict on ' + (sig.sym || ticker)
+    + ', evaluate the DotVerse technical signal: ' + levels.join(', ')
+    + '. Is the entry price well-placed? Is the stop loss distance reasonable? Is the R:R ratio acceptable? '
+    + 'Any concerns about these specific levels based on your analysis? '
+    + 'Write 2-4 plain English sentences. Be specific. Do not repeat the main verdict.';
+  dvFetch('/api/verdict/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ job_id: window._verdictChatJobId || '', question: question, ticker: ticker, timeframe: sig.tf || '4h' })
+  }).then(function(r) {
+    if (r && r.answer) {
+      window._verdictSignalAssessmentCache = r.answer;
+      // If Size tab is currently open, update the card live
+      var szCard = document.getElementById('szDvsSignalCard');
+      if (szCard) {
+        szCard.innerHTML = '<div style="font-size:10px;color:rgba(237,232,216,.7);line-height:1.6">' + r.answer.replace(/\n/g,'<br>') + '</div>';
+      }
+    }
+  }).catch(function(){});
+}
+
+function _vAdjustLadder() {
+  // Asks DeepSeek agents to redistribute the risk ladder for a different
+  // number of positions. Response uses the full verdict context — not formulas.
+  var nEl = document.getElementById('verdictLadderN');
+  var n   = nEl ? (parseInt(nEl.value) || 3) : 3;
+  n = Math.max(1, Math.min(5, n));
+  var sig = window._activeSignal     || {};
+  var s   = window._structuredVerdict || {};
+  var cur    = s.positions || 3;
+  var action = ((s.action || sig.sig) || 'BUY').toUpperCase();
+  // Include actual trade levels so risk % recommendations are tied to real
+  // entry/SL distances, not abstract percentages.
+  var levels = '';
+  if (sig.entry) levels += ' Entry: ' + sig.entry + '.';
+  if (sig.sl)    levels += ' Stop loss: ' + sig.sl + '.';
+  if (sig.tp)    levels += ' TP1: ' + sig.tp + '.';
+  if (sig.rr)    levels += ' R:R 1:' + sig.rr + '.';
+  if (sig.tf)    levels += ' Timeframe: ' + sig.tf + '.';
+  var question = 'I want ' + n + ' position entries instead of the recommended ' + cur
+    + ' for this ' + action + ' trade on ' + (sig.sym || 'this ticker') + '.' + levels
+    + ' Based on your full analysis and these exact levels, what risk % should each of the '
+    + n + ' entries use? Do not divide equally — use the trade context and your agent reasoning'
+    + ' to weight each entry. Explain each size in one sentence.';
+  _vChat(question);
+}
+
 function _vShowBanner(status, msg){
   // On error: unlock the button so the user can retry.
   if (status === 'error') {
@@ -12755,7 +12965,10 @@ function _vChat(q){
   if(!q||!q.trim()) return;
   var msgs=document.getElementById('verdictChatMsgs'), inp=document.getElementById('verdictChatInput');
   if(!msgs) return;
-  msgs.innerHTML += '<div class="verdict-chat-msg verdict-chat-user"><div class="verdict-chat-bubble">'+q.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div></div>';
+  var userHtml = '<div class="verdict-chat-msg verdict-chat-user"><div class="verdict-chat-bubble">'+q.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div></div>';
+  msgs.innerHTML += userHtml;
+  if (!window._verdictChatHistory) window._verdictChatHistory = [];
+  window._verdictChatHistory.push(userHtml); // persist for navigation restore
   if(inp){ inp.value=''; inp.disabled=true; }
   var tid='vc-'+Date.now();
   msgs.innerHTML += '<div class="verdict-chat-msg verdict-chat-agent" id="'+tid+'"><div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble" style="opacity:.5">Thinking…</div></div>';
@@ -12765,19 +12978,24 @@ function _vChat(q){
   dvFetch('/api/verdict/chat',{
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      job_id: window._verdictPrewarmJobId || '',
+      job_id: window._verdictChatJobId || '',
       question: q,
-      ticker: ticker
+      ticker: ticker,
+      timeframe: sig.tf || '4h'
     })
   }).then(function(r){
     var el2=document.getElementById(tid);
     if(!el2) return;
+    var answerHtml;
     if(r && r.answer){
-      el2.innerHTML='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble">'+r.answer.replace(/\n/g,'<br>')+'</div>';
+      answerHtml='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble">'+r.answer.replace(/\n/g,'<br>')+'</div>';
     } else {
       var errMsg = (r && r.error) ? r.error : 'Could not get a response. Try again.';
-      el2.innerHTML='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble" style="color:var(--red)">'+errMsg+'</div>';
+      answerHtml='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble" style="color:var(--red)">'+errMsg+'</div>';
     }
+    el2.removeAttribute('id'); // detach ID so it's replaced by inner HTML
+    el2.innerHTML = answerHtml;
+    window._verdictChatHistory.push('<div class="verdict-chat-msg verdict-chat-agent">'+answerHtml+'</div>');
     if(msgs) msgs.scrollTop=msgs.scrollHeight;
     if(inp) inp.disabled=false;
   }).catch(function(){
@@ -13119,6 +13337,68 @@ function showSize(){
     <div id="szLadderStatus" style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);min-height:14px;"></div>
   </div>
 
+  ${(function(){
+    // Verdict agent cards section — show if a verdict has been run for this signal.
+    // The Size tab is the final checkpoint before trade execution, so the agents'
+    // reasoning and their assessment of the DotVerse signal are shown here as a
+    // last-chance sanity check before committing capital.
+    var sv = window._structuredVerdict;
+    if (!sv || !sv.agents || !sv.agents.length) return '';
+    var action    = sv.action || sig.sig || 'HOLD';
+    var actColor  = action==='BUY'?'#5de8a0':action==='SELL'?'#e8706e':'#c9a84c';
+    var confColor = sv.confidence==='HIGH'?'#5de8a0':sv.confidence==='MEDIUM'?'#c9a84c':'#e8706e';
+    // Agent cards (2-col grid, same style as verdict tab)
+    var cardItems = '';
+    for (var ai = 0; ai < sv.agents.length; ai++) {
+      var ag    = sv.agents[ai];
+      var agV   = (ag.vote||'HOLD').toUpperCase();
+      var agCol = agV==='BUY'?'#5de8a0':agV==='SELL'?'#e8706e':'#c9a84c';
+      var agBg  = agV==='BUY'?'rgba(93,232,160,.04)':agV==='SELL'?'rgba(232,112,110,.04)':'rgba(201,168,76,.04)';
+      var agBd  = agV==='BUY'?'rgba(93,232,160,.18)':agV==='SELL'?'rgba(232,112,110,.18)':'rgba(201,168,76,.18)';
+      cardItems += '<div style="background:'+agBg+';border:1px solid '+agBd+';border-radius:8px;padding:12px 14px;min-width:0">'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
+        + '<span style="font-size:10px;font-weight:700;color:var(--t1);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">'+ag.name+'</span>'
+        + '<span style="padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;font-family:var(--mono);background:'+agCol+'22;color:'+agCol+'">'+agV+'</span>'
+        + '</div>'
+        + '<div style="font-size:10px;color:rgba(237,232,216,.7);line-height:1.6">'+(ag.argument||'')+'</div>'
+        + '</div>';
+    }
+    // 9th card — agents' assessment of the DotVerse signal specifically
+    // Cached from _vSignalAssessmentAI (fires on verdict complete).
+    // If not yet ready, shows a loading state and _vSignalAssessmentAI will
+    // update it live via the szDvsSignalCard element ID.
+    var dvsText = window._verdictSignalAssessmentCache
+      || (sv.dotverse_signal_review && sv.dotverse_signal_review !== 'N/A' ? sv.dotverse_signal_review : null);
+    var hasSig = sig.entry && sig.sl;
+    if (hasSig) {
+      var dvsLevels = (sig.sig||'') + ' · Entry ' + (sig.entry||'—') + ' · SL ' + (sig.sl||'—') + (sig.rr ? ' · 1:'+sig.rr : '');
+      cardItems += '<div style="background:rgba(110,165,232,.04);border:1px solid rgba(110,165,232,.2);border-radius:8px;padding:12px 14px;min-width:0">'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
+        + '<span style="font-size:10px;font-weight:700;color:var(--t1);flex:1">DotVerse Signal Review</span>'
+        + '<span style="padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;font-family:var(--mono);background:rgba(110,165,232,.15);color:#6ea5e8">ANALYSIS</span>'
+        + '</div>'
+        + '<div style="font-size:8px;color:var(--t3);font-family:var(--mono);margin-bottom:6px">'+dvsLevels+'</div>'
+        + '<div id="szDvsSignalCard" style="font-size:10px;color:rgba(237,232,216,.7);line-height:1.6">'
+        + (dvsText
+            ? dvsText.replace(/\n/g,'<br>')
+            : '<span style="color:rgba(237,232,216,.35)">Agents are reviewing the DotVerse signal…</span>')
+        + '</div>'
+        + '</div>';
+    }
+    return '<div style="margin-bottom:16px;border-radius:10px;border:1px solid rgba(237,232,216,.08);background:rgba(9,11,16,.6);padding:14px 16px">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer" onclick="szToggleVerdict()">'
+      + '<svg id="szVerdictChevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2.5" style="transition:transform .2s;transform:rotate(0deg)"><polyline points="6 9 12 15 18 9"/></svg>'
+      + '<span style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:.06em;text-transform:uppercase;flex:1">Verdict · Agent Reasoning & Signal Review</span>'
+      + '<span style="padding:3px 8px;border-radius:3px;font-size:9px;font-weight:700;background:'+actColor+'22;color:'+actColor+';font-family:var(--mono)">'+action+'</span>'
+      + (sv.confidence ? '<span style="padding:3px 7px;border-radius:3px;font-size:9px;font-weight:700;background:'+confColor+'18;color:'+confColor+';font-family:var(--mono)">'+sv.confidence+'</span>' : '')
+      + '</div>'
+      + '<div id="szVerdictBody" style="display:none">'
+      + '<div style="font-size:9px;color:var(--t3);margin-bottom:12px;line-height:1.5">8 agent cards from the Verdict analysis + their assessment of the DotVerse signal. Final checkpoint before you execute.</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+cardItems+'</div>'
+      + '</div>'
+      + '</div>';
+  })()}
+
   <div class="flow-footer" style="margin-top:16px;">
     <div class="flow-footer-left">
       <div class="flow-footer-step">Step 5 of 6 · SIZE</div>
@@ -13145,6 +13425,15 @@ function showSize(){
   // chip highlight + teaching panel. Done after the DOM is built.
   if(typeof szRiskRestore === 'function') szRiskRestore();
   szCalc();
+}
+
+function szToggleVerdict(){
+  var body    = document.getElementById('szVerdictBody');
+  var chevron = document.getElementById('szVerdictChevron');
+  if (!body) return;
+  var isOpen = body.style.display !== 'none';
+  body.style.display    = isOpen ? 'none' : 'block';
+  if (chevron) chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
 }
 
 function szSetDir(dir, btn){
@@ -15186,8 +15475,17 @@ function btPickTicker(sym, assetCategory) {
 function triggerBacktest() {
   // Silent guards — button is hidden for HOLD/no-entry by renderResults(),
   // but keep these as a safety net in case of stale state.
-  if (!window._activeSignal) return;
-  if (window._activeSignal.signal === 'HOLD' || window._activeSignal.entry == null) return;
+  var loading = document.getElementById('backtestLoading');
+  var empty = document.getElementById('btEmpty');
+  if (!window._activeSignal) {
+    if (loading) loading.style.display = 'none';
+    return;
+  }
+  if (window._activeSignal.sig === 'HOLD' || window._activeSignal.entry == null) {
+    if (loading) loading.style.display = 'none';
+    if (empty) { empty.style.display = 'block'; empty.textContent = 'Signal is HOLD — pick a BUY or SELL signal first to run a backtest.'; }
+    return;
+  }
   runBacktest(window._activeSignal);
 }
 

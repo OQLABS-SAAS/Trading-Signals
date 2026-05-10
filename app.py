@@ -8506,11 +8506,12 @@ def _build_fallback_structured(state, decision):
     }
 
 
-def _extract_verdict_structure(verdict_text, state, ticker):
+def _extract_verdict_structure(verdict_text, state, ticker, signal_ctx=None):
     """
     Post-processes the raw TradingAgents verdict into structured trade plan fields
     including per-agent cards built from the LangGraph state reports.
     Uses deepseek-chat (fast, cheap ~1-2s) to extract JSON from the raw text.
+    signal_ctx: optional dict with DotVerse signal data (entry, sl, tp, tp2, tp3, rr, sig, conf).
     Returns None if extraction fails — callers must handle gracefully.
     """
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
@@ -8538,6 +8539,28 @@ def _extract_verdict_structure(verdict_text, state, ticker):
             f"[Risk Team] {_snip(state.get('final_trade_decision','') if state else '')}\n"
         )
 
+        # Build DotVerse signal context block if provided
+        signal_block = ""
+        if signal_ctx and isinstance(signal_ctx, dict):
+            sig_dir   = signal_ctx.get("sig", signal_ctx.get("signal", ""))
+            sig_entry = signal_ctx.get("entry", "")
+            sig_sl    = signal_ctx.get("sl", "")
+            sig_tp1   = signal_ctx.get("tp", signal_ctx.get("tp1", ""))
+            sig_tp2   = signal_ctx.get("tp2", "")
+            sig_tp3   = signal_ctx.get("tp3", "")
+            sig_rr    = signal_ctx.get("rr", "")
+            sig_conf  = signal_ctx.get("conf", signal_ctx.get("confLbl", ""))
+            sig_tf    = signal_ctx.get("tf", "")
+            parts = [f"Direction: {sig_dir}", f"Timeframe: {sig_tf}"]
+            if sig_entry:  parts.append(f"Entry: {sig_entry}")
+            if sig_sl:     parts.append(f"Stop loss: {sig_sl}")
+            if sig_tp1:    parts.append(f"TP1: {sig_tp1}")
+            if sig_tp2:    parts.append(f"TP2: {sig_tp2}")
+            if sig_tp3:    parts.append(f"TP3: {sig_tp3}")
+            if sig_rr:     parts.append(f"R:R 1:{sig_rr}")
+            if sig_conf:   parts.append(f"DotVerse confidence: {sig_conf}")
+            signal_block = "\n\nDOTVERSE SIGNAL (the app's own technical analysis — treat as separate context):\n" + " | ".join(parts)
+
         resp = client.chat.completions.create(
             model="deepseek-chat",
             messages=[{
@@ -8549,6 +8572,7 @@ def _extract_verdict_structure(verdict_text, state, ticker):
                     '"confidence":"HIGH|MEDIUM|LOW",'
                     '"summary":"2-3 sentences plain English for a beginner",'
                     '"risk_team_notes":"1-2 sentences about stop loss management and risk controls",'
+                    '"dotverse_signal_review":"2-3 sentences: evaluate the DotVerse technical signal separately — does the entry/SL/TP look reasonable given your analysis? Is R:R acceptable? Any concerns? Write N/A if no signal provided.",'
                     '"positions":3,'
                     '"risk_ladder":[0.5,1.0,1.5],'
                     '"tp_r_multiples":[1.5,2.5,3.5],'
@@ -8565,12 +8589,14 @@ def _extract_verdict_structure(verdict_text, state, ticker):
                     ']}\n\n'
                     "Rules: positions=3-5 (HIGH=5,MEDIUM=4,LOW=3). "
                     "risk_ladder must sum ≤8%. Start small (0.5-1%), scale up. "
-                    "tp_r_multiples: TP as multiples of initial R. TP1 min 1.5R. "
+                    "tp_r_multiples: TP as multiples of initial R (distance from entry to SL = 1R). TP1 min 1.5R. "
+                    "If DotVerse signal is provided, calibrate tp_r_multiples against actual SL distance. "
                     "HOLD: positions=1, risk_ladder=[0.5], trailing=['manual'], tp_r_multiples=[1.5].\n"
                     "For agents: vote must match each agent's actual stance from their report. "
                     "argument must be 1-2 plain English sentences from their specific report.\n\n"
                     f"FINAL VERDICT:\n{raw}\n\n"
                     f"AGENT REPORTS:\n{agent_ctx}"
+                    f"{signal_block}"
                 )
             }],
             response_format={"type": "json_object"},
@@ -8583,8 +8609,10 @@ def _extract_verdict_structure(verdict_text, state, ticker):
         return None
 
 
-def _run_verdict_job(ticker, trade_date_str):
-    """Runs TradingAgents deep analysis. Called by RQ worker."""
+def _run_verdict_job(ticker, trade_date_str, signal_ctx=None):
+    """Runs TradingAgents deep analysis. Called by RQ worker.
+    signal_ctx: optional dict with DotVerse signal data passed through to structure extraction.
+    """
     if not TA_AVAILABLE:
         return {"error": "TradingAgents not installed — requires Python 3.10+", "status": "unavailable"}
     # Fail fast with a clear message if the LLM provider's API key is not in
@@ -8615,7 +8643,7 @@ def _run_verdict_job(ticker, trade_date_str):
         config = VERDICT_CONFIG.copy()
         ta = TradingAgentsGraph(debug=False, config=config)
         state, decision = ta.propagate(ticker, trade_date_str)
-        structured = _extract_verdict_structure(decision, state, ticker)
+        structured = _extract_verdict_structure(decision, state, ticker, signal_ctx=signal_ctx)
         # Always guarantee a structured dict — if DeepSeek extraction fails
         # (missing key, JSON parse error, network issue) fall back to building
         # agent cards directly from the TradingAgents state reports.
@@ -8636,8 +8664,21 @@ def verdict_enqueue():
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
 
+    # Store DotVerse signal context in Redis so chat endpoint can retrieve it
+    signal_ctx = body.get("signal") or None
+    tf_key = (body.get("timeframe", "4H")).lower()
+    if signal_ctx and _redis_client:
+        try:
+            _redis_client.setex(
+                f"signal_ctx:{ticker}:{tf_key}",
+                7200,
+                json.dumps(signal_ctx),
+            )
+        except Exception:
+            pass
+
     # Check Redis cache (1-hour TTL)
-    cache_key = "verdict:" + ticker + ":" + (body.get("timeframe","4H")).lower()
+    cache_key = "verdict:" + ticker + ":" + tf_key
     if _redis_client:
         try:
             cached = _redis_client.get(cache_key)
@@ -8653,7 +8694,7 @@ def verdict_enqueue():
     trade_date = body.get("date") or datetime.utcnow().strftime("%Y-%m-%d")
     try:
         job = _rq_queue.enqueue(
-            _run_verdict_job, ticker, trade_date,
+            _run_verdict_job, ticker, trade_date, signal_ctx,
             job_timeout=600, result_ttl=3600,
         )
         return jsonify({"job_id": job.id, "status": "enqueued"})
@@ -8724,6 +8765,7 @@ def verdict_chat():
     # Retrieve verdict context: try job result first, then Redis cache
     verdict_text   = ""
     agents_context = ""
+    signal_ctx_str = ""
     try:
         if job_id and _rq_queue:
             job = _rq_queue.fetch_job(job_id)
@@ -8749,11 +8791,43 @@ def verdict_chat():
         except Exception:
             pass
 
+    # Retrieve DotVerse signal context stored at enqueue time
+    if ticker and _redis_client:
+        try:
+            tf_key = body.get("timeframe", "4h").lower()
+            sig_raw = _redis_client.get(f"signal_ctx:{ticker}:{tf_key}")
+            if not sig_raw:
+                # fallback: try common timeframes
+                for _tf in ("4h", "1h", "1d", "15m", "1w"):
+                    sig_raw = _redis_client.get(f"signal_ctx:{ticker}:{_tf}")
+                    if sig_raw:
+                        break
+            if sig_raw:
+                sig = json.loads(sig_raw)
+                parts = []
+                if sig.get("sig") or sig.get("signal"):
+                    parts.append(f"Direction: {sig.get('sig', sig.get('signal',''))}")
+                if sig.get("tf"):     parts.append(f"Timeframe: {sig['tf']}")
+                if sig.get("entry"):  parts.append(f"Entry: {sig['entry']}")
+                if sig.get("sl"):     parts.append(f"Stop loss: {sig['sl']}")
+                if sig.get("tp"):     parts.append(f"TP1: {sig['tp']}")
+                if sig.get("tp2"):    parts.append(f"TP2: {sig['tp2']}")
+                if sig.get("tp3"):    parts.append(f"TP3: {sig['tp3']}")
+                if sig.get("rr"):     parts.append(f"R:R 1:{sig['rr']}")
+                if sig.get("conf") or sig.get("confLbl"):
+                    parts.append(f"DotVerse confidence: {sig.get('confLbl', sig.get('conf',''))}")
+                if parts:
+                    signal_ctx_str = "DOTVERSE SIGNAL (technical analysis — separate context):\n" + " | ".join(parts)
+        except Exception:
+            pass
+
     context_block = f"TICKER: {ticker}\n\n"
     if verdict_text:
         context_block += f"VERDICT:\n{verdict_text}\n\n"
     if agents_context:
         context_block += agents_context + "\n\n"
+    if signal_ctx_str:
+        context_block += signal_ctx_str + "\n\n"
 
     try:
         import openai as _oai
