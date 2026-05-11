@@ -4704,6 +4704,7 @@ async function doLogin(){
   }catch(e){ _showToast('Network error — try again'); if(btn){btn.disabled=false;btn.innerHTML='Sign In to DotVerse &#8594;';} }
 }
 function goDash(u){
+  window._dvUser = u || {};
   showView('vDash'); showMarket(); setNav('market'); startDashClock(); initTier(); _initStratMode();
   // Update sidebar user info from auth response
   if(u && u.name){ var sn=document.getElementById('sidebarUserName'); if(sn) sn.textContent=u.name;
@@ -5556,6 +5557,91 @@ function _saveBtnHandler(btn, label){
   setTimeout(function(){ btn.innerHTML = iconSave + ' ' + label; }, 2000);
 }
 
+/* ── Settings: User Management panel (admin only) ── */
+function _spUsers(){
+  return '<div class="sett-sect">'
+    +'<div class="sett-sect-title">Grant Access</div>'
+    +'<div class="sett-sect-sub">Add any email — registered or not. Access applies immediately or on signup.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;margin-top:12px;align-items:end;">'
+    +'<div><div style="font-size:10px;color:rgba(237,232,216,.5);margin-bottom:4px;">Email</div>'
+    +'<input id="settGrantEmail" type="email" placeholder="user@example.com" style="width:100%;box-sizing:border-box;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.15);border-radius:5px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--t1);outline:none;"></div>'
+    +'<div><div style="font-size:10px;color:rgba(237,232,216,.5);margin-bottom:4px;">Role</div>'
+    +'<select id="settGrantRole" style="background:rgba(20,18,14,.95);border:1px solid rgba(237,232,216,.15);border-radius:5px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--t1);cursor:pointer;">'
+    +'<option value="user">User</option><option value="admin">Admin</option></select></div>'
+    +'<div><div style="font-size:10px;color:rgba(237,232,216,.5);margin-bottom:4px;">Tier</div>'
+    +'<select id="settGrantTier" style="background:rgba(20,18,14,.95);border:1px solid rgba(237,232,216,.15);border-radius:5px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--t1);cursor:pointer;">'
+    +'<option value="free">Free</option><option value="pro">Pro</option><option value="elite">Elite</option></select></div>'
+    +'<button onclick="settGrantUser()" style="padding:8px 18px;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.4);border-radius:5px;color:#c9a84c;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.05em;">GRANT</button>'
+    +'</div>'
+    +'<div id="settGrantMsg" style="margin-top:8px;font-size:11px;font-family:var(--mono);min-height:16px;"></div>'
+    +'</div>'
+    +'<div class="sett-sect" style="margin-top:16px;">'
+    +'<div class="sett-sect-title">Registered Users</div>'
+    +'<div id="settUsersTable"><div style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">Loading...</div></div>'
+    +'</div>'
+    +'<div class="sett-sect" style="margin-top:16px;">'
+    +'<div class="sett-sect-title">Pending Invites</div>'
+    +'<div id="settInvitesTable"><div style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">Loading...</div></div>'
+    +'</div>';
+}
+
+async function settGrantUser(){
+  var email = (document.getElementById('settGrantEmail')||{}).value||'';
+  var role  = (document.getElementById('settGrantRole')||{}).value||'user';
+  var tier  = (document.getElementById('settGrantTier')||{}).value||'free';
+  var msg   = document.getElementById('settGrantMsg');
+  if(!email){ if(msg){ msg.style.color='#e05555'; msg.textContent='Email required.'; } return; }
+  var r = await dvFetch('/api/admin/grant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,role,tier})});
+  if(!r){ if(msg){ msg.style.color='#e05555'; msg.textContent='Request failed — check connection.'; } return; }
+  if(r.error){ if(msg){ msg.style.color='#e05555'; msg.textContent=r.error; } return; }
+  if(msg){ msg.style.color='#3dbe6c'; msg.textContent=r.message||'Done.'; }
+  var inp = document.getElementById('settGrantEmail'); if(inp) inp.value='';
+  settLoadUsers(); settLoadInvites();
+}
+
+async function settLoadUsers(){
+  var tbl = document.getElementById('settUsersTable'); if(!tbl) return;
+  var r = await dvFetch('/api/admin/users');
+  if(!r||!r.users){ tbl.innerHTML='<div style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">Could not load users.</div>'; return; }
+  if(!r.users.length){ tbl.innerHTML='<div style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">No users yet.</div>'; return; }
+  var rows = r.users.map(function(u){
+    return '<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(237,232,216,.06);">'
+      +'<span style="font-size:11px;color:var(--t1);font-family:var(--mono);">'+u.email+'</span>'
+      +'<select onchange="adminChangeRole('+u.id+',this.value)" style="background:rgba(20,18,14,.9);border:1px solid rgba(237,232,216,.12);border-radius:4px;padding:3px 6px;font-size:10px;color:var(--t1);font-family:var(--mono);cursor:pointer;">'
+      +'<option value="user"'+(u.role==='user'?' selected':'')+'>User</option>'
+      +'<option value="admin"'+(u.role==='admin'?' selected':'')+'>Admin</option>'
+      +'</select>'
+      +'<select onchange="adminChangeTier('+u.id+',this.value)" style="background:rgba(20,18,14,.9);border:1px solid rgba(237,232,216,.12);border-radius:4px;padding:3px 6px;font-size:10px;color:var(--t1);font-family:var(--mono);cursor:pointer;">'
+      +'<option value="free"'+(u.tier==='free'?' selected':'')+'>Free</option>'
+      +'<option value="pro"'+(u.tier==='pro'?' selected':'')+'>Pro</option>'
+      +'<option value="elite"'+(u.tier==='elite'?' selected':'')+'>Elite</option>'
+      +'</select>'
+      +'</div>';
+  }).join('');
+  tbl.innerHTML = rows;
+}
+
+async function settLoadInvites(){
+  var tbl = document.getElementById('settInvitesTable'); if(!tbl) return;
+  var r = await dvFetch('/api/admin/invites');
+  if(!r||!r.invites){ tbl.innerHTML='<div style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">Could not load invites.</div>'; return; }
+  if(!r.invites.length){ tbl.innerHTML='<div style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">No pending invites.</div>'; return; }
+  var rows = r.invites.map(function(inv){
+    return '<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(237,232,216,.06);">'
+      +'<span style="font-size:11px;color:var(--t1);font-family:var(--mono);">'+inv.email+'</span>'
+      +'<span style="font-size:10px;color:rgba(237,232,216,.4);font-family:var(--mono);">'+inv.role+' / '+inv.tier+'</span>'
+      +'<span style="font-size:10px;color:rgba(237,232,216,.3);font-family:var(--mono);">'+inv.created_at+'</span>'
+      +'<button onclick="settRevokeInvite(\''+inv.email+'\')" style="padding:3px 8px;background:rgba(224,85,85,.08);border:1px solid rgba(224,85,85,.3);border-radius:4px;color:#e05555;font-size:10px;font-family:var(--mono);cursor:pointer;">Revoke</button>'
+      +'</div>';
+  }).join('');
+  tbl.innerHTML = rows;
+}
+
+async function settRevokeInvite(email){
+  var r = await dvFetch('/api/admin/invite',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+  settLoadInvites();
+}
+
 function _spConnections(){
   var inpStyle='width:100%;box-sizing:border-box;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.12);border-radius:6px;padding:9px 12px;font-family:var(--mono);font-size:12px;color:var(--t1);outline:none;margin-top:6px;';
   var lblStyle='font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.07em;color:rgba(237,232,216,.5);text-transform:uppercase;';
@@ -5692,6 +5778,7 @@ async function _loadConnSettings(){
 function showSettings(tab){
   const el=document.getElementById('dashContent');
   tab=tab||'connections';
+  const isAdmin = window._dvUser && window._dvUser.role === 'admin';
   const tabs=[
     {id:'connections',label:'Connections'},
     {id:'assets',     label:'Asset Preferences'},
@@ -5702,6 +5789,7 @@ function showSettings(tab){
     {id:'alerts',     label:'Alert Thresholds'},
     {id:'timezone',   label:'Timezone & Hours'},
   ];
+  if(isAdmin) tabs.push({id:'users', label:'User Management'});
   const navHtml=tabs.map(t=>`<div class="sett-snav-item${tab===t.id?' on':''}" onclick="showSettings('${t.id}')">${t.label}</div>`).join('');
   let panelHtml='';
   if(tab==='connections') panelHtml=_spConnections();
@@ -5712,6 +5800,7 @@ function showSettings(tab){
   else if(tab==='portfolio')panelHtml=_spPortfolio();
   else if(tab==='alerts')   panelHtml=_spAlerts();
   else if(tab==='timezone') panelHtml=_spTimezone();
+  else if(tab==='users' && isAdmin) panelHtml=_spUsers();
   el.innerHTML=`<div class="sett-outer">
     <div class="sett-hd">
       <div class="sett-hd-ico">
@@ -5728,6 +5817,7 @@ function showSettings(tab){
     </div>
   </div>`;
   if(tab==='timezone') _initTzClocks();
+  if(tab==='users'){ setTimeout(function(){ settLoadUsers(); settLoadInvites(); }, 50); }
   if(tab==='connections') {
     // Apply cached state immediately (avoids flash of NOT CONNECTED)
     var badge = document.getElementById('mt5ConnBadge');
@@ -7557,6 +7647,7 @@ function applyCondFilter(type, label, desc){
   };
   if(!MAP[type]) return;
   window._condFilter = { type, ...MAP[type] };
+  window._sfResultCache = null; // force fresh live scan on signals page
 }
 
 function showSignalFeed(){
@@ -7659,7 +7750,9 @@ async function _sfFetchSignals(){
     // showing an empty Signal feed — better to scan everything than nothing).
     const groups = _filtered.length ? _filtered : _allGroups;
     // Scan multiple timeframes per group — a weak 4H signal might be a strong 1D signal
-    const _scanTfs = ['1h','4h','1d'];
+    var _modeToScanTf = {scalp:'15m', day:'1h', swing:'4h', position:'1d'};
+    var _singleTf = _modeToScanTf[window._stratMode||'all'];
+    const _scanTfs = _singleTf ? [_singleTf] : ['1h','4h','1d'];
     const all = await Promise.race([
       Promise.all(groups.flatMap(function(g){
         return _scanTfs.map(function(tf){
@@ -8256,7 +8349,7 @@ function _sfRender(){
         <div class="flow-footer-step">Step 2 of 6 &middot; SIGNAL</div>
       </div>
       <div class="flow-footer-right">
-        <button class="flow-btn-back" aria-label="Go back" onclick="setNav('market');showMarket();">← MARKET</button>
+        <button class="flow-btn-back btn-pipeline" aria-label="Go back" onclick="setNav('market');showMarket();">← MARKET</button>
       </div>
     </div>
 
@@ -8787,29 +8880,38 @@ function showMarket(){
   /* ── Market conditions chip ── */
   const bullCount = crypto.filter(m=>m.up).length + indices.filter(m=>m.up).length;
   const totalCount = crypto.length + indices.length;
-  let condCls, condLabel, condDesc, condSignals;
+  let condCls, condLabel, condDesc;
   if(bullCount/totalCount >= 0.6){
-    condCls='trending';
-    condLabel='TRENDING CONDITIONS';
+    condCls='trending'; condLabel='TRENDING CONDITIONS';
     condDesc=bullCount+' of '+totalCount+' assets in directional moves · Good session for momentum trades';
-    condSignals='10 signals match';
   } else if(bullCount/totalCount >= 0.4){
-    condCls='mixed';
-    condLabel='MIXED SESSION';
+    condCls='mixed'; condLabel='MIXED SESSION';
     condDesc='Range-bound conditions · Wait for clear breakouts before entering';
-    condSignals='6 signals match';
   } else {
-    condCls='risk-off';
-    condLabel='RISK-OFF';
+    condCls='risk-off'; condLabel='RISK-OFF';
     condDesc='Elevated volatility · Avoid new positions, wait for clarity';
-    condSignals='2 signals match';
+  }
+  // Filter criteria label — shown so user knows what "signals match" means
+  var _condFilterDesc = condCls==='trending' ? 'Filter: BUY · HIGH confidence (≥74%)'
+                      : condCls==='mixed'    ? 'Filter: HIGH confidence only (≥79%)'
+                      :                        'Filter: CONFIRMED signals only';
+  // Count from last signals page scan — same source, no separate scan
+  var _mktSigCountTxt = 'VIEW SIGNALS';
+  var _sfCache = window._sfResultCache;
+  if(_sfCache && _sfCache.opps && (Date.now()-_sfCache.ts) < 300000){
+    var _ffn = condCls==='trending' ? function(o){return o.sig==='BUY'&&o.conf>=74;}
+             : condCls==='mixed'    ? function(o){return o.conf>=79;}
+             :                        function(o){return o.confLbl==='CONFIRMED';};
+    var _cc = _sfCache.opps.filter(_ffn).length;
+    _mktSigCountTxt = _cc+' signal'+(_cc!==1?'s':'')+' match';
   }
   const conditionsChip=`
   <div class="mkt-conditions ${condCls}">
     <div class="mkt-cond-dot"></div>
     <div class="mkt-cond-label">${condLabel}</div>
     <div class="mkt-cond-desc">${condDesc}</div>
-    <button class="mkt-cond-cta" onclick="applyCondFilter('${condCls}');setNav('signals');showSignalFeed();"><span id="mktCondSigCount">${condSignals}</span> → SIGNAL</button>
+    <div style="font-size:10px;color:rgba(237,232,216,.4);font-family:var(--mono);margin-top:4px;">${_condFilterDesc}</div>
+    <button class="mkt-cond-cta" onclick="applyCondFilter('${condCls}');setNav('signals');showSignalFeed();">${_mktSigCountTxt} →</button>
   </div>`;
 
   el.innerHTML=`
@@ -8924,7 +9026,7 @@ function showMarket(){
           <span id="mktBtLbl" style="font-size:10px;font-family:var(--mono);color:rgba(237,232,216,.5);white-space:nowrap;">DotVerse is backtesting signals before populating…</span>
         </div>
       </div>
-      <button class="flow-btn-next" style="width:100%;justify-content:center;display:flex;align-items:center;gap:8px;" onclick="setNav('signals');showSignalFeed();">
+      <button class="flow-btn-next btn-pipeline" style="width:100%;justify-content:center;display:flex;align-items:center;gap:8px;" onclick="setNav('signals');showSignalFeed();">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         View All Signals → SIGNAL
       </button>
@@ -8944,7 +9046,7 @@ function showMarket(){
       <div class="flow-footer-msg">Market context loaded — ready to find your next trade</div>
     </div>
     <div class="flow-footer-right">
-      <button class="flow-btn-next" onclick="setNav('signals');showSignalFeed();">Find Opportunities → SIGNAL</button>
+      <button class="flow-btn-next btn-pipeline" onclick="setNav('signals');showSignalFeed();">Find Opportunities → SIGNAL</button>
     </div>
   </div>`;
   /* Animate sector bars in after render */
@@ -9172,115 +9274,42 @@ function mktSlotTrade(sym, entry, sl, tp, assetClass){
 
 
 /* ── Market tab: live signal fetch with progress bar ── */
-async function _mktFetchTopSignals(){
-  const list = document.getElementById('mktSigList');
-  const badge = document.getElementById('mktSigBadge');
-  const fill = document.getElementById('mktBtFill');
-  const lbl  = document.getElementById('mktBtLbl');
+function _mktFetchTopSignals(){
+  /* Market signal list reads from the signals page scan — one source of truth, no separate scan */
+  var list  = document.getElementById('mktSigList');
+  var badge = document.getElementById('mktSigBadge');
   if(!list) return;
-
-  /* Animate progress bar while scanning */
-  let pct = 0;
-  const tickers = ['BTCUSD','ETHUSD','SOLUSD','NVDA','AAPL','EURUSD','XAUUSD'];
-  const prog = setInterval(function(){
-    pct = Math.min(pct + 9.5, 85);
-    if(fill) fill.style.width = Math.min(pct, 90) + '%';
-  }, 280);
-
-  /* Fetch + minimum 2.5s display — run both in parallel */
-  let results = [];
-  const minWait = new Promise(function(r){ setTimeout(r, 800); });
-  const fetchData = (async function(){
-    try {
-      const res = await Promise.race([
-        dvFetch('/api/scan-list', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ tickers: tickers, timeframe: '4H', asset_types: ['crypto','crypto','crypto','equity','equity','forex','commodity'] })}),
-        new Promise(function(r){ setTimeout(function(){ r(null); }, 5000); })
-      ]);
-      if(res && res.results) return res.results.filter(function(r){ return r.signal && !r.error && r.confidence_label !== 'LOW' && r.confidence_label !== 'HYPOTHESIS'; });
-    } catch(e){ /* silent */ }
-    return [];
-  })();
-
-  const fetched = await Promise.all([fetchData, minWait]);
-  if (fetched[0] && fetched[0].length > 0) {
-    results = fetched[0];
-  } else {
-    clearInterval(prog);
-    if(fill){ fill.style.width = '100%'; fill.style.transition = 'width .2s ease-out'; }
-    const progRow2 = list.querySelector('#mktBtBar');
-    if(progRow2) progRow2.closest('div').remove();
-    list.innerHTML = '<div style="font-size:12px;color:rgba(237,232,216,.45);padding:16px 8px;text-align:center;font-family:var(--mono);">Data temporarily unavailable — retrying shortly.<br><button onclick="showMarket()" style="margin-top:10px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:var(--amb);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:var(--mono);font-size:11px;">Retry</button></div>';
+  var cache = window._sfResultCache;
+  if(!cache || !cache.opps || (Date.now()-cache.ts) > 300000){
+    list.innerHTML = '<div style="font-size:11px;color:rgba(237,232,216,.4);padding:12px 4px;font-family:var(--mono);">Open SIGNAL tab to run a live scan — results will appear here.</div>';
+    if(badge){ badge.textContent='—'; badge.style.background='rgba(237,232,216,.06)'; badge.style.color='rgba(237,232,216,.4)'; badge.style.borderColor='rgba(237,232,216,.15)'; }
     return;
   }
-
-  clearInterval(prog);
-  if(fill){ fill.style.width = '100%'; fill.style.transition = 'width .2s ease-out'; }
-  await new Promise(function(r){ setTimeout(r, 400); });
-
-  /* Remove progress bar row */
-  const progRow = list.querySelector('#mktBtBar');
-  if(progRow) progRow.closest('div').remove();
-
-  /* Sort BUY first, SELL second, HOLD last */
-  const active = results
-    .sort(function(a,b){
-      var order = {'BUY':0,'SELL':1,'HOLD':2};
-      return (order[a.signal]||2) - (order[b.signal]||2);
-    })
-    .slice(0, 5);
-
-  if(badge){
-    badge.textContent = active.length + ' active';
-    badge.style.background = active.length > 0 ? 'rgba(93,232,160,.12)' : 'rgba(237,232,216,.08)';
-    badge.style.color = active.length > 0 ? '#5de8a0' : 'rgba(237,232,216,.6)';
-    badge.style.borderColor = active.length > 0 ? 'rgba(93,232,160,.3)' : 'rgba(237,232,216,.2)';
-  }
-  var ccEl = document.getElementById('mktCondSigCount');
-  if (ccEl) ccEl.textContent = active.length + ' signals match';
-
-  if(active.length === 0){
-    list.innerHTML = '<div style="font-size:12px;color:rgba(237,232,216,.4);padding:12px 2px;">No strong signals right now — check back later or scan manually.</div>';
+  var opps = cache.opps.slice().sort(function(a,b){
+    var ord = {BUY:0,SELL:1,HOLD:2};
+    return (ord[a.sig]||2)-(ord[b.sig]||2);
+  });
+  if(badge){ badge.textContent=opps.length+' active'; badge.style.background='rgba(93,232,160,.12)'; badge.style.color='#5de8a0'; badge.style.borderColor='rgba(93,232,160,.3)'; }
+  if(!opps.length){
+    list.innerHTML='<div style="font-size:11px;color:rgba(237,232,216,.4);padding:12px 4px;">No signals passed criteria in last scan.</div>';
     return;
   }
-
-  const isBuy = function(s){ return s.signal === 'BUY'; };
-  const rows = active.slice(0, 3).map(function(s){
-    const gc = isBuy(s) ? '93,232,160' : '232,112,110';
-    const tc = isBuy(s) ? '#5de8a0' : '#e8706e';
-    const sigData = JSON.stringify({
-      sym: s.ticker || s.symbol || '',
-      sig: s.signal,
-      tf: s.timeframe || '4H',
-      rr: s.rr1 || s.rr || '--',
-      conf: s.confidence || '--',
-      confLbl: s.confidence_label || s.confidence || '--',
-      entry: s.entry || '--',
-      sl: s.stop_loss || '--',
-      tp: s.tp1 || '--',
-      asset: s.asset_type || 'equity',
-      reason: s.reason || 'Live scan signal'
-    }).replace(/"/g, '&quot;');
-    const tfLabel = (s.timeframe || '4H').toUpperCase();
-    const rrLabel = s.rr1 ? s.rr1 + 'R' : '--';
-    const confLabel = (s.confidence || '').toUpperCase();
-    return '<div data-sig="' + sigData + '" onclick="var d=JSON.parse(this.dataset.sig);loadSignalContext(d);setNav(\'understand\');showUnderstand();"'
-      + ' style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;'
-      + 'transition:background .13s;background:rgba(' + gc + ',.05);border:1px solid rgba(' + gc + ',.12);"'
-      + ' onmouseover="this.style.background=\'rgba(' + gc + ',.12)\'"'
-      + ' onmouseout="this.style.background=\'rgba(' + gc + ',.05)\'">'
-      + '<span style="font-size:9px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px;'
-      + 'background:rgba(' + gc + ',.15);color:' + tc + ';font-family:var(--mono);">' + s.signal + '</span>'
-      + '<span style="font-size:12px;font-weight:500;color:rgba(237,232,216,.88);flex:1;">' + (s.ticker || s.symbol || '') + '</span>'
-      + '<span style="font-size:10px;font-family:var(--mono);color:rgba(237,232,216,.38);">' + tfLabel + ' · ' + rrLabel + ' · ' + confLabel + '</span>'
-      + '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.35)" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>'
-      + '</div>';
+  var rows = opps.slice(0,3).map(function(o){
+    var isBuy = o.sig==='BUY';
+    var gc = isBuy?'93,232,160':'232,112,110';
+    var tc = isBuy?'#5de8a0':'#e8706e';
+    var safeO = JSON.stringify(o).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    return '<div data-sig="'+safeO+'" onclick="var d=JSON.parse(this.dataset.sig);loadSignalContext(d);setNav(\'understand\');showUnderstand();"'
+      +' style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:rgba('+gc+',.05);border:1px solid rgba('+gc+',.12);transition:background .13s;"'
+      +' onmouseover="this.style.background=\'rgba('+gc+',.12)\'" onmouseout="this.style.background=\'rgba('+gc+',.05)\'">'
+      +'<span style="font-size:9px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px;background:rgba('+gc+',.15);color:'+tc+';font-family:var(--mono);">'+o.sig+'</span>'
+      +'<span style="font-size:12px;font-weight:500;color:rgba(237,232,216,.88);flex:1;">'+o.sym+'</span>'
+      +'<span style="font-size:10px;font-family:var(--mono);color:rgba(237,232,216,.38);">'+o.tf+' · '+o.rr+'R · '+o.confLbl+'</span>'
+      +'<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.35)" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>'
+      +'</div>';
   }).join('');
-
-  const extra = active.length > 3
-    ? '<div style="font-size:11px;color:rgba(237,232,216,.45);padding:4px 2px;">+ ' + (active.length - 3) + ' more signals today</div>'
-    : '';
-
-  list.innerHTML = rows + extra;
+  var extra = opps.length>3 ? '<div style="font-size:11px;color:rgba(237,232,216,.45);padding:4px 2px;">+ '+(opps.length-3)+' more signals</div>' : '';
+  list.innerHTML = rows+extra;
 }
 
 /* ── Market page: live price + calendar update ── */
@@ -9586,7 +9615,7 @@ async function showPortfolio(){
           </div>
 
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
-            <button class="btn-ghost" style="font-size:11px;padding:5px 14px" onclick="pfGoAnalyze('${p.ticker}')">
+            <button class="btn-ghost btn-pipeline" style="font-size:11px;padding:5px 14px" onclick="pfGoAnalyze('${p.ticker}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right:4px"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Analyse
             </button>
             <button class="pos-act-btn" style="background:rgba(232,112,110,.15);border-color:rgba(232,112,110,.3);color:#e8706e;padding:5px 14px" onclick="event.stopPropagation();pfDelete('${p.id}')">Close Position</button>
@@ -10917,7 +10946,7 @@ function showUnderstand(){
       <div class="flow-empty-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--crys)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
       <div class="flow-empty-title">No signal selected</div>
       <div class="flow-empty-sub">Go to SIGNAL, pick one of the 10 ranked opportunities or run the scanner, then tap Analyse.</div>
-      <button class="flow-btn-next" onclick="setNav('signals');showSignalFeed();">← Back to SIGNAL</button>
+      <button class="flow-btn-next btn-pipeline" onclick="setNav('signals');showSignalFeed();">← Back to SIGNAL</button>
     </div>`;
     return;
   }
@@ -10937,7 +10966,7 @@ function showUnderstand(){
             style="font-family:var(--mono);font-size:11px;font-weight:600;padding:6px 14px;border-radius:5px;cursor:pointer;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:rgba(201,168,76,.9);transition:all .15s;letter-spacing:.04em;">${tf}</button>
         `).join('')}
       </div>
-      <button class="flow-btn-next" onclick="setNav('signals');showSignalFeed();setTimeout(()=>sfShowTab('signals'),60);" style="margin-top:4px;">
+      <button class="flow-btn-next btn-pipeline" onclick="setNav('signals');showSignalFeed();setTimeout(()=>sfShowTab('signals'),60);" style="margin-top:4px;">
         View Top Signals for ${sig.sym} →
       </button>
       <div style="font-size:10px;color:rgba(237,232,216,.3);margin-top:-6px;">or go to SIGNAL tab to see ranked opportunities</div>
@@ -12441,7 +12470,7 @@ function showVerdict(){
         3. Come back to <span style="color:var(--gold)">Verdict</span> — the agents will be ready
       </div>
       <div style="margin-top:20px">
-        <button class="flow-btn-next" onclick="setNav('signals');showSignalFeed()">Go to Signals</button>
+        <button class="flow-btn-next btn-pipeline" onclick="setNav('signals');showSignalFeed()">Go to Signals</button>
       </div>
     </div>`;
     return;
@@ -13531,8 +13560,8 @@ function showSize(){
       <div class="flow-footer-msg">Position sized — ready to execute</div>
     </div>
     <div class="flow-footer-right">
-      <button class="flow-btn-back" aria-label="Go back" onclick="setNav('understand');showUnderstand();">← UNDERSTAND</button>
-      <button class="flow-btn-next" onclick="setNav('act');showAct();">Execute Trade → ACT</button>
+      <button class="flow-btn-back btn-pipeline" aria-label="Go back" onclick="setNav('understand');showUnderstand();">← UNDERSTAND</button>
+      <button class="flow-btn-next btn-pipeline" onclick="setNav('act');showAct();">Execute Trade → ACT</button>
     </div>
   </div>`;
 
@@ -14409,8 +14438,8 @@ function showAct(){
       </div>
     </div>
     <div class="flow-footer-right">
-      <button class="flow-btn-back" aria-label="Go back" onclick="setNav('size');showSize();">← SIZE</button>
-      <button class="flow-btn-next" onclick="actLogToPortfolio();" style="${window._activeSignal&&window._activeSignal.sym&&window._activeSignal.sig&&window._activeSignal.sig!=='HOLD'?'':'opacity:.6;'}">
+      <button class="flow-btn-back btn-pipeline" aria-label="Go back" onclick="setNav('size');showSize();">← SIZE</button>
+      <button class="flow-btn-next btn-pipeline" onclick="actLogToPortfolio();" style="${window._activeSignal&&window._activeSignal.sym&&window._activeSignal.sig&&window._activeSignal.sig!=='HOLD'?'':'opacity:.6;'}">
         ${window._activeSignal&&window._activeSignal.sym&&window._activeSignal.sig&&window._activeSignal.sig!=='HOLD'
           ? 'Log '+window._activeSignal.sym+' to Portfolio →'
           : 'Get a Signal First →'}
@@ -16729,18 +16758,12 @@ async function adminGrantByEmail(){
   var tier=document.getElementById('adminGrantTier').value;
   var msg=document.getElementById('adminGrantMsg');
   if(!email){ msg.style.color='#e05555'; msg.textContent='Enter an email address.'; return; }
-  try{
-    var r=await dvFetch('/api/admin/users');
-    var user=(r.users||[]).find(function(u){ return u.email.toLowerCase()===email.toLowerCase(); });
-    if(!user){ msg.style.color='#e05555'; msg.textContent='User not found — they must register first.'; return; }
-    await dvFetch('/api/admin/set-role',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:user.id,role:role})});
-    await dvFetch('/api/admin/set-tier',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:user.id,tier:tier})});
-    msg.style.color='#3dbe6c';
-    msg.textContent='✓ '+email+' updated to '+role+' / '+tier;
-    adminLoadUsers();
-  }catch(e){
-    msg.style.color='#e05555'; msg.textContent='Error — try again.';
-  }
+  var r=await dvFetch('/api/admin/grant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,role:role,tier:tier})});
+  if(!r){ msg.style.color='#e05555'; msg.textContent='Request failed.'; return; }
+  if(r.error){ msg.style.color='#e05555'; msg.textContent=r.error; return; }
+  msg.style.color='#3dbe6c';
+  msg.textContent=r.message||'Done.';
+  adminLoadUsers();
 }
 </script>
 </body>

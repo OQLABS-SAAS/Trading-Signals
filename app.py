@@ -3576,9 +3576,10 @@ def register():
     try:
         if db.query(User).filter_by(email=email).first():
             return jsonify({"status": "error", "message": "Email already registered"}), 409
-        is_admin = bool(ADMIN_EMAIL and email == ADMIN_EMAIL) or bool(db.query(AdminInvite).filter_by(email=email).first())
-        role = "admin" if is_admin else "user"
-        tier = "elite" if role == "admin" else "free"
+        invite   = db.query(AdminInvite).filter_by(email=email).first()
+        is_owner = bool(ADMIN_EMAIL and email == ADMIN_EMAIL)
+        role = invite.role if (invite and invite.role) else ("admin" if is_owner else "user")
+        tier = invite.tier if (invite and invite.tier) else ("elite" if role == "admin" else "free")
         user = User(
             email         = email,
             name          = name or email.split("@")[0],
@@ -3754,9 +3755,45 @@ def admin_list_invites():
     db = _DBSession()
     try:
         rows = db.query(AdminInvite).order_by(AdminInvite.created_at.desc()).all()
-        return jsonify({"invites": [{"email": r.email, "created_at": r.created_at.strftime("%Y-%m-%d")} for r in rows]})
+        return jsonify({"invites": [{"email": r.email, "role": r.role or "user", "tier": r.tier or "free", "created_at": r.created_at.strftime("%Y-%m-%d")} for r in rows]})
     except Exception as e:
         return jsonify({"invites": []})
+    finally:
+        db.close()
+
+@app.route("/api/admin/grant", methods=["POST"])
+@require_admin
+def admin_grant():
+    """Grant role+tier to any email — registered or not."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body  = request.json or {}
+    email = body.get("email", "").strip().lower()
+    role  = body.get("role", "user")
+    tier  = body.get("tier", "free")
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+    if role not in ("user", "admin"):
+        return jsonify({"error": "Invalid role"}), 400
+    if tier not in ("free", "pro", "elite"):
+        return jsonify({"error": "Invalid tier"}), 400
+    db = _DBSession()
+    try:
+        user = db.query(User).filter_by(email=email).first()
+        if user:
+            user.role = role; user.tier = tier; db.commit()
+            return jsonify({"status": "updated", "registered": True,
+                            "message": f"{email} updated to {role} / {tier}"})
+        inv = db.query(AdminInvite).filter_by(email=email).first()
+        if inv:
+            inv.role = role; inv.tier = tier
+        else:
+            db.add(AdminInvite(email=email, invited_by=session.get("user_id"), role=role, tier=tier))
+        db.commit()
+        return jsonify({"status": "pre_approved", "registered": False,
+                        "message": f"{email} pre-approved as {role} / {tier}. Access granted on registration."})
+    except Exception as e:
+        db.rollback(); return jsonify({"error": str(e)}), 500
     finally:
         db.close()
 
@@ -7338,12 +7375,14 @@ class ExchangeKey(_Base):
     created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
 
 class AdminInvite(_Base):
-    """Pre-approved admin emails — grants admin role automatically on signup."""
+    """Pre-approved emails — role + tier granted automatically on signup."""
     __tablename__ = "admin_invites"
     id         = Column(Integer,    primary_key=True, autoincrement=True)
     email      = Column(String(120), nullable=False, unique=True)
     invited_by = Column(Integer,    nullable=True)
     created_at = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    role       = Column(String(20), nullable=True,  default='user')
+    tier       = Column(String(20), nullable=True,  default='free')
 
 class MT5Order(_Base):
     """Orders submitted from DotVerse to be executed by the MT5 EA."""
@@ -7559,6 +7598,8 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS pnl FLOAT"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
+                _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user'"))
+                _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS tier VARCHAR(20) DEFAULT 'free'"))
                 # Phase A/B/C/D automation tables (idempotent)
                 _conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS notifications (
