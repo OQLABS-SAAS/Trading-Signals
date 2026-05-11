@@ -8643,7 +8643,176 @@ TA_AVAILABLE = False
 TA_ERROR = ""
 try:
     from tradingagents.graph.trading_graph import TradingAgentsGraph
-    TA_AVAILABLE = True
+    from tradingagents.graph.setup import GraphSetup
+    from tradingagents.agents import (
+        create_market_analyst, create_social_media_analyst, create_news_analyst,
+        create_fundamentals_analyst, create_bull_researcher, create_bear_researcher,
+        create_research_manager, create_trader, create_aggressive_debator,
+        create_neutral_debator, create_conservative_debator, create_portfolio_manager,
+        create_msg_delete,
+    )
+    from tradingagents.agents.utils.agent_states import AgentState
+    from langgraph.graph import END, START, StateGraph
+    from langchain_core.messages import HumanMessage as _LCHumanMessage
+
+    def _create_thesis_injector(prior_keys, analyst_focus):
+        key_labels = {
+            'market_report':      'Market Structure',
+            'sentiment_report':   'Sentiment',
+            'news_report':        'News/Macro',
+            'fundamentals_report':'Fundamentals',
+        }
+        def injector_node(state):
+            try:
+                lines = []
+                for key in prior_keys:
+                    report = (state.get(key) or '').strip()
+                    if len(report) > 100:
+                        snippet = report[:300].replace('\n', ' ').strip()
+                        lines.append(f'[{key_labels.get(key, key)}]: {snippet}...')
+                if not lines:
+                    return {}
+                thesis_msg = _LCHumanMessage(content=(
+                    '=== SHARED THESIS FROM PRIOR AGENTS ===\n'
+                    + '\n'.join(lines)
+                    + f'\n\nYOUR TASK: {analyst_focus}\n'
+                    'Focus ONLY on whether your domain CONFIRMS or CONTRADICTS this. '
+                    'Be concise — 3-5 paragraphs maximum.\n=== END THESIS ==='
+                ))
+                return {'messages': [thesis_msg]}
+            except Exception:
+                return {}
+        return injector_node
+
+    class _SharedContextGraphSetup(GraphSetup):
+        def setup_graph(self, selected_analysts=['market', 'social', 'news', 'fundamentals']):
+            if not selected_analysts:
+                raise ValueError('No analysts selected!')
+            analyst_nodes  = {}
+            delete_nodes   = {}
+            tool_nodes_map = {}
+            if 'market' in selected_analysts:
+                analyst_nodes['market'] = create_market_analyst(self.quick_thinking_llm)
+                delete_nodes['market']  = create_msg_delete()
+                tool_nodes_map['market'] = self.tool_nodes['market']
+            if 'social' in selected_analysts:
+                analyst_nodes['social'] = create_social_media_analyst(self.quick_thinking_llm)
+                delete_nodes['social']  = create_msg_delete()
+                tool_nodes_map['social'] = self.tool_nodes['social']
+            if 'news' in selected_analysts:
+                analyst_nodes['news'] = create_news_analyst(self.quick_thinking_llm)
+                delete_nodes['news']  = create_msg_delete()
+                tool_nodes_map['news'] = self.tool_nodes['news']
+            if 'fundamentals' in selected_analysts:
+                analyst_nodes['fundamentals'] = create_fundamentals_analyst(self.quick_thinking_llm)
+                delete_nodes['fundamentals']  = create_msg_delete()
+                tool_nodes_map['fundamentals'] = self.tool_nodes['fundamentals']
+            analyst_focus = {
+                'social':       'Does current social media sentiment CONFIRM or CONTRADICT the market structure above?',
+                'news':         'Does the current news and macro environment SUPPORT or UNDERMINE the emerging thesis?',
+                'fundamentals': 'Do the company fundamentals SUPPORT or CONTRADICT the thesis above?',
+            }
+            key_map = {
+                'market':       'market_report',
+                'social':       'sentiment_report',
+                'news':         'news_report',
+                'fundamentals': 'fundamentals_report',
+            }
+            inject_nodes = {}
+            for i, analyst_type in enumerate(selected_analysts):
+                if i == 0:
+                    continue
+                prior_keys = [key_map[selected_analysts[j]] for j in range(i) if selected_analysts[j] in key_map]
+                focus = analyst_focus.get(analyst_type, 'Focus on confirming or contradicting the emerging thesis.')
+                inject_nodes[analyst_type] = _create_thesis_injector(prior_keys, focus)
+            bull_researcher_node   = create_bull_researcher(self.quick_thinking_llm)
+            bear_researcher_node   = create_bear_researcher(self.quick_thinking_llm)
+            research_manager_node  = create_research_manager(self.deep_thinking_llm)
+            trader_node            = create_trader(self.quick_thinking_llm)
+            aggressive_analyst     = create_aggressive_debator(self.quick_thinking_llm)
+            neutral_analyst        = create_neutral_debator(self.quick_thinking_llm)
+            conservative_analyst   = create_conservative_debator(self.quick_thinking_llm)
+            portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm)
+            workflow = StateGraph(AgentState)
+            for analyst_type, node in analyst_nodes.items():
+                workflow.add_node(f'{analyst_type.capitalize()} Analyst', node)
+                workflow.add_node(f'Msg Clear {analyst_type.capitalize()}', delete_nodes[analyst_type])
+                workflow.add_node(f'tools_{analyst_type}', tool_nodes_map[analyst_type])
+                if analyst_type in inject_nodes:
+                    workflow.add_node(f'Inject Thesis {analyst_type.capitalize()}', inject_nodes[analyst_type])
+            workflow.add_node('Bull Researcher', bull_researcher_node)
+            workflow.add_node('Bear Researcher', bear_researcher_node)
+            workflow.add_node('Research Manager', research_manager_node)
+            workflow.add_node('Trader', trader_node)
+            workflow.add_node('Aggressive Analyst', aggressive_analyst)
+            workflow.add_node('Neutral Analyst', neutral_analyst)
+            workflow.add_node('Conservative Analyst', conservative_analyst)
+            workflow.add_node('Portfolio Manager', portfolio_manager_node)
+            first_analyst = selected_analysts[0]
+            workflow.add_edge(START, f'{first_analyst.capitalize()} Analyst')
+            for i, analyst_type in enumerate(selected_analysts):
+                current = f'{analyst_type.capitalize()} Analyst'
+                tools   = f'tools_{analyst_type}'
+                clear   = f'Msg Clear {analyst_type.capitalize()}'
+                workflow.add_conditional_edges(
+                    current,
+                    getattr(self.conditional_logic, f'should_continue_{analyst_type}'),
+                    [tools, clear],
+                )
+                workflow.add_edge(tools, current)
+                if i < len(selected_analysts) - 1:
+                    next_type = selected_analysts[i + 1]
+                    if next_type in inject_nodes:
+                        workflow.add_edge(clear, f'Inject Thesis {next_type.capitalize()}')
+                        workflow.add_edge(f'Inject Thesis {next_type.capitalize()}', f'{next_type.capitalize()} Analyst')
+                    else:
+                        workflow.add_edge(clear, f'{next_type.capitalize()} Analyst')
+                else:
+                    workflow.add_edge(clear, 'Bull Researcher')
+            workflow.add_conditional_edges(
+                'Bull Researcher',
+                self.conditional_logic.should_continue_debate,
+                {'Bear Researcher': 'Bear Researcher', 'Research Manager': 'Research Manager'},
+            )
+            workflow.add_conditional_edges(
+                'Bear Researcher',
+                self.conditional_logic.should_continue_debate,
+                {'Bull Researcher': 'Bull Researcher', 'Research Manager': 'Research Manager'},
+            )
+            workflow.add_edge('Research Manager', 'Trader')
+            workflow.add_edge('Trader', 'Aggressive Analyst')
+            workflow.add_conditional_edges(
+                'Aggressive Analyst',
+                self.conditional_logic.should_continue_risk_analysis,
+                {'Conservative Analyst': 'Conservative Analyst', 'Portfolio Manager': 'Portfolio Manager'},
+            )
+            workflow.add_conditional_edges(
+                'Conservative Analyst',
+                self.conditional_logic.should_continue_risk_analysis,
+                {'Neutral Analyst': 'Neutral Analyst', 'Portfolio Manager': 'Portfolio Manager'},
+            )
+            workflow.add_conditional_edges(
+                'Neutral Analyst',
+                self.conditional_logic.should_continue_risk_analysis,
+                {'Aggressive Analyst': 'Aggressive Analyst', 'Portfolio Manager': 'Portfolio Manager'},
+            )
+            workflow.add_edge('Portfolio Manager', END)
+            return workflow
+
+    class SharedContextTradingGraph(TradingAgentsGraph):
+        """Stage 2: shared-context analyst chain — each analyst receives prior agents' emerging thesis."""
+        def __init__(self, selected_analysts=['market', 'social', 'news', 'fundamentals'], debug=False, config=None, callbacks=None):
+            super().__init__(selected_analysts=selected_analysts, debug=debug, config=config, callbacks=callbacks)
+            self.graph_setup = _SharedContextGraphSetup(
+                self.quick_thinking_llm,
+                self.deep_thinking_llm,
+                self.tool_nodes,
+                self.conditional_logic,
+            )
+            self.workflow = self.graph_setup.setup_graph(selected_analysts)
+            self.graph = self.workflow.compile()
+
+    TA_AVAILABLE = True  # LAST — only True if every import and class definition above succeeded
 except Exception as e:
     TA_ERROR = str(e)
     print(f"[verdict] TradingAgents not available: {e}")
@@ -8921,7 +9090,7 @@ def _run_verdict_job(ticker, trade_date_str, signal_ctx=None):
         }
     try:
         config = VERDICT_CONFIG.copy()
-        ta = TradingAgentsGraph(debug=False, config=config)
+        ta = SharedContextTradingGraph(debug=False, config=config)
         state, decision = ta.propagate(ticker, trade_date_str)
         structured = _extract_verdict_structure(decision, state, ticker, signal_ctx=signal_ctx)
         # Always guarantee a structured dict — if DeepSeek extraction fails
