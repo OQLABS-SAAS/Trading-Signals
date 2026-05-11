@@ -5079,7 +5079,7 @@ function _ldInit() {
     }
     geo.attributes.position.needsUpdate = true;
     renderer.render(scene, camera);
-    count += 0.025;
+    count += 0.007;
   }
   function onResize() {
     var W2 = container.offsetWidth || window.innerWidth;
@@ -5832,14 +5832,26 @@ async function settLoadInvites(){
   if(!r||!r.invites){ tbl.innerHTML='<div style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">Could not load invites.</div>'; return; }
   if(!r.invites.length){ tbl.innerHTML='<div style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">No pending invites.</div>'; return; }
   var rows = r.invites.map(function(inv){
-    return '<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(237,232,216,.06);">'
+    return '<div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(237,232,216,.06);">'
       +'<span style="font-size:11px;color:var(--t1);font-family:var(--mono);">'+inv.email+'</span>'
       +'<span style="font-size:10px;color:rgba(237,232,216,.4);font-family:var(--mono);">'+inv.role+' / '+inv.tier+'</span>'
       +'<span style="font-size:10px;color:rgba(237,232,216,.3);font-family:var(--mono);">'+inv.created_at+'</span>'
+      +'<button onclick="settResendInvite(\''+inv.email+'\')" style="padding:3px 8px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.3);border-radius:4px;color:#c9a84c;font-size:10px;font-family:var(--mono);cursor:pointer;">Send Email</button>'
       +'<button onclick="settRevokeInvite(\''+inv.email+'\')" style="padding:3px 8px;background:rgba(224,85,85,.08);border:1px solid rgba(224,85,85,.3);border-radius:4px;color:#e05555;font-size:10px;font-family:var(--mono);cursor:pointer;">Revoke</button>'
       +'</div>';
   }).join('');
   tbl.innerHTML = rows;
+}
+
+async function settResendInvite(email){
+  var btn = event && event.target;
+  if(btn){ btn.textContent='Sending…'; btn.disabled=true; }
+  var r = await dvFetch('/api/admin/resend-invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+  if(btn){
+    btn.textContent = (r && r.status === 'sent') ? 'Sent ✓' : 'No email provider';
+    btn.style.color = (r && r.status === 'sent') ? '#3dbe6c' : 'rgba(237,232,216,.4)';
+    setTimeout(function(){ btn.textContent='Send Email'; btn.style.color='#c9a84c'; btn.disabled=false; }, 3000);
+  }
 }
 
 async function settRevokeInvite(email){

@@ -3887,6 +3887,49 @@ def admin_list_invites():
     finally:
         db.close()
 
+@app.route("/api/admin/resend-invite", methods=["POST"])
+@require_admin
+def admin_resend_invite():
+    """Re-send the invitation email to a pending invite address."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body  = request.json or {}
+    email = body.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+    db = _DBSession()
+    try:
+        inv = db.query(AdminInvite).filter_by(email=email).first()
+        if not inv:
+            return jsonify({"error": "Invite not found"}), 404
+        role = inv.role or "user"
+        tier = inv.tier or "free"
+    finally:
+        db.close()
+    result = _send_notification_email(
+        email,
+        f"You've been invited to DotVerse — {tier.upper()} access",
+        f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#0d0e12;color:#e8e4da;padding:36px 28px;border-radius:10px;">
+<h2 style="color:#c9a84c;margin-top:0;">You've been invited to DotVerse</h2>
+<p>An admin has pre-approved your email address <strong>{email}</strong> for access to DotVerse — the AI-powered trading signals platform.</p>
+<table style="border-collapse:collapse;width:100%;margin:20px 0;">
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">Role</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{role.upper()}</td></tr>
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">Tier</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{tier.upper()}</td></tr>
+</table>
+<p>Register with this email address to activate your account:</p>
+<p style="text-align:center;margin:28px 0;">
+  <a href="https://trading-signals-saas-production.up.railway.app/" style="background:#c9a84c;color:#07080c;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Create Your Account →</a>
+</p>
+<p style="color:#888;font-size:12px;margin-bottom:0;">If you did not expect this, you can ignore this email.</p>
+</div>"""
+    )
+    if result is None:
+        return jsonify({"status": "no_provider", "message": "No email provider configured (set SENDGRID_API_KEY, MAILGUN_API_KEY, or SMTP_HOST in Railway env)"})
+    if result:
+        return jsonify({"status": "sent"})
+    return jsonify({"status": "failed", "message": "Email delivery failed — check Railway logs"}), 500
+
+
 @app.route("/api/admin/grant", methods=["POST"])
 @require_admin
 def admin_grant():
