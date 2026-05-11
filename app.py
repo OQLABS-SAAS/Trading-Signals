@@ -5077,6 +5077,25 @@ def keys_delete(key_id):
     finally:
         db.close()
 
+@app.route("/api/live-price", methods=["GET"])
+@login_required
+def live_price():
+    """Return latest price for a ticker. Used as REST fallback for non-crypto assets
+    on the live size tab (crypto uses direct Binance WebSocket from the browser)."""
+    ticker     = request.args.get("ticker", "").strip().upper()
+    asset_type = request.args.get("asset_type", "stock").strip().lower()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(ticker).history(period="1d", interval="1m")
+        if hist.empty:
+            return jsonify({"error": "no data"}), 404
+        price = float(hist["Close"].iloc[-1])
+        return jsonify({"price": price, "delayed": True, "ticker": ticker})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/analyze", methods=["POST"])
 @login_required
 def analyze():

@@ -4682,6 +4682,8 @@ function setNav(id){
     clearInterval(_mt5PollTimer);
     _mt5PollTimer = null;
   }
+  // Stop live price WebSocket when leaving SIZE tab
+  if (id !== 'size' && typeof _szLivePriceStop === 'function') _szLivePriceStop();
 }
 // ── Tier selector ──────────────────────────────────────────────────────────────
 let _selectedTier = 'beginner';
@@ -13407,6 +13409,30 @@ function showSize(){
     <button class="sz-clear-btn" onclick="window._activeSignal=null;window._calcPrefill=null;window._verdictPlan=null;showSize()">Clear</button>
     <button onclick="setNav('verdict');showVerdict()" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:5px;color:var(--gold);font-size:10px;font-family:var(--mono);cursor:pointer;padding:4px 10px;white-space:nowrap">Verdict</button>
   </div>`:'<div class="sz-no-signal">No signal loaded — enter your trade prices manually below or pick a signal from <span style="color:var(--crys);cursor:pointer;" onclick="setNav(\'signals\');showSignalFeed()">SIGNAL</span>.</div>'}
+
+  ${(sig.sym && sig.entry) ? `
+  <div id="szLiveBar" style="margin:0 0 12px 0;border-radius:8px;border:1px solid rgba(201,168,76,.25);background:rgba(201,168,76,.06);padding:12px 14px;transition:background .35s ease,border-color .35s ease;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px;flex-wrap:wrap;">
+        <span style="color:var(--mut);letter-spacing:.06em;font-size:9px;">ENTRY</span>
+        <strong id="szLiveEntryVal" style="color:var(--txt);">—</strong>
+        <span style="color:var(--mut);">→</span>
+        <span style="color:var(--mut);letter-spacing:.06em;font-size:9px;">LIVE</span>
+        <strong id="szLiveCurrent" style="color:var(--txt);">—</strong>
+        <span id="szLiveDrift" style="font-size:10px;color:var(--mut);transition:color .2s;">—</span>
+        <span id="szLiveDelayed" style="display:none;font-size:9px;color:var(--mut);background:rgba(237,232,216,.07);padding:1px 6px;border-radius:3px;letter-spacing:.04em;">15-MIN DELAY</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <div id="szLiveStatusDot" style="width:7px;height:7px;border-radius:50%;background:rgba(201,168,76,.45);flex-shrink:0;transition:background .3s;"></div>
+        <span id="szLiveStatusText" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--gold);transition:color .3s;">CONNECTING</span>
+      </div>
+    </div>
+    <div style="height:2px;border-radius:1px;background:rgba(237,232,216,.07);overflow:hidden;margin-bottom:8px;">
+      <div id="szLiveBarFill" style="height:100%;width:0%;background:var(--gold);border-radius:1px;transition:width .4s ease,background .3s ease;"></div>
+    </div>
+    <div id="szLiveMsg" style="font-size:11px;color:rgba(237,232,216,.55);line-height:1.5;"></div>
+  </div>` : ''}
+
   ${(typeof window._verdictPlan === 'object' && window._verdictPlan && window._verdictPlan.positions) ? (function(p){
     var rows='', totalRisk=0;
     for(var i=0;i<p.positions;i++){
@@ -13801,7 +13827,193 @@ function showSize(){
   // chip highlight + teaching panel. Done after the DOM is built.
   if(typeof szRiskRestore === 'function') szRiskRestore();
   szCalc();
+  if (typeof _szLivePriceStart === 'function') _szLivePriceStart();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STAGE 1 — LIVE SIZE TAB
+// Real-time Binance WebSocket for crypto. REST snapshot for stocks/forex.
+// Drift indicator + Green/Amber/Red validity engine + auto-recalc on move.
+// ═══════════════════════════════════════════════════════════════════════════
+var _szWs        = null;  // active WebSocket
+var _szWsRetries = 0;     // reconnect attempts
+var _szWsTimer   = null;  // reconnect delay handle
+var _szLiveState = null;  // 'green' | 'amber' | 'red'
+
+function _szBinanceSym(rawSym) {
+  if (!rawSym) return null;
+  var s = rawSym.replace(/[-_/=^]/g, '').toLowerCase();
+  if (s.endsWith('usd') && !s.endsWith('usdt')) s += 't';
+  return s;
+}
+
+function _szIsCrypto() {
+  var sig = window._activeSignal || {};
+  return (sig.asset || sig.asset_type || '').toLowerCase() === 'crypto';
+}
+
+function _szUpdatePrice(livePrice) {
+  if (!livePrice || !window._activeSignal) return;
+  if (!document.getElementById('szLiveBar')) return;
+  var sig   = window._activeSignal;
+  var entry = parseFloat(sig.entry || 0);
+  if (!entry) return;
+
+  var prec = livePrice >= 100 ? 2 : livePrice >= 1 ? 4 : 6;
+  var fmtP = function(p){ return parseFloat(p).toLocaleString(undefined,{maximumFractionDigits:prec}); };
+
+  // Drift from signal entry
+  var drift    = ((livePrice - entry) / entry) * 100;
+  var absDrift = Math.abs(drift);
+  var isBuy    = (sig.sig || sig.signal || '').toUpperCase() !== 'SELL';
+  var favorable = isBuy ? drift <= 0 : drift >= 0;  // moving toward entry = favorable
+
+  // Auto-update Current Price input and trigger recalc (throttled to 800ms to prevent jank)
+  var assetInp = document.getElementById('szAsset');
+  if (assetInp) {
+    assetInp.value = livePrice.toFixed(prec);
+    var now = Date.now();
+    if (!window._szLastCalcTime || now - window._szLastCalcTime > 800) {
+      window._szLastCalcTime = now;
+      if (typeof szCalc === 'function') szCalc();
+    }
+  }
+
+  // DOM references
+  var currEl     = document.getElementById('szLiveCurrent');
+  var driftEl    = document.getElementById('szLiveDrift');
+  var statusDot  = document.getElementById('szLiveStatusDot');
+  var statusText = document.getElementById('szLiveStatusText');
+  var barFill    = document.getElementById('szLiveBarFill');
+  var msgEl      = document.getElementById('szLiveMsg');
+  var liveBar    = document.getElementById('szLiveBar');
+
+  if (currEl)  currEl.textContent = fmtP(livePrice);
+
+  // HOLD signal — price display only, no entry validity states (HOLD means don't enter)
+  var isHold = (sig.sig || sig.signal || '').toUpperCase() === 'HOLD';
+  if (isHold) {
+    if (driftEl)    { driftEl.textContent = ''; }
+    if (statusDot)  { statusDot.style.background = 'rgba(237,232,216,.25)'; }
+    if (statusText) { statusText.textContent = 'HOLD'; statusText.style.color = 'rgba(237,232,216,.45)'; }
+    if (barFill)    { barFill.style.width = '0%'; }
+    if (msgEl)      { msgEl.textContent = 'Signal is HOLD — no entry is recommended. Monitor the market and wait for the next signal.'; }
+    window._szLiveState = 'hold';
+    return;
+  }
+
+  if (driftEl) {
+    var sign = drift >= 0 ? '+' : '';
+    driftEl.textContent = sign + drift.toFixed(3) + '%';
+    driftEl.style.color = favorable ? '#5de8a0' : '#e8706e';
+  }
+
+  // R:R check at current price
+  var sl  = parseFloat(sig.sl || sig.stop_loss || 0);
+  var tp1 = parseFloat(sig.tp || sig.tp1 || 0);
+  var newSlDist = sl  ? Math.abs(livePrice - sl)  : 0;
+  var newTpDist = tp1 ? Math.abs(tp1 - livePrice) : 0;
+  var rrOk = tp1 && newSlDist > 0 && (newTpDist / newSlDist) >= 1.0;
+
+  // Stop loss breach: price has passed the SL — signal fully invalidated
+  var slBreached = sl && (isBuy ? livePrice <= sl : livePrice >= sl);
+
+  // Validity state machine
+  var state, color, bg, borderColor, statusLabel, msg;
+  if (slBreached) {
+    state = 'red'; color = '#e8706e';
+    bg = 'rgba(232,112,110,.07)'; borderColor = 'rgba(232,112,110,.3)';
+    statusLabel = 'SL BREACHED';
+    msg = 'Price has passed the stop loss level. This signal is invalidated. Do not enter — wait for the next signal.';
+  } else if (absDrift <= 0.3) {
+    state = 'green'; color = '#5de8a0';
+    bg = 'rgba(93,232,160,.07)'; borderColor = 'rgba(93,232,160,.3)';
+    statusLabel = 'ENTER NOW';
+    msg = 'Price is at the signal entry. Your position size is optimal. Enter when ready.';
+  } else if (absDrift <= 2.0 && rrOk) {
+    state = 'amber'; color = '#c9a84c';
+    bg = 'rgba(201,168,76,.07)'; borderColor = 'rgba(201,168,76,.3)';
+    statusLabel = 'ADJUSTED';
+    msg = 'Price has moved ' + (drift >= 0 ? '+' : '') + drift.toFixed(2) + '% from signal entry. R:R is still positive — you can still take this trade. Sizing below is based on original signal levels.';
+  } else {
+    state = 'red'; color = '#e8706e';
+    bg = 'rgba(232,112,110,.07)'; borderColor = 'rgba(232,112,110,.3)';
+    statusLabel = 'ENTRY PASSED';
+    msg = absDrift > 2.0
+      ? 'Price has moved ' + Math.abs(drift).toFixed(1) + '% from signal entry. This entry has passed. Do not chase — wait for the next signal.'
+      : 'Price has moved and R:R is now below 1:1. Entering here puts you at a disadvantage. Wait for the next signal.';
+  }
+
+  // Apply to bar
+  if (liveBar)    { liveBar.style.background = bg; liveBar.style.borderColor = borderColor; }
+  if (statusDot)  { statusDot.style.background = color; }
+  if (statusText) { statusText.textContent = statusLabel; statusText.style.color = color; }
+  if (msgEl)      { msgEl.textContent = msg; }
+  var fillPct = Math.min(100, (absDrift / 2.0) * 100);
+  if (barFill)    { barFill.style.width = fillPct + '%'; barFill.style.background = color; }
+
+  // Tint entry input by state
+  var entryInp = document.getElementById('szEntry');
+  if (entryInp) entryInp.style.borderColor =
+    state === 'red' ? 'rgba(232,112,110,.5)' : state === 'amber' ? 'rgba(201,168,76,.4)' : '';
+
+  window._szLiveState = state;
+}
+
+function _szStartBinanceWs(sig) {
+  var sym = _szBinanceSym(sig.sym);
+  if (!sym) { _szFetchRestPrice(sig); return; }
+  try {
+    var ws = new WebSocket('wss://stream.binance.com:9443/ws/' + sym + '@miniTicker');
+    _szWs = ws;
+    ws.onmessage = function(evt) {
+      try { var d = JSON.parse(evt.data); if (d && d.c) _szUpdatePrice(parseFloat(d.c)); } catch(e) {}
+    };
+    ws.onerror = function() { _szFetchRestPrice(sig); };
+    ws.onclose = function() {
+      if (_szWs !== ws) return;  // stale socket — stop() already ran, do not reconnect
+      if (_szWsRetries < 3 && document.getElementById('szLiveBar')) {
+        _szWsRetries++;
+        _szWsTimer = setTimeout(function(){ _szStartBinanceWs(sig); }, 800 * _szWsRetries);
+      }
+    };
+    _szWsRetries = 0;
+  } catch(e) { _szFetchRestPrice(sig); }
+}
+
+function _szFetchRestPrice(sig) {
+  var delayedEl = document.getElementById('szLiveDelayed');
+  if (delayedEl) delayedEl.style.display = 'inline';
+  if (typeof dvFetch !== 'function') return;
+  var snapSym = sig.sym;  // snapshot at call time — guard against signal switching mid-flight
+  dvFetch('/api/live-price?ticker=' + encodeURIComponent(sig.sym || '') +
+          '&asset_type='            + encodeURIComponent(sig.asset || sig.asset_type || 'stock'))
+    .then(function(r){
+      // Only apply if signal hasn't changed since this fetch was fired
+      if (r && r.price && window._activeSignal && window._activeSignal.sym === snapSym) {
+        _szUpdatePrice(r.price);
+      }
+    })
+    .catch(function(){});
+}
+
+function _szLivePriceStart() {
+  _szLivePriceStop();
+  var sig = window._activeSignal || {};
+  if (!sig.sym || !sig.entry) return;
+  var prec    = parseFloat(sig.entry) >= 100 ? 2 : parseFloat(sig.entry) >= 1 ? 4 : 6;
+  var entryEl = document.getElementById('szLiveEntryVal');
+  if (entryEl) entryEl.textContent = parseFloat(sig.entry).toLocaleString(undefined,{maximumFractionDigits:prec});
+  if (_szIsCrypto()) { _szStartBinanceWs(sig); } else { _szFetchRestPrice(sig); }
+}
+
+function _szLivePriceStop() {
+  if (_szWs)      { try { _szWs.close(); } catch(e){} _szWs = null; }
+  if (_szWsTimer) { clearTimeout(_szWsTimer); _szWsTimer = null; }
+  _szWsRetries = 0;
+  window._szLiveState = null;
+}
+// ═══════════════════════════════════════════════════════════════════════════
 
 function szToggleVerdict(){
   var body    = document.getElementById('szVerdictBody');
