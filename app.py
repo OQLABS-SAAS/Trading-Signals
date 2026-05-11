@@ -2689,6 +2689,99 @@ def send_telegram(message):
         return False
 
 
+def _send_notification_email(to_email, subject, html_body):
+    """Send a notification email via SendGrid, Mailgun, or SMTP.
+    Returns True on success, False on delivery failure, None if not configured (silent no-op).
+    """
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    from_name  = os.environ.get("MAIL_FROM_NAME",  "DotVerse").strip()
+    from_email = os.environ.get("MAIL_FROM_EMAIL", "").strip()
+
+    # ── SendGrid ──
+    sg_key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    if sg_key:
+        if not from_email:
+            from_email = "noreply@dotverse.app"
+        try:
+            resp = requests.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={"Authorization": f"Bearer {sg_key}", "Content-Type": "application/json"},
+                json={
+                    "personalizations": [{"to": [{"email": to_email}]}],
+                    "from": {"email": from_email, "name": from_name},
+                    "subject": subject,
+                    "content": [{"type": "text/html", "value": html_body}],
+                },
+                timeout=15,
+            )
+            if resp.status_code in (200, 202):
+                print(f"[Email/SG] Sent to {to_email} — {subject}")
+                return True
+            print(f"[Email/SG] Error {resp.status_code}: {resp.text[:200]}")
+            return False
+        except Exception as e:
+            print(f"[Email/SG] Error: {e}")
+            return False
+
+    # ── Mailgun ──
+    mg_key    = os.environ.get("MAILGUN_API_KEY",  "").strip()
+    mg_domain = os.environ.get("MAILGUN_DOMAIN",   "").strip()
+    if mg_key and mg_domain:
+        if not from_email:
+            from_email = f"noreply@{mg_domain}"
+        try:
+            resp = requests.post(
+                f"https://api.mailgun.net/v3/{mg_domain}/messages",
+                auth=("api", mg_key),
+                data={
+                    "from": f"{from_name} <{from_email}>",
+                    "to": to_email,
+                    "subject": subject,
+                    "html": html_body,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                print(f"[Email/MG] Sent to {to_email} — {subject}")
+                return True
+            print(f"[Email/MG] Error {resp.status_code}: {resp.text[:200]}")
+            return False
+        except Exception as e:
+            print(f"[Email/MG] Error: {e}")
+            return False
+
+    # ── SMTP ──
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_pass = os.environ.get("SMTP_PASS", "").strip()
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    if smtp_host and smtp_user and smtp_pass:
+        if not from_email:
+            from_email = smtp_user
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"]    = f"{from_name} <{from_email}>"
+            msg["To"]      = to_email
+            msg.attach(MIMEText(html_body, "html"))
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as srv:
+                srv.ehlo()
+                srv.starttls()
+                srv.login(smtp_user, smtp_pass)
+                srv.sendmail(from_email, to_email, msg.as_string())
+            print(f"[Email/SMTP] Sent to {to_email} — {subject}")
+            return True
+        except Exception as e:
+            print(f"[Email/SMTP] Error: {e}")
+            return False
+
+    # Not configured — silent no-op
+    return None
+
+
 def send_telegram_keyboard(message, keyboard_rows):
     """Send Telegram message with inline keyboard buttons. Returns message_id or None."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -3711,6 +3804,25 @@ def admin_set_role():
         if role == "admin":
             user.tier = "elite"
         db.commit()
+        _u_email = user.email
+        _u_role  = user.role
+        _u_tier  = user.tier
+        # Notify user of role change
+        threading.Thread(target=_send_notification_email, args=(
+            _u_email,
+            "Your DotVerse role has been updated",
+            f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#0d0e12;color:#e8e4da;padding:36px 28px;border-radius:10px;">
+<h2 style="color:#c9a84c;margin-top:0;">Your DotVerse access has been updated</h2>
+<p>Your account permissions have been updated by an admin.</p>
+<table style="border-collapse:collapse;width:100%;margin:20px 0;">
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">Role</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{_u_role.upper()}</td></tr>
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">Tier</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{_u_tier.upper()}</td></tr>
+</table>
+<p style="text-align:center;margin:28px 0;">
+  <a href="https://trading-signals-saas-production.up.railway.app/" style="background:#c9a84c;color:#07080c;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Open DotVerse →</a>
+</p>
+</div>"""
+        ), daemon=True).start()
         return jsonify({"status": "ok", "email": user.email, "role": user.role, "tier": user.tier})
     except Exception as e:
         db.rollback()
@@ -3739,6 +3851,20 @@ def admin_invite():
             return jsonify({"status": "already_invited"})
         db.add(AdminInvite(email=email, invited_by=session.get("user_id")))
         db.commit()
+        # Notify invited user
+        threading.Thread(target=_send_notification_email, args=(
+            email,
+            "You've been invited to DotVerse",
+            f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#0d0e12;color:#e8e4da;padding:36px 28px;border-radius:10px;">
+<h2 style="color:#c9a84c;margin-top:0;">You've been invited to DotVerse</h2>
+<p>An admin has pre-approved your email address <strong>{email}</strong> for access to DotVerse — the AI-powered trading signals platform.</p>
+<p>To activate your account, simply register at the link below using this email address:</p>
+<p style="text-align:center;margin:28px 0;">
+  <a href="https://trading-signals-saas-production.up.railway.app/" style="background:#c9a84c;color:#07080c;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Access DotVerse →</a>
+</p>
+<p style="color:#888;font-size:12px;margin-bottom:0;">If you did not expect this invitation, you can ignore this email.</p>
+</div>"""
+        ), daemon=True).start()
         return jsonify({"status": "invited"})
     except Exception as e:
         db.rollback()
@@ -3782,6 +3908,22 @@ def admin_grant():
         user = db.query(User).filter_by(email=email).first()
         if user:
             user.role = role; user.tier = tier; db.commit()
+            # Notify registered user of grant
+            threading.Thread(target=_send_notification_email, args=(
+                email,
+                "Your DotVerse access has been updated",
+                f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#0d0e12;color:#e8e4da;padding:36px 28px;border-radius:10px;">
+<h2 style="color:#c9a84c;margin-top:0;">Your DotVerse access has been updated</h2>
+<p>An admin has updated your account permissions.</p>
+<table style="border-collapse:collapse;width:100%;margin:20px 0;">
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">Role</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{role.upper()}</td></tr>
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">Tier</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{tier.upper()}</td></tr>
+</table>
+<p style="text-align:center;margin:28px 0;">
+  <a href="https://trading-signals-saas-production.up.railway.app/" style="background:#c9a84c;color:#07080c;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Open DotVerse →</a>
+</p>
+</div>"""
+            ), daemon=True).start()
             return jsonify({"status": "updated", "registered": True,
                             "message": f"{email} updated to {role} / {tier}"})
         inv = db.query(AdminInvite).filter_by(email=email).first()
@@ -3790,6 +3932,24 @@ def admin_grant():
         else:
             db.add(AdminInvite(email=email, invited_by=session.get("user_id"), role=role, tier=tier))
         db.commit()
+        # Notify unregistered email of pre-approval
+        threading.Thread(target=_send_notification_email, args=(
+            email,
+            f"You've been given {tier.upper()} access to DotVerse",
+            f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#0d0e12;color:#e8e4da;padding:36px 28px;border-radius:10px;">
+<h2 style="color:#c9a84c;margin-top:0;">You've been given access to DotVerse</h2>
+<p>An admin has granted your email address <strong>{email}</strong> access to DotVerse — the AI-powered trading signals platform.</p>
+<table style="border-collapse:collapse;width:100%;margin:20px 0;">
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">Role</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{role.upper()}</td></tr>
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">Tier</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{tier.upper()}</td></tr>
+</table>
+<p>Register with this email address to activate your account immediately:</p>
+<p style="text-align:center;margin:28px 0;">
+  <a href="https://trading-signals-saas-production.up.railway.app/" style="background:#c9a84c;color:#07080c;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Create Your Account →</a>
+</p>
+<p style="color:#888;font-size:12px;margin-bottom:0;">If you did not expect this, you can ignore this email.</p>
+</div>"""
+        ), daemon=True).start()
         return jsonify({"status": "pre_approved", "registered": False,
                         "message": f"{email} pre-approved as {role} / {tier}. Access granted on registration."})
     except Exception as e:
@@ -3815,6 +3975,23 @@ def admin_set_tier():
             return jsonify({"error": "User not found"}), 404
         user.tier = tier
         db.commit()
+        _u_email2 = user.email
+        _u_tier2  = user.tier
+        # Notify user of tier change
+        threading.Thread(target=_send_notification_email, args=(
+            _u_email2,
+            f"Your DotVerse tier has been upgraded to {_u_tier2.upper()}",
+            f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#0d0e12;color:#e8e4da;padding:36px 28px;border-radius:10px;">
+<h2 style="color:#c9a84c;margin-top:0;">Your DotVerse tier has been updated</h2>
+<p>Your account subscription tier has been updated by an admin.</p>
+<table style="border-collapse:collapse;width:100%;margin:20px 0;">
+  <tr><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#888;">New Tier</td><td style="padding:8px 12px;border:1px solid #2a2b2f;color:#c9a84c;">{_u_tier2.upper()}</td></tr>
+</table>
+<p style="text-align:center;margin:28px 0;">
+  <a href="https://trading-signals-saas-production.up.railway.app/" style="background:#c9a84c;color:#07080c;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Open DotVerse →</a>
+</p>
+</div>"""
+        ), daemon=True).start()
         return jsonify({"status": "ok", "email": user.email, "tier": user.tier})
     except Exception as e:
         db.rollback()
