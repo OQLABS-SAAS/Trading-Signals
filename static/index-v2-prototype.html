@@ -3030,23 +3030,55 @@ body{ background:#07080c; color:#ede8d8; }
 }
 .sett-snav-item:hover:not(.on){ color: rgba(201,168,76,.6) !important; }
 
+/* ─── No thick fonts on any button, anywhere ─── */
+button { font-weight: 400 !important; }
+
 /* ─── Pipeline-style action buttons — mirror active nav-item ─── */
-.btn-pipeline {
+.btn-pipeline,
+.opp-analyze-btn, .sc-act-btn, .mkt-analyse-btn,
+.dv-analyze-btn, .verdict-chat-btn, .sz-clear-btn,
+.al-ack-btn, .al-dis-btn, .al-new-btn,
+.sett-save-btn {
   background: var(--sel-bg) !important;
   border: 1px solid var(--sel-bd) !important;
   box-shadow: 0 0 14px var(--sel-glow), inset 0 0 10px rgba(201,168,76,.02) !important;
   color: var(--sel-txt) !important;
-  font-weight: 600 !important;
+  font-weight: 400 !important;
   transition: background .18s, box-shadow .18s, border-color .18s, transform .1s !important;
   cursor: pointer !important;
 }
-.btn-pipeline:hover {
+.btn-pipeline:hover,
+.opp-analyze-btn:hover, .sc-act-btn:hover, .mkt-analyse-btn:hover,
+.dv-analyze-btn:hover, .verdict-chat-btn:hover, .sz-clear-btn:hover,
+.al-ack-btn:hover, .al-dis-btn:hover, .al-new-btn:hover,
+.sett-save-btn:hover {
   background: rgba(255,255,255,.09) !important;
   border-color: rgba(201,168,76,.65) !important;
   box-shadow: 0 0 22px rgba(201,168,76,.32), inset 0 0 14px rgba(201,168,76,.04) !important;
-  color: #d4b558 !important;
+  color: rgba(237,232,216,1) !important;
 }
-.btn-pipeline:active { transform: scale(0.96) !important; transition: transform .08s !important; }
+.btn-pipeline:active,
+.opp-analyze-btn:active, .sc-act-btn:active, .mkt-analyse-btn:active,
+.dv-analyze-btn:active, .verdict-chat-btn:active, .sz-clear-btn:active,
+.al-ack-btn:active, .al-dis-btn:active, .al-new-btn:active,
+.sett-save-btn:active { transform: scale(0.96) !important; transition: transform .08s !important; }
+
+/* ─── Red buttons — Stop Loss / Close / Remove / Revoke ─── */
+.pf-sl-btn, .al-rem-btn, .pos-act-btn {
+  background: rgba(224,85,85,.07) !important;
+  border: 1px solid rgba(224,85,85,.38) !important;
+  box-shadow: 0 0 12px rgba(224,85,85,.12) !important;
+  color: #e05555 !important;
+  font-weight: 400 !important;
+  cursor: pointer !important;
+  transition: background .15s, box-shadow .15s, border-color .15s !important;
+}
+.pf-sl-btn:hover, .al-rem-btn:hover, .pos-act-btn:hover {
+  background: rgba(224,85,85,.14) !important;
+  border-color: rgba(224,85,85,.58) !important;
+  box-shadow: 0 0 20px rgba(224,85,85,.2) !important;
+  color: #e8706e !important;
+}
 
 /* ─── Settings top tabs ─── */
 .sett-tab.on{
@@ -3286,6 +3318,18 @@ input:focus, select:focus, textarea:focus{
 #vLanding {
   background: transparent !important;
   overflow: hidden !important;
+}
+#landingDots {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+#landingDots canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 #vLanding .land-left {
   background: transparent !important;
@@ -4007,6 +4051,7 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
 
 </style>
 <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
@@ -4134,6 +4179,7 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
 
 <!-- ═══════════════ LANDING VIEW ═══════════════ -->
 <div class="view" id="vLanding">
+  <div id="landingDots"></div>
   <div class="land-left" style="background:linear-gradient(135deg,rgba(8,7,5,.85) 0%,rgba(10,9,6,.72) 100%);backdrop-filter:none;-webkit-backdrop-filter:none;">
     <div class="land-logo">
       <svg class="logo-icon" viewBox="0 0 28 28" fill="none">
@@ -4529,6 +4575,8 @@ setInterval(_updateDashHeader, 30000);
 function showView(id){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  if (id === 'vLanding') { setTimeout(_ldInit, 80); }
+  else { _ldDestroy(); }
 }
 function setNav(id){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.nav===id));
@@ -4899,6 +4947,75 @@ function _initStratMode(){
   const h = document.getElementById('stratModeHint');
   if(h) h.textContent = hints[saved] || '';
 }
+/* ─── Landing dots animation ─── */
+var _ldAnim = null;
+function _ldInit() {
+  if (_ldAnim) return;
+  var container = document.getElementById('landingDots');
+  if (!container || typeof THREE === 'undefined') return;
+  var SEP = 150, AX = 40, AY = 60;
+  var scene = new THREE.Scene();
+  var W = container.offsetWidth || window.innerWidth;
+  var H = container.offsetHeight || window.innerHeight;
+  var camera = new THREE.PerspectiveCamera(60, W / H, 1, 10000);
+  camera.position.set(0, 355, 1220);
+  var renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(W, H);
+  renderer.setClearColor(0x000000, 0);
+  container.appendChild(renderer.domElement);
+  var positions = [], colors = [];
+  for (var ix = 0; ix < AX; ix++) {
+    for (var iy = 0; iy < AY; iy++) {
+      positions.push(ix * SEP - (AX * SEP) / 2, 0, iy * SEP - (AY * SEP) / 2);
+      colors.push(0.22, 0.18, 0.12);
+    }
+  }
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  var mat = new THREE.PointsMaterial({ size: 7, vertexColors: true, transparent: true, opacity: 0.55, sizeAttenuation: true });
+  var points = new THREE.Points(geo, mat);
+  scene.add(points);
+  var count = 0;
+  var _raf = { id: null };
+  function animate() {
+    _raf.id = requestAnimationFrame(animate);
+    var pos = geo.attributes.position.array;
+    var i = 0;
+    for (var ix = 0; ix < AX; ix++) {
+      for (var iy = 0; iy < AY; iy++) {
+        pos[i * 3 + 1] = Math.sin((ix + count) * 0.3) * 50 + Math.sin((iy + count) * 0.5) * 50;
+        i++;
+      }
+    }
+    geo.attributes.position.needsUpdate = true;
+    renderer.render(scene, camera);
+    count += 0.1;
+  }
+  function onResize() {
+    var W2 = container.offsetWidth || window.innerWidth;
+    var H2 = container.offsetHeight || window.innerHeight;
+    camera.aspect = W2 / H2;
+    camera.updateProjectionMatrix();
+    renderer.setSize(W2, H2);
+  }
+  window.addEventListener('resize', onResize);
+  animate();
+  _ldAnim = { _raf: _raf, renderer: renderer, geo: geo, mat: mat, onResize: onResize, container: container };
+}
+function _ldDestroy() {
+  if (!_ldAnim) return;
+  cancelAnimationFrame(_ldAnim._raf.id);
+  window.removeEventListener('resize', _ldAnim.onResize);
+  _ldAnim.geo.dispose();
+  _ldAnim.mat.dispose();
+  _ldAnim.renderer.dispose();
+  if (_ldAnim.container && _ldAnim.renderer.domElement.parentNode === _ldAnim.container)
+    _ldAnim.container.removeChild(_ldAnim.renderer.domElement);
+  _ldAnim = null;
+}
+
 function goLanding(){ showView('vLanding'); _loadLandingStats(); showAuthPanel('signin'); }
 function _loadLandingStats(){
   try{ fetch('/api/stats').then(function(r){ return r.json(); }).then(function(d){
