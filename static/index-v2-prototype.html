@@ -12945,7 +12945,7 @@ function _vRenderLive(sig, verdict, structured){
       + '<div style="margin-top:8px;font-size:9px;color:var(--t3);line-height:1.5">Risk % per entry, TP targets (as R multiples), and trailing stop settings are from the AI analysis. Adjust in Size.</div>'
       + '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
       + '<span style="font-size:9px;color:var(--t3)">Want different number of positions?</span>'
-      + '<input id="verdictLadderN" type="number" min="1" max="5" value="'+s.positions+'" style="width:44px;background:rgba(255,255,255,.06);border:1px solid rgba(237,232,216,.15);border-radius:4px;padding:4px 6px;color:var(--t1);font-family:var(--mono);font-size:11px;text-align:center;outline:none" />'
+      + '<input id="verdictLadderN" type="number" min="1" max="10" value="'+s.positions+'" style="width:44px;background:rgba(255,255,255,.06);border:1px solid rgba(237,232,216,.15);border-radius:4px;padding:4px 6px;color:var(--t1);font-family:var(--mono);font-size:11px;text-align:center;outline:none" />'
       + '<button onclick="_vAdjustLadder()" style="padding:4px 11px;border-radius:4px;font-size:9px;font-weight:700;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.28);color:var(--amb);cursor:pointer;font-family:var(--mono);letter-spacing:.04em">Ask Agents to Redistribute</button>'
       + '</div>'
       + '</div>';
@@ -13040,7 +13040,7 @@ function _vRenderLive(sig, verdict, structured){
     // Agent chat box
     + chatHtml
     + '</div>'
-    + '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--grn);color:#07080c;display:inline-flex;align-items:center;gap:6px">'
+    + '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:#5de8a0;color:#07080c;display:inline-flex;align-items:center;gap:6px">'
     + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
 
   // Restore chat history after innerHTML (innerHTML wipes the DOM)
@@ -13169,24 +13169,31 @@ function _vAdjustLadder() {
   // number of positions. Response uses the full verdict context — not formulas.
   var nEl = document.getElementById('verdictLadderN');
   var n   = nEl ? (parseInt(nEl.value) || 3) : 3;
-  n = Math.max(1, Math.min(5, n));
+  n = Math.max(1, Math.min(10, n));
   var sig = window._activeSignal     || {};
   var s   = window._structuredVerdict || {};
   var cur    = s.positions || 3;
   var action = ((s.action || sig.sig) || 'BUY').toUpperCase();
-  // Include actual trade levels so risk % recommendations are tied to real
-  // entry/SL distances, not abstract percentages.
+  // Read user's configured risk % — used as the per-entry cap so DeepSeek
+  // never recommends allocating more than the user's own risk tolerance.
+  var baseRisk = window._userBaseRisk || parseFloat(document.getElementById('szRisk')&&document.getElementById('szRisk').value) || 1.0;
+  var maxTotal = Math.min(baseRisk * n, baseRisk * 3);  // cap total across all entries
+  // Include actual trade levels so risk % recommendations are tied to real entry/SL distances.
   var levels = '';
-  if (sig.entry) levels += ' Entry: ' + sig.entry + '.';
-  if (sig.sl)    levels += ' Stop loss: ' + sig.sl + '.';
+  if (sig.entry) levels += ' Entry price: ' + sig.entry + '.';
+  if (sig.sl)    levels += ' Stop loss: ' + sig.sl + ' (this is the price where the position is closed at a loss).';
   if (sig.tp)    levels += ' TP1: ' + sig.tp + '.';
   if (sig.rr)    levels += ' R:R 1:' + sig.rr + '.';
   if (sig.tf)    levels += ' Timeframe: ' + sig.tf + '.';
-  var question = 'I want ' + n + ' position entries instead of the recommended ' + cur
-    + ' for this ' + action + ' trade on ' + (sig.sym || 'this ticker') + '.' + levels
-    + ' Based on your full analysis and these exact levels, what risk % should each of the '
-    + n + ' entries use? Do not divide equally — use the trade context and your agent reasoning'
-    + ' to weight each entry. Explain each size in one sentence.';
+  var question = 'I want to split this ' + action + ' trade on ' + (sig.sym || 'this ticker')
+    + ' into ' + n + ' separate entries.' + levels
+    + '\n\nIMPORTANT DEFINITION: "Risk %" here means the percentage of my TOTAL ACCOUNT BALANCE I would lose if that entry hits the stop loss. It is NOT a capital allocation percentage. For example, risk 0.8% means: if this entry hits the stop loss, I lose 0.8% of my total account — nothing more.'
+    + '\n\nConstraints you MUST follow:'
+    + '\n- Each entry risk must be between 0.2% and ' + baseRisk.toFixed(1) + '% of account'
+    + '\n- Total risk across ALL ' + n + ' entries must NOT exceed ' + maxTotal.toFixed(1) + '% of account'
+    + '\n- Do NOT say "100% of your allocated capital" or any capital-allocation language'
+    + '\n- Each entry should use a different risk % based on confidence, not equal splits'
+    + '\n\nFor each entry provide: the entry trigger or price zone, the risk % (must be a small number like 0.5%, 0.8%, 1.0%), and one sentence why. Then show the total risk sum.';
   _vChat(question);
 }
 
