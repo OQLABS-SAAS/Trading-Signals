@@ -5259,7 +5259,7 @@ def mt5_cancel_order(order_id):
     try:
         order = db.query(MT5Order).filter(
             MT5Order.id == order_id,
-            MT5Order.user_id == user_id,
+            MT5Order.user_id.in_([user_id, "default"]),
             MT5Order.status.in_(["pending", "executing"])
         ).first()
         if not order:
