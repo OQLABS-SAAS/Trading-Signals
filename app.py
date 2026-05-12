@@ -4801,7 +4801,10 @@ def mt5_get_pending():
                 "action":       o.action or "open",
                 "close_ticket": o.close_ticket,
             })
-            o.status = "executing"
+            if o.order_type == "TRAILING":
+                o.status = "filled"
+            else:
+                o.status = "executing"
         db.commit()
         # Embed automation settings so the EA can apply trailing stop without an extra request
         cfg = _get_automation_settings("default")
