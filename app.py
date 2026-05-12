@@ -279,6 +279,11 @@ watch_lock     = threading.Lock()
 mt5_state      = {}   # { user_id: {account:{}, positions:[], last_seen:datetime} }
 mt5_state_lock = threading.Lock()
 
+# ── ATR trailing dist cache — keyed by "user_id:symbol:ticket" ──────────────
+# Prevents flooding the EA with trailing modify orders every 60s on stable days.
+# A new order is queued only when ATR-derived trail distance changes by >10%.
+_trail_dist_cache: dict = {}  # { "uid:sym:ticket": float }
+
 def _mt5_symbol(ticker, asset_type):
     """Convert DotVerse ticker to MT5 symbol format."""
     s = ticker.upper()
@@ -1912,6 +1917,198 @@ def _tv_prompt_block(tv):
 
 
 # ─── OPENAI DATA NARRATOR ────────────────────────────────────
+def _get_macro_context_inline(ticker, asset_type):
+    """Return upcoming high-impact economic events relevant to this asset (48h window).
+    Cached in Redis for 5 minutes so it never blocks analyze(). Returns {} on any error."""
+    # Crypto results are ticker-specific (coin-filtered) — include ticker in key.
+    # Non-crypto results are country-based — shared per asset_type is correct.
+    _ck_ticker = ticker.upper() if asset_type == "crypto" else ""
+    cache_key = f"macro_ctx:{asset_type}:{_ck_ticker}:{datetime.utcnow().strftime('%Y-%m-%d-%H')}"
+    try:
+        if _redis_client:
+            cached = _redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+    except Exception:
+        pass
+
+    result = {"events": [], "has_high_impact": False, "warning": ""}
+    fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not fh_key:
+        return result
+
+    try:
+        from_dt = datetime.utcnow().strftime("%Y-%m-%d")
+        to_dt   = (datetime.utcnow() + timedelta(hours=48)).strftime("%Y-%m-%d")
+        r = requests.get(
+            "https://finnhub.io/api/v1/calendar/economic",
+            params={"from": from_dt, "to": to_dt, "token": fh_key},
+            timeout=5
+        )
+        if r.status_code != 200:
+            return result
+
+        all_events = r.json().get("economicCalendar", [])
+        # Relevance map — which countries matter for each asset class
+        relevant_countries = {
+            "crypto":      {"US", "EU", "USD"},
+            "forex":       {"US", "EU", "GB", "JP", "AU", "CA", "CH", "NZ"},
+            "stock":       {"US"},
+            "index":       {"US", "EU", "GB", "JP"},
+            "commodity":   {"US"},
+        }
+        countries = relevant_countries.get(asset_type, {"US", "EU"})
+
+        filtered = []
+        for ev in all_events:
+            country = (ev.get("country", "") or "").upper()
+            impact  = (ev.get("impact", "") or "").capitalize()
+            if impact != "High":
+                continue
+            if country not in countries:
+                continue
+            raw_date = ev.get("date", "") or ""
+            raw_hour = ev.get("hour", "") or ""
+            # Compute hours until event
+            hours_away = None
+            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"]:
+                try:
+                    ev_dt = datetime.strptime(raw_date.split(".")[0], fmt)
+                    hours_away = (ev_dt - datetime.utcnow()).total_seconds() / 3600
+                    break
+                except ValueError:
+                    continue
+            filtered.append({
+                "title":      ev.get("event", ev.get("title", "Unknown event")),
+                "country":    country,
+                "date":       raw_date,
+                "time":       raw_hour or "--:--",
+                "hours_away": round(hours_away, 1) if hours_away is not None else None,
+                "estimate":   ev.get("forecast"),
+                "previous":   ev.get("previous"),
+            })
+
+        # ── CoinMarketCal: crypto-specific on-chain events ────────────────────────
+        # PDF spec Chapter 4: token unlocks, protocol upgrades, hard forks injected
+        # at signal time for crypto assets. Runs after Finnhub so both merge into
+        # the same `filtered` list before sorting. Skipped gracefully if no API key.
+        #
+        # Endpoint confirmed live 2026-05-12: https://developers.coinmarketcal.com/v1/events
+        # Auth: x-api-key header
+        # Response confirmed: {"body": [{...}]} — body is a list
+        # title confirmed: {"en": "..."} dict (NOT a plain string)
+        # date_event confirmed: ISO "2026-05-11T00:00:00Z" — parse [:10] as %Y-%m-%d
+        # coins confirmed: [{"id": "bitcoin", "symbol": "BTC", ...}]
+        # No dateRangeStart/dateRangeEnd params (return 400) — filter in Python
+        # No percentage/is_hot fields in new API — significance = within 48h window
+        if asset_type == "crypto":
+            cmc_key = os.environ.get("COINMARKETCAL_API_KEY", "").strip()
+            if cmc_key:
+                try:
+                    # Raw events cached once per hour shared across ALL crypto tickers.
+                    # Coin filtering runs after the cache read on every call (cheap —
+                    # just list iteration). This prevents: (a) cache collision where
+                    # BTC's filtered events get served to AVAX analyses, and (b) quota
+                    # burn where every different ticker triggers a new API fetch.
+                    _cmc_raw_key = f"cmc_raw:crypto:{datetime.utcnow().strftime('%Y-%m-%d-%H')}"
+                    _cmc_events  = []
+                    if _redis_client:
+                        try:
+                            _cmc_cached = _redis_client.get(_cmc_raw_key)
+                            if _cmc_cached:
+                                _cmc_events = json.loads(_cmc_cached)
+                        except Exception:
+                            pass
+                    if not _cmc_events:
+                        # Cache miss — fetch all pages from API
+                        _cmc_page  = 1
+                        _cmc_pages = 1   # updated from first response metadata
+                        while _cmc_page <= min(_cmc_pages, 5):
+                            _cmc_r = requests.get(
+                                "https://developers.coinmarketcal.com/v1/events",
+                                headers={"x-api-key": cmc_key, "Accept": "application/json"},
+                                params={"max": 100, "page": _cmc_page},
+                                timeout=4,
+                            )
+                            if _cmc_r.status_code != 200:
+                                print(f"[macro_ctx] CoinMarketCal HTTP {_cmc_r.status_code} p{_cmc_page}")
+                                break
+                            _cmc_body   = _cmc_r.json()
+                            _cmc_events.extend(_cmc_body.get("body") or [])
+                            _cmc_pages  = _cmc_body.get("_metadata", {}).get("page_count", 1)
+                            _cmc_page  += 1
+                        # Cache raw events for 1 hour — shared across all crypto tickers
+                        if _redis_client and _cmc_events:
+                            try:
+                                _redis_client.setex(_cmc_raw_key, 3600, json.dumps(_cmc_events))
+                            except Exception:
+                                pass
+                    # Derive base symbol: BTC-USD→BTC, ETHUSDT→ETH, BTC/USD→BTC
+                    _base_sym = ticker.upper().split("-")[0].split("/")[0]
+                    for _q in ("USDT", "USDC", "BUSD", "USD", "EUR"):
+                        if _base_sym.endswith(_q) and len(_base_sym) > len(_q):
+                            _base_sym = _base_sym[:-len(_q)]
+                            break
+                    _now_utc = datetime.utcnow()
+                    for _ev in _cmc_events:
+                        _ev_dt_str = (_ev.get("date_event") or "")[:10]
+                        _ev_hours  = None
+                        try:
+                            _ev_dt    = datetime.strptime(_ev_dt_str, "%Y-%m-%d")
+                            _ev_hours = (_ev_dt - _now_utc).total_seconds() / 3600
+                            if _ev_hours < 0 or _ev_hours > 48:
+                                continue   # free tier: no past events; +48h upper bound
+                        except ValueError:
+                            continue
+                        _ev_coins = [c.get("symbol", "").upper()
+                                     for c in (_ev.get("coins") or [])]
+                        if _ev_coins and _base_sym not in _ev_coins:
+                            continue
+                        _title_raw = _ev.get("title", {})
+                        _title = (_title_raw.get("en") if isinstance(_title_raw, dict)
+                                  else str(_title_raw or "")).strip() or "Crypto event"
+                        filtered.append({
+                            "title":      _title,
+                            "country":    "CRYPTO",
+                            "date":       _ev_dt_str,
+                            "time":       "--:--",
+                            "hours_away": round(_ev_hours, 1) if _ev_hours is not None else None,
+                            "estimate":   None,
+                            "previous":   None,
+                            "source":     "CoinMarketCal",
+                        })
+                except Exception as _cmc_err:
+                    print(f"[macro_ctx] CoinMarketCal error: {_cmc_err}")
+
+        # Sort by proximity
+        filtered.sort(key=lambda e: e.get("hours_away") or 999)
+        result["events"] = filtered[:5]
+        result["has_high_impact"] = len(filtered) > 0
+
+        # Build a human-readable warning for the signal card
+        if filtered:
+            nearest = filtered[0]
+            hours   = nearest.get("hours_away")
+            if hours is not None and hours <= 24:
+                h_str = f"in {hours:.0f}h" if hours > 1 else "in under 1h"
+                result["warning"] = (
+                    f"HIGH IMPACT EVENT: {nearest['title']} ({nearest['country']}) {h_str}. "
+                    f"Consider reducing size or waiting for release before entering."
+                )
+            elif hours is not None:
+                result["warning"] = f"Upcoming: {nearest['title']} ({nearest['country']}) in {hours:.0f}h"
+
+        try:
+            if _redis_client:
+                _redis_client.setex(cache_key, 300, json.dumps(result))
+        except Exception:
+            pass
+    except Exception as _mce:
+        print(f"[macro_ctx] {_mce}")
+
+    return result
+
+
 def _narrate_data_openai(result, ticker, asset_type, ind, timeframe):
     """
     Use OpenAI GPT-4o-mini to narrate indicator data as plain English.
@@ -3010,6 +3207,53 @@ def get_watch_signal(ticker, asset_type, ind, timeframe):
     }
 
 
+# ─── QUICK CONFLUENCE HELPER (used by signal-invalidation detection) ──────────
+def _quick_bull_pct(ind):
+    """Recompute bull_pct from an already-computed ind dict without any I/O.
+    Mirrors the core voting logic in get_analysis() so watch-job can compare
+    current momentum against the confluence recorded at entry time."""
+    rsi       = ind.get("rsi", 50) or 50
+    macd_hist = ind.get("macd_hist", 0) or 0
+    ema_trend = (ind.get("ema_trend", "") or "").upper()
+    vol_ratio = ind.get("vol_ratio", 1.0) or 1.0
+    supertrend= (ind.get("supertrend", "") or "").lower()
+    bb_pos    = ind.get("bb_pos", 0.5) or 0.5
+
+    b, r = 0, 0  # bullish votes, bearish votes
+
+    # RSI
+    if rsi >= 75:         r += 1
+    elif 55 <= rsi < 75:  b += 1
+    elif 25 < rsi < 45:   r += 1
+    elif rsi <= 25:       b += 1
+
+    # EMA trend (heavier weight)
+    if   ema_trend == "STRONG BULL":  b += 3
+    elif ema_trend == "BULL":         b += 2
+    elif ema_trend == "STRONG BEAR":  r += 3
+    elif ema_trend == "BEAR":         r += 2
+
+    # MACD
+    if   macd_hist > 0:  b += 1
+    elif macd_hist < 0:  r += 1
+
+    # Volume × EMA direction
+    if vol_ratio > 1.2:
+        if   ema_trend in ("STRONG BULL", "BULL"):   b += 1
+        elif ema_trend in ("STRONG BEAR", "BEAR"):   r += 1
+
+    # Supertrend
+    if   supertrend == "bullish":  b += 1
+    elif supertrend == "bearish":  r += 1
+
+    # Bollinger Bands
+    if   bb_pos > 0.85:  r += 1
+    elif bb_pos < 0.15:  b += 1
+
+    total = b + r
+    return (b / total) if total > 0 else 0.5
+
+
 # ─── SERVER-SIDE WATCH JOB ────────────────────────────────────
 def run_watch_job():
     """Runs every 60s. Checks each watched ticker against its timeframe interval."""
@@ -3049,6 +3293,243 @@ def run_watch_job():
                 watch_registry[key]["last_check"]  = now
                 watch_registry[key]["last_reason"]  = screen["reason"]
                 watch_registry[key]["last_price"]   = ind["price"]
+
+            # ── ATR-Dynamic Trailing: update any open MT5 positions in this symbol ──
+            # PDF spec (Chapter 8): queue a trailing modify only when ATR trail
+            # distance changes by >10% from the previously-queued value.
+            # Without this gate every 60s tick floods the EA on stable days.
+            try:
+                atr_val  = ind.get("atr", 0)
+                price_val= ind.get("price", 1)
+                cfg      = _get_automation_settings(w.get("user_id", "default"))
+                if cfg.get("trailing_on") and atr_val > 0:
+                    atr_mult   = float(cfg.get("trailing_atr_mult", 2.0))
+                    trail_dist = _atr_to_pips(atr_val * atr_mult, asset_type, price_val)
+                    # Find open MT5 positions in this symbol
+                    mt5_sym  = _mt5_symbol(ticker, asset_type)
+                    uid_str  = str(w.get("user_id", "default"))
+                    with mt5_state_lock:
+                        # Bug Y fix: EA always pushes to mt5_state["default"].
+                        # Fall back to "default" so trailing stop fires even for
+                        # watches whose user_id is the real session user_id.
+                        state = mt5_state.get(uid_str) or mt5_state.get("default", {})
+                    # Bug S fix: skip auto-trade actions during abnormal spread conditions.
+                    # spread_warning is set by mt5_push_state when spread > 5× entry_atr.
+                    if state.get("spread_warning"):
+                        continue
+                    positions = state.get("positions", [])
+                    for pos in positions:
+                        if pos.get("symbol","").upper() == mt5_sym.upper():
+                            ticket = pos.get("ticket")
+                            if not ticket or not _DBSession:
+                                continue
+                            # 10% change gate — skip if trail distance hasn't moved enough
+                            _tcache_key  = f"{uid_str}:{mt5_sym}:{ticket}"
+                            _prev_trail  = _trail_dist_cache.get(_tcache_key)
+                            _change_pct  = (
+                                abs(trail_dist - _prev_trail) / max(abs(_prev_trail), 0.001)
+                                if _prev_trail is not None else 1.0  # first time → always queue
+                            )
+                            if _change_pct <= 0.10:
+                                continue  # ATR stable — don't flood EA
+                            if trail_dist <= 0:
+                                continue  # degenerate ATR — don't send zero-distance trailing
+                            _trail_dist_cache[_tcache_key] = trail_dist
+                            db2 = _DBSession()
+                            try:
+                                trail_order = MT5Order(
+                                    user_id      = uid_str,
+                                    symbol       = mt5_sym,
+                                    order_type   = "TRAILING",
+                                    volume       = 0,
+                                    price        = float(trail_dist),
+                                    action       = "trailing",
+                                    close_ticket = int(ticket),
+                                    status       = "pending",
+                                    comment      = f"ATR trail {atr_mult}×ATR={trail_dist:.1f}pts (+{_change_pct*100:.0f}% chg)",
+                                )
+                                db2.add(trail_order)
+                                db2.commit()
+                            except Exception:
+                                db2.rollback()
+                            finally:
+                                db2.close()
+            except Exception as _trail_err:
+                print(f"[trail] ATR trailing update error: {_trail_err}")
+
+            # ── Phase 5: Signal Invalidation + ATR Expansion Detection ──────────────
+            # Runs for every watched ticker that has open MT5 positions.
+            # 1) If current bull_pct drops below 50%, the original trade setup has
+            #    lost its technical basis — notify the user so they can protect capital.
+            # 2) If current ATR >= 2× the ATR recorded at entry, volatility has expanded
+            #    and TP targets may now be too conservative — notify to re-run analysis.
+            try:
+                _inv_sym    = _mt5_symbol(ticker, asset_type)
+                _curr_bpct  = _quick_bull_pct(ind)
+                _curr_atr   = ind.get("atr", 0) or 0
+                with mt5_state_lock:
+                    # Bug Y fix: EA always pushes to mt5_state["default"].
+                    # Fall back to "default" so invalidation fires even for
+                    # watches whose user_id is the real session user_id.
+                    _uid_inv   = w.get("user_id", "default")
+                    _inv_state = mt5_state.get(_uid_inv) or mt5_state.get("default", {})
+                # Bug S fix: skip invalidation actions during abnormal spread.
+                if _inv_state.get("spread_warning"):
+                    continue
+                _inv_positions = _inv_state.get("positions", [])
+
+                for _pos in _inv_positions:
+                    if (_pos.get("symbol","") or "").upper() != _inv_sym.upper():
+                        continue
+                    _ticket = _pos.get("ticket")
+                    if not _ticket or not _DBSession:
+                        continue
+
+                    _inv_db = _DBSession()
+                    try:
+                        # Look up the original order to read stored entry_confluence / entry_atr.
+                        # The EA sets mt5_ticket after fill, so try that first; fall back to
+                        # close_ticket which the ladder submit uses as the target ticket.
+                        # Bug X fix: include "default" so Telegram-execute and
+                        # auto-scan orders (saved with user_id="default") are found
+                        # even when the watch is owned by a real user_id like "42".
+                        _watch_uid   = str(w.get("user_id", "default"))
+                        _uid_filter  = [_watch_uid, "default"]
+                        _stored = (
+                            _inv_db.query(MT5Order)
+                            .filter(
+                                MT5Order.user_id.in_(_uid_filter),
+                                MT5Order.mt5_ticket == int(_ticket),
+                                MT5Order.order_type.in_(["BUY", "SELL"]),  # exclude modify_sl cascade orders
+                            )
+                            .order_by(MT5Order.created_at.desc())
+                            .first()
+                        )
+                        if not _stored:
+                            _stored = (
+                                _inv_db.query(MT5Order)
+                                .filter(
+                                    MT5Order.user_id.in_(_uid_filter),
+                                    MT5Order.symbol  == _inv_sym,
+                                    MT5Order.status.in_(["filled", "executing", "pending"]),
+                                    MT5Order.entry_confluence != None  # noqa: E711
+                                )
+                                .order_by(MT5Order.created_at.desc())
+                                .first()
+                            )
+
+                        if not _stored:
+                            continue
+
+                        _e_conf = _stored.entry_confluence
+                        _e_atr  = _stored.entry_atr
+                        _uid    = str(w.get("user_id", "default"))
+
+                        # ── 5a: Signal invalidation ────────────────────────────────
+                        if _e_conf is not None and _curr_bpct < 0.50:
+                            _inv_dedup = f"inv_alert:{_uid}:{_ticket}:{now.strftime('%Y-%m-%d-%H')}"
+                            _inv_seen  = False
+                            try:
+                                if _redis_client:
+                                    _inv_seen = bool(_redis_client.get(_inv_dedup))
+                            except Exception:
+                                pass
+                            if not _inv_seen:
+                                _push_notification(
+                                    _uid,
+                                    "signal_invalidation",
+                                    f"Signal Invalidated — {ticker}",
+                                    f"Confluence has dropped to {_curr_bpct*100:.0f}% "
+                                    f"(was {_e_conf*100:.0f}% when you entered). "
+                                    f"The technical setup that justified this trade is no longer valid. "
+                                    f"Consider moving your stop to breakeven or exiting to protect capital.",
+                                    data={"ticker": ticker, "ticket": _ticket,
+                                          "current_conf": round(_curr_bpct, 3),
+                                          "entry_conf":   round(_e_conf, 3)}
+                                )
+                                # Telegram keyboard — PDF spec Chapter 5: one-tap action buttons
+                                try:
+                                    _inv_tg = (
+                                        f"⚠️ Signal Invalidated — {ticker}\n"
+                                        f"Confluence: {_e_conf*100:.0f}% → {_curr_bpct*100:.0f}%\n"
+                                        f"Position #{_ticket}\n\n"
+                                        f"The technical basis for this trade has weakened. "
+                                        f"Protect capital by moving stop to breakeven."
+                                    )
+                                    _inv_kb = [[
+                                        {"text": "🛡 Move Stop to Breakeven",
+                                         "callback_data": f"breakeven|{_ticket}|{_inv_sym}|invalidation"},
+                                        {"text": "Keep Original Stop",
+                                         "callback_data": f"ignore|{_ticket}|{_inv_sym}|invalidation"},
+                                    ]]
+                                    send_telegram_keyboard(_inv_tg, _inv_kb)
+                                except Exception as _inv_tg_err:
+                                    print(f"[invalidation] Telegram error: {_inv_tg_err}")
+                                try:
+                                    if _redis_client:
+                                        _redis_client.setex(_inv_dedup, 3600, "1")
+                                except Exception:
+                                    pass
+                                print(f"[invalidation] {ticker} ticket {_ticket}: "
+                                      f"conf {_e_conf*100:.0f}% → {_curr_bpct*100:.0f}% — alert sent")
+
+                        # ── 5b: ATR expansion ─────────────────────────────────────
+                        if _e_atr is not None and _e_atr > 0 and _curr_atr >= _e_atr * 2.0:
+                            _atr_dedup = f"atr_exp:{_uid}:{_ticket}:{now.strftime('%Y-%m-%d-%H')}"
+                            _atr_seen  = False
+                            try:
+                                if _redis_client:
+                                    _atr_seen = bool(_redis_client.get(_atr_dedup))
+                            except Exception:
+                                pass
+                            if not _atr_seen:
+                                _push_notification(
+                                    _uid,
+                                    "atr_expansion",
+                                    f"Volatility Doubled — {ticker} TP Targets May Be Conservative",
+                                    f"ATR has expanded from {_e_atr:.5g} at entry to {_curr_atr:.5g} now "
+                                    f"({_curr_atr/_e_atr:.1f}×). Your take-profit targets were set at lower "
+                                    f"volatility. Re-run analysis on {ticker} to recalculate TP levels "
+                                    f"that reflect the current range.",
+                                    data={"ticker": ticker, "ticket": _ticket,
+                                          "entry_atr":   round(_e_atr,   6),
+                                          "current_atr": round(_curr_atr, 6),
+                                          "expansion":   round(_curr_atr / _e_atr, 2)}
+                                )
+                                # Telegram keyboard — PDF spec Chapter 9: re-run analysis button
+                                try:
+                                    _atr_tg = (
+                                        f"📈 Volatility Doubled — {ticker}\n"
+                                        f"ATR at entry: {_e_atr:.5g} → now: {_curr_atr:.5g} "
+                                        f"({_curr_atr/_e_atr:.1f}×)\n"
+                                        f"Position #{_ticket}\n\n"
+                                        f"TP targets were set at lower volatility. "
+                                        f"Re-run analysis to get updated levels."
+                                    )
+                                    _atr_kb = [[
+                                        {"text": "🔄 Re-run Analysis",
+                                         "callback_data": f"reanalyze|{ticker}|{_inv_sym}|atr_expansion"},
+                                        {"text": "Close 50% + Move to Breakeven",
+                                         "callback_data": f"partial_close|{_ticket}|{_inv_sym}|atr_expansion"},
+                                    ]]
+                                    send_telegram_keyboard(_atr_tg, _atr_kb)
+                                except Exception as _atr_tg_err:
+                                    print(f"[atr-expansion] Telegram error: {_atr_tg_err}")
+                                try:
+                                    if _redis_client:
+                                        _redis_client.setex(_atr_dedup, 3600, "1")
+                                except Exception:
+                                    pass
+                                print(f"[atr-expansion] {ticker} ticket {_ticket}: "
+                                      f"ATR {_e_atr:.5g} → {_curr_atr:.5g} — alert sent")
+
+                    except Exception as _inv_db_err:
+                        print(f"[invalidation] db lookup error for {ticker}/{_ticket}: {_inv_db_err}")
+                    finally:
+                        _inv_db.close()
+
+            except Exception as _inv_outer:
+                print(f"[invalidation] outer error for {ticker}: {_inv_outer}")
 
             if not screen["call_claude"]:
                 continue
@@ -3103,6 +3584,84 @@ def run_watch_job():
         except Exception as e:
             print(f"[Watch] Error for {key}: {e}")
 
+    # ── Live Position Event Monitor — check open MT5 trades against macro calendar ──
+    # Runs once per watch_job tick (every 60s). Fetches calendar once, then iterates
+    # all open positions across all connected users. Fires an in-app notification if
+    # a high-impact event is within 2 hours of an open trade.
+    try:
+        _event_check_cache_key = f"pos_event_check:{now.strftime('%Y-%m-%d-%H-%M')[:13]}"
+        _already_checked = False
+        try:
+            if _redis_client:
+                _already_checked = bool(_redis_client.get(_event_check_cache_key))
+        except Exception:
+            pass
+
+        if not _already_checked:
+            fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+            if fh_key:
+                try:
+                    from_dt = now.strftime("%Y-%m-%d")
+                    to_dt   = (now + timedelta(hours=4)).strftime("%Y-%m-%d")
+                    _er = requests.get(
+                        "https://finnhub.io/api/v1/calendar/economic",
+                        params={"from": from_dt, "to": to_dt, "token": fh_key},
+                        timeout=5
+                    )
+                    if _er.status_code == 200:
+                        _all_ev = _er.json().get("economicCalendar", [])
+                        # Only high-impact events within the next 2 hours
+                        _imminent = []
+                        for _ev in _all_ev:
+                            if (_ev.get("impact","") or "").capitalize() != "High":
+                                continue
+                            _raw_d = _ev.get("date","") or ""
+                            for _fmt in ["%Y-%m-%d %H:%M:%S","%Y-%m-%dT%H:%M:%SZ","%Y-%m-%d"]:
+                                try:
+                                    _ev_dt = datetime.strptime(_raw_d.split(".")[0], _fmt)
+                                    _hrs   = (_ev_dt - now).total_seconds() / 3600
+                                    if 0 <= _hrs <= 2:
+                                        _imminent.append({
+                                            "title":    _ev.get("event","Event"),
+                                            "country":  (_ev.get("country","") or "").upper(),
+                                            "hours":    round(_hrs, 1),
+                                        })
+                                    break
+                                except ValueError:
+                                    continue
+
+                        if _imminent:
+                            # Alert all users with open positions
+                            with mt5_state_lock:
+                                _all_states = dict(mt5_state)
+                            for _uid, _state in _all_states.items():
+                                _positions = _state.get("positions", [])
+                                if not _positions:
+                                    continue
+                                _ev_titles = ", ".join(f"{e['title']} ({e['country']}) in {e['hours']:.0f}h"
+                                                       for e in _imminent[:3])
+                                _syms = ", ".join(set(p.get("symbol","?") for p in _positions[:5]))
+                                _push_notification(
+                                    _uid,
+                                    "macro_event",
+                                    f"HIGH IMPACT EVENT — {len(_imminent)} release(s) imminent",
+                                    f"Open positions: {_syms}\nEvents: {_ev_titles}\n"
+                                    f"Consider reducing size or moving SL to breakeven now.",
+                                    data={"events": _imminent, "positions": len(_positions)}
+                                )
+                                print(f"[pos-monitor] Event alert sent to user {_uid}: {_ev_titles}")
+
+                except Exception as _pme:
+                    print(f"[pos-monitor] calendar fetch error: {_pme}")
+
+            try:
+                if _redis_client:
+                    _redis_client.setex(_event_check_cache_key, 3600, "1")
+            except Exception:
+                pass
+    except Exception as _pme_outer:
+        print(f"[pos-monitor] outer error: {_pme_outer}")
+
 # ─── AUTOMATION HELPERS ────────────────────────────────────────
 
 def _push_notification(user_id, ntype, title, body, data=None):
@@ -3122,29 +3681,69 @@ def _push_notification(user_id, ntype, title, body, data=None):
     except Exception as e:
         print(f"[notify] DB error: {e}")
 
+def _atr_to_pips(atr, asset_type, price=1.0):
+    """Convert an ATR value (price units) to pips/points for the MT5 trailing stop API.
+    Forex: pips = atr / pip_size (0.0001 or 0.01 for JPY).
+    Everything else: pips = atr (MT5 uses price points for non-forex)."""
+    if atr <= 0:
+        return 50.0  # safe fallback
+    if asset_type == "forex":
+        pip_size = 0.01 if price and price > 50 else 0.0001  # crude JPY heuristic
+        return round(atr / pip_size, 1)
+    # Adaptive precision for non-forex — prevents micro-cap ATR (e.g. 0.00023) rounding to 0.0
+    if atr < 0.0001:
+        return round(atr, 8)
+    if atr < 0.01:
+        return round(atr, 6)
+    if atr < 1:
+        return round(atr, 4)
+    return round(atr, 2)
+
 def _get_automation_settings(user_id):
-    """Return AutomationSettings for user, creating defaults if absent."""
+    """Return AutomationSettings for user, creating defaults if absent.
+
+    Bug W fix: in single-user mode the EA and background jobs request
+    user_id="default" but the human user saves settings under their real
+    session user_id (e.g. "42").  When called with "default" always prefer
+    the most-recently-customised human-user row so that trailing_on,
+    trailing_atr_mult, breakeven_on etc. reflect what the user actually set
+    in the UI — not the auto-created defaults row.
+    """
     if not _DBSession:
         return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
-                "trailing_on": False, "trailing_pips": 50.0, "market_alerts_on": True}
+                "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 2.0,
+                "market_alerts_on": True}
     try:
         db = _DBSession()
         s = db.query(AutomationSettings).filter_by(user_id=str(user_id)).first()
+        # In single-user mode the EA/background jobs use user_id="default" but
+        # the human user saves settings under their real session user_id.
+        # Always prefer the most recently updated human-user row.
+        if str(user_id) == "default":
+            human = (db.query(AutomationSettings)
+                       .filter(AutomationSettings.user_id != "default")
+                       .order_by(AutomationSettings.updated_at.desc())
+                       .first())
+            if human:
+                s = human
         if not s:
             s = AutomationSettings(user_id=str(user_id))
             db.add(s); db.commit()
         result = {
             "scan_enabled": s.scan_enabled, "scan_risk_pct": s.scan_risk_pct,
             "breakeven_on": s.breakeven_on, "trailing_on": s.trailing_on,
-            "trailing_pips": s.trailing_pips, "market_alerts_on": s.market_alerts_on,
+            "trailing_pips": s.trailing_pips,
+            "trailing_atr_mult": getattr(s, "trailing_atr_mult", 2.0) or 2.0,
+            "market_alerts_on": s.market_alerts_on,
         }
         db.close()
         return result
     except Exception:
         return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
-                "trailing_on": False, "trailing_pips": 50.0, "market_alerts_on": True}
+                "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 2.0,
+                "market_alerts_on": True}
 
-def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0):
+def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0, ticker=""):
     """Calculate appropriate lot size for an auto-scan signal."""
     if not entry or not sl or entry == sl or account_balance <= 0:
         return 0.0
@@ -3153,8 +3752,10 @@ def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0):
     if sl_dist == 0:
         return 0.0
     if asset_type == "forex":
-        # 1 std lot = 100,000 units; pip value ~$10/lot for USD-quoted pairs
-        pip_size = 0.01 if "JPY" in str(entry).upper() else 0.0001
+        # 1 std lot = 100,000 units; pip value ~$10/lot for USD-quoted pairs.
+        # JPY pairs (USDJPY, EURJPY…) use 2dp pricing so pip_size = 0.01.
+        # Must check the ticker name, NOT the price value.
+        pip_size = 0.01 if "JPY" in str(ticker).upper() else 0.0001
         pips = sl_dist / pip_size
         lots = risk_amt / max(pips * 10, 0.01)
     else:
@@ -3247,7 +3848,8 @@ def _is_duplicate_scan_alert(ticker, signal, timeframe, trade_type):
     except Exception:
         return False
 
-def _record_scan_alert(ticker, signal, timeframe, trade_type, entry, sl, tp1, lot_size):
+def _record_scan_alert(ticker, signal, timeframe, trade_type, entry, sl, tp1, lot_size,
+                       tp2=None, tp3=None, entry_confluence=None, entry_atr=None):
     """Save scan alert and return its ID (used in Telegram callback_data)."""
     if not _DBSession:
         return None
@@ -3255,7 +3857,8 @@ def _record_scan_alert(ticker, signal, timeframe, trade_type, entry, sl, tp1, lo
         db = _DBSession()
         rec = ScanAlert(ticker=ticker, signal=signal, timeframe=timeframe,
                         trade_type=trade_type, entry=entry, sl=sl, tp1=tp1,
-                        lot_size=lot_size)
+                        tp2=tp2, tp3=tp3, lot_size=lot_size,
+                        entry_confluence=entry_confluence, entry_atr=entry_atr)
         db.add(rec)
         db.commit()
         db.refresh(rec)
@@ -3269,7 +3872,14 @@ def _job_auto_scan():
     """Scan 18 instruments across scalp (15m) + swing (4H) timeframes every 15 min.
     Sends Telegram + in-app alert for HIGH-confidence BUY/SELL signals above min lot."""
     import time as _time
-    print("[auto_scan] Starting scan...")
+    # Respect user's scan_enabled toggle and scan_risk_pct setting.
+    # Bug fix: these were ignored — scan always ran at 1% risk regardless of user preference.
+    auto_cfg = _get_automation_settings("default")
+    if not auto_cfg.get("scan_enabled", True):
+        print("[auto_scan] scan_enabled=False in automation settings — skipping")
+        return
+    scan_risk_pct = float(auto_cfg.get("scan_risk_pct", 1.0))
+    print(f"[auto_scan] Starting scan (risk={scan_risk_pct}%)...")
     # Get account balance from any active mt5_state
     account_balance = 1000.0
     with mt5_state_lock:
@@ -3318,7 +3928,7 @@ def _job_auto_scan():
             tp3   = res.get("tp3", 0)
             rr    = res.get("rr1", 0)
 
-            lot   = _calc_auto_lot(account_balance, entry, sl, asset_type)
+            lot   = _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=scan_risk_pct, ticker=ticker)
             if lot < min_lot:
                 _time.sleep(0.5)
                 continue
@@ -3341,7 +3951,14 @@ def _job_auto_scan():
                 f"Confidence: HIGH ✅"
             )
             # Save scan alert first to get its ID for the callback button
-            scan_id = _record_scan_alert(ticker, sig, tf, trade_type, entry, sl, tp1, lot)
+            _bc    = res.get("bullish_count", 0)
+            _brc   = res.get("bearish_count", 0)
+            _tot   = _bc + _brc
+            _econf = round(_bc / _tot, 3) if _tot > 0 else None
+            _eatr  = ind.get("atr")
+            scan_id = _record_scan_alert(ticker, sig, tf, trade_type, entry, sl, tp1, lot,
+                                          tp2=tp2, tp3=tp3,
+                                          entry_confluence=_econf, entry_atr=_eatr)
             # callback_data: execute|{scan_id}  (well within 64-char Telegram limit)
             exec_label = f"{'✅ Execute BUY' if sig=='BUY' else '🔴 Execute SELL'} {lot:.2f} lots"
             keyboard = [[{"text": exec_label, "callback_data": f"execute|{scan_id}"}]]
@@ -3378,8 +3995,10 @@ def _job_trade_suggestions():
         db = _DBSession()
         # Look at last 20 signal history rows
         history = db.query(SignalHistory).order_by(SignalHistory.fired_at.desc()).limit(20).all()
-        orders  = db.query(MT5Order).filter(MT5Order.status == "filled")\
-                    .order_by(MT5Order.created_at.desc()).limit(20).all()
+        orders  = db.query(MT5Order).filter(
+                        MT5Order.status     == "filled",
+                        MT5Order.order_type.in_(["BUY", "SELL"]),  # exclude modify_sl cascade orders
+                    ).order_by(MT5Order.created_at.desc()).limit(20).all()
         db.close()
 
         if len(orders) < 5:
@@ -4110,27 +4729,31 @@ def mt5_submit_order():
     price      = float(body.get("price", 0))
     sl         = body.get("sl")
     tp         = body.get("tp")
-    tp2        = body.get("tp2")
-    tp3        = body.get("tp3")
-    timeframe  = body.get("timeframe", "")
+    tp2              = body.get("tp2")
+    tp3              = body.get("tp3")
+    timeframe        = body.get("timeframe", "")
+    entry_confluence = body.get("entry_confluence")   # bull_pct (0.0–1.0) at signal time
+    entry_atr        = body.get("entry_atr")          # ATR price distance at signal time
     if not ticker or direction not in ("BUY", "SELL") or volume <= 0:
         return jsonify({"error": "ticker, direction (BUY/SELL), and volume required"}), 400
     symbol = _mt5_symbol(ticker, asset_type)
     db = _DBSession()
     try:
         order = MT5Order(
-            user_id    = user_id,
-            symbol     = symbol,
-            order_type = direction,
-            volume     = volume,
-            price      = price,
-            sl         = float(sl)  if sl  else None,
-            tp         = float(tp)  if tp  else None,
-            tp2        = float(tp2) if tp2 else None,
-            tp3        = float(tp3) if tp3 else None,
-            timeframe  = timeframe or None,
-            status     = "pending",
-            comment    = f"DotVerse {ticker} {direction}",
+            user_id          = user_id,
+            symbol           = symbol,
+            order_type       = direction,
+            volume           = volume,
+            price            = price,
+            sl               = float(sl)  if sl  else None,
+            tp               = float(tp)  if tp  else None,
+            tp2              = float(tp2) if tp2 else None,
+            tp3              = float(tp3) if tp3 else None,
+            timeframe        = timeframe or None,
+            entry_confluence = float(entry_confluence) if entry_confluence is not None else None,
+            entry_atr        = float(entry_atr)        if entry_atr        is not None else None,
+            status           = "pending",
+            comment          = f"DotVerse {ticker} {direction}",
         )
         db.add(order)
         db.commit()
@@ -4147,9 +4770,22 @@ def mt5_get_pending():
     """EA polls this every 5s — returns pending orders and marks them as executing."""
     if not _DBSession:
         return jsonify({"orders": []})
+    # Bug V fix: identity contract — EA may identify itself via user_id query param.
+    # When EA sends user_id (e.g. "42"): scope to that user + "default" only.
+    # When EA omits user_id (all existing EAs): return ALL pending — backward compat.
+    # This preserves human-initiated trade execution for unidentified EAs while
+    # scoping correctly for multi-user deployments where EA sends its user_id.
+    ea_uid = request.args.get("user_id")   # None if not sent
     db = _DBSession()
     try:
-        orders = db.query(MT5Order).filter_by(status="pending").all()
+        if ea_uid and ea_uid != "default":
+            uid_filter = [ea_uid, "default"]
+            orders = db.query(MT5Order).filter(
+                MT5Order.status  == "pending",
+                MT5Order.user_id.in_(uid_filter),
+            ).all()
+        else:
+            orders = db.query(MT5Order).filter_by(status="pending").all()
         result = []
         for o in orders:
             result.append({
@@ -4170,8 +4806,9 @@ def mt5_get_pending():
         # Embed automation settings so the EA can apply trailing stop without an extra request
         cfg = _get_automation_settings("default")
         settings = {
-            "trailing_on":   cfg.get("trailing_on", False),
-            "trailing_pips": float(cfg.get("trailing_pips", 50.0)),
+            "trailing_on":       cfg.get("trailing_on", False),
+            "trailing_pips":     float(cfg.get("trailing_pips", 50.0)),
+            "trailing_atr_mult": float(cfg.get("trailing_atr_mult", 2.0)),
         }
         return jsonify({"orders": result, "settings": settings})
     except Exception as e:
@@ -4206,6 +4843,15 @@ def mt5_confirm_order():
                     order.pnl = float(pnl)
                 except (TypeError, ValueError):
                     pass
+            # MODIFY orders (modify_sl cascade) — update status only.
+            # Skip fill notification and tp_enrichment cache to avoid
+            # garbage "MODIFY 0 lots" Telegram messages and overwriting
+            # TP2/TP3 enrichment cached from the original BUY/SELL fill.
+            if order.order_type == "MODIFY":
+                if status == "filled":
+                    order.filled_at = datetime.utcnow()
+                db.commit()
+                return jsonify({"status": "ok"})
             if status == "filled":
                 order.filled_at = datetime.utcnow()
                 # Send Telegram notification on fill
@@ -4236,7 +4882,9 @@ def mt5_confirm_order():
                     "tp3":       order.tp3,
                     "timeframe": order.timeframe,
                 }
-        return jsonify({"status": "ok", "tp2": order.tp2, "tp3": order.tp3})
+        return jsonify({"status": "ok",
+                        "tp2": order.tp2 if order else None,
+                        "tp3": order.tp3 if order else None})
     except Exception as e:
         db.rollback()
         return jsonify({"status": "error", "error": str(e)})
@@ -4277,91 +4925,181 @@ def mt5_level_alert():
         "SL":  "🛑 Close Position — SL",
     }.get(level, f"Close — {level}")
     keyboard = [[{"text": btn_label, "callback_data": f"close|{ticket}|{symbol}|{level}"}]]
-    try:
-        send_telegram_keyboard(tg_msg, keyboard)
-    except Exception:
-        pass
-    # Store hit in mt5_state so frontend can flash the action button
+    # Store hit + dedup check — atomic under the lock.
+    # Read before write: if this exact level was already recorded for this ticket
+    # (EA retried after network error), skip both the Telegram notification and
+    # the SL cascade to prevent duplicate alerts and duplicate MODIFY orders.
     with mt5_state_lock:
         state = mt5_state.get("default", {})
         if "level_hits" not in state:
             state["level_hits"] = {}
-        state["level_hits"][str(ticket)] = level
+        _already_hit = state["level_hits"].get(str(ticket))
+        if _already_hit != level:
+            state["level_hits"][str(ticket)] = level   # mark before cascade
         mt5_state["default"] = state
+    if _already_hit == level:
+        return jsonify({"status": "ok", "note": "duplicate_level_hit"})
 
-    # ── Phase C — progressive SL-ladder automation ───────────────────
-    # TP1 hit → SL moves to entry (breakeven, can't lose now)
-    # TP2 hit → SL moves to TP1 price (locks TP1 profit)
-    # TP3 hit → SL moves to TP2 price (locks TP2 profit; trade still has runway)
-    # Each step requires the corresponding price to be available — the
-    # original MT5Order.tp / tp2 fields hold them.
+    try:
+        send_telegram_keyboard(tg_msg, keyboard)
+    except Exception:
+        pass
+
     if level in ("TP1", "TP2", "TP3") and _DBSession:
         try:
             auto_cfg = _get_automation_settings("default")
             if auto_cfg.get("breakeven_on"):
-                new_sl = None
+                new_sl       = None
                 ladder_label = None
-                if level == "TP1":
-                    # Move to entry
-                    open_price = None
-                    with mt5_state_lock:
-                        for uid, st in mt5_state.items():
-                            if isinstance(st, dict):
-                                for p in st.get("positions", []):
-                                    if str(p.get("ticket")) == str(ticket):
-                                        open_price = p.get("open_price")
+                db_lookup    = _DBSession()
+                try:
+                    import re as _re_sl
+                    # Fetch the DB record for the position that just hit TP.
+                    # Primary: mt5_ticket match (only works when EA stores res.order not res.deal)
+                    original = (
+                        db_lookup.query(MT5Order)
+                        .filter(
+                            MT5Order.mt5_ticket == int(ticket),
+                            MT5Order.status     == "filled",
+                            MT5Order.order_type.in_(["BUY", "SELL"]),
+                        )
+                        .first()
+                    )
+                    # Fallback 1: mt5_state comment lookup (EA embeds "DotVerse #<id>" in position comment)
+                    # This handles the common case where mt5_ticket = deal ticket ≠ position ticket.
+                    if not original:
+                        _dv_id = None
+                        with mt5_state_lock:
+                            for _uid2, _st2 in mt5_state.items():
+                                if not isinstance(_st2, dict):
+                                    continue
+                                for _p2 in _st2.get("positions", []):
+                                    if str(_p2.get("ticket", "")) == str(ticket):
+                                        _m2 = _re_sl.search(r'DotVerse #(\d+)',
+                                                            _p2.get("comment", ""))
+                                        if _m2:
+                                            _dv_id = int(_m2.group(1))
                                         break
-                    new_sl = float(open_price) if open_price else None
-                    ladder_label = f"Breakeven after TP1 — SL → entry {new_sl}" if new_sl else None
-                elif level in ("TP2", "TP3"):
-                    # Look up the original TP1/TP2 price from MT5Order using mt5_ticket
-                    db_lookup = _DBSession()
-                    try:
-                        original = db_lookup.query(MT5Order)\
-                            .filter(MT5Order.mt5_ticket == int(ticket),
-                                    MT5Order.action == "open",
-                                    MT5Order.status == "filled").first()
-                        if original:
+                                if _dv_id:
+                                    break
+                        if _dv_id:
+                            original = (
+                                db_lookup.query(MT5Order)
+                                .filter(
+                                    MT5Order.id         == _dv_id,
+                                    MT5Order.status     == "filled",
+                                    MT5Order.order_type.in_(["BUY", "SELL"]),
+                                )
+                                .first()
+                            )
+                    # Fallback 2: most recent filled order on this symbol
+                    if not original:
+                        original = (
+                            db_lookup.query(MT5Order)
+                            .filter(
+                                MT5Order.symbol      == symbol,
+                                MT5Order.status      == "filled",
+                                MT5Order.order_type.in_(["BUY", "SELL"]),
+                            )
+                            .order_by(MT5Order.created_at.desc())
+                            .first()
+                        )
+                    if original:
+                        if level == "TP1":
+                            # Breakeven = actual fill price; fall back to requested price if EA
+                            # hasn't confirmed fill yet (race condition between TP1 and confirm)
+                            entry_px = float(original.fill_price or original.price) if (original.fill_price or original.price) else None
+                            if not entry_px:
+                                # Fallback: pull open_price from any remaining position
+                                with mt5_state_lock:
+                                    for _uid2, _st2 in mt5_state.items():
+                                        if not isinstance(_st2, dict):
+                                            continue
+                                        for _p2 in _st2.get("positions", []):
+                                            if _p2.get("symbol","").upper() == symbol.upper():
+                                                entry_px = (_p2.get("open_price")
+                                                            or _p2.get("price_open"))
+                                                if entry_px:
+                                                    break
+                            if entry_px:
+                                new_sl       = float(entry_px)
+                                ladder_label = f"Breakeven after TP1 — SL → entry {new_sl}"
+
+                        elif level in ("TP2", "TP3"):
+                            # TP1/TP2 prices are stored on the original order record
+                            # at submission time — no cross-signal contamination possible.
+                            # TP2 cascade → lock at TP1 price = original.tp
+                            # TP3 cascade → lock at TP2 price = original.tp2
                             if level == "TP2" and original.tp:
-                                new_sl = float(original.tp)
+                                new_sl       = float(original.tp)
                                 ladder_label = f"Lock TP1 after TP2 — SL → TP1 ({new_sl})"
                             elif level == "TP3" and original.tp2:
-                                new_sl = float(original.tp2)
+                                new_sl       = float(original.tp2)
                                 ladder_label = f"Lock TP2 after TP3 — SL → TP2 ({new_sl})"
-                    finally:
-                        db_lookup.close()
+                            elif level == "TP3" and original.tp:
+                                # tp2 not stored — fall back to tp1 price
+                                new_sl       = float(original.tp)
+                                ladder_label = f"Lock profit after TP3 — SL → TP1 ({new_sl})"
+                finally:
+                    db_lookup.close()
+
                 if new_sl is not None and ladder_label:
-                    db_be = _DBSession()
-                    try:
-                        be_order = MT5Order(
-                            user_id      = "default",
-                            symbol       = symbol,
-                            order_type   = "MODIFY",
-                            volume       = 0,
-                            price        = 0,
-                            sl           = new_sl,
-                            action       = "modify_sl",
-                            close_ticket = int(ticket),
-                            status       = "pending",
-                            comment      = ladder_label,
-                        )
-                        db_be.add(be_order)
-                        db_be.commit()
-                        be_tg = (f"🔒 SL Ladder — {symbol}\n"
-                                 f"{ladder_label}\n"
-                                 f"Ticket #{ticket} — profit locked.")
+                    # Collect ALL remaining open positions on this symbol
+                    # (exclude the just-closed ticket — it no longer exists in MT5)
+                    remaining_tickets = []
+                    with mt5_state_lock:
+                        for _uid3, _st3 in mt5_state.items():
+                            if not isinstance(_st3, dict):
+                                continue
+                            for _p3 in _st3.get("positions", []):
+                                _rem_t = _p3.get("ticket")
+                                if (_rem_t is not None
+                                        and _p3.get("symbol", "").upper() == symbol.upper()
+                                        and str(_rem_t) != str(ticket)):
+                                    remaining_tickets.append(_rem_t)
+
+                    if remaining_tickets:
+                        db_be = _DBSession()
                         try:
-                            send_telegram(be_tg)
-                        except Exception:
-                            pass
-                        _push_notification("default", "level",
-                                           f"🔒 SL Locked — {symbol}",
-                                           ladder_label)
-                        print(f"[sl-ladder] {symbol} #{ticket} {level} -> SL={new_sl}")
-                    except Exception as be_e:
-                        print(f"[sl-ladder] DB error: {be_e}")
-                    finally:
-                        db_be.close()
+                            for rem_ticket in remaining_tickets:
+                                be_order = MT5Order(
+                                    user_id      = "default",
+                                    symbol       = symbol,
+                                    order_type   = "MODIFY",
+                                    volume       = 0,
+                                    price        = 0,
+                                    sl           = new_sl,
+                                    action       = "modify_sl",
+                                    close_ticket = int(rem_ticket),
+                                    status       = "pending",
+                                    comment      = f"{ladder_label} (#{rem_ticket})",
+                                )
+                                db_be.add(be_order)
+                            db_be.commit()
+                            be_tg = (
+                                f"🔒 SL Ladder — {symbol}\n"
+                                f"{ladder_label}\n"
+                                f"{len(remaining_tickets)} position(s) SL updated."
+                            )
+                            try:
+                                send_telegram(be_tg)
+                            except Exception:
+                                pass
+                            _push_notification(
+                                "default", "level",
+                                f"🔒 SL Locked — {symbol}",
+                                f"{ladder_label} ({len(remaining_tickets)} positions)"
+                            )
+                            print(f"[sl-ladder] {symbol} level={level} new_sl={new_sl} "
+                                  f"→ {len(remaining_tickets)} positions: {remaining_tickets}")
+                        except Exception as be_e:
+                            db_be.rollback()
+                            print(f"[sl-ladder] DB error: {be_e}")
+                        finally:
+                            db_be.close()
+                    else:
+                        print(f"[sl-ladder] {symbol} level={level}: "
+                              f"no remaining open positions found — cascade skipped")
         except Exception as e:
             print(f"[sl-ladder] {e}")
 
@@ -4375,11 +5113,45 @@ def mt5_push_state():
     user_id   = body.get("user_id", "default")
     account   = body.get("account", {})
     positions = body.get("positions", [])
+    # Bug S fix: spread guard — if EA reports current spread per position,
+    # compare against stored entry_atr (5× ATR threshold).
+    # Sets spread_warning flag in mt5_state so watch job can pause auto-trades.
+    # Domain rule: spread > 5× ATR = market conditions are abnormal (news spike,
+    # illiquid session). Auto-trading during this window has negative expectancy.
+    spread_warning = False
+    if _DBSession:
+        try:
+            db_s = _DBSession()
+            for pos in positions:
+                pos_spread = pos.get("spread")          # EA may include current spread
+                if pos_spread is None:
+                    continue
+                sym = pos.get("symbol", "")
+                recent = (
+                    db_s.query(MT5Order)
+                    .filter(
+                        MT5Order.symbol   == sym,
+                        MT5Order.user_id.in_([user_id, "default"]),
+                        MT5Order.entry_atr.isnot(None),
+                    )
+                    .order_by(MT5Order.created_at.desc())
+                    .first()
+                )
+                if recent and recent.entry_atr:
+                    if float(pos_spread) > 5.0 * float(recent.entry_atr):
+                        spread_warning = True
+                        break
+            db_s.close()
+        except Exception:
+            pass
     with mt5_state_lock:
+        prev = mt5_state.get(user_id, {})
         mt5_state[user_id] = {
-            "account":   account,
-            "positions": positions,
-            "last_seen": datetime.utcnow().isoformat(),
+            "account":        account,
+            "positions":      positions,
+            "last_seen":      datetime.utcnow().isoformat(),
+            "level_hits":     prev.get("level_hits", {}),  # preserve — set by mt5_level_alert
+            "spread_warning": spread_warning,               # Bug S: high-spread guard flag
         }
     return jsonify({"status": "ok"})
 
@@ -4411,9 +5183,11 @@ def mt5_get_state():
                 if m:
                     order_ids.append(int(m.group(1)))
             if order_ids:
+                # Include "default" so Telegram-execute and auto-scan orders
+                # (created with user_id="default") also get enriched.
                 orders = db.query(MT5Order).filter(
                     MT5Order.id.in_(order_ids),
-                    MT5Order.user_id == user_id_str
+                    MT5Order.user_id.in_([user_id_str, "default"])
                 ).all()
                 order_map = {o.id: o for o in orders}
                 for p in positions:
@@ -4447,8 +5221,10 @@ def mt5_get_orders():
     user_id = str(session.get("user_id"))
     db = _DBSession()
     try:
-        orders = db.query(MT5Order).filter_by(user_id=user_id)\
-                   .order_by(MT5Order.created_at.desc()).limit(50).all()
+        orders = db.query(MT5Order).filter(
+                       MT5Order.user_id.in_([user_id, "default"]),  # include Telegram-execute + auto-scan orders (saved as "default")
+                       MT5Order.order_type != "MODIFY",             # exclude internal modify_sl cascade orders
+                   ).order_by(MT5Order.created_at.desc()).limit(50).all()
         return jsonify({"orders": [{
             "id":         o.id,
             "symbol":     o.symbol,
@@ -4601,9 +5377,10 @@ def automation_settings_save():
         if "scan_enabled"     in body: s.scan_enabled     = bool(body["scan_enabled"])
         if "scan_risk_pct"    in body: s.scan_risk_pct    = float(body["scan_risk_pct"])
         if "breakeven_on"     in body: s.breakeven_on     = bool(body["breakeven_on"])
-        if "trailing_on"      in body: s.trailing_on      = bool(body["trailing_on"])
-        if "trailing_pips"    in body: s.trailing_pips    = float(body["trailing_pips"])
-        if "market_alerts_on" in body: s.market_alerts_on = bool(body["market_alerts_on"])
+        if "trailing_on"       in body: s.trailing_on       = bool(body["trailing_on"])
+        if "trailing_pips"     in body: s.trailing_pips     = float(body["trailing_pips"])
+        if "trailing_atr_mult" in body: s.trailing_atr_mult = float(body["trailing_atr_mult"])
+        if "market_alerts_on"  in body: s.market_alerts_on  = bool(body["market_alerts_on"])
         s.updated_at = datetime.utcnow()
         db.commit()
         return jsonify({"status": "ok"})
@@ -4903,6 +5680,25 @@ def telegram_status():
     return jsonify({"configured": bool(token and chat)})
 
 
+def _tg_dismiss_keyboard(bot_token, callback_id, chat_id, message_id, answer_text, show_alert=False):
+    """Acknowledge a Telegram callback_query and remove the inline keyboard from the message."""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
+            json={"callback_query_id": callback_id, "text": answer_text, "show_alert": show_alert},
+            timeout=5,
+        )
+        if chat_id and message_id:
+            requests.post(
+                f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup",
+                json={"chat_id": chat_id, "message_id": message_id,
+                      "reply_markup": {"inline_keyboard": []}},
+                timeout=5,
+            )
+    except Exception as _tgd_e:
+        print(f"[Telegram dismiss] {_tgd_e}")
+
+
 @app.route("/api/telegram/webhook", methods=["POST"])
 def telegram_webhook():
     """Telegram calls this when user taps an inline keyboard button."""
@@ -4938,17 +5734,21 @@ def telegram_webhook():
                          else "stock")))
                     symbol = _mt5_symbol(t, at)
                     order = MT5Order(
-                        user_id    = "default",
-                        symbol     = symbol,
-                        order_type = rec.signal,
-                        volume     = rec.lot_size or 0.01,
-                        price      = rec.entry or 0,
-                        sl         = rec.sl,
-                        tp         = rec.tp1,
-                        timeframe  = rec.timeframe,
-                        action     = "open",
-                        status     = "pending",
-                        comment    = f"Telegram execute #{scan_id}",
+                        user_id          = "default",
+                        symbol           = symbol,
+                        order_type       = rec.signal,
+                        volume           = rec.lot_size or 0.01,
+                        price            = rec.entry or 0,
+                        sl               = rec.sl,
+                        tp               = rec.tp1,
+                        tp2              = rec.tp2,
+                        tp3              = rec.tp3,
+                        timeframe        = rec.timeframe,
+                        entry_confluence = rec.entry_confluence,
+                        entry_atr        = rec.entry_atr,
+                        action           = "open",
+                        status           = "pending",
+                        comment          = f"Telegram execute #{scan_id}",
                     )
                     db.add(order)
                     db.commit()
@@ -5028,6 +5828,134 @@ def telegram_webhook():
                     )
             except Exception:
                 pass
+
+    # ── breakeven|ticket|symbol|reason ────────────────────────────────────────
+    # Move stop loss to the position's open (entry) price — locks in breakeven.
+    if len(parts) == 4 and parts[0] == "breakeven":
+        _, ticket_str, symbol, _reason = parts
+        try:
+            ticket = int(ticket_str)
+        except ValueError:
+            ticket = 0
+        queued = False
+        if ticket > 0 and _DBSession:
+            # Look up current open price from MT5 state
+            open_price = None
+            with mt5_state_lock:
+                for _uid_key, _st in mt5_state.items():
+                    if isinstance(_st, dict):
+                        for _pos in _st.get("positions", []):
+                            if str(_pos.get("ticket")) == str(ticket):
+                                open_price = _pos.get("open_price") or _pos.get("price_open")
+                                break
+            if open_price:
+                db = _DBSession()
+                try:
+                    be_order = MT5Order(
+                        user_id      = "default",
+                        symbol       = symbol,
+                        order_type   = "MODIFY",
+                        volume       = 0,
+                        price        = 0,
+                        sl           = float(open_price),
+                        action       = "modify_sl",
+                        close_ticket = ticket,
+                        status       = "pending",
+                        comment      = f"Telegram breakeven #{ticket}",
+                    )
+                    db.add(be_order)
+                    db.commit()
+                    queued = True
+                except Exception as _be_err:
+                    db.rollback()
+                    print(f"[Telegram webhook] breakeven error: {_be_err}")
+                finally:
+                    db.close()
+        answer = "✅ Stop moved to breakeven — EA will execute within 5s" if queued \
+                 else "⚠️ Could not find open price — move stop manually"
+        _tg_dismiss_keyboard(bot_token, callback_id, chat_id, message_id, answer, show_alert=True)
+
+    # ── ignore|ticket|symbol|reason ───────────────────────────────────────────
+    # User chose to keep the original stop — just dismiss the keyboard.
+    elif len(parts) == 4 and parts[0] == "ignore":
+        _tg_dismiss_keyboard(bot_token, callback_id, chat_id, message_id,
+                             "Keeping original stop — monitor the position closely.",
+                             show_alert=False)
+
+    # ── reanalyze|ticker|symbol|reason ────────────────────────────────────────
+    # Can't trigger a full analysis from the Telegram webhook context.
+    # Acknowledge and direct user to open DotVerse.
+    elif len(parts) == 4 and parts[0] == "reanalyze":
+        _base_ticker = parts[1]
+        _tg_dismiss_keyboard(bot_token, callback_id, chat_id, message_id,
+                             f"Open DotVerse and re-run analysis for {_base_ticker} "
+                             f"to get updated TP levels at current volatility.",
+                             show_alert=True)
+
+    # ── partial_close|ticket|symbol|reason ────────────────────────────────────
+    # Close ~50% of the current position volume.
+    elif len(parts) == 4 and parts[0] == "partial_close":
+        _, ticket_str, symbol, _reason = parts
+        try:
+            ticket = int(ticket_str)
+        except ValueError:
+            ticket = 0
+        queued   = False
+        half_vol = 0  # initialised here so _half_display never hits NameError
+        if ticket > 0 and _DBSession:
+            # Find current position volume AND open price from MT5 state
+            pos_vol    = None
+            open_price = None
+            with mt5_state_lock:
+                for _uid_key, _st in mt5_state.items():
+                    if isinstance(_st, dict):
+                        for _pos in _st.get("positions", []):
+                            if str(_pos.get("ticket")) == str(ticket):
+                                pos_vol    = _pos.get("volume") or _pos.get("lots")
+                                open_price = _pos.get("open_price") or _pos.get("price_open")
+                                break
+            half_vol = round(float(pos_vol) / 2, 2) if pos_vol else 0
+            if half_vol >= 0.01:
+                db = _DBSession()
+                try:
+                    pc_order = MT5Order(
+                        user_id      = "default",
+                        symbol       = symbol,
+                        order_type   = "CLOSE",
+                        volume       = half_vol,
+                        price        = 0,
+                        action       = "partial_close",
+                        close_ticket = ticket,
+                        status       = "pending",
+                        comment      = f"Telegram partial close 50% #{ticket}",
+                    )
+                    db.add(pc_order)
+                    # Move SL to breakeven in the same transaction if open price is known
+                    if open_price:
+                        be_order = MT5Order(
+                            user_id      = "default",
+                            symbol       = symbol,
+                            order_type   = "MODIFY",
+                            volume       = 0,
+                            price        = 0,
+                            sl           = float(open_price),
+                            action       = "modify_sl",
+                            close_ticket = ticket,
+                            status       = "pending",
+                            comment      = f"Telegram breakeven (post partial close) #{ticket}",
+                        )
+                        db.add(be_order)
+                    db.commit()
+                    queued = True
+                except Exception as _pc_err:
+                    db.rollback()
+                    print(f"[Telegram webhook] partial_close error: {_pc_err}")
+                finally:
+                    db.close()
+        _half_display = f"{half_vol} lots" if half_vol else "?"
+        answer = f"✅ Closing 50% ({_half_display}) + moving SL to breakeven — EA executes within 5s" \
+                 if queued else "⚠️ Could not find position volume — close manually"
+        _tg_dismiss_keyboard(bot_token, callback_id, chat_id, message_id, answer, show_alert=True)
 
     return jsonify({"ok": True})
 
@@ -5562,6 +6490,17 @@ def analyze():
             **counter,
             "tv": tv,
         })
+        # ── Macro context — upcoming high-impact events (non-blocking, Redis-cached) ──
+        try:
+            _macro = _get_macro_context_inline(ticker, asset_type)
+            response_data["macro_events"]  = _macro.get("events", [])
+            response_data["macro_warning"] = _macro.get("warning", "")
+            response_data["macro_high_impact"] = _macro.get("has_high_impact", False)
+        except Exception as _mce:
+            response_data["macro_events"] = []
+            response_data["macro_warning"] = ""
+            response_data["macro_high_impact"] = False
+
         # ── Scanner cache override REMOVED 2026-04-29 (Bug N fix) ──
         # Previously read scanner_signal Redis key and overrode response_data signal
         # fields. Created the same trust violation we removed from TV override:
@@ -7637,13 +8576,15 @@ class MT5Order(_Base):
     tp2         = Column(Float,      nullable=True)
     tp3         = Column(Float,      nullable=True)
     timeframe    = Column(String(8),   nullable=True)                       # 15m | 1h | 4h | 1d | 1w | 1mo
-    action       = Column(String(8),  nullable=False, default="open")    # open | close
+    action       = Column(String(32), nullable=False, default="open")    # open | close | modify_sl | partial_close | trailing
     close_ticket = Column(Integer,    nullable=True)                       # MT5 ticket to close
     status      = Column(String(16), nullable=False, default="pending")  # pending|executing|filled|failed|cancelled
     mt5_ticket  = Column(Integer,    nullable=True)
     fill_price  = Column(Float,      nullable=True)
     pnl         = Column(Float,      nullable=True)    # realised P&L in account currency (set by EA on close)
-    comment     = Column(String(128),nullable=True)
+    comment          = Column(String(128),nullable=True)
+    entry_confluence = Column(Float,      nullable=True)   # bull_pct at time of submission (0.0–1.0)
+    entry_atr        = Column(Float,      nullable=True)   # ATR price distance at time of submission
     created_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
     filled_at   = Column(DateTime,   nullable=True)
 
@@ -7680,6 +8621,7 @@ class AutomationSettings(_Base):
     breakeven_on     = Column(Boolean, default=True)
     trailing_on      = Column(Boolean, default=False)
     trailing_pips    = Column(Float,   default=50.0)
+    trailing_atr_mult= Column(Float,   default=2.0)   # ATR multiplier — overrides fixed pips when > 0
     market_alerts_on = Column(Boolean, default=True)
     updated_at       = Column(DateTime, default=datetime.utcnow)
 
@@ -7744,9 +8686,13 @@ class ScanAlert(_Base):
     trade_type = Column(String(16), nullable=False)   # scalping | swing
     entry      = Column(Float,  nullable=True)
     sl         = Column(Float,  nullable=True)
-    tp1        = Column(Float,  nullable=True)
-    lot_size   = Column(Float,  nullable=True)
-    sent_at    = Column(DateTime, default=datetime.utcnow)
+    tp1              = Column(Float,  nullable=True)
+    tp2              = Column(Float,  nullable=True)
+    tp3              = Column(Float,  nullable=True)
+    lot_size         = Column(Float,  nullable=True)
+    entry_confluence = Column(Float,  nullable=True)   # bull_pct at alert time (0.0–1.0)
+    entry_atr        = Column(Float,  nullable=True)   # ATR at alert time (price units)
+    sent_at          = Column(DateTime, default=datetime.utcnow)
 
 # ─── WATCH DB HELPERS ─────────────────────────────────────────
 
@@ -7832,13 +8778,24 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'legacy'"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp2 FLOAT"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp3 FLOAT"))
-                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS action VARCHAR(8) DEFAULT 'open'"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS action VARCHAR(32) DEFAULT 'open'"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS close_ticket INTEGER"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS pnl FLOAT"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user'"))
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS tier VARCHAR(20) DEFAULT 'free'"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS trailing_atr_mult FLOAT DEFAULT 2.0"))
+                # updated_at required by Bug W fix (_get_automation_settings orders by this to
+                # find the most-recently-customised human-user row for EA/background job calls)
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS entry_confluence FLOAT"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS entry_atr FLOAT"))
+                # fill_price and mt5_ticket introduced in Stage 2 commit — missing from earlier migration
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS fill_price FLOAT"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS mt5_ticket INTEGER"))
+                # Widen action column — original VARCHAR(8) too short for "modify_sl" (9 chars)
+                _conn.execute(text("ALTER TABLE mt5_orders ALTER COLUMN action TYPE VARCHAR(32)"))
                 # Phase A/B/C/D automation tables (idempotent)
                 _conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS notifications (
@@ -7873,6 +8830,11 @@ def _init_db():
                         entry FLOAT, sl FLOAT, tp1 FLOAT, lot_size FLOAT,
                         sent_at TIMESTAMP DEFAULT NOW()
                     )"""))
+                # Add tp2/tp3/entry_confluence/entry_atr to scan_alerts if missing (existing Railway DB)
+                _conn.execute(text("ALTER TABLE scan_alerts ADD COLUMN IF NOT EXISTS tp2 FLOAT"))
+                _conn.execute(text("ALTER TABLE scan_alerts ADD COLUMN IF NOT EXISTS tp3 FLOAT"))
+                _conn.execute(text("ALTER TABLE scan_alerts ADD COLUMN IF NOT EXISTS entry_confluence FLOAT"))
+                _conn.execute(text("ALTER TABLE scan_alerts ADD COLUMN IF NOT EXISTS entry_atr FLOAT"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")
