@@ -4897,6 +4897,12 @@ def mt5_level_alert():
     """EA reports when a TP or SL level is hit — sends Telegram notification."""
     body   = request.json or {}
     ticket = body.get("ticket")
+    if not ticket:
+        return jsonify({"status": "ok", "note": "missing_ticket"}), 200
+    try:
+        int(ticket)
+    except (TypeError, ValueError):
+        return jsonify({"status": "ok", "note": "invalid_ticket"}), 200
     symbol = body.get("symbol", "")
     level  = body.get("level", "")    # TP1 | TP2 | TP3 | SL
     price  = body.get("price", 0)
