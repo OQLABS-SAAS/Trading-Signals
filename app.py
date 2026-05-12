@@ -5754,9 +5754,11 @@ def telegram_webhook():
                         entry_atr        = rec.entry_atr,
                         action           = "open",
                         status           = "pending",
-                        comment          = f"Telegram execute #{scan_id}",
                     )
                     db.add(order)
+                    db.commit()
+                    db.refresh(order)
+                    order.comment = f"DotVerse #{order.id}"
                     db.commit()
                     queued = True
                     answer_text = (f"✅ {rec.signal} {rec.lot_size:.2f} lots {symbol} queued — "
