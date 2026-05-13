@@ -9317,6 +9317,7 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS tier VARCHAR(20) DEFAULT 'free'"))
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS trailing_atr_mult FLOAT DEFAULT 1.0"))
                 _conn.execute(text("ALTER TABLE automation_settings ALTER COLUMN trailing_atr_mult SET DEFAULT 1.0"))
+                _conn.execute(text("UPDATE automation_settings SET trailing_atr_mult = 1.0 WHERE trailing_atr_mult = 2.0"))
                 # updated_at required by Bug W fix (_get_automation_settings orders by this to
                 # find the most-recently-customised human-user row for EA/background job calls)
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
