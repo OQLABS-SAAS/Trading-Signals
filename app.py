@@ -2111,6 +2111,152 @@ def _get_macro_context_inline(ticker, asset_type):
     return result
 
 
+def _fetch_news_sentiment(ticker, asset_type):
+    """Fetch and score news sentiment from Finnhub for the given ticker.
+
+    GAP 5 (ITEM 7a): surfaces positive/negative/neutral headline counts and a
+    verdict tag on the signal card. Called in analyze() after macro_events.
+
+    Returns dict or None.
+    None  — FINNHUB_API_KEY not set (signal card hides widget, no crash).
+    dict  — {positive, negative, neutral, verdict, top_headline, available}
+
+    Failure modes handled:
+    - No API key         → None
+    - Rate limit / 4xx   → cached empty result
+    - Empty array        → verdict = "NEWS UNAVAILABLE"
+    - No sentiment field → keyword-based fallback
+    - Old articles >24h  → excluded from count
+    - Any exception      → None (never raises)
+    """
+    fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not fh_key:
+        return None
+
+    # Cache key per ticker per hour — spec TTL 3600s
+    _clean    = (ticker.upper()
+                 .replace("-", "").replace("/", "")
+                 .replace("=X", "").replace("=F", ""))
+    cache_key = f"news:{_clean}:{datetime.utcnow().strftime('%Y-%m-%d-%H')}"
+    try:
+        if _redis_client:
+            cached = _redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+    except Exception:
+        pass
+
+    # Keyword scoring fallback — spec words + common expansions
+    _BULL_KW = {"surge", "rally", "all-time", "breakout", "bullish",
+                "gain", "rise", "high", "record"}
+    _BEAR_KW = {"crash", "drop", "fear", "dump", "bearish",
+                "fall", "low", "plunge", "sell-off", "collapse"}
+
+    def _kw_score(headline):
+        w = headline.lower()
+        bull = any(k in w for k in _BULL_KW)
+        bear = any(k in w for k in _BEAR_KW)
+        if bull and not bear:  return "positive"
+        if bear and not bull:  return "negative"
+        return "neutral"
+
+    _empty = {"positive": 0, "negative": 0, "neutral": 0,
+              "verdict": "NEWS UNAVAILABLE", "top_headline": None, "available": False}
+
+    try:
+        now_utc  = datetime.utcnow()
+        from_dt  = (now_utc - timedelta(hours=24)).strftime("%Y-%m-%d")
+        to_dt    = now_utc.strftime("%Y-%m-%d")
+
+        if asset_type in ("stock", "index"):
+            # Finnhub company-news: strip suffixes to get bare symbol (e.g. AAPL)
+            _fh_sym = ticker.upper().split("-")[0].replace("^", "")
+            r = requests.get(
+                "https://finnhub.io/api/v1/company-news",
+                params={"symbol": _fh_sym, "from": from_dt, "to": to_dt, "token": fh_key},
+                timeout=5,
+            )
+        elif asset_type == "crypto":
+            r = requests.get(
+                "https://finnhub.io/api/v1/news",
+                params={"category": "crypto", "token": fh_key},
+                timeout=5,
+            )
+        else:  # forex, commodity, general
+            r = requests.get(
+                "https://finnhub.io/api/v1/news",
+                params={"category": "general", "token": fh_key},
+                timeout=5,
+            )
+
+        if r.status_code != 200:
+            return _empty
+
+        raw = r.json()
+        if not isinstance(raw, list) or not raw:
+            return _empty
+
+    except Exception as _fe:
+        print(f"[news_sentiment] fetch error: {_fe}")
+        return None
+
+    # Score articles from last 24h
+    positive = negative = neutral = 0
+    top_headline = None
+    top_dt = 0
+    now_ts = now_utc.timestamp()
+
+    for art in raw[:30]:
+        headline = (art.get("headline") or art.get("title") or "").strip()
+        if not headline:
+            continue
+        art_dt = art.get("datetime", 0) or 0
+        if art_dt > 0 and (now_ts - art_dt) > 86400:
+            continue  # older than 24h — skip
+        if art_dt > top_dt:
+            top_dt = art_dt
+            top_headline = headline[:80]
+        # Use Finnhub sentiment field if present, else keyword fallback
+        sent = art.get("sentiment")
+        if sent is not None:
+            try:
+                sv = float(sent)
+                if sv > 0.2:    positive += 1
+                elif sv < -0.2: negative += 1
+                else:           neutral  += 1
+                continue
+            except (TypeError, ValueError):
+                pass
+        s = _kw_score(headline)
+        if s == "positive":   positive += 1
+        elif s == "negative": negative += 1
+        else:                 neutral  += 1
+
+    net   = positive - negative
+    total = positive + negative + neutral
+    if net >= 3:
+        verdict = "BULLISH PRESS"
+    elif net <= -3:
+        verdict = "NEGATIVE PRESS"
+    else:
+        verdict = "NEUTRAL"
+
+    result = {
+        "positive":     positive,
+        "negative":     negative,
+        "neutral":      neutral,
+        "verdict":      verdict if total > 0 else "NEWS UNAVAILABLE",
+        "top_headline": top_headline,
+        "available":    total > 0,
+    }
+    try:
+        if _redis_client:
+            _redis_client.setex(cache_key, 3600, json.dumps(result))
+    except Exception:
+        pass
+    return result
+
+
 def _narrate_data_openai(result, ticker, asset_type, ind, timeframe):
     """
     Use OpenAI GPT-4o-mini to narrate indicator data as plain English.
@@ -6878,6 +7024,12 @@ def analyze():
             response_data["macro_events"] = []
             response_data["macro_warning"] = ""
             response_data["macro_high_impact"] = False
+
+        # ── News sentiment (GAP 5 — Finnhub, Redis-cached 1h) ─────────────────────
+        try:
+            response_data["news_sentiment"] = _fetch_news_sentiment(ticker, asset_type)
+        except Exception:
+            response_data["news_sentiment"] = None
 
         # ── Scanner cache override REMOVED 2026-04-29 (Bug N fix) ──
         # Previously read scanner_signal Redis key and overrode response_data signal
