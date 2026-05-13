@@ -7112,6 +7112,10 @@ async function dvRunAnalyze(){
       volatility_range:    data.volatility_range,
       volatility_p95:      data.volatility_p95,
       tv_signal_used:      data.tv_signal_used === true,
+      // ── Macro / event context (from Finnhub calendar) ──
+      macroWarning:        data.macro_warning || '',
+      macroEvents:         data.macro_events  || [],
+      macroHighImpact:     data.macro_high_impact === true,
     };
     // Clear any stale verdict pre-warm from a previous signal
     window._verdictPrewarmJobId = null;
@@ -7183,6 +7187,19 @@ function updateFlowBadge() {
   var badge = document.getElementById('szFlowBadge');
   if (!sig || !badge) { if (badge) badge.style.display = 'none'; return; }
 
+  // ITEM 2: HOLD signals have no entry/SL/TP — show a plain-English "no trade" message
+  if ((sig.sig || '').toUpperCase() === 'HOLD') {
+    badge.innerHTML =
+      '<div style="padding:14px 16px;text-align:center;">'
+      + '<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.45);line-height:1.6;">'
+      + 'No position sizing needed — this signal is a <strong style="color:rgba(201,168,76,.7);">HOLD</strong>.'
+      + '<br>Wait for the next BUY or SELL signal before entering a trade.'
+      + '</div>'
+      + '</div>';
+    badge.style.display = 'block';
+    return;
+  }
+
   // ── PRIORITY 1: Kelly from verified backtest data ─────────────────────
   // Kelly fraction: f* = p - q/b  (Half Kelly = f*/2)
   // p = win rate, q = 1-p, b = avg_win_R / avg_loss_R
@@ -7231,8 +7248,8 @@ function updateFlowBadge() {
   var confPct    = totalVotes > 0 ? Math.round((Math.max(bullCount, bearCount) / totalVotes) * 100) : 65;
 
   var entry = parseFloat(sig.entry)              || 0;
-  var sl    = parseFloat(sig.stop_loss || sig.sl) || 0;
-  var tp1   = parseFloat(sig.tp1 || sig.tp)       || 0;
+  var sl    = parseFloat(sig.stop_loss || sig.sl) || null;
+  var tp1   = parseFloat(sig.tp1 || sig.tp)       || null;
   var rr    = (entry > 0 && sl > 0 && tp1 > 0)
               ? Math.abs(tp1 - entry) / Math.abs(entry - sl)
               : (bt && bt.avg_rr ? bt.avg_rr : 2.0);
@@ -11385,6 +11402,20 @@ function showUnderstand(){
     <span>${sig.sym} ${sig.sig} — setup confirmed &middot; Entry ${sig.entry} &middot; SL ${sig.sl}</span>
   </div>
 
+  <!-- Macro event banner — shown when Finnhub returns a high-impact event within 48h -->
+  ${sig.macroWarning ? `
+  <div id="dvMacroBanner" style="display:flex;align-items:flex-start;gap:10px;padding:9px 14px;margin-bottom:8px;background:rgba(201,120,32,.08);border:1px solid rgba(201,120,32,.35);border-radius:7px;">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,.9)" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    <div style="flex:1;">
+      <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:rgba(201,168,76,.9);letter-spacing:.06em;margin-bottom:3px;">MACRO CALENDAR ALERT</div>
+      <div style="font-family:var(--ui);font-size:11px;color:rgba(237,232,216,.8);line-height:1.5;">${sig.macroWarning}</div>
+      ${sig.macroEvents && sig.macroEvents.length > 1 ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px;">${
+        sig.macroEvents.slice(0,4).map(e=>`<span style="font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:3px;background:rgba(201,120,32,.12);border:1px solid rgba(201,120,32,.25);color:rgba(237,232,216,.65);">${e.country} · ${e.title}${e.hours_away!=null?' · '+e.hours_away.toFixed(0)+'h':''}</span>`).join('')
+      }</div>` : ''}
+    </div>
+    <button onclick="document.getElementById('dvMacroBanner').style.display='none'" style="background:none;border:none;color:rgba(237,232,216,.3);cursor:pointer;font-size:14px;padding:0;flex-shrink:0;">×</button>
+  </div>` : ''}
+
   <!-- Info strip — real values from API -->
   <div class="dv-info-strip">
     <div class="dv-ic">
@@ -12929,25 +12960,8 @@ function _vRenderLive(sig, verdict, structured){
   // Build position plan rows from structured data
   var planHtml = '';
   if (s.positions && s.risk_ladder && s.risk_ladder.length >= s.positions){
-    var rows = '', totalRisk = 0;
-    for (var i = 0; i < s.positions; i++){
-      totalRisk += s.risk_ladder[i];
-      rows += '<div style="text-align:center;flex:1;min-width:70px">'
-        + '<div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">#'+(i+1)+'</div>'
-        + '<div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--gold)">'+s.risk_ladder[i].toFixed(1)+'%</div>'
-        + '<div style="font-size:8px;color:var(--grn);font-family:var(--mono);margin-top:1px">TP '+(s.tp_r_multiples&&s.tp_r_multiples[i]?s.tp_r_multiples[i].toFixed(1)+'R':'—')+'</div>'
-        + '<div style="font-size:7px;color:rgba(201,168,76,.6);font-family:var(--mono);margin-top:2px">'+(s.trailing&&s.trailing[i]?s.trailing[i]:'—')+'</div>'
-        + '</div>';
-    }
-    planHtml = '<div style="margin-bottom:14px;border-radius:8px;border:1px solid rgba(93,232,160,.2);background:rgba(93,232,160,.04);padding:14px 16px">'
-      + '<div style="font-size:9px;font-weight:700;color:var(--grn);letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase">Position Plan · '+s.positions+' Entries · '+totalRisk.toFixed(1)+'% Total Risk</div>'
-      + '<div style="display:flex;gap:8px;overflow-x:auto">'+rows+'</div>'
-      + '<div style="margin-top:8px;font-size:9px;color:var(--t3);line-height:1.5">Risk % per entry, TP targets (as R multiples), and trailing stop settings are from the AI analysis. Adjust in Size.</div>'
-      + '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-      + '<span style="font-size:9px;color:var(--t3)">Want different number of positions?</span>'
-      + '<input id="verdictLadderN" type="number" min="1" max="10" value="'+s.positions+'" style="width:44px;background:rgba(255,255,255,.06);border:1px solid rgba(237,232,216,.15);border-radius:4px;padding:4px 6px;color:var(--t1);font-family:var(--mono);font-size:11px;text-align:center;outline:none" />'
-      + '<button onclick="_vAdjustLadder()" style="padding:4px 11px;border-radius:4px;font-size:9px;font-weight:700;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.28);color:var(--amb);cursor:pointer;font-family:var(--mono);letter-spacing:.04em">Ask Agents to Redistribute</button>'
-      + '</div>'
+    planHtml = '<div id="verdictPlanWrap" style="margin-bottom:14px;border-radius:8px;border:1px solid rgba(93,232,160,.2);background:rgba(93,232,160,.04);padding:14px 16px">'
+      + _vBuildPlanInner(s)
       + '</div>';
   }
 
@@ -13164,6 +13178,73 @@ function _vSignalAssessmentAI(s, sig) {
   }).catch(function(){});
 }
 
+// Builds the inner HTML for the position plan div.
+// Used both on initial render and on live update after redistribution.
+function _vBuildPlanInner(s) {
+  var rows = '', totalRisk = 0;
+  for (var i = 0; i < s.positions; i++) {
+    totalRisk += s.risk_ladder[i];
+    rows += '<div style="text-align:center;flex:1;min-width:70px">'
+      + '<div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">#'+(i+1)+'</div>'
+      + '<div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--gold)">'+s.risk_ladder[i].toFixed(1)+'%</div>'
+      + '<div style="font-size:8px;color:var(--grn);font-family:var(--mono);margin-top:1px">TP '+(s.tp_r_multiples&&s.tp_r_multiples[i]?s.tp_r_multiples[i].toFixed(1)+'R':'—')+'</div>'
+      + '<div style="font-size:7px;color:rgba(201,168,76,.6);font-family:var(--mono);margin-top:2px">'+(s.trailing&&s.trailing[i]?s.trailing[i]:'—')+'</div>'
+      + '</div>';
+  }
+  return '<div style="font-size:9px;font-weight:700;color:var(--grn);letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase">Position Plan · '+s.positions+' Entries · '+totalRisk.toFixed(1)+'% Total Risk</div>'
+    + '<div style="display:flex;gap:8px;overflow-x:auto">'+rows+'</div>'
+    + '<div style="margin-top:8px;font-size:9px;color:var(--t3);line-height:1.5">Risk % per entry, TP targets (as R multiples), and trailing stop settings are from the AI analysis. Adjust in Size.</div>'
+    + '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    + '<span style="font-size:9px;color:var(--t3)">Want different number of positions?</span>'
+    + '<input id="verdictLadderN" type="number" min="1" max="10" value="'+s.positions+'" style="width:44px;background:rgba(255,255,255,.06);border:1px solid rgba(237,232,216,.15);border-radius:4px;padding:4px 6px;color:var(--t1);font-family:var(--mono);font-size:11px;text-align:center;outline:none" />'
+    + '<button onclick="_vAdjustLadder()" style="padding:4px 11px;border-radius:4px;font-size:9px;font-weight:700;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.28);color:var(--amb);cursor:pointer;font-family:var(--mono);letter-spacing:.04em">Ask Agents to Redistribute</button>'
+    + '</div>';
+}
+
+// Parses risk % values from DeepSeek's text response.
+// Two-path logic:
+//   Path A — values <= 10%: these look like correctly-formatted SL-based account risk.
+//             Use directly. Filters out false positives like "50% Fibonacci", "65% confidence".
+//   Path B — values > 10%: model likely gave capital-allocation %. Scale proportionally
+//             to maxTotal so the plan shows sensible values regardless of model output.
+function _vParseRiskLadder(text, expectedCount, maxTotal) {
+  var regex = /(\d+\.?\d*)\s*%/g, m, small = [], large = [];
+  while ((m = regex.exec(text)) !== null) {
+    var v = parseFloat(m[1]);
+    if (v > 0 && v <= 10)  small.push(v);
+    else if (v > 10 && v <= 100) large.push(v);
+  }
+  // Path A: enough small values → use directly, but cap total to maxTotal.
+  // Model may return correct per-entry % that happen to sum over the user's limit
+  // (e.g. 10 entries at 1% each = 10% total when maxTotal is 3%). Scale if needed.
+  if (small.length >= expectedCount) {
+    var result = small.slice(0, expectedCount);
+    var resultSum = result.reduce(function(a, b){ return a + b; }, 0);
+    if (resultSum > maxTotal && resultSum > 0) {
+      var scaleFactor = maxTotal / resultSum;
+      return result.map(function(v){ return Math.round(v * scaleFactor * 10) / 10; });
+    }
+    return result;
+  }
+  // Path B: enough large values → scale down proportionally to maxTotal
+  if (large.length >= expectedCount) {
+    var vals = large.slice(0, expectedCount);
+    var sum = vals.reduce(function(a, b){ return a + b; }, 0);
+    if (sum > 0) {
+      var factor = maxTotal / sum;
+      return vals.map(function(v){ return Math.round(v * factor * 10) / 10; });
+    }
+  }
+  return null; // not enough parseable values — plan stays unchanged
+}
+
+// Refreshes just the plan div in-place — does not touch the rest of the verdict DOM.
+function _vRefreshPlanHtml(s) {
+  var wrap = document.getElementById('verdictPlanWrap');
+  if (!wrap) return;
+  wrap.innerHTML = _vBuildPlanInner(s);
+}
+
 function _vAdjustLadder() {
   // Asks DeepSeek agents to redistribute the risk ladder for a different
   // number of positions. Response uses the full verdict context — not formulas.
@@ -13194,7 +13275,16 @@ function _vAdjustLadder() {
     + '\n- Do NOT say "100% of your allocated capital" or any capital-allocation language'
     + '\n- Each entry should use a different risk % based on confidence, not equal splits'
     + '\n\nFor each entry provide: the entry trigger or price zone, the risk % (must be a small number like 0.5%, 0.8%, 1.0%), and one sentence why. Then show the total risk sum.';
-  _vChat(question);
+  _vChat(question, function(answer) {
+    // Parse risk % values from DeepSeek response and update the visual plan
+    var parsed = _vParseRiskLadder(answer, n, maxTotal);
+    if (parsed && parsed.length === n) {
+      window._structuredVerdict = window._structuredVerdict || {};
+      window._structuredVerdict.risk_ladder = parsed;
+      window._structuredVerdict.positions = n;
+      _vRefreshPlanHtml(window._structuredVerdict);
+    }
+  });
 }
 
 function _vShowBanner(status, msg){
@@ -13300,10 +13390,10 @@ function _vPreloadSize(){
   var positions = s.positions || 3;
   var riskLadder = (s.risk_ladder && s.risk_ladder.length >= positions)
     ? s.risk_ladder.slice(0, positions)
-    : [0.5, 1.0, 1.5, 2.0, 2.5].slice(0, positions);
+    : [0.3, 0.5, 0.7, 0.8, 1.0, 1.0, 0.8, 0.7, 0.5, 0.3].slice(0, positions);
   var tpMultiples = (s.tp_r_multiples && s.tp_r_multiples.length >= positions)
     ? s.tp_r_multiples.slice(0, positions)
-    : [1.5, 2.5, 3.5, 4.0, 5.0].slice(0, positions);
+    : [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0].slice(0, positions);
   var trailing = (s.trailing && s.trailing.length >= positions)
     ? s.trailing.slice(0, positions)
     : Array(positions).fill('0.5x ATR after +1.5R');
@@ -13330,6 +13420,8 @@ function _vPreloadSize(){
   // Sync the Size tab ladder to the agent-assigned percentages so
   // szLadderRows shows the same numbers as the Verdict position plan.
   window._szLadder = riskLadder.slice(0, positions);
+  // Assign sensible default targets: first→TP1, second→TP2, rest→TP3
+  window._szLadderTargets = riskLadder.slice(0, positions).map(function(_, idx){ return _szDefaultTarget(idx); });
   setNav('size'); showSize();
   // After showSize() renders, fill szRisk with first-position risk % from the
   // verdict ladder and trigger recalculation so the user sees live numbers.
@@ -13343,7 +13435,7 @@ function _vPreloadSize(){
     }
   }, 150);
 }
-function _vChat(q){
+function _vChat(q, _onComplete){
   if(!q||!q.trim()) return;
   var msgs=document.getElementById('verdictChatMsgs'), inp=document.getElementById('verdictChatInput');
   if(!msgs) return;
@@ -13380,10 +13472,12 @@ function _vChat(q){
     window._verdictChatHistory.push('<div class="verdict-chat-msg verdict-chat-agent">'+answerHtml+'</div>');
     if(msgs) msgs.scrollTop=msgs.scrollHeight;
     if(inp) inp.disabled=false;
+    if(typeof _onComplete === 'function') _onComplete(r && r.answer ? r.answer : '');
   }).catch(function(){
     var el2=document.getElementById(tid);
     if(el2) el2.innerHTML='<div class="verdict-chat-who" style="color:var(--gold)">Analyst Team</div><div class="verdict-chat-bubble" style="color:var(--red)">Network error. Try again.</div>';
     if(inp) inp.disabled=false;
+    if(typeof _onComplete === 'function') _onComplete('');
   });
 }
 
@@ -13829,6 +13923,9 @@ function showSize(){
   if(sig.sig==='SELL'){
     const db=document.getElementById('szDirSell');
     if(db) db.click();
+  } else if((sig.sig||'').toUpperCase()==='HOLD'){
+    // ITEM 3: HOLD has no direction — deactivate both buttons so neither shows active
+    document.querySelectorAll('.sz-dir-btn').forEach(function(b){ b.classList.remove('active'); });
   }
   // Restore the user's persisted risk % from localStorage and refresh the
   // chip highlight + teaching panel. Done after the DOM is built.
@@ -13916,8 +14013,8 @@ function _szUpdatePrice(livePrice) {
   }
 
   // R:R check at current price
-  var sl  = parseFloat(sig.sl || sig.stop_loss || 0);
-  var tp1 = parseFloat(sig.tp || sig.tp1 || 0);
+  var sl  = parseFloat(sig.sl || sig.stop_loss) || null;
+  var tp1 = parseFloat(sig.tp || sig.tp1)       || null;
   var newSlDist = sl  ? Math.abs(livePrice - sl)  : 0;
   var newTpDist = tp1 ? Math.abs(tp1 - livePrice) : 0;
   var rrOk = tp1 && newSlDist > 0 && (newTpDist / newSlDist) >= 1.0;
@@ -14040,6 +14137,19 @@ function szSetDir(dir, btn){
 
 // ── Multi-Trade Ladder — up to 10 simultaneous trades at varying risk % ──
 window._szLadder = window._szLadder || [1.0, 1.5, 2.0, 2.5, 3.0];
+// Per-row TP target: 'tp1' | 'tp2' | 'tp3' | 'trail'
+// Default spread: first position exits at TP1, second at TP2, rest at TP3
+window._szLadderTargets = window._szLadderTargets || ['tp1','tp2','tp3','tp3','tp3'];
+function _szDefaultTarget(i) {
+  if (i === 0) return 'tp1';
+  if (i === 1) return 'tp2';
+  return 'tp3';
+}
+function szLadderTargetUpdate(i, val) {
+  if (!window._szLadderTargets) window._szLadderTargets = [];
+  window._szLadderTargets[i] = val;
+  szLadderRender();
+}
 function szLadderRender() {
   const wrap = document.getElementById('szLadderRows');
   if (!wrap) return;
@@ -14060,11 +14170,15 @@ function szLadderRender() {
   let totalRisk = 0, totalTp1 = 0, totalTp2 = 0, totalTp3 = 0;
   // Format helper — short for negative + dollar, signed
   const fmt$ = (v) => (v >= 0 ? '+$' : '-$') + Math.abs(v).toLocaleString(undefined, {maximumFractionDigits: 2});
+  // Ensure targets array matches current ladder length
+  if (!window._szLadderTargets) window._szLadderTargets = [];
+  while (window._szLadderTargets.length < (window._szLadder||[]).length) {
+    window._szLadderTargets.push(_szDefaultTarget(window._szLadderTargets.length));
+  }
   wrap.innerHTML = (window._szLadder||[]).map((risk, i) => {
     const moneyAtRisk = acct * (risk/100);
     const units       = moneyAtRisk / slDist;
     const lotsStr     = units.toFixed(4);
-    // Per-row $ profit at each TP. Lots × distance per unit.
     const p1 = tp1Dist ? units * tp1Dist : 0;
     const p2 = tp2Dist ? units * tp2Dist : 0;
     const p3 = tp3Dist ? units * tp3Dist : 0;
@@ -14072,32 +14186,44 @@ function szLadderRender() {
     totalTp1  += p1;
     totalTp2  += p2;
     totalTp3  += p3;
-    // Per-target cell — shows "—" if that TP isn't set
     const tpCell = (val, label) => val
       ? `<div style="font-family:var(--mono);font-size:10px;color:rgba(93,232,160,.85);text-align:right;line-height:1.2;"><div style="font-size:8.5px;color:rgba(237,232,216,.4);letter-spacing:.4px;">${label}</div>+$${val.toLocaleString(undefined,{maximumFractionDigits:0})}</div>`
       : `<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.3);text-align:right;line-height:1.2;"><div style="font-size:8.5px;color:rgba(237,232,216,.3);letter-spacing:.4px;">${label}</div>—</div>`;
     const slFmt = sl ? (sl >= 100 ? '$'+sl.toLocaleString(undefined,{maximumFractionDigits:2}) : '$'+sl.toFixed(sl >= 1 ? 4 : 6)) : '—';
-    const autoText = (window._verdictPlan && window._verdictPlan.trailing && window._verdictPlan.trailing[i]) ? window._verdictPlan.trailing[i] : 'Manual';
-    return `<div style="display:grid;grid-template-columns:38px 120px 130px 110px 70px 70px 70px 140px 24px;gap:7px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:5px;">
+    const target = (window._szLadderTargets[i] || _szDefaultTarget(i));
+    // Target selector colour
+    const tgtColMap = {tp1:'rgba(93,232,160,.9)', tp2:'rgba(201,168,76,.95)', tp3:'rgba(93,175,232,.9)', trail:'rgba(232,165,80,.9)'};
+    const tgtLblMap = {tp1:'TP1 — exit full', tp2:'TP2 — hold through TP1', tp3:'TP3 — run to max', trail:'ATR Trail'};
+    const tgtCol = tgtColMap[target] || 'rgba(237,232,216,.7)';
+    // Which TP price this row will use (for profit highlight)
+    const targetProfit = target === 'tp1' ? p1 : target === 'tp2' ? p2 : target === 'tp3' ? p3 : p3;
+    const targetDist   = target === 'tp1' ? tp1Dist : target === 'tp2' ? tp2Dist : target === 'tp3' ? tp3Dist : tp3Dist;
+    return `<div style="display:grid;grid-template-columns:32px 110px 120px 100px 62px 62px 62px 160px 24px;gap:6px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-radius:5px;">
       <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
       <div style="display:flex;align-items:center;gap:6px;">
         <input type="number" step="0.1" min="0.1" max="10" value="${risk}" onchange="szLadderUpdate(${i}, this.value)"
-          style="width:55px;padding:5px 7px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
-        <span style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">% risk</span>
+          style="width:52px;padding:4px 6px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
+        <span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);">%</span>
       </div>
       <div style="font-family:var(--mono);font-size:10px;color:rgba(232,112,110,.85);line-height:1.4;">
         <div style="font-weight:600;">${slFmt}</div>
-        <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;">SL price</div>
+        <div style="font-size:8px;color:rgba(237,232,216,.35);">SL price</div>
         <div style="margin-top:2px;">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
-        <div style="font-size:8px;color:rgba(237,232,216,.35);">if hit</div>
       </div>
-      <div style="font-family:var(--mono);font-size:10.5px;color:rgba(201,168,76,.95);">${lotsStr}<div style="font-size:8.5px;color:rgba(237,232,216,.4);letter-spacing:.4px;">units/lots</div></div>
+      <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.85);">${lotsStr}<div style="font-size:8px;color:rgba(237,232,216,.4);">lots</div></div>
       ${tpCell(p1, 'TP1')}
       ${tpCell(p2, 'TP2')}
       ${tpCell(p3, 'TP3')}
-      <div style="font-family:var(--mono);font-size:9px;line-height:1.4;">
-        <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;margin-bottom:2px;">AUTOMATION</div>
-        ${autoText === 'Manual' ? '<span style="color:rgba(237,232,216,.35);">Manual — none</span>' : '<span style="color:rgba(201,168,76,.85);">' + autoText + '</span>'}
+      <div>
+        <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;margin-bottom:3px;font-family:var(--mono);">TARGET</div>
+        <select onchange="szLadderTargetUpdate(${i}, this.value)"
+          style="width:100%;padding:4px 6px;font-family:var(--mono);font-size:9.5px;background:rgba(9,11,16,.9);border:1px solid ${tgtCol};border-radius:4px;color:${tgtCol};outline:none;cursor:pointer;font-weight:600;">
+          <option value="tp1" ${target==='tp1'?'selected':''}>TP1 — exit full</option>
+          <option value="tp2" ${target==='tp2'?'selected':''}>TP2 — hold to TP2</option>
+          <option value="tp3" ${target==='tp3'?'selected':''}>TP3 — run to max</option>
+          <option value="trail" ${target==='trail'?'selected':''}>ATR Trail</option>
+        </select>
+        ${targetDist && targetProfit ? `<div style="font-size:8.5px;font-family:var(--mono);color:${tgtCol};margin-top:3px;font-weight:700;">+$${targetProfit.toLocaleString(undefined,{maximumFractionDigits:0})}</div>` : ''}
       </div>
       <button onclick="szLadderRemove(${i})" style="background:none;border:none;color:rgba(232,112,110,.6);cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button>
     </div>`;
@@ -14159,11 +14285,14 @@ function szLadderAdd() {
   if (window._szLadder.length >= 10) return;
   const last = window._szLadder[window._szLadder.length - 1] || 1.0;
   window._szLadder.push(Math.min(10, Math.round((last + 0.5) * 10) / 10));
+  if (!window._szLadderTargets) window._szLadderTargets = [];
+  window._szLadderTargets.push(_szDefaultTarget(window._szLadder.length - 1));
   szLadderRender();
 }
 function szLadderRemove(i) {
   window._szLadder.splice(i, 1);
-  if (window._szLadder.length === 0) window._szLadder = [1.0];
+  if (window._szLadderTargets) window._szLadderTargets.splice(i, 1);
+  if (window._szLadder.length === 0) { window._szLadder = [1.0]; window._szLadderTargets = ['tp1']; }
   szLadderRender();
 }
 function szLadderUpdate(i, v) {
@@ -14171,9 +14300,16 @@ function szLadderUpdate(i, v) {
   if (isFinite(n) && n > 0) { window._szLadder[i] = n; szLadderRender(); }
 }
 function szLadderPreset(kind) {
-  if (kind === 'conservative') window._szLadder = [0.5, 0.5, 0.5, 0.5, 0.5];
-  else if (kind === 'balanced')  window._szLadder = [1.0, 1.5, 2.0, 2.5, 3.0];
-  else if (kind === 'aggressive')window._szLadder = [1.0, 2.0, 3.0, 4.0, 5.0];
+  if (kind === 'conservative') {
+    window._szLadder = [0.5, 0.5, 0.5, 0.5, 0.5];
+    window._szLadderTargets = ['tp1','tp1','tp2','tp2','tp3'];
+  } else if (kind === 'balanced') {
+    window._szLadder = [1.0, 1.5, 2.0, 2.5, 3.0];
+    window._szLadderTargets = ['tp1','tp2','tp2','tp3','tp3'];
+  } else if (kind === 'aggressive') {
+    window._szLadder = [1.0, 2.0, 3.0, 4.0, 5.0];
+    window._szLadderTargets = ['tp1','tp2','tp3','tp3','trail'];
+  }
   szLadderRender();
 }
 async function szLadderSubmitAll() {
@@ -14190,18 +14326,37 @@ async function szLadderSubmitAll() {
   const ladder = (window._szLadder||[]).slice(0, 10);
   if (status) status.innerHTML = '<span style="color:rgba(201,168,76,.9);">Submitting ' + ladder.length + ' orders…</span>';
   let ok = 0, fail = 0;
+  // TP price map — each row sends ONLY its assigned TP to MT5 so it closes at
+  // that exact target. SL cascade (breakeven after TP1, lock-TP1 after TP2)
+  // is handled automatically by the EA via the /api/mt5/alert endpoint.
+  const tpPriceMap = { tp1: sig.tp, tp2: sig.tp2, tp3: sig.tp3 };
+  // Snapshot entry confluence (bull_pct) and ATR at submission time so the
+  // watch job can detect signal invalidation and ATR expansion post-entry.
+  const _totalVotes = (sig.bullCount||0) + (sig.bearCount||0);
+  const _entryConf  = _totalVotes > 0 ? ((sig.bullCount||0) / _totalVotes) : null;
+  const _entryAtr   = sig.atr || null;
   for (let i = 0; i < ladder.length; i++) {
     const risk    = ladder[i];
     const dollars = acct * (risk/100);
     const lots    = parseFloat((dollars / slDist).toFixed(4));
+    const target  = (window._szLadderTargets && window._szLadderTargets[i]) || (i===0?'tp1':i===1?'tp2':'tp3');
+    // Resolve the single TP price this position will close at
+    const assignedTp = target === 'trail' ? null : (tpPriceMap[target] || sig.tp);
+    const isTrailing = target === 'trail';
     try {
       const res = await dvFetch('/api/mt5/order', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           ticker: sig.sym, order_type: orderType, lots: lots, direction: direction,
-          entry: sig.entry, sl: sig.sl, tp1: sig.tp, tp2: sig.tp2, tp3: sig.tp3,
-          comment: 'DotVerse ladder #' + (i+1) + ' @ ' + risk + '%'
+          entry: sig.entry, sl: sig.sl,
+          // Only the assigned TP — not all three — so position closes precisely at target
+          tp1: assignedTp, tp2: null, tp3: null,
+          trailing: isTrailing,
+          comment: 'DotVerse L#' + (i+1) + ' ' + target.toUpperCase() + ' @ ' + risk + '%',
+          // Snapshot for signal-invalidation and ATR-expansion detection in watch job
+          entry_confluence: _entryConf,
+          entry_atr:        _entryAtr
         })
       });
       if (res && res.order_id) ok++; else fail++;
@@ -15119,12 +15274,16 @@ function autoUpdateStatus(){
 function autoSyncMT5(){
   // Fire-and-forget to MT5 endpoint — fails silently if EA not connected
   const s = window._autoState;
-  const trail = (document.getElementById('trailingPipsInput')||{}).value || 50;
-  const risk  = (document.getElementById('scanRiskInput')||{}).value || 1;
+  const atrMult = (document.getElementById('trailingAtrMultInput')||{}).value || 2.0;
+  const risk    = (document.getElementById('scanRiskInput')||{}).value || 1;
   dvFetch('/api/automation/settings', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ master:s.master, auto_scan:s.scan, market_alerts:s.alerts, breakeven:s.breakeven, trailing:s.trailing, trailing_pips:Number(trail), scan_risk:Number(risk) })
+    body: JSON.stringify({
+      master: s.master, auto_scan: s.scan, market_alerts: s.alerts,
+      breakeven: s.breakeven, trailing: s.trailing,
+      trailing_atr_mult: Number(atrMult), scan_risk: Number(risk)
+    })
   }).catch(()=>{});
 }
 
@@ -16832,10 +16991,11 @@ async function showAutomations() {
   try {
     var d = await dvFetch('/api/automation/settings');
     if(d){
-      if(d.breakeven_on     != null) _autoSettings.breakeven   = !!d.breakeven_on;
-      if(d.trailing_on      != null) _autoSettings.trailing    = !!d.trailing_on;
-      if(d.scan_enabled     != null) _autoSettings.autoScan    = !!d.scan_enabled;
-      if(d.market_alerts_on != null) _autoSettings.alertSignal = !!d.market_alerts_on;
+      if(d.breakeven_on       != null) _autoSettings.breakeven      = !!d.breakeven_on;
+      if(d.trailing_on        != null) _autoSettings.trailing       = !!d.trailing_on;
+      if(d.trailing_atr_mult  != null) _autoSettings.trailingAtrMult= parseFloat(d.trailing_atr_mult) || 2.0;
+      if(d.scan_enabled       != null) _autoSettings.autoScan       = !!d.scan_enabled;
+      if(d.market_alerts_on   != null) _autoSettings.alertSignal    = !!d.market_alerts_on;
     }
   } catch(e){}
   var s = _autoSettings;
@@ -16907,10 +17067,10 @@ async function showAutomations() {
           'Once price hits Target 1, DotVerse moves your stop loss to your entry price — you can no longer lose money on this trade.',
           s.breakeven, true,
           '')
-      + row('trailing', 'Trail the stop as price moves',
-          'As price moves in your favour, the stop loss follows automatically — locking in more profit the further price goes.',
+      + row('trailing', 'Trail the stop as price moves (ATR-dynamic)',
+          'The stop loss follows price automatically. Distance = ATR × multiplier — adapts to market volatility. E.g. 2× ATR on BTC ≈ $2,000 pts. Recalculated every 60 seconds by the watch engine.',
           s.trailing, true,
-          sliderSub('trailing', 20, 5, 100, 'pips (default — overridden per trade)', 'Default distance'))
+          sliderSub('trailingAtrMult', s.trailingAtrMult || 2.0, 0.5, 5.0, '× ATR distance (recalculated live)', 'ATR multiplier'))
       + row('autoTP1', 'Auto-take 50% profit at Target 1',
           'When Target 1 is hit, DotVerse automatically closes half your position and lets the rest run to Target 2.',
           s.autoTP1, true, '')
