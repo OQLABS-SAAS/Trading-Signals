@@ -2144,8 +2144,8 @@ VOLUME RATIO: {ind.get('vol_ratio')}x vs 30d avg
 BOLLINGER POSITION: {ind.get('bb_pos')} | BB WIDTH: {ind.get('bb_width')}
 SUPERTREND: {ind.get('supertrend')}
 SUPPORT: {ind.get('support')} | RESISTANCE: {ind.get('resistance')}
-ENTRY: {result.get('entry')} | STOP LOSS: {result.get('stop_loss')}
-TP1: {result.get('tp1')} | TP2: {result.get('tp2')} | TP3: {result.get('tp3')}
+ENTRY: {result.get('entry') or 'N/A (HOLD — no trade setup)'} | STOP LOSS: {result.get('stop_loss') or 'N/A'}
+TP1: {result.get('tp1') or 'N/A'} | TP2: {result.get('tp2') or 'N/A'} | TP3: {result.get('tp3') or 'N/A'}
 
 Return JSON with these keys ONLY:
 - "summary": 2 sentences for a beginner — what is happening with this asset right now, using the numbers above
