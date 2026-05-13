@@ -3277,7 +3277,7 @@ def run_watch_job():
 
             df = safe_download(ticker, period=cfg["period"], interval=cfg["interval"],
                               progress=False, auto_adjust=True)
-            if "resample" in cfg:
+            if "resample" in cfg and not df.empty:
                 df = df.resample(cfg["resample"]).agg(
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
                 ).dropna()
