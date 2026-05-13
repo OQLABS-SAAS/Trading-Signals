@@ -3305,6 +3305,17 @@ def run_watch_job():
                     watch_registry[key]["prev_ema_cross"] = _curr_ema_cross
                 else:
                     _curr_ema_cross = None
+                # ITEM 5 (GAP 3b): read prev Supertrend state before overwriting
+                _prev_st_bull = watch_registry[key].get("prev_supertrend_bull")
+                _st_raw = (ind.get("supertrend") or "").upper()
+                if _st_raw == "BULLISH":
+                    _curr_st_bull = True
+                    watch_registry[key]["prev_supertrend_bull"] = True
+                elif _st_raw == "BEARISH":
+                    _curr_st_bull = False
+                    watch_registry[key]["prev_supertrend_bull"] = False
+                else:
+                    _curr_st_bull = None  # NEUTRAL — skip store and check
 
             # ── ATR-Dynamic Trailing: update any open MT5 positions in this symbol ──
             # PDF spec (Chapter 8): queue a trailing modify only when ATR trail
@@ -3608,6 +3619,78 @@ def run_watch_job():
                                     pass
                                 print(f"[ema-cross] {ticker} ticket {_ticket}: "
                                       f"{_order_type_ema} cross {_prev_ema_cross}→{_curr_ema_cross} — alert sent")
+
+                        # ── 5d: Supertrend Flip Invalidation (ITEM 5 — GAP 3b) ────
+                        # Supertrend flipping direction mid-trade = high-reliability reversal.
+                        # Fires independently from EMA cross, confluence, and ATR checks.
+                        # NEUTRAL is treated as unknown — no fire, no store.
+                        # First tick: _prev_st_bull is None → set state, no fire.
+                        _order_type_st = (_stored.order_type or "").upper() if _stored else None
+                        _st_fire = (
+                            _prev_st_bull is not None
+                            and _curr_st_bull is not None
+                            and _prev_st_bull != _curr_st_bull
+                            and (
+                                (_order_type_st == "BUY"  and _prev_st_bull is True  and _curr_st_bull is False)
+                                or
+                                (_order_type_st == "SELL" and _prev_st_bull is False and _curr_st_bull is True)
+                            )
+                        )
+                        if _st_fire:
+                            _st_dedup = f"st_flip:{_ticket}:{now.strftime('%Y-%m-%d')}"
+                            _st_seen  = False
+                            try:
+                                if _redis_client:
+                                    _st_seen = bool(_redis_client.get(_st_dedup))
+                            except Exception:
+                                pass
+                            if not _st_seen:
+                                if _order_type_st == "BUY":
+                                    _st_msg = (
+                                        f"The Supertrend indicator has flipped from BULLISH to BEARISH "
+                                        f"while your BUY position is open. This is a high-reliability reversal "
+                                        f"signal — price is now below the Supertrend line. "
+                                        f"Consider protecting capital by moving your stop to breakeven."
+                                    )
+                                else:
+                                    _st_msg = (
+                                        f"The Supertrend indicator has flipped from BEARISH to BULLISH "
+                                        f"while your SELL position is open. This is a high-reliability reversal "
+                                        f"signal — price is now above the Supertrend line. "
+                                        f"Consider protecting capital by moving your stop to breakeven."
+                                    )
+                                _push_notification(
+                                    _uid,
+                                    "supertrend_flip",
+                                    f"Supertrend Flip — {ticker} Trade Setup Reversed",
+                                    _st_msg,
+                                    data={"ticker": ticker, "ticket": _ticket,
+                                          "order_type": _order_type_st,
+                                          "prev_bullish": _prev_st_bull,
+                                          "curr_bullish": _curr_st_bull}
+                                )
+                                try:
+                                    _st_tg = (
+                                        f"🔄 Supertrend Flip — {ticker}\n"
+                                        f"Position #{_ticket} ({_order_type_st})\n\n"
+                                        f"{_st_msg}"
+                                    )
+                                    _st_kb = [[
+                                        {"text": "🛡 Move Stop to Breakeven",
+                                         "callback_data": f"breakeven|{_ticket}|{_inv_sym}|st_flip"},
+                                        {"text": "Keep Position",
+                                         "callback_data": f"ignore|{_ticket}|{_inv_sym}|st_flip"},
+                                    ]]
+                                    send_telegram_keyboard(_st_tg, _st_kb)
+                                except Exception as _st_tg_err:
+                                    print(f"[st-flip] Telegram error: {_st_tg_err}")
+                                try:
+                                    if _redis_client:
+                                        _redis_client.setex(_st_dedup, 86400, "1")
+                                except Exception:
+                                    pass
+                                print(f"[st-flip] {ticker} ticket {_ticket}: "
+                                      f"{_order_type_st} flip {'BULLISH→BEARISH' if _order_type_st=='BUY' else 'BEARISH→BULLISH'} — alert sent")
 
                         # ── GAP 2: Event-triggered Telegram alert ─────────────────
                         # PDF spec Ch.5: when a HIGH/MEDIUM macro event is within 48h
