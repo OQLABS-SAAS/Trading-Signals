@@ -3458,33 +3458,82 @@ def run_watch_job():
                             except Exception:
                                 pass
                             if not _inv_seen:
+                                # ── GAP 4: compute specific pip recommendation ────────────
+                                _inv_open_px = None
+                                try:
+                                    _inv_open_px = float(_stored.open_price) if _stored.open_price else None
+                                except (TypeError, ValueError):
+                                    pass
+                                _inv_curr_px = float(ind.get("price") or 0) or None
+                                _inv_safe_pips = None
+                                _inv_tight_sl  = None
+                                if _inv_open_px and _inv_curr_px:
+                                    _inv_profit_dist = abs(_inv_curr_px - _inv_open_px)
+                                    _inv_profit_pips = _atr_to_pips(_inv_profit_dist, asset_type, _inv_curr_px)
+                                    _inv_safe_pips   = max(1.0, round(_inv_profit_pips - 3, 0))
+                                    if _stored.tp1 is not None:
+                                        try:
+                                            _tp1_dist = abs(float(_stored.tp1) - _inv_open_px)
+                                            _tp1_pips = _atr_to_pips(_tp1_dist, asset_type, _inv_curr_px)
+                                            _inv_safe_pips = min(_inv_safe_pips, _tp1_pips * 0.90)
+                                        except (TypeError, ValueError):
+                                            pass
+                                    _inv_pip_sz = (0.01 if asset_type == "forex" and _inv_curr_px > 50
+                                                   else 0.0001 if asset_type == "forex"
+                                                   else 1.0)
+                                    _inv_order_t = (_stored.order_type or "").upper()
+                                    if _inv_order_t == "BUY":
+                                        _inv_tight_sl = _inv_open_px + _inv_safe_pips * _inv_pip_sz
+                                    elif _inv_order_t == "SELL":
+                                        _inv_tight_sl = _inv_open_px - _inv_safe_pips * _inv_pip_sz
+                                if _inv_safe_pips is not None and _inv_tight_sl is not None:
+                                    _inv_body = (
+                                        f"Tighten stop to +{_inv_safe_pips:.0f} pips "
+                                        f"(above entry {_inv_open_px:.5g}, locking "
+                                        f"{_inv_safe_pips:.0f} pip profit). "
+                                        f"If confluence does not recover above 60% on the next 2 "
+                                        f"candles, consider closing the position to preserve profit."
+                                    )
+                                else:
+                                    _inv_body = (
+                                        f"The technical setup that justified this trade is no longer valid. "
+                                        f"Consider moving your stop to breakeven or exiting to protect capital."
+                                    )
                                 _push_notification(
                                     _uid,
                                     "signal_invalidation",
                                     f"Signal Invalidated — {ticker}",
                                     f"Confluence has dropped to {_curr_bpct*100:.0f}% "
                                     f"(was {_e_conf*100:.0f}% when you entered). "
-                                    f"The technical setup that justified this trade is no longer valid. "
-                                    f"Consider moving your stop to breakeven or exiting to protect capital.",
+                                    + _inv_body,
                                     data={"ticker": ticker, "ticket": _ticket,
                                           "current_conf": round(_curr_bpct, 3),
                                           "entry_conf":   round(_e_conf, 3)}
                                 )
-                                # Telegram keyboard — PDF spec Chapter 5: one-tap action buttons
+                                # Telegram keyboard — GAP 4: tighten + breakeven + keep
                                 try:
                                     _inv_tg = (
                                         f"⚠️ Signal Invalidated — {ticker}\n"
                                         f"Confluence: {_e_conf*100:.0f}% → {_curr_bpct*100:.0f}%\n"
                                         f"Position #{_ticket}\n\n"
-                                        f"The technical basis for this trade has weakened. "
-                                        f"Protect capital by moving stop to breakeven."
+                                        + _inv_body
                                     )
-                                    _inv_kb = [[
-                                        {"text": "🛡 Move Stop to Breakeven",
-                                         "callback_data": f"breakeven|{_ticket}|{_inv_sym}|invalidation"},
-                                        {"text": "Keep Original Stop",
-                                         "callback_data": f"ignore|{_ticket}|{_inv_sym}|invalidation"},
-                                    ]]
+                                    if _inv_tight_sl is not None:
+                                        _inv_kb = [
+                                            [{"text": f"⬆️ Tighten to +{_inv_safe_pips:.0f} pips",
+                                              "callback_data": f"tighten|{_ticket}|{_inv_sym}|{_inv_tight_sl:.5g}"}],
+                                            [{"text": "🛡 Move to Breakeven",
+                                              "callback_data": f"breakeven|{_ticket}|{_inv_sym}|invalidation"},
+                                             {"text": "Keep Original Stop",
+                                              "callback_data": f"ignore|{_ticket}|{_inv_sym}|invalidation"}],
+                                        ]
+                                    else:
+                                        _inv_kb = [[
+                                            {"text": "🛡 Move Stop to Breakeven",
+                                             "callback_data": f"breakeven|{_ticket}|{_inv_sym}|invalidation"},
+                                            {"text": "Keep Original Stop",
+                                             "callback_data": f"ignore|{_ticket}|{_inv_sym}|invalidation"},
+                                        ]]
                                     send_telegram_keyboard(_inv_tg, _inv_kb)
                                 except Exception as _inv_tg_err:
                                     print(f"[invalidation] Telegram error: {_inv_tg_err}")
@@ -6172,6 +6221,44 @@ def telegram_webhook():
         _tg_dismiss_keyboard(bot_token, callback_id, chat_id, message_id,
                              "Keeping original stop — monitor the position closely.",
                              show_alert=False)
+
+    # ── tighten|ticket|symbol|sl_price ────────────────────────────────────────
+    # GAP 4: Move SL to a specific price above entry (BUY) or below entry (SELL).
+    # sl_price is computed in run_watch_job as open_price ± safe_pips * pip_size.
+    elif len(parts) == 4 and parts[0] == "tighten":
+        _, ticket_str, symbol, sl_price_str = parts
+        try:
+            ticket   = int(ticket_str)
+            sl_price = float(sl_price_str)
+        except (ValueError, TypeError):
+            ticket = 0; sl_price = 0.0
+        queued = False
+        if ticket > 0 and sl_price > 0 and _DBSession:
+            db = _DBSession()
+            try:
+                tighten_order = MT5Order(
+                    user_id      = "default",
+                    symbol       = symbol,
+                    order_type   = "MODIFY",
+                    volume       = 0,
+                    price        = 0,
+                    sl           = sl_price,
+                    action       = "modify_sl",
+                    close_ticket = ticket,
+                    status       = "pending",
+                    comment      = f"Telegram tighten #{ticket} SL→{sl_price:.5g}",
+                )
+                db.add(tighten_order)
+                db.commit()
+                queued = True
+            except Exception as _tg_err:
+                db.rollback()
+                print(f"[Telegram webhook] tighten error: {_tg_err}")
+            finally:
+                db.close()
+        answer = (f"✅ Stop tightened to {sl_price:.5g} — EA will execute within 5s" if queued
+                  else "⚠️ Could not queue stop tighten — adjust manually")
+        _tg_dismiss_keyboard(bot_token, callback_id, chat_id, message_id, answer, show_alert=True)
 
     # ── reanalyze|ticker|symbol|reason ────────────────────────────────────────
     # Can't trigger a full analysis from the Telegram webhook context.
