@@ -3292,9 +3292,19 @@ def run_watch_job():
             screen = pre_screen(ind)
 
             with watch_lock:
-                watch_registry[key]["last_check"]  = now
+                watch_registry[key]["last_check"]   = now
                 watch_registry[key]["last_reason"]  = screen["reason"]
                 watch_registry[key]["last_price"]   = ind["price"]
+                # ITEM 4 (GAP 3a): read prev EMA cross state before overwriting
+                _prev_ema_cross = watch_registry[key].get("prev_ema_cross")
+                _ef = ind.get("ema20"); _es = ind.get("ema50")
+                import math as _math
+                if (_ef is not None and _es is not None
+                        and not _math.isnan(float(_ef)) and not _math.isnan(float(_es))):
+                    _curr_ema_cross = "above" if float(_ef) > float(_es) else "below"
+                    watch_registry[key]["prev_ema_cross"] = _curr_ema_cross
+                else:
+                    _curr_ema_cross = None
 
             # ── ATR-Dynamic Trailing: update any open MT5 positions in this symbol ──
             # PDF spec (Chapter 8): queue a trailing modify only when ATR trail
@@ -3524,6 +3534,80 @@ def run_watch_job():
                                     pass
                                 print(f"[atr-expansion] {ticker} ticket {_ticket}: "
                                       f"ATR {_e_atr:.5g} → {_curr_atr:.5g} — alert sent")
+
+                        # ── 5c: EMA Cross Invalidation (ITEM 4 — GAP 3a) ──────────
+                        # EMA fast crossing below slow on a BUY = bearish reversal.
+                        # EMA fast crossing above slow on a SELL = bullish reversal.
+                        # Fires independently from confluence and ATR checks.
+                        # First tick: _prev_ema_cross is None → set state, no fire.
+                        _order_type_ema = (_stored.order_type or "").upper() if _stored else None
+                        _ema_fire = (
+                            _prev_ema_cross is not None
+                            and _curr_ema_cross is not None
+                            and _prev_ema_cross != _curr_ema_cross
+                            and (
+                                (_order_type_ema == "BUY"  and _prev_ema_cross == "above" and _curr_ema_cross == "below")
+                                or
+                                (_order_type_ema == "SELL" and _prev_ema_cross == "below" and _curr_ema_cross == "above")
+                            )
+                        )
+                        if _ema_fire:
+                            _ema_dedup = f"ema_cross:{_ticket}:{now.strftime('%Y-%m-%d')}"
+                            _ema_seen  = False
+                            try:
+                                if _redis_client:
+                                    _ema_seen = bool(_redis_client.get(_ema_dedup))
+                            except Exception:
+                                pass
+                            if not _ema_seen:
+                                _ef_per = ind.get("ema_fast_period", "fast")
+                                _es_per = ind.get("ema_slow_period", "slow")
+                                if _order_type_ema == "BUY":
+                                    _ema_msg = (
+                                        f"EMA {_ef_per} has crossed below EMA {_es_per} — "
+                                        f"a bearish reversal signal while your BUY position is open. "
+                                        f"The short-term trend has flipped. Consider protecting capital "
+                                        f"by moving your stop to breakeven."
+                                    )
+                                else:
+                                    _ema_msg = (
+                                        f"EMA {_ef_per} has crossed above EMA {_es_per} — "
+                                        f"a bullish reversal signal while your SELL position is open. "
+                                        f"The short-term trend has flipped. Consider protecting capital "
+                                        f"by moving your stop to breakeven."
+                                    )
+                                _push_notification(
+                                    _uid,
+                                    "ema_cross_invalidation",
+                                    f"EMA Cross — {ticker} Trade Setup Weakening",
+                                    _ema_msg,
+                                    data={"ticker": ticker, "ticket": _ticket,
+                                          "order_type": _order_type_ema,
+                                          "prev_cross": _prev_ema_cross,
+                                          "curr_cross": _curr_ema_cross}
+                                )
+                                try:
+                                    _ema_tg = (
+                                        f"⚡ EMA Cross — {ticker}\n"
+                                        f"Position #{_ticket} ({_order_type_ema})\n\n"
+                                        f"{_ema_msg}"
+                                    )
+                                    _ema_kb = [[
+                                        {"text": "🛡 Move Stop to Breakeven",
+                                         "callback_data": f"breakeven|{_ticket}|{_inv_sym}|ema_cross"},
+                                        {"text": "Keep Position",
+                                         "callback_data": f"ignore|{_ticket}|{_inv_sym}|ema_cross"},
+                                    ]]
+                                    send_telegram_keyboard(_ema_tg, _ema_kb)
+                                except Exception as _ema_tg_err:
+                                    print(f"[ema-cross] Telegram error: {_ema_tg_err}")
+                                try:
+                                    if _redis_client:
+                                        _redis_client.setex(_ema_dedup, 86400, "1")
+                                except Exception:
+                                    pass
+                                print(f"[ema-cross] {ticker} ticket {_ticket}: "
+                                      f"{_order_type_ema} cross {_prev_ema_cross}→{_curr_ema_cross} — alert sent")
 
                         # ── GAP 2: Event-triggered Telegram alert ─────────────────
                         # PDF spec Ch.5: when a HIGH/MEDIUM macro event is within 48h
