@@ -3472,7 +3472,7 @@ def run_watch_job():
                 price_val= ind.get("price", 1)
                 cfg      = _get_automation_settings(w.get("user_id", "default"))
                 if cfg.get("trailing_on") and atr_val > 0:
-                    atr_mult   = float(cfg.get("trailing_atr_mult", 2.0))
+                    atr_mult   = float(cfg.get("trailing_atr_mult", 1.0))
                     trail_dist = _atr_to_pips(atr_val * atr_mult, asset_type, price_val)
                     # Find open MT5 positions in this symbol
                     mt5_sym  = _mt5_symbol(ticker, asset_type)
@@ -4186,7 +4186,7 @@ def _get_automation_settings(user_id):
     """
     if not _DBSession:
         return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
-                "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 2.0,
+                "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 1.0,
                 "market_alerts_on": True}
     try:
         db = _DBSession()
@@ -4208,14 +4208,14 @@ def _get_automation_settings(user_id):
             "scan_enabled": s.scan_enabled, "scan_risk_pct": s.scan_risk_pct,
             "breakeven_on": s.breakeven_on, "trailing_on": s.trailing_on,
             "trailing_pips": s.trailing_pips,
-            "trailing_atr_mult": getattr(s, "trailing_atr_mult", 2.0) or 2.0,
+            "trailing_atr_mult": getattr(s, "trailing_atr_mult", 1.0) or 1.0,
             "market_alerts_on": s.market_alerts_on,
         }
         db.close()
         return result
     except Exception:
         return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
-                "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 2.0,
+                "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 1.0,
                 "market_alerts_on": True}
 
 def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0, ticker=""):
@@ -5286,7 +5286,7 @@ def mt5_get_pending():
         settings = {
             "trailing_on":       cfg.get("trailing_on", False),
             "trailing_pips":     float(cfg.get("trailing_pips", 50.0)),
-            "trailing_atr_mult": float(cfg.get("trailing_atr_mult", 2.0)),
+            "trailing_atr_mult": float(cfg.get("trailing_atr_mult", 1.0)),
         }
         return jsonify({"orders": result, "settings": settings})
     except Exception as e:
@@ -9151,7 +9151,7 @@ class AutomationSettings(_Base):
     breakeven_on     = Column(Boolean, default=True)
     trailing_on      = Column(Boolean, default=False)
     trailing_pips    = Column(Float,   default=50.0)
-    trailing_atr_mult= Column(Float,   default=2.0)   # ATR multiplier — overrides fixed pips when > 0
+    trailing_atr_mult= Column(Float,   default=1.0)   # ATR multiplier — overrides fixed pips when > 0. PDF spec Ch8: 1.0x ATR.
     market_alerts_on = Column(Boolean, default=True)
     updated_at       = Column(DateTime, default=datetime.utcnow)
 
@@ -9315,7 +9315,8 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user'"))
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS tier VARCHAR(20) DEFAULT 'free'"))
-                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS trailing_atr_mult FLOAT DEFAULT 2.0"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS trailing_atr_mult FLOAT DEFAULT 1.0"))
+                _conn.execute(text("ALTER TABLE automation_settings ALTER COLUMN trailing_atr_mult SET DEFAULT 1.0"))
                 # updated_at required by Bug W fix (_get_automation_settings orders by this to
                 # find the most-recently-customised human-user row for EA/background job calls)
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
