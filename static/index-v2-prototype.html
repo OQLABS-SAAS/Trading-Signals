@@ -8868,6 +8868,7 @@ function loadSignalContext(o){
   window._activeSignal = o;
   window._calcPrefill = { entry: o.entry, sl: o.sl, tp: o.tp, tp2: o.tp2, tp3: o.tp3, sym: o.sym };
   window._lastBt = null;   // reset stale backtest from previous signal
+  window._szTargetsUserModified = false; // new signal — let DotVerse re-apply its recommendation
   setTimeout(function(){ undRunBacktest(true); }, 300);
   // Auto-navigate to CONTEXT pre-trade gate
   setNav('understand');showUnderstand();
@@ -14163,6 +14164,8 @@ window._szLadder = window._szLadder || [1.0, 1.5, 2.0, 2.5, 3.0];
 // Per-row TP target: 'tp1' | 'tp2' | 'tp3' | 'trail'
 // Default spread: first position exits at TP1, second at TP2, rest at TP3
 window._szLadderTargets = window._szLadderTargets || ['tp1','tp2','tp3','tp3','tp3'];
+// Track whether the user has manually overridden any target (so we don't clobber manual choices)
+window._szTargetsUserModified = window._szTargetsUserModified || false;
 function _szDefaultTarget(i) {
   if (i === 0) return 'tp1';
   if (i === 1) return 'tp2';
@@ -14171,6 +14174,48 @@ function _szDefaultTarget(i) {
 function szLadderTargetUpdate(i, val) {
   if (!window._szLadderTargets) window._szLadderTargets = [];
   window._szLadderTargets[i] = val;
+  window._szTargetsUserModified = true;
+  szLadderRender();
+}
+// Compute DotVerse-recommended exit targets based on signal timeframe + confidence.
+// Returns { targets: [...], explanation: '...', type: 'Swing', confLabel: 'CONFIRMED' }
+// or null if no signal is loaded.
+function _szRecommendTargets(ladderLen) {
+  const sig = window._activeSignal || {};
+  if (!sig.tf) return null;
+  const tt   = (typeof _tradeTypeLabel === 'function') ? _tradeTypeLabel(sig.tf, window._stratMode) : { label: 'Trade' };
+  const type = tt.label; // 'Scalp' | 'Day Trade' | 'Swing' | 'Position' | 'Trade'
+  const conf = sig.confidence_label || (sig.confidence >= 75 ? 'CONFIRMED' : sig.confidence >= 55 ? 'LIKELY' : 'HYPOTHESIS');
+  const targets = [];
+  for (let i = 0; i < ladderLen; i++) {
+    if (type === 'Scalp') {
+      // Scalps are fast. Every position exits at TP1 — no time to ride TP2/TP3.
+      targets.push('tp1');
+    } else if (type === 'Day Trade') {
+      // Day trade: lock in row 1 early (TP1), let the rest run to TP2 before session closes.
+      targets.push(i === 0 ? 'tp1' : 'tp2');
+    } else if (type === 'Swing') {
+      // Swing: scale out progressively — row 1 secures profit, row 2 holds to TP2, rest target TP3.
+      targets.push(i === 0 ? 'tp1' : i === 1 ? 'tp2' : 'tp3');
+    } else {
+      // Position trade (days–weeks): scale out and let the final rows ride with ATR Trail.
+      targets.push(i === 0 ? 'tp1' : i === 1 ? 'tp2' : i === 2 ? 'tp3' : 'trail');
+    }
+  }
+  const explain = {
+    'Scalp':     'Scalp — every trade exits at TP1. Scalps are time-critical: do not hold past TP1.',
+    'Day Trade': 'Day trade — Trade #1 locks in early profit (TP1). All others target TP2 before the session closes.',
+    'Swing':     'Swing trade — Trade #1 secures (TP1), Trade #2 extends (TP2), the rest ride to maximum (TP3).',
+    'Position':  'Position trade — Scale out at TP1 → TP2 → TP3, then let the final trade ride with the ATR trailing stop.'
+  }[type] || 'DotVerse has pre-selected exits based on your timeframe.';
+  return { targets, explanation: explain, type, confLabel: conf };
+}
+// Apply DotVerse recommendation to the ladder targets and re-render.
+function szApplyRecommendation() {
+  const rec = _szRecommendTargets((window._szLadder||[]).length);
+  if (!rec) return;
+  window._szLadderTargets = rec.targets.slice();
+  window._szTargetsUserModified = false;
   szLadderRender();
 }
 function szLadderRender() {
@@ -14198,7 +14243,26 @@ function szLadderRender() {
   while (window._szLadderTargets.length < (window._szLadder||[]).length) {
     window._szLadderTargets.push(_szDefaultTarget(window._szLadderTargets.length));
   }
-  wrap.innerHTML = (window._szLadder||[]).map((risk, i) => {
+  // Auto-apply DotVerse recommendation whenever signal is loaded and user hasn't manually changed targets
+  if (!window._szTargetsUserModified) {
+    const _autoRec = _szRecommendTargets((window._szLadder||[]).length);
+    if (_autoRec) window._szLadderTargets = _autoRec.targets.slice();
+  }
+  // Build recommendation banner
+  const _rec = _szRecommendTargets((window._szLadder||[]).length);
+  const _recBanner = _rec ? `
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.22);border-radius:6px;margin-bottom:10px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,.9)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:.8px;color:rgba(201,168,76,.7);text-transform:uppercase;margin-bottom:3px;">DotVerse Recommendation · ${_rec.type} · ${_rec.confLabel}</div>
+        <div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.8);line-height:1.5;">${_rec.explanation}</div>
+        ${window._szTargetsUserModified ? `<button onclick="szApplyRecommendation()" style="margin-top:6px;padding:3px 10px;font-family:var(--mono);font-size:9px;font-weight:700;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.35);border-radius:4px;color:rgba(201,168,76,.9);cursor:pointer;letter-spacing:.03em;">↺ Reset to DotVerse recommendation</button>` : ''}
+      </div>
+    </div>` : `
+    <div style="padding:8px 12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:6px;margin-bottom:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">
+      Run a signal analysis first — DotVerse will recommend the right exit target for each trade based on your timeframe and signal confidence.
+    </div>`;
+  wrap.innerHTML = _recBanner + (window._szLadder||[]).map((risk, i) => {
     const moneyAtRisk = acct * (risk/100);
     const units       = moneyAtRisk / slDist;
     const lotsStr     = units.toFixed(4);
@@ -14238,15 +14302,16 @@ function szLadderRender() {
       ${tpCell(p2, 'TP2')}
       ${tpCell(p3, 'TP3')}
       <div>
-        <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;margin-bottom:3px;font-family:var(--mono);">TARGET</div>
-        <select onchange="szLadderTargetUpdate(${i}, this.value)"
-          style="width:100%;padding:4px 6px;font-family:var(--mono);font-size:9.5px;background:rgba(9,11,16,.9);border:1px solid ${tgtCol};border-radius:4px;color:${tgtCol};outline:none;cursor:pointer;font-weight:600;">
-          <option value="tp1" ${target==='tp1'?'selected':''}>TP1 — exit full</option>
-          <option value="tp2" ${target==='tp2'?'selected':''}>TP2 — hold to TP2</option>
-          <option value="tp3" ${target==='tp3'?'selected':''}>TP3 — run to max</option>
-          <option value="trail" ${target==='trail'?'selected':''}>ATR Trail</option>
-        </select>
-        ${targetDist && targetProfit ? `<div style="font-size:8.5px;font-family:var(--mono);color:${tgtCol};margin-top:3px;font-weight:700;">+$${targetProfit.toLocaleString(undefined,{maximumFractionDigits:0})}</div>` : ''}
+        <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;margin-bottom:4px;font-family:var(--mono);">TARGET</div>
+        <div style="display:flex;gap:3px;flex-wrap:wrap;">
+          ${['tp1','tp2','tp3','trail'].map(v => {
+            const btnLabels = {tp1:'TP1', tp2:'TP2', tp3:'TP3', trail:'TRAIL'};
+            const btnCols   = {tp1:'rgba(93,232,160,.9)', tp2:'rgba(201,168,76,.95)', tp3:'rgba(93,175,232,.9)', trail:'rgba(232,165,80,.9)'};
+            const on = target === v;
+            return '<button onclick="szLadderTargetUpdate('+i+',\''+v+'\')" style="padding:3px 7px;font-family:var(--mono);font-size:9px;font-weight:700;border-radius:3px;cursor:pointer;transition:all .12s;border:1px solid '+(on ? btnCols[v] : 'rgba(237,232,216,.14)')+';background:'+(on ? btnCols[v].replace('.9)',',.18)').replace('.95)',',.18)') : 'transparent')+';color:'+(on ? btnCols[v] : 'rgba(237,232,216,.38)')+';line-height:1.6;">'+btnLabels[v]+'</button>';
+          }).join('')}
+        </div>
+        ${targetDist && targetProfit ? `<div style="font-size:8.5px;font-family:var(--mono);color:${tgtCol};margin-top:4px;font-weight:700;">+$${targetProfit.toLocaleString(undefined,{maximumFractionDigits:0})}</div>` : ''}
       </div>
       <button onclick="szLadderRemove(${i})" style="background:none;border:none;color:rgba(232,112,110,.6);cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button>
     </div>`;
