@@ -4187,7 +4187,17 @@ def _get_automation_settings(user_id):
     if not _DBSession:
         return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
                 "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 1.0,
-                "market_alerts_on": True}
+                "market_alerts_on": True,
+                "auto_macro_response": False, "auto_invalidation_act": False,
+                "auto_sentiment_watch": False, "macro_hours_threshold": 4.0,
+                "auto_close_pct": 50.0,
+                "auto_tp1": True, "auto_tp2": False, "auto_tp3": False, "weekend_close": True,
+                "min_confidence": 75, "max_trades": 3,
+                "daily_loss_limit": True, "daily_loss_max": 3.0,
+                "drawdown_pause": True, "drawdown_max": 10.0,
+                "news_filter": True, "ai_reanalyze": True, "ai_interval": 15,
+                "alert_tp": True, "alert_sl": True,
+                "alert_daily_summary": False, "alert_time": "08:00"}
     try:
         db = _DBSession()
         s = db.query(AutomationSettings).filter_by(user_id=str(user_id)).first()
@@ -4210,13 +4220,46 @@ def _get_automation_settings(user_id):
             "trailing_pips": s.trailing_pips,
             "trailing_atr_mult": getattr(s, "trailing_atr_mult", 1.0) or 1.0,
             "market_alerts_on": s.market_alerts_on,
+            "auto_macro_response":   getattr(s, "auto_macro_response",   False) or False,
+            "auto_invalidation_act": getattr(s, "auto_invalidation_act", False) or False,
+            "auto_sentiment_watch":  getattr(s, "auto_sentiment_watch",  False) or False,
+            "macro_hours_threshold": getattr(s, "macro_hours_threshold", 4.0)   or 4.0,
+            "auto_close_pct":        getattr(s, "auto_close_pct",        50.0)  or 50.0,
+            # Automations GAP — previously localStorage-only
+            "auto_tp1":           getattr(s, "auto_tp1",           True),
+            "auto_tp2":           getattr(s, "auto_tp2",           False),
+            "auto_tp3":           getattr(s, "auto_tp3",           False),
+            "weekend_close":      getattr(s, "weekend_close",      True),
+            "min_confidence":     getattr(s, "min_confidence",     75)   or 75,
+            "max_trades":         getattr(s, "max_trades",         3)    or 3,
+            "daily_loss_limit":   getattr(s, "daily_loss_limit",   True),
+            "daily_loss_max":     getattr(s, "daily_loss_max",     3.0)  or 3.0,
+            "drawdown_pause":     getattr(s, "drawdown_pause",     True),
+            "drawdown_max":       getattr(s, "drawdown_max",       10.0) or 10.0,
+            "news_filter":        getattr(s, "news_filter",        True),
+            "ai_reanalyze":       getattr(s, "ai_reanalyze",       True),
+            "ai_interval":        getattr(s, "ai_interval",        15)   or 15,
+            "alert_tp":           getattr(s, "alert_tp",           True),
+            "alert_sl":           getattr(s, "alert_sl",           True),
+            "alert_daily_summary":getattr(s, "alert_daily_summary",False),
+            "alert_time":         getattr(s, "alert_time",         "08:00") or "08:00",
         }
         db.close()
         return result
     except Exception:
         return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
                 "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 1.0,
-                "market_alerts_on": True}
+                "market_alerts_on": True,
+                "auto_macro_response": False, "auto_invalidation_act": False,
+                "auto_sentiment_watch": False, "macro_hours_threshold": 4.0,
+                "auto_close_pct": 50.0,
+                "auto_tp1": True, "auto_tp2": False, "auto_tp3": False,
+                "weekend_close": True, "min_confidence": 75, "max_trades": 3,
+                "daily_loss_limit": True, "daily_loss_max": 3.0,
+                "drawdown_pause": True, "drawdown_max": 10.0,
+                "news_filter": True, "ai_reanalyze": True, "ai_interval": 15,
+                "alert_tp": True, "alert_sl": True,
+                "alert_daily_summary": False, "alert_time": "08:00"}
 
 def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0, ticker=""):
     """Calculate appropriate lot size for an auto-scan signal."""
@@ -5332,21 +5375,23 @@ def mt5_confirm_order():
                 return jsonify({"status": "ok"})
             if status == "filled":
                 order.filled_at = datetime.utcnow()
-                # Send Telegram notification on fill
+                # Send Telegram notification on fill — gated by market_alerts_on
                 try:
-                    emoji = "🟢" if order.order_type == "BUY" else "🔴"
-                    tg_msg = (
-                        f"{emoji} Trade Executed\n"
-                        f"{order.symbol} {order.order_type} {order.volume} lots\n"
-                        f"Entry:  {fill_price}\n"
-                        f"SL:     {order.sl or '—'}\n"
-                        f"TP1:    {order.tp  or '—'}\n"
-                        f"TP2:    {order.tp2 or '—'}\n"
-                        f"TP3:    {order.tp3 or '—'}\n"
-                        f"Ticket: #{ticket}\n"
-                        f"🔗 https://dot-verse.up.railway.app"
-                    )
-                    send_telegram(tg_msg)
+                    _fill_cfg = _get_automation_settings("default")
+                    if _fill_cfg.get("market_alerts_on", True):
+                        emoji = "🟢" if order.order_type == "BUY" else "🔴"
+                        tg_msg = (
+                            f"{emoji} Trade Executed\n"
+                            f"{order.symbol} {order.order_type} {order.volume} lots\n"
+                            f"Entry:  {fill_price}\n"
+                            f"SL:     {order.sl or '—'}\n"
+                            f"TP1:    {order.tp  or '—'}\n"
+                            f"TP2:    {order.tp2 or '—'}\n"
+                            f"TP3:    {order.tp3 or '—'}\n"
+                            f"Ticket: #{ticket}\n"
+                            f"🔗 https://dot-verse.up.railway.app"
+                        )
+                        send_telegram(tg_msg)
                 except Exception:
                     pass
         db.commit()
@@ -5424,14 +5469,22 @@ def mt5_level_alert():
     if _already_hit == level:
         return jsonify({"status": "ok", "note": "duplicate_level_hit"})
 
+    # Fetch automation settings once — used for alert gating and breakeven logic below
+    auto_cfg = _get_automation_settings("default")
+
+    # Gate TP and SL alerts on user preferences
     try:
-        send_telegram_keyboard(tg_msg, keyboard)
+        _should_alert = (
+            (level in ("TP1", "TP2", "TP3") and auto_cfg.get("alert_tp", True)) or
+            (level == "SL" and auto_cfg.get("alert_sl", True))
+        )
+        if _should_alert:
+            send_telegram_keyboard(tg_msg, keyboard)
     except Exception:
         pass
 
     if level in ("TP1", "TP2", "TP3") and _DBSession:
         try:
-            auto_cfg = _get_automation_settings("default")
             if auto_cfg.get("breakeven_on"):
                 new_sl       = None
                 ladder_label = None
@@ -5863,8 +5916,31 @@ def automation_settings_save():
         if "breakeven_on"     in body: s.breakeven_on     = bool(body["breakeven_on"])
         if "trailing_on"       in body: s.trailing_on       = bool(body["trailing_on"])
         if "trailing_pips"     in body: s.trailing_pips     = float(body["trailing_pips"])
-        if "trailing_atr_mult" in body: s.trailing_atr_mult = float(body["trailing_atr_mult"])
-        if "market_alerts_on"  in body: s.market_alerts_on  = bool(body["market_alerts_on"])
+        if "trailing_atr_mult"    in body: s.trailing_atr_mult    = float(body["trailing_atr_mult"])
+        if "market_alerts_on"     in body: s.market_alerts_on     = bool(body["market_alerts_on"])
+        if "auto_macro_response"  in body: s.auto_macro_response  = bool(body["auto_macro_response"])
+        if "auto_invalidation_act" in body: s.auto_invalidation_act = bool(body["auto_invalidation_act"])
+        if "auto_sentiment_watch" in body: s.auto_sentiment_watch = bool(body["auto_sentiment_watch"])
+        if "macro_hours_threshold" in body: s.macro_hours_threshold = float(body["macro_hours_threshold"])
+        if "auto_close_pct"       in body: s.auto_close_pct       = float(body["auto_close_pct"])
+        # Automations GAP — 16 settings previously localStorage-only
+        if "auto_tp1"            in body: s.auto_tp1            = bool(body["auto_tp1"])
+        if "auto_tp2"            in body: s.auto_tp2            = bool(body["auto_tp2"])
+        if "auto_tp3"            in body: s.auto_tp3            = bool(body["auto_tp3"])
+        if "weekend_close"       in body: s.weekend_close       = bool(body["weekend_close"])
+        if "min_confidence"      in body: s.min_confidence      = int(body["min_confidence"])
+        if "max_trades"          in body: s.max_trades          = int(body["max_trades"])
+        if "daily_loss_limit"    in body: s.daily_loss_limit    = bool(body["daily_loss_limit"])
+        if "daily_loss_max"      in body: s.daily_loss_max      = float(body["daily_loss_max"])
+        if "drawdown_pause"      in body: s.drawdown_pause      = bool(body["drawdown_pause"])
+        if "drawdown_max"        in body: s.drawdown_max        = float(body["drawdown_max"])
+        if "news_filter"         in body: s.news_filter         = bool(body["news_filter"])
+        if "ai_reanalyze"        in body: s.ai_reanalyze        = bool(body["ai_reanalyze"])
+        if "ai_interval"         in body: s.ai_interval         = int(body["ai_interval"])
+        if "alert_tp"            in body: s.alert_tp            = bool(body["alert_tp"])
+        if "alert_sl"            in body: s.alert_sl            = bool(body["alert_sl"])
+        if "alert_daily_summary" in body: s.alert_daily_summary = bool(body["alert_daily_summary"])
+        if "alert_time"          in body: s.alert_time          = str(body["alert_time"])[:5]
         s.updated_at = datetime.utcnow()
         db.commit()
         return jsonify({"status": "ok"})
@@ -9154,6 +9230,30 @@ class AutomationSettings(_Base):
     trailing_atr_mult= Column(Float,   default=1.0)   # ATR multiplier — overrides fixed pips when > 0. PDF spec Ch8: 1.0x ATR.
     market_alerts_on = Column(Boolean, default=True)
     updated_at       = Column(DateTime, default=datetime.utcnow)
+    # Auto-Adjustment fields (GAP 7-9) — all default OFF, safe for existing users
+    auto_macro_response    = Column(Boolean, default=False)  # Auto move SL to breakeven before HIGH news event
+    auto_invalidation_act  = Column(Boolean, default=False)  # Auto tighten stop on EMA cross / ST flip
+    auto_sentiment_watch   = Column(Boolean, default=False)  # Auto partial close on negative sentiment shift
+    macro_hours_threshold  = Column(Float,   default=4.0)    # Hours before event to trigger auto response
+    auto_close_pct         = Column(Float,   default=50.0)   # % of position to close on macro/sentiment trigger
+    # Automations GAP — settings that existed in frontend localStorage only, now persisted to DB
+    auto_tp1             = Column(Boolean, default=True)    # Auto-take 50% profit at TP1
+    auto_tp2             = Column(Boolean, default=False)   # Auto-take 30% profit at TP2
+    auto_tp3             = Column(Boolean, default=False)   # Auto-take remainder at TP3
+    weekend_close        = Column(Boolean, default=True)    # Close all trades before weekend
+    min_confidence       = Column(Integer, default=75)      # Minimum signal confidence % to act on
+    max_trades           = Column(Integer, default=3)       # Max simultaneous open trades
+    daily_loss_limit     = Column(Boolean, default=True)    # Enable daily loss cap
+    daily_loss_max       = Column(Float,   default=3.0)     # Stop trading at X% daily loss
+    drawdown_pause       = Column(Boolean, default=True)    # Pause on max drawdown
+    drawdown_max         = Column(Float,   default=10.0)    # Pause at X% drawdown
+    news_filter          = Column(Boolean, default=True)    # Block trades during high-impact news
+    ai_reanalyze         = Column(Boolean, default=True)    # Re-analyze open trades automatically
+    ai_interval          = Column(Integer, default=15)      # Re-analyze interval in minutes
+    alert_tp             = Column(Boolean, default=True)    # Send Telegram alert on TP hit
+    alert_sl             = Column(Boolean, default=True)    # Send Telegram alert on SL hit
+    alert_daily_summary  = Column(Boolean, default=False)   # Send daily P&L summary
+    alert_time           = Column(String(5), default='08:00') # Time for daily summary (HH:MM)
 
 class UserSettings(_Base):
     """Per-user application preferences. Persisted server-side so they
@@ -9321,6 +9421,30 @@ def _init_db():
                 # updated_at required by Bug W fix (_get_automation_settings orders by this to
                 # find the most-recently-customised human-user row for EA/background job calls)
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
+                # GAP 7-9: Auto-Adjustment columns
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS auto_macro_response BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS auto_invalidation_act BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS auto_sentiment_watch BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS macro_hours_threshold FLOAT DEFAULT 4.0"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS auto_close_pct FLOAT DEFAULT 50.0"))
+                # Automations GAP — 16 settings previously localStorage-only, now persisted to DB
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS auto_tp1 BOOLEAN DEFAULT TRUE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS auto_tp2 BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS auto_tp3 BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS weekend_close BOOLEAN DEFAULT TRUE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS min_confidence INTEGER DEFAULT 75"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS max_trades INTEGER DEFAULT 3"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS daily_loss_limit BOOLEAN DEFAULT TRUE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS daily_loss_max FLOAT DEFAULT 3.0"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS drawdown_pause BOOLEAN DEFAULT TRUE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS drawdown_max FLOAT DEFAULT 10.0"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS news_filter BOOLEAN DEFAULT TRUE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS ai_reanalyze BOOLEAN DEFAULT TRUE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS ai_interval INTEGER DEFAULT 15"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS alert_tp BOOLEAN DEFAULT TRUE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS alert_sl BOOLEAN DEFAULT TRUE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS alert_daily_summary BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS alert_time VARCHAR(5) DEFAULT '08:00'"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS entry_confluence FLOAT"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS entry_atr FLOAT"))
                 # fill_price and mt5_ticket introduced in Stage 2 commit — missing from earlier migration
