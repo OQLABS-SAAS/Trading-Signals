@@ -12709,6 +12709,65 @@ function szRiskOnInput(){
     szRiskHighlightChip(null);
   }
   szRiskTeach();
+  szPortfolioCtx();
+}
+function szPortfolioCtx(){
+  // Portfolio-level risk intelligence panel — shown below the risk % input.
+  // Tells the trader: how many slots are left, what per-trade risk the portfolio budget implies,
+  // and whether the current szRisk value is within, at, or over the safe limit.
+  var box = document.getElementById('szPortfolioCtx');
+  if(!box) return;
+  var maxTrades    = (_autoSettings && _autoSettings.maxTrades) ? parseInt(_autoSettings.maxTrades) : 3;
+  var dailyMax     = (_autoSettings && _autoSettings.dailyLossMax) ? parseFloat(_autoSettings.dailyLossMax) : 3.0;
+  var openCount    = (typeof window._szOpenPositions === 'number') ? window._szOpenPositions : 0;
+  var remaining    = Math.max(0, maxTrades - openCount);
+  var safePer      = (maxTrades > 0) ? Math.round((dailyMax / maxTrades) * 10) / 10 : dailyMax;
+  var currentRisk  = parseFloat((document.getElementById('szRisk') || {}).value) || 0;
+  // Signal confidence adjustment
+  var sigConf      = window._activeSignal ? (window._activeSignal.confidence_label || '') : '';
+  var confWeight   = sigConf === 'CONFIRMED' ? 1.0 : (sigConf === 'LIKELY' ? 0.75 : (sigConf === 'HYPOTHESIS' ? 0.5 : null));
+  var confHtml     = '';
+  if(confWeight !== null && sigConf){
+    var recRisk    = Math.round(safePer * confWeight * 10) / 10;
+    var confColor  = confWeight === 1.0 ? '#5de8a0' : (confWeight === 0.75 ? 'var(--amb)' : '#e05555');
+    confHtml = '<div style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.07);">'
+      + '<span style="color:var(--t3);">Signal strength: </span>'
+      + '<span style="color:' + confColor + ';font-weight:700;">' + sigConf + '</span>'
+      + ' <span style="color:var(--t3);">— recommended risk for this trade: </span>'
+      + '<span style="color:' + confColor + ';font-weight:700;">' + recRisk + '%</span>'
+      + ' <span style="color:var(--t3);font-size:9px;">(' + Math.round(confWeight * 100) + '% of your ' + safePer + '% per-trade budget)</span>'
+      + '</div>';
+  }
+  // Risk level colour vs safe per-trade budget
+  var riskColor = '#5de8a0', riskLabel = 'WITHIN BUDGET';
+  if(currentRisk > 0){
+    if(currentRisk > safePer * 1.5){ riskColor = '#e05555'; riskLabel = 'OVER BUDGET'; }
+    else if(currentRisk > safePer){ riskColor = 'var(--amb)'; riskLabel = 'ABOVE RECOMMENDED'; }
+  }
+  // Slots bar
+  var slotsHtml = '';
+  for(var i = 0; i < maxTrades; i++){
+    var filled = i < openCount;
+    slotsHtml += '<div style="width:14px;height:8px;border-radius:2px;margin-right:3px;background:'
+      + (filled ? 'var(--amb)' : 'rgba(255,255,255,.1)') + ';"></div>';
+  }
+  box.style.display = 'block';
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">'
+    + '<span style="font-weight:700;color:var(--t1);font-size:10.5px;">Portfolio Risk Check</span>'
+    + '<span style="font-size:9px;color:var(--t3);">from Automations settings</span>'
+    + '</div>'
+    + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">'
+    + slotsHtml
+    + '<span style="color:var(--t2);font-size:10px;margin-left:2px;">'
+    + openCount + '/' + maxTrades + ' trades open — <strong style="color:' + (remaining > 0 ? '#5de8a0' : '#e05555') + ';">' + remaining + ' slot' + (remaining === 1 ? '' : 's') + ' free</strong></span>'
+    + '</div>'
+    + '<div style="color:var(--t3);font-size:10px;">'
+    + 'Daily loss limit <strong style="color:var(--t2);">' + dailyMax + '%</strong> across <strong style="color:var(--t2);">' + maxTrades + ' max trades</strong>'
+    + ' → safe per-trade risk: <strong style="color:var(--amb);">' + safePer + '%</strong>'
+    + (currentRisk > 0 ? ' · your setting: <strong style="color:' + riskColor + ';">' + currentRisk + '% — ' + riskLabel + '</strong>' : '')
+    + '</div>'
+    + confHtml;
 }
 function szRiskTeach(){
   var box = document.getElementById('szRiskTeach');
@@ -13685,6 +13744,8 @@ function showSize(){
           <!-- Plain-English teaching panel — updates as the user changes the value -->
           <div id="szRiskTeach" style="margin-top:7px;padding:9px 11px;border-radius:5px;background:rgba(255,248,230,.04);border:1px solid rgba(201,168,76,.18);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.6;"></div>
           <div class="sz-hint" id="szRiskHint" style="color:var(--crys);"></div>
+          <!-- Portfolio risk context panel — updates live as risk % changes -->
+          <div id="szPortfolioCtx" style="display:none;margin-top:8px;padding:10px 12px;border-radius:6px;border:1px solid rgba(201,168,76,.2);background:rgba(201,168,76,.04);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.7;"></div>
         </div>
         <!-- Trade Size -->
         <div class="sz-field full">
@@ -13987,6 +14048,13 @@ function showSize(){
   if(typeof szRiskRestore === 'function') szRiskRestore();
   szCalc();
   if (typeof _szLivePriceStart === 'function') _szLivePriceStart();
+  // Fetch live open position count once for the portfolio context panel.
+  // Stored in window._szOpenPositions so szPortfolioCtx() can read it without
+  // making a new API call on every keypress.
+  dvFetch('/api/mt5/state').then(function(d){
+    window._szOpenPositions = (d && d.positions) ? d.positions.length : 0;
+    if(typeof szPortfolioCtx === 'function') szPortfolioCtx();
+  }).catch(function(){ window._szOpenPositions = 0; if(typeof szPortfolioCtx === 'function') szPortfolioCtx(); });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -17135,6 +17203,30 @@ function _autoUpdateActBanner() {
   el.textContent = 'DotVerse is protecting your trades · ' + (parts.join(' · ') || 'No automations active');
 }
 
+// Max trades stepper helpers — wired to _autoSettings.maxTrades + _autoPersist()
+function _autoMaxTradesAdj(delta) {
+  var v = Math.min(20, Math.max(1, (_autoSettings.maxTrades || 3) + delta));
+  _autoMaxTradesSet(v);
+}
+function _autoMaxTradesSet(n) {
+  _autoSettings.maxTrades = n;
+  var valEl = document.getElementById('autoMaxTradesVal');
+  if (valEl) valEl.textContent = n;
+  var warnEl = document.getElementById('autoMaxTradesWarn');
+  if (warnEl) warnEl.style.display = n > 10 ? 'block' : 'none';
+  var calcEl = document.getElementById('autoMaxTradesCalc');
+  if (calcEl) calcEl.innerHTML = 'At <span style="color:var(--t2);">' + n + ' trade' + (n===1?'':'s') + '</span> open simultaneously — if each trade risks <strong style="color:var(--amb);">1%</strong>, your total account exposure is up to <strong style="color:var(--amb);">' + n + '%</strong>. At 2% per trade, up to <strong style="color:var(--amb);">' + (n*2) + '%</strong>.';
+  document.querySelectorAll('[data-mxt]').forEach(function(c) {
+    var cn = parseInt(c.getAttribute('data-mxt'));
+    if (cn === n) {
+      c.style.background = 'var(--crys2)'; c.style.color = 'var(--crys)'; c.style.borderColor = 'var(--crys-bord)';
+    } else {
+      c.style.background = 'var(--s2)'; c.style.color = 'var(--t3)'; c.style.borderColor = 'var(--bd)';
+    }
+  });
+  _autoPersist();
+}
+
 async function showAutomations() {
   var el = document.getElementById('dashContent');
   if (!el) return;
@@ -17173,14 +17265,149 @@ async function showAutomations() {
   try{ localStorage.setItem('dv_auto_settings', JSON.stringify(_autoSettings)); }catch(e){}
   var s = _autoSettings;
 
+  // Education guides — every toggle gets plain-English coaching.
+  // Keyed to _autoSettings key names. Auto-looked up inside row() — no call-site changes needed.
+  var GUIDES = {
+    breakeven: {
+      what: 'Once price reaches Target 1, your stop loss automatically moves to your entry price. You can no longer lose money on this trade.',
+      when_on: 'Turn ON for every trade. This is one of the most important protections in trading — it turns a winning trade into a risk-free trade.',
+      risk_if_off: 'Price can hit Target 1, reverse all the way back, and trigger your original stop loss — turning a winning trade into a full loss.',
+      level: 'SAFE'
+    },
+    trailing: {
+      what: 'Your stop loss follows price as it moves in your favour. The distance is set using ATR (Average True Range) — a live measure of how much this asset normally moves each candle.',
+      when_on: 'Turn ON when you want to ride a strong trend without manually adjusting your stop every hour. Best for swing and position trades.',
+      risk_if_off: 'A strong move in your favour can reverse and take back most of your unrealised profit before it reaches your static stop loss.',
+      level: 'SAFE'
+    },
+    autoTP1: {
+      what: 'When price hits Target 1, DotVerse automatically closes 50% of your position and banks that profit.',
+      when_on: 'Turn ON if you want guaranteed partial profits locked in. Even if price reverses after TP1, you still win on half the trade.',
+      risk_if_off: 'If price reaches TP1 and reverses before TP2, you close the full trade at a much smaller gain — or at breakeven if the stop moved.',
+      level: 'SAFE'
+    },
+    autoTP2: {
+      what: 'When price hits Target 2, DotVerse closes another 30% of your position — leaving only 20% running for Target 3.',
+      when_on: 'Turn ON when the signal has strong momentum and you want to progressively scale out of the trade.',
+      risk_if_off: 'You stay fully exposed until Target 3 — higher potential profit but a greater chance that a reversal eats your unrealised gains.',
+      level: 'CAUTION'
+    },
+    autoTP3: {
+      what: 'When price hits Target 3, DotVerse closes the final 20% of your position and exits the trade completely.',
+      when_on: 'Turn ON for strong trend trades where you believe the full move is likely to complete.',
+      risk_if_off: 'The position stays open indefinitely until you close it manually or the stop loss triggers.',
+      level: 'CAUTION'
+    },
+    weekendClose: {
+      what: 'DotVerse closes all open trades before Friday market close. Markets can reopen Monday at a dramatically different price from Friday — this is called a gap.',
+      when_on: 'Turn ON unless you are specifically and intentionally holding a position over the weekend with a clear thesis.',
+      risk_if_off: 'Weekend gap risk. News over the weekend can cause price to open so far from your stop that your actual loss is much larger than the stop distance implies.',
+      level: 'SAFE'
+    },
+    autoScan: {
+      what: 'When the DotVerse scanner finds a signal matching your confidence and asset rules, it places the trade in MT5 automatically — without you clicking anything.',
+      when_on: 'Only turn ON after you have tested your rules extensively and are confident in the automation. This feature places real trades with real money.',
+      risk_if_off: 'You review every signal before placing a trade. Slower but you stay fully in control of every entry.',
+      level: 'ADVANCED'
+    },
+    dailyLossLimit: {
+      what: 'If your account drops by your chosen percentage in a single calendar day, all automated trading stops until the next day.',
+      when_on: 'Always turn ON. This is your daily safety net — it prevents one bad session from wiping out a week of gains.',
+      risk_if_off: 'A series of consecutive losing trades can compound into a catastrophic single-day loss before you notice what is happening.',
+      level: 'SAFE'
+    },
+    drawdownPause: {
+      what: 'If your account falls by your chosen percentage from its highest point ever reached, all automated trading pauses until you manually resume it.',
+      when_on: 'Always turn ON. This is your last line of defence against a sustained losing streak destroying your account.',
+      risk_if_off: 'A prolonged losing period can draw your account down to zero before the system stops — there is no automatic recovery.',
+      level: 'SAFE'
+    },
+    newsFilter: {
+      what: 'DotVerse pauses all automated entries for 30 minutes before and after high-impact economic news events (NFP, CPI, Federal Reserve rate decisions).',
+      when_on: 'Always turn ON. Economic announcements cause extreme short-term volatility that makes technical signals unreliable.',
+      risk_if_off: 'Your automated trade may open right into a news spike and hit your stop loss within seconds of entry.',
+      level: 'SAFE'
+    },
+    aiReanalyze: {
+      what: 'On a timer you set, DotVerse re-analyzes each open trade and sends you a plain-English update: hold, take partial profit early, or exit now.',
+      when_on: 'Turn ON when you want ongoing coaching on live trades without watching charts all day.',
+      risk_if_off: 'You manage all open trades manually based on your own monitoring. Nothing wrong with this — it requires your regular attention.',
+      level: 'SAFE'
+    },
+    alertSignal: {
+      what: 'Sends a Telegram message to your phone the moment a new BUY or SELL signal fires on any asset you are watching.',
+      when_on: 'Turn ON so you never miss a signal while away from your screen.',
+      risk_if_off: 'Signals only appear when you are actively looking at DotVerse. You may miss time-sensitive entries.',
+      level: 'SAFE'
+    },
+    alertTP: {
+      what: 'Sends a Telegram message the moment any open trade hits a take-profit target.',
+      when_on: 'Turn ON to know immediately when a target is hit — useful for deciding whether to move stops or let the remainder run.',
+      risk_if_off: 'You will not be notified when targets are hit. You may miss the opportunity to act on the remaining open position.',
+      level: 'SAFE'
+    },
+    alertSL: {
+      what: 'Sends a Telegram message if your stop loss is triggered on any open trade.',
+      when_on: 'Always turn ON. You should always know immediately when a trade closes at a loss.',
+      risk_if_off: 'Losses can occur without your knowledge until you next open the app.',
+      level: 'SAFE'
+    },
+    alertDailySummary: {
+      what: 'Sends a daily summary to Telegram showing every trade closed today, your total profit or loss, and a list of currently open positions.',
+      when_on: 'Turn ON to maintain a daily performance log without manually recording anything.',
+      risk_if_off: 'No automated daily record. You track performance manually.',
+      level: 'SAFE'
+    },
+    autoMacroResponse: {
+      what: 'When a high-impact economic event is within your threshold window AND your trade is in profit, DotVerse moves your stop to breakeven automatically — locking in the gain before the news hits.',
+      when_on: 'Turn ON if you hold trades overnight or through news windows. It protects profitable trades from news-driven reversals.',
+      risk_if_off: 'A news release can reverse a profitable trade past your original stop, converting a winner into a full loss.',
+      level: 'CAUTION'
+    },
+    autoInvalidationAct: {
+      what: 'When the trend signal that justified your trade entry reverses (EMA crossover or Supertrend direction change), DotVerse automatically tightens your stop to lock partial profit.',
+      when_on: 'Turn ON for trend-following trades where your entry logic was specifically the trend continuing. When the trend ends, the reason for the trade ends.',
+      risk_if_off: 'Your trade stays open even after the original reason for entering it has disappeared.',
+      level: 'CAUTION'
+    },
+    autoSentimentWatch: {
+      what: 'When AI-analysed news sentiment for your asset turns sharply negative mid-trade, DotVerse automatically closes a portion of your position to reduce exposure.',
+      when_on: 'Turn ON only if you trust AI news sentiment as part of your risk management strategy. This is an advanced feature.',
+      risk_if_off: 'News-driven reversals are not acted on automatically. You manage this manually.',
+      level: 'ADVANCED'
+    }
+  };
+
   function row(key, label, desc, checked, recommended, subHtml) {
+    var guide = GUIDES[key] || null;
     var recBadge = recommended
       ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.6px;padding:1px 5px;border-radius:2px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);color:var(--amb);margin-left:6px;">RECOMMENDED</span>'
+      : '';
+    var levelBadge = guide
+      ? (guide.level === 'SAFE'
+          ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(61,190,108,.1);border:1px solid rgba(61,190,108,.2);color:#3dbe6c;margin-left:5px;">SAFE</span>'
+          : guide.level === 'ADVANCED'
+          ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(224,85,85,.1);border:1px solid rgba(224,85,85,.2);color:#e05555;margin-left:5px;">ADVANCED</span>'
+          : '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);color:var(--amb);margin-left:5px;">CAUTION</span>')
+      : '';
+    var guideHtml = guide
+      ? '<details style="margin-top:7px;padding-top:7px;border-top:1px solid var(--bd);">'
+        + '<summary style="font-family:var(--mono);font-size:10px;color:var(--crys);cursor:pointer;list-style:none;display:flex;align-items:center;gap:5px;outline:none;-webkit-appearance:none;">'
+        + '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+        + 'Why this matters &amp; when to use it ▾</summary>'
+        + '<div style="padding:10px 0 2px 0;display:grid;gap:9px;">'
+        + '<div><div style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.07em;color:var(--t3);text-transform:uppercase;margin-bottom:3px;">What it does</div>'
+        + '<div style="font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.65;">' + guide.what + '</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.07em;color:var(--t3);text-transform:uppercase;margin-bottom:3px;">Turn ON when</div>'
+        + '<div style="font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.65;">' + guide.when_on + '</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.07em;color:#e05555;text-transform:uppercase;margin-bottom:3px;">Risk if OFF</div>'
+        + '<div style="font-family:var(--mono);font-size:10px;color:rgba(224,85,85,.85);line-height:1.65;">' + guide.risk_if_off + '</div></div>'
+        + '</div></details>'
       : '';
     return '<div style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
       +   '<div style="flex:1;">'
-      +     '<div style="display:flex;align-items:center;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);">' + label + recBadge + '</div>'
+      +     '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);">' + label + recBadge + levelBadge + '</div>'
       +     '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px;line-height:1.5;">' + desc + '</div>'
       +   '</div>'
       +   '<label class="ta-switch" style="flex-shrink:0;">'
@@ -17189,6 +17416,7 @@ async function showAutomations() {
       +   '</label>'
       + '</div>'
       + (subHtml || '')
+      + guideHtml
       + '</div>';
   }
 
@@ -17270,10 +17498,21 @@ async function showAutomations() {
           s.autoScan, false,
           sliderSub('minConfidence', s.minConfidence, 65, 95, '%  minimum signal confidence', 'Min confidence'))
       + '<div style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
-      +   '<div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);margin-bottom:8px;">Max simultaneous trades</div>'
-      +   '<div style="display:flex;gap:8px;">'
-      +   [1,2,3,4,5].map(function(n){var isA=n===s.maxTrades;return '<button onclick="this.parentNode.querySelectorAll(\'button\').forEach(function(b){b.style.background=\'var(--s2)\';b.style.color=\'var(--t3)\';b.style.borderColor=\'var(--bd)\'});this.style.background=\'var(--crys2)\';this.style.color=\'var(--crys)\';this.style.borderColor=\'var(--crys-bord)\';_autoSettings.maxTrades='+n+';_autoPersist();" style="flex:1;padding:8px 4px;font-family:var(--mono);font-size:12px;font-weight:700;border:1px solid '+(isA?'var(--crys-bord)':'var(--bd)')+';border-radius:4px;background:'+(isA?'var(--crys2)':'var(--s2)')+';color:'+(isA?'var(--crys)':'var(--t3)')+';">'+n+'</button>';}).join('')
+      +   '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px;">'
+      +     '<div>'
+      +       '<div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);">Max simultaneous trades</div>'
+      +       '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px;line-height:1.5;">How many trades DotVerse can have open at the same time. Higher = more exposure.</div>'
+      +     '</div>'
       +   '</div>'
+      +   '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+      +     '<button onclick="_autoMaxTradesAdj(-1)" style="width:34px;height:34px;flex-shrink:0;border:1px solid var(--bd);border-radius:5px;background:var(--s2);color:var(--t2);font-size:18px;font-family:var(--mono);cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;">−</button>'
+      +     '<div id="autoMaxTradesVal" style="font-family:var(--mono);font-size:20px;font-weight:700;color:var(--t1);min-width:38px;text-align:center;">' + (s.maxTrades||3) + '</div>'
+      +     '<button onclick="_autoMaxTradesAdj(1)" style="width:34px;height:34px;flex-shrink:0;border:1px solid var(--bd);border-radius:5px;background:var(--s2);color:var(--t2);font-size:18px;font-family:var(--mono);cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;">+</button>'
+      +     '<div style="width:1px;height:24px;background:var(--bd);margin:0 4px;flex-shrink:0;"></div>'
+      +     [1,3,5,10].map(function(n){var isA=n===s.maxTrades;return '<button data-mxt="'+n+'" onclick="_autoMaxTradesSet('+n+')" style="padding:6px 11px;font-family:var(--mono);font-size:11px;font-weight:700;border:1px solid '+(isA?'var(--crys-bord)':'var(--bd)')+';border-radius:4px;background:'+(isA?'var(--crys2)':'var(--s2)')+';color:'+(isA?'var(--crys)':'var(--t3)')+';">'+n+'</button>';}).join('')
+      +   '</div>'
+      +   '<div id="autoMaxTradesWarn" style="display:' + ((s.maxTrades||3) > 10 ? 'block' : 'none') + ';font-family:var(--mono);font-size:10px;color:var(--amb);padding:7px 10px;background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;margin-bottom:8px;line-height:1.5;">Running more than 10 simultaneous trades significantly increases your margin exposure and the cognitive load of managing them. Ensure your daily loss limit circuit breaker is ON.</div>'
+      +   '<div id="autoMaxTradesCalc" style="font-family:var(--mono);font-size:10px;color:var(--t3);line-height:1.6;">At <span style="color:var(--t2);">' + (s.maxTrades||3) + ' trade' + ((s.maxTrades||3)===1?'':'s') + '</span> open simultaneously — if each trade risks <strong style="color:var(--amb);">1%</strong>, your total account exposure is up to <strong style="color:var(--amb);">' + (s.maxTrades||3) + '%</strong>. At 2% per trade, up to <strong style="color:var(--amb);">' + ((s.maxTrades||3)*2) + '%</strong>.</div>'
       + '</div>'
     )
 

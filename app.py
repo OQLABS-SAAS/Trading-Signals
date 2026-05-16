@@ -4447,6 +4447,12 @@ def _job_auto_scan():
             rr    = res.get("rr1", 0)
 
             lot   = _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=scan_risk_pct, ticker=ticker)
+            # Confidence-weighted sizing — real trader logic.
+            # CONFIRMED = full allocation, LIKELY = 75%, HYPOTHESIS = 50%.
+            # Conviction should always scale position size — never bet the same on a weak signal.
+            conf_label  = res.get("confidence_label", "CONFIRMED")
+            conf_weight = 1.0 if conf_label == "CONFIRMED" else (0.75 if conf_label == "LIKELY" else 0.5)
+            lot         = round(lot * conf_weight, 2)
             if lot < min_lot:
                 _time.sleep(0.5)
                 continue
@@ -4458,6 +4464,7 @@ def _job_auto_scan():
             # ── Send alert ──────────────────────────────────────────────
             type_tag  = "SCALP" if trade_type == "scalping" else "SWING"
             sig_emoji = "🟢" if sig == "BUY" else "🔴"
+            conf_pct_str = "100%" if conf_weight == 1.0 else ("75%" if conf_weight == 0.75 else "50%")
             tg_msg = (
                 f"{sig_emoji} {type_tag} SIGNAL — {ticker}\n"
                 f"Direction: {sig}  |  TF: {tf.upper()}\n"
@@ -4465,8 +4472,8 @@ def _job_auto_scan():
                 f"SL:     {sl:.5g}\n"
                 f"TP1:    {tp1:.5g}  |  TP2: {tp2:.5g}  |  TP3: {tp3:.5g}\n"
                 f"R:R     1:{rr:.1f}\n"
-                f"Lot size: {lot:.2f} lots\n"
-                f"Confidence: HIGH ✅"
+                f"Lot size: {lot:.2f} lots ({conf_label} — {conf_pct_str} allocation)\n"
+                f"Confidence: HIGH"
             )
             # Save scan alert first to get its ID for the callback button
             _bc    = res.get("bullish_count", 0)
@@ -6285,38 +6292,56 @@ def telegram_webhook():
             try:
                 rec = db.query(ScanAlert).filter_by(id=scan_id).first()
                 if rec:
+                    # ── Hard gate: maxTrades enforcement ──────────────────
+                    # Count live open positions across all connected MT5 accounts.
+                    # If at or over the trader's configured max, reject the tap.
+                    _auto_cfg   = _get_automation_settings("default")
+                    _max_trades = int(_auto_cfg.get("max_trades", 3))
+                    _open_count = 0
+                    with mt5_state_lock:
+                        for _uid, _st in mt5_state.items():
+                            if isinstance(_st, dict):
+                                _open_count += len(_st.get("positions", []))
+                    if _open_count >= _max_trades:
+                        answer_text = (
+                            f"Max trades limit reached ({_open_count}/{_max_trades}). "
+                            f"Close an open position before adding a new one. "
+                            f"Change your limit in Automations > Max simultaneous trades."
+                        )
+                    else:
+                    # ── Proceed: place the order ───────────────────────────
                     # Determine asset_type from ticker pattern
-                    t = rec.ticker
-                    at = "crypto" if t.endswith("-USD") and not t.startswith("^") \
-                         else ("forex" if t.endswith("=X") or t in ("EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X") \
-                         else ("index" if t.startswith("^") \
-                         else ("commodity" if t in ("GC=F","SI=F","CL=F") \
-                         else "stock")))
-                    symbol = _mt5_symbol(t, at)
-                    order = MT5Order(
-                        user_id          = "default",
-                        symbol           = symbol,
-                        order_type       = rec.signal,
-                        volume           = rec.lot_size or 0.01,
-                        price            = rec.entry or 0,
-                        sl               = rec.sl,
-                        tp               = rec.tp1,
-                        tp2              = rec.tp2,
-                        tp3              = rec.tp3,
-                        timeframe        = rec.timeframe,
-                        entry_confluence = rec.entry_confluence,
-                        entry_atr        = rec.entry_atr,
-                        action           = "open",
-                        status           = "pending",
-                    )
-                    db.add(order)
-                    db.commit()
-                    db.refresh(order)
-                    order.comment = f"DotVerse #{order.id}"
-                    db.commit()
-                    queued = True
-                    answer_text = (f"✅ {rec.signal} {rec.lot_size:.2f} lots {symbol} queued — "
-                                   f"EA executes within 5s")
+                        t = rec.ticker
+                        at = "crypto" if t.endswith("-USD") and not t.startswith("^") \
+                             else ("forex" if t.endswith("=X") or t in ("EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X") \
+                             else ("index" if t.startswith("^") \
+                             else ("commodity" if t in ("GC=F","SI=F","CL=F") \
+                             else "stock")))
+                        symbol = _mt5_symbol(t, at)
+                        order = MT5Order(
+                            user_id          = "default",
+                            symbol           = symbol,
+                            order_type       = rec.signal,
+                            volume           = rec.lot_size or 0.01,
+                            price            = rec.entry or 0,
+                            sl               = rec.sl,
+                            tp               = rec.tp1,
+                            tp2              = rec.tp2,
+                            tp3              = rec.tp3,
+                            timeframe        = rec.timeframe,
+                            entry_confluence = rec.entry_confluence,
+                            entry_atr        = rec.entry_atr,
+                            action           = "open",
+                            status           = "pending",
+                        )
+                        db.add(order)
+                        db.commit()
+                        db.refresh(order)
+                        order.comment = f"DotVerse #{order.id}"
+                        db.commit()
+                        queued = True
+                        answer_text = (f"✅ {rec.signal} {rec.lot_size:.2f} lots {symbol} queued — "
+                                       f"EA executes within 5s")
             except Exception as e:
                 db.rollback()
                 print(f"[Telegram webhook] execute error: {e}")
