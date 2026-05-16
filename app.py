@@ -326,7 +326,7 @@ def _get_spread(ticker, asset_type, entry=1.0):
       Tier 2 — SPREAD_TABLE (typical values per instrument)
       Tier 3 — flat estimate (entry * 0.001, labelled approximate)
 
-    Returns: (spread_price_units: float, source: "live"|"estimated"|"approximate")
+    Returns: (spread_price_units: float, source: "live"|"estimated"|"approximate", quality: "tight"|"fair"|"wide")
     """
     is_forex = (asset_type == "forex")
     pip_size = 0.01 if "JPY" in ticker.upper() else 0.0001
@@ -342,7 +342,23 @@ def _get_spread(ticker, asset_type, entry=1.0):
                 raw = float(spreads[sym_key])
                 # EA sends pips for forex; price units for others
                 price_units = (raw * pip_size) if is_forex else raw
-                return round(price_units, 8), "live"
+                # Quality: compare live spread to SPREAD_TABLE typical
+                _typ = SPREAD_TABLE.get(ticker)
+                if _typ is None:
+                    if asset_type == "crypto":      _typ = SPREAD_TABLE["_default_crypto"]
+                    elif asset_type == "forex":     _typ = SPREAD_TABLE["_default_forex"]
+                    elif asset_type == "index":     _typ = SPREAD_TABLE["_default_index"]
+                    elif asset_type == "commodity": _typ = SPREAD_TABLE["_default_commodity"]
+                    else:                           _typ = SPREAD_TABLE["_default_stock"]
+                if is_forex:
+                    _typ_pu = float(_typ) * pip_size
+                elif asset_type in ("crypto", "stock"):
+                    _typ_pu = float(_typ) / 100.0 * entry
+                else:
+                    _typ_pu = float(_typ)
+                _ratio = price_units / _typ_pu if _typ_pu > 0 else 1.0
+                _qual  = "wide" if _ratio > 2.0 else "tight" if _ratio < 0.6 else "fair"
+                return round(price_units, 8), "live", _qual
 
     # ── Tier 2: spread table ──────────────────────────────────────
     val = SPREAD_TABLE.get(ticker)
@@ -359,15 +375,15 @@ def _get_spread(ticker, asset_type, entry=1.0):
             val = SPREAD_TABLE["_default_stock"]
 
     if is_forex:
-        return round(float(val) * pip_size, 8), "estimated"
+        return round(float(val) * pip_size, 8), "estimated", "fair"
     elif asset_type in ("crypto", "stock"):
-        return round(float(val) / 100.0 * entry, 8), "estimated"
+        return round(float(val) / 100.0 * entry, 8), "estimated", "fair"
     else:
         # index / commodity — already in price units
-        return round(float(val), 8), "estimated"
+        return round(float(val), 8), "estimated", "fair"
 
     # ── Tier 3: flat fallback (should be unreachable) ─────────────
-    return round(entry * 0.001, 8), "approximate"
+    return round(entry * 0.001, 8), "approximate", "fair"
 
 
 # ─── INDICATOR HELPERS ────────────────────────────────────────
@@ -2832,6 +2848,8 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     spread_cost     = 0.0
     spread_source   = None
     spread_pips_val = None
+    spread_quality  = 'fair'
+    breakeven       = None
     rr1_raw = rr2_raw = rr3_raw = None
     is_forex_t  = (asset_type == "forex")
     pip_size_t  = 0.01 if "JPY" in ticker.upper() else 0.0001
@@ -2864,8 +2882,9 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # Replaces the old flat fee_adj (entry * 0.002).  Now uses the actual
         # broker spread so every number the trader sees reflects real cost.
         # Tier 1 = live from MT5 EA · Tier 2 = table · Tier 3 = flat estimate.
-        spread_cost, spread_source = _get_spread(ticker, asset_type, entry)
+        spread_cost, spread_source, spread_quality = _get_spread(ticker, asset_type, entry)
         spread_pips_val = round(spread_cost / pip_size_t, 1) if is_forex_t else None
+        breakeven = prnd(entry + spread_cost) if signal == "BUY" else prnd(entry - spread_cost) if signal == "SELL" else None
 
         # Raw R:R (before spread) — shown alongside adjusted for education
         risk_raw = abs(entry - stop_loss)
@@ -3028,9 +3047,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         "rr1_raw":      rr1_raw,
         "rr2_raw":      rr2_raw,
         "rr3_raw":      rr3_raw,
-        "spread_cost":  round(spread_cost, 6),
-        "spread_source": spread_source,
-        "spread_pips":  spread_pips_val,
+        "spread_cost":    round(spread_cost, 6),
+        "spread_source":  spread_source,
+        "spread_pips":    spread_pips_val,
+        "spread_quality": spread_quality,
+        "breakeven":      breakeven,
         "position_pct": position_pct,
         # Trade-type metadata so the frontend card can show what kind of
         # trade this is and the plain-English reasoning for why the SL/TP

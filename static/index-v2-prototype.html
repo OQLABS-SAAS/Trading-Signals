@@ -7150,10 +7150,12 @@ async function dvRunAnalyze(){
       // ── News sentiment (GAP 5 — Finnhub headlines) ──
       newsSentiment:       data.news_sentiment || null,
       // ── Spread-aware R:R (spread build Steps A/B/D) ──
-      spreadCost:   data.spread_cost,
-      spreadSource: data.spread_source,
-      spreadPips:   data.spread_pips,
-      rr1Raw:       data.rr1_raw,
+      spreadCost:    data.spread_cost,
+      spreadSource:  data.spread_source,
+      spreadPips:    data.spread_pips,
+      spreadQuality: data.spread_quality || 'fair',
+      breakeven:     data.breakeven      || null,
+      rr1Raw:        data.rr1_raw,
       rr2Raw:       data.rr2_raw,
       rr3Raw:       data.rr3_raw,
     };
@@ -8072,8 +8074,9 @@ async function _sfFetchSignals(){
             volRatio:    r.vol_ratio    || 1.0,
             spreadCost:  r.spread_cost  != null ? r.spread_cost  : null,
             spreadPips:  r.spread_pips  != null ? r.spread_pips  : null,
-            spreadSrc:   r.spread_source || null,
-            rr1Raw:      r.rr1_raw      != null ? r.rr1_raw      : null
+            spreadSrc:     r.spread_source  || null,
+            spreadQuality: r.spread_quality || 'fair',
+            rr1Raw:        r.rr1_raw      != null ? r.rr1_raw      : null
           };
         });
       // Multi-TF scan — keep all timeframes so users can compare
@@ -8990,7 +8993,7 @@ function _sfCard(s){
       <span class="sig-rr">1:${s.rr}${s.rr1Raw&&s.rr1Raw!==s.rr?'<span style="font-size:8px;opacity:.5;margin-left:2px;">(adj)</span>':''}</span>
       <span class="sig-eta"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${s.eta}</span>
     </div>
-    ${s.spreadCost&&s.spreadCost>0?`<div style="padding:5px 14px 6px;font-family:var(--mono);font-size:9px;color:rgba(201,168,76,.65);border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;justify-content:space-between;gap:8px;"><span>Spread&thinsp;${s.spreadPips!=null?s.spreadPips+' pips':'~$'+s.spreadCost.toFixed(s.spreadCost<0.1?4:2)}&ensp;<span style="color:${s.spreadSrc==='live'?'#3dbe6c':'rgba(237,232,216,.25)'};">${s.spreadSrc==='live'?'● live':'● est.'}</span></span>${s.rr1Raw&&s.rr1Raw!==s.rr?`<span style="color:rgba(237,232,216,.3);">raw 1:${s.rr1Raw} → adj 1:${s.rr}</span>`:''}` + '</div>':''}
+    ${s.spreadCost&&s.spreadCost>0?`<div style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;"><span style="color:rgba(201,168,76,.45);">spread adj</span><span style="padding:1px 6px;border-radius:3px;font-size:8px;letter-spacing:.05em;${{'wide':'background:rgba(224,85,85,.12);color:#e05555;','fair':'background:rgba(237,232,216,.07);color:rgba(237,232,216,.4);','tight':'background:rgba(61,190,108,.1);color:#3dbe6c;'}[s.spreadQuality||'fair']}">${(s.spreadQuality||'fair').toUpperCase()}</span>${s.spreadSrc==='live'?'<span style="display:inline-flex;align-items:center;gap:3px;color:#3dbe6c;font-size:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#3dbe6c;animation:lpulse 1.8s ease-in-out infinite;flex-shrink:0;"></span>LIVE</span>':''}</div>`:''}
     <div class="sig-analysis" id="sfa-${id}">${s.analysis}</div>
     <div class="sig-tags">${s.tags.map(t=>`<span class="sig-tag">${t}</span>`).join('')}</div>
     <div class="sig-foot">
@@ -11617,21 +11620,35 @@ function showUnderstand(){
 
         <!-- Spread cost block — shown only for live BUY/SELL signals -->
         ${(sig.spreadCost&&sig.spreadCost>0&&sig.rr)?`
-        <div style="margin-bottom:16px;padding:12px 14px;border-radius:7px;border:1px solid rgba(201,168,76,.22);background:rgba(201,168,76,.04);">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:7px;">
-            <div>
-              <div style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:rgba(201,168,76,.55);margin-bottom:4px;">BROKER SPREAD COST</div>
-              <div style="font-family:var(--mono);font-size:18px;font-weight:600;color:rgba(201,168,76,.9);">${sig.spreadPips!=null?sig.spreadPips+' pips':('~$'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2))}&thinsp;<span style="font-size:9px;font-weight:400;color:${sig.spreadSource==='live'?'#3dbe6c':'rgba(237,232,216,.3)'};">${sig.spreadSource==='live'?'● LIVE':'● EST.'}</span></div>
-            </div>
-            ${sig.rr1Raw&&sig.rr1Raw!==sig.rr?`
-            <div style="text-align:right;flex-shrink:0;">
-              <div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);letter-spacing:.04em;margin-bottom:4px;">R:R IMPACT</div>
-              <div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.35);text-decoration:line-through;">1:${sig.rr1Raw}</div>
-              <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:rgba(237,232,216,.88);">1:${sig.rr}</div>
-            </div>`:''}
+        <div style="margin-bottom:16px;padding:13px 14px;border-radius:7px;border:1px solid rgba(61,190,108,.18);background:rgba(61,190,108,.04);">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3dbe6c" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg>
+            <span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:#3dbe6c;">SPREAD ALREADY ACCOUNTED FOR</span>
+            ${sig.spreadSource==='live'?`<span style="display:inline-flex;align-items:center;gap:4px;margin-left:auto;font-family:var(--mono);font-size:8px;color:#3dbe6c;"><span style="width:5px;height:5px;border-radius:50%;background:#3dbe6c;animation:lpulse 1.8s ease-in-out infinite;flex-shrink:0;"></span>LIVE EA</span>`:''}
           </div>
-          <div style="font-size:11px;color:rgba(237,232,216,.48);line-height:1.55;">Your broker charges this the moment you open the trade. DotVerse already adjusts your TP levels and R:R to account for it.${sig.spreadSource==='estimated'?'&ensp;<span style="color:rgba(237,232,216,.3);">Connect the DotVerse EA for your live broker spread.</span>':''}</div>
-        </div>`:``}
+          <div style="font-size:11px;color:rgba(237,232,216,.52);line-height:1.6;margin-bottom:10px;">Your broker takes a small cut the moment you open a trade — it's called the spread. DotVerse has already adjusted your TP targets and R:R to account for it. You don't need to do anything extra.${sig.spreadSource==='estimated'?'&ensp;<span style="color:rgba(237,232,216,.22);font-size:10px;">Connect the DotVerse EA for your live broker spread.</span>':''}</div>
+          ${sig.rr1Raw&&sig.rr1Raw!==sig.rr?`
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:5px;background:rgba(237,232,216,.04);margin-bottom:10px;">
+            <div style="text-align:center;flex:1;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.28);margin-bottom:3px;">WITHOUT SPREAD</div><div style="font-family:var(--mono);font-size:13px;color:rgba(237,232,216,.28);text-decoration:line-through;">1:${sig.rr1Raw}</div></div>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.18)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            <div style="text-align:center;flex:1;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.45);margin-bottom:3px;">AFTER SPREAD</div><div style="font-family:var(--mono);font-size:15px;font-weight:600;color:rgba(237,232,216,.9);">1:${sig.rr}</div></div>
+          </div>`:''}
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.28);">SPREAD QUALITY</span>
+            <span style="padding:2px 8px;border-radius:3px;font-family:var(--mono);font-size:9px;letter-spacing:.05em;${{'wide':'background:rgba(224,85,85,.12);color:#e05555;','fair':'background:rgba(237,232,216,.07);color:rgba(237,232,216,.45);','tight':'background:rgba(61,190,108,.1);color:#3dbe6c;'}[sig.spreadQuality||'fair']}">${(sig.spreadQuality||'fair').toUpperCase()}</span>
+            ${sig.spreadPips!=null?`<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.22);">${sig.spreadPips} pips</span>`:''}
+          </div>
+        </div>
+        ${sig.spreadQuality==='wide'?`
+        <div style="margin-bottom:16px;padding:12px 14px;border-radius:7px;border:1px solid rgba(224,85,85,.25);background:rgba(224,85,85,.05);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#e05555" stroke-width="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span style="font-family:var(--mono);font-size:9px;letter-spacing:.07em;color:#e05555;">WIDE SPREAD WARNING</span></div>
+          <div style="font-size:11px;color:rgba(237,232,216,.52);line-height:1.6;">Your broker's spread right now is wider than usual — more than 2× the typical cost for this instrument. This eats further into your real R:R. Consider waiting for the spread to narrow, or using a broker with tighter spreads.</div>
+        </div>`:''}
+        ${sig.macroHighImpact&&sig.macroEvents&&sig.macroEvents.length>0?`
+        <div style="margin-bottom:16px;padding:12px 14px;border-radius:7px;border:1px solid rgba(201,168,76,.2);background:rgba(201,168,76,.04);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d4870a" stroke-width="2.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span style="font-family:var(--mono);font-size:9px;letter-spacing:.07em;color:#d4870a;">HIGH-IMPACT NEWS TODAY</span></div>
+          <div style="font-size:11px;color:rgba(237,232,216,.52);line-height:1.6;">High-impact events detected: ${sig.macroEvents.slice(0,2).map(function(e){return e.title||e;}).join(' · ')}. Spreads often widen and prices can spike around news. DotVerse's R:R is calculated on current prices — factor this in before opening the trade.</div>
+        </div>`:''}`:``}
 
         <!-- A3: Trade duration estimator -->
         ${(()=>{const d=_undDurInfo(sig.tf);return `<div class="und-duration-strip">
@@ -13679,7 +13696,8 @@ function showSize(){
         <span>SL <strong style="color:#e8706e;">${sig.sl||pf.sl||'—'}</strong></span>
         <span>TP <strong style="color:#5de8a0;">${sig.tp||pf.tp||'—'}</strong></span>
         <span>R:R <strong style="color:rgba(237,232,216,.88);">1:${sig.rr||'—'}</strong>${sig.rr1Raw&&sig.rr1Raw!==sig.rr?'<span style="opacity:.45;font-size:9px;"> (adj from 1:'+sig.rr1Raw+')</span>':''}</span>
-        ${sig.spreadCost&&sig.spreadCost>0?`<span style="color:rgba(201,168,76,.75);">Spread <strong style="color:rgba(201,168,76,.92);">${sig.spreadPips!=null?sig.spreadPips+' pips':'~$'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2)}</strong>&thinsp;<span style="font-size:8px;color:${sig.spreadSource==='live'?'#3dbe6c':'rgba(237,232,216,.3)'};">${sig.spreadSource==='live'?'● live':'● est.'}</span></span>`:''}
+        ${sig.spreadCost&&sig.spreadCost>0?`<span style="color:rgba(201,168,76,.45);">spread adj</span><span style="padding:1px 6px;border-radius:3px;font-size:8px;letter-spacing:.04em;${{'wide':'background:rgba(224,85,85,.12);color:#e05555;','fair':'background:rgba(237,232,216,.07);color:rgba(237,232,216,.38);','tight':'background:rgba(61,190,108,.1);color:#3dbe6c;'}[sig.spreadQuality||'fair']}">${(sig.spreadQuality||'fair').toUpperCase()}</span>`:''}
+        ${sig.breakeven?`<span style="color:rgba(237,232,216,.38);">breakeven <strong style="color:rgba(237,232,216,.72);">${sig.breakeven}</strong></span>`:''}
       </div>
     </div>
     <button class="sz-clear-btn" onclick="window._activeSignal=null;window._calcPrefill=null;window._verdictPlan=null;showSize()">Clear</button>
