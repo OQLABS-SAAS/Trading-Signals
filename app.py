@@ -7798,6 +7798,11 @@ def scan_list():
                         "bear_score": analysis.get("bearish_count",0), "counter_trade": ct["counter_trade"],
                         "confidence": analysis.get("confidence","LOW"),
                         "confidence_label": analysis.get("confidence_label","HYPOTHESIS"),
+                        "spread_cost":    analysis.get("spread_cost"),
+                        "spread_quality": analysis.get("spread_quality","fair"),
+                        "spread_source":  analysis.get("spread_source"),
+                        "spread_pips":    analysis.get("spread_pips"),
+                        "rr1_raw":        analysis.get("rr1_raw"),
                     }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
