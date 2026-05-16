@@ -293,6 +293,83 @@ def _mt5_symbol(ticker, asset_type):
             "XAUUSD":"XAUUSD","XAGUSD":"XAGUSD"}
     return _map.get(s, s)
 
+
+# ─── SPREAD TABLE (Tier 2 fallback) ──────────────────────────
+# Values mean different things per asset class — see _get_spread().
+# Forex: pips  |  Crypto/Stock: % of price  |  Index/Commodity: price units
+SPREAD_TABLE = {
+    # Forex majors (pips)
+    "EURUSD=X": 1.5, "GBPUSD=X": 2.0, "USDJPY=X": 1.5, "AUDUSD=X": 2.0,
+    "USDCHF=X": 2.0, "USDCAD=X": 2.5, "NZDUSD=X": 2.5,
+    # Forex minors (pips)
+    "EURGBP=X": 2.5, "EURJPY=X": 2.5, "GBPJPY=X": 3.5,
+    # Crypto (% of price)
+    "BTC-USD": 0.05, "ETH-USD": 0.07, "BNB-USD": 0.10,
+    # Indices (points)
+    "^GSPC": 0.5, "^NDX": 1.0, "^DJI": 2.0, "^FTSE": 1.5,
+    # Commodities (price units)
+    "GC=F": 0.5, "SI=F": 0.030, "CL=F": 0.03,
+    # Defaults per class
+    "_default_stock":     0.05,   # % of price
+    "_default_crypto":    0.10,   # % of price
+    "_default_forex":     3.0,    # pips
+    "_default_index":     1.0,    # points (price units)
+    "_default_commodity": 0.1,    # price units
+}
+
+
+def _get_spread(ticker, asset_type, entry=1.0):
+    """Return spread in price units for the given instrument.
+
+    Priority:
+      Tier 1 — live MT5 EA (spread pushed via /api/mt5/heartbeat)
+      Tier 2 — SPREAD_TABLE (typical values per instrument)
+      Tier 3 — flat estimate (entry * 0.001, labelled approximate)
+
+    Returns: (spread_price_units: float, source: "live"|"estimated"|"approximate")
+    """
+    is_forex = (asset_type == "forex")
+    pip_size = 0.01 if "JPY" in ticker.upper() else 0.0001
+
+    # ── Tier 1: live from MT5 heartbeat ──────────────────────────
+    with mt5_state_lock:
+        for _uid, _st in mt5_state.items():
+            if not isinstance(_st, dict):
+                continue
+            spreads = _st.get("spread", {})
+            sym_key = _mt5_symbol(ticker, asset_type)
+            if sym_key in spreads:
+                raw = float(spreads[sym_key])
+                # EA sends pips for forex; price units for others
+                price_units = (raw * pip_size) if is_forex else raw
+                return round(price_units, 8), "live"
+
+    # ── Tier 2: spread table ──────────────────────────────────────
+    val = SPREAD_TABLE.get(ticker)
+    if val is None:
+        if asset_type == "crypto":
+            val = SPREAD_TABLE["_default_crypto"]
+        elif asset_type == "forex":
+            val = SPREAD_TABLE["_default_forex"]
+        elif asset_type == "index":
+            val = SPREAD_TABLE["_default_index"]
+        elif asset_type == "commodity":
+            val = SPREAD_TABLE["_default_commodity"]
+        else:
+            val = SPREAD_TABLE["_default_stock"]
+
+    if is_forex:
+        return round(float(val) * pip_size, 8), "estimated"
+    elif asset_type in ("crypto", "stock"):
+        return round(float(val) / 100.0 * entry, 8), "estimated"
+    else:
+        # index / commodity — already in price units
+        return round(float(val), 8), "estimated"
+
+    # ── Tier 3: flat fallback (should be unreachable) ─────────────
+    return round(entry * 0.001, 8), "approximate"
+
+
 # ─── INDICATOR HELPERS ────────────────────────────────────────
 def rma(series, length):
     alpha  = 1.0 / length
@@ -2750,6 +2827,15 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     # bottom of this function still needs trade_type metadata.
     _profile = _atr_profile_for_tf(timeframe)
 
+    # Spread vars — initialised here so the result dict always has them
+    # regardless of which branch fires. Overwritten inside the ATR block.
+    spread_cost     = 0.0
+    spread_source   = None
+    spread_pips_val = None
+    rr1_raw = rr2_raw = rr3_raw = None
+    is_forex_t  = (asset_type == "forex")
+    pip_size_t  = 0.01 if "JPY" in ticker.upper() else 0.0001
+
     # Generate trade levels based on ATR
     if signal != "HOLD" and atr > 0:
         # Adaptive decimal places: cheap altcoins (< $1) need 6dp so TP levels
@@ -2774,30 +2860,57 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             tp2 = prnd(price - (_t2_m * atr))
             tp3 = prnd(price - (_t3_m * atr))
 
-        # ── 2d: Net RR after fees — 0.2% round-trip (0.1% entry + 0.1% exit) ──
-        fee_adj = entry * 0.002
-        if signal == "BUY":
-            tp1 = prnd(tp1 - fee_adj)
-            tp2 = prnd(tp2 - fee_adj)
-            tp3 = prnd(tp3 - fee_adj)
-        else:  # SELL — fees add to cost, reducing net gain
-            tp1 = prnd(tp1 + fee_adj)
-            tp2 = prnd(tp2 + fee_adj)
-            tp3 = prnd(tp3 + fee_adj)
+        # ── Spread-aware TP adjustment + R:R ─────────────────────────────────
+        # Replaces the old flat fee_adj (entry * 0.002).  Now uses the actual
+        # broker spread so every number the trader sees reflects real cost.
+        # Tier 1 = live from MT5 EA · Tier 2 = table · Tier 3 = flat estimate.
+        spread_cost, spread_source = _get_spread(ticker, asset_type, entry)
+        spread_pips_val = round(spread_cost / pip_size_t, 1) if is_forex_t else None
 
-        # Calculate R:R ratios (after fee adjustment)
-        risk = abs(entry - stop_loss)
-        if risk > 0:
-            rr1 = round((abs(tp1 - entry) / risk), 1)
-            rr2 = round((abs(tp2 - entry) / risk), 1)
-            rr3 = round((abs(tp3 - entry) / risk), 1)
+        # Raw R:R (before spread) — shown alongside adjusted for education
+        risk_raw = abs(entry - stop_loss)
+        if risk_raw > 0:
+            rr1_raw = round(abs(tp1 - entry) / risk_raw, 1)
+            rr2_raw = round(abs(tp2 - entry) / risk_raw, 1)
+            rr3_raw = round(abs(tp3 - entry) / risk_raw, 1)
+
+        # ── Step D: Scalp guard ───────────────────────────────────────────────
+        # If spread consumes >25% of TP1 distance, the trade is structurally
+        # unviable as a scalp — the entry cost alone eats most of the reward.
+        _tp1_dist = abs(tp1 - entry)
+        if _profile["type"] == "scalp" and _tp1_dist > 0 and spread_cost > 0.25 * _tp1_dist:
+            _sp_pct = int(spread_cost / _tp1_dist * 100)
+            _sp_str = (f"{round(spread_cost / pip_size_t, 1)} pips"
+                       if is_forex_t else f"{spread_cost:.5g}")
+            gate_note = gate_note or (
+                f"Spread too wide for scalp — {_sp_str} of spread consumes {_sp_pct}% of "
+                f"your TP1 target before price moves in your favour. "
+                f"Scalping only works when spread is a small fraction of the target. "
+                f"Wait for tighter market conditions or switch to the 1H timeframe for a wider target."
+            )
+            signal = "HOLD"
+
+        # Apply spread to TP levels (only for live BUY/SELL after scalp guard)
+        if signal == "BUY":
+            tp1 = prnd(tp1 - spread_cost)
+            tp2 = prnd(tp2 - spread_cost)
+            tp3 = prnd(tp3 - spread_cost)
+        elif signal == "SELL":
+            tp1 = prnd(tp1 + spread_cost)
+            tp2 = prnd(tp2 + spread_cost)
+            tp3 = prnd(tp3 + spread_cost)
+
+        # Spread-adjusted R:R — spread reduces reward AND widens effective risk
+        # (you buy at ask = mid + spread, so the hurdle is higher on both sides)
+        risk = risk_raw
+        if risk > 0 and signal in ("BUY", "SELL"):
+            risk_adj = risk + spread_cost
+            rr1 = round(abs(tp1 - entry) / risk_adj, 1)
+            rr2 = round(abs(tp2 - entry) / risk_adj, 1)
+            rr3 = round(abs(tp3 - entry) / risk_adj, 1)
             # ── Minimum R:R gate — reject trades below 1:2 ──────────────────
             if rr1 < 2.0:
                 print(f"[rr-gate] {ticker} rr1={rr1} < 2.0 — downgrading {signal} to HOLD")
-                # FIX 2026-04-29: set gate_note so the summary text explains WHY
-                # the signal was demoted. Without this, user saw the bare
-                # 'Mixed signals: X bullish vs Y bearish' text with no reason.
-                # Beginner trust requires honesty about gate decisions.
                 gate_note = gate_note or (
                     f"Risk:reward only 1:{rr1} — below DotVerse's minimum 1:2 floor. "
                     f"Trade levels exist but the math doesn't favour entry."
@@ -2805,6 +2918,8 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
                 signal = "HOLD"
                 entry = stop_loss = tp1 = tp2 = tp3 = None
                 rr1 = rr2 = rr3 = None
+                rr1_raw = rr2_raw = rr3_raw = None
+                spread_pips_val = None
                 position_pct = None
             else:
                 # ── 3c: Position size for 1% account risk ──────────────────────
@@ -2910,6 +3025,12 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         "rr1": rr1,
         "rr2": rr2,
         "rr3": rr3,
+        "rr1_raw":      rr1_raw,
+        "rr2_raw":      rr2_raw,
+        "rr3_raw":      rr3_raw,
+        "spread_cost":  round(spread_cost, 6),
+        "spread_source": spread_source,
+        "spread_pips":  spread_pips_val,
         "position_pct": position_pct,
         # Trade-type metadata so the frontend card can show what kind of
         # trade this is and the plain-English reasoning for why the SL/TP

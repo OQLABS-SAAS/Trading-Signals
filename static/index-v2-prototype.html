@@ -7149,6 +7149,13 @@ async function dvRunAnalyze(){
       macroHighImpact:     data.macro_high_impact === true,
       // ── News sentiment (GAP 5 — Finnhub headlines) ──
       newsSentiment:       data.news_sentiment || null,
+      // ── Spread-aware R:R (spread build Steps A/B/D) ──
+      spreadCost:   data.spread_cost,
+      spreadSource: data.spread_source,
+      spreadPips:   data.spread_pips,
+      rr1Raw:       data.rr1_raw,
+      rr2Raw:       data.rr2_raw,
+      rr3Raw:       data.rr3_raw,
     };
     // Clear any stale verdict pre-warm from a previous signal
     window._verdictPrewarmJobId = null;
@@ -11478,9 +11485,13 @@ function showUnderstand(){
       <div class="dv-ic-val" style="color:${sig.chg&&sig.chg.startsWith('+')?'#5de8a0':sig.chg&&sig.chg.startsWith('-')?'#e8706e':'var(--crys)'}">${sig.chg||'–'}</div>
     </div>
     <div class="dv-ic">
-      <div class="dv-ic-lbl">R:R</div>
+      <div class="dv-ic-lbl">R:R${sig.rr1Raw&&sig.rr1Raw!==sig.rr?' adj':''}</div>
       <div class="dv-ic-val" style="color:rgba(237,232,216,.88)">1:${sig.rr||'–'}</div>
     </div>
+    ${sig.spreadCost!=null&&sig.rr?`<div class="dv-ic">
+      <div class="dv-ic-lbl">Spread</div>
+      <div class="dv-ic-val" style="color:rgba(237,232,216,.65);font-size:10px;">${sig.spreadPips!=null?sig.spreadPips+'pip':('~$'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2))}${sig.spreadSource==='live'?' <span style="color:#3dbe6c;font-size:9px;">live</span>':' <span style="color:rgba(237,232,216,.4);font-size:9px;">est.</span>'}</div>
+    </div>`:''}
     <div class="dv-ic">
       <div class="dv-ic-lbl">Volatility</div>
       <div class="dv-ic-val">${sig.atr!=null?(sig.atr>0.05?'High':sig.atr>0.02?'Moderate':'Low'):'–'}</div>
@@ -11502,6 +11513,31 @@ function showUnderstand(){
       <div class="dv-ic-val" style="color:${sig.winRate!=null&&sig.winRate>=55?'#5de8a0':sig.winRate!=null&&sig.winRate<45?'#e8706e':'inherit'}">${sig.winRate!=null?sig.winRate.toFixed(0)+'%':'–'}</div>
     </div>
   </div>
+
+  <!-- Spread education strip — only when trade signal is active -->
+  ${(sig.rr&&sig.spreadCost!=null&&sig.rr1Raw)?`<div style="margin:0 0 8px 0;border-radius:8px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.02);overflow:hidden;">
+    <div style="padding:9px 13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);letter-spacing:.04em;flex-shrink:0;">SPREAD COST</div>
+      <div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.88);">${sig.spreadPips!=null?sig.spreadPips+' pips':('≈$'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2))}&nbsp;<span style="font-size:9px;color:${sig.spreadSource==='live'?'#3dbe6c':'rgba(237,232,216,.4)'};">${sig.spreadSource==='live'?'● LIVE':'● EST.'}</span></div>
+      <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.45);">Raw R:R 1:${sig.rr1Raw} → Adj. 1:${sig.rr}</div>
+    </div>
+    <details style="border-top:1px solid rgba(255,255,255,.05);">
+      <summary style="padding:7px 13px;font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.7);cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        What is spread and why does it change my R:R?
+      </summary>
+      <div style="padding:10px 13px 12px;font-size:12px;line-height:1.7;color:rgba(237,232,216,.7);">
+        <strong style="color:rgba(237,232,216,.88);">The spread is your broker's entry fee — paid the moment you open a trade.</strong>
+        Your broker shows you two prices: the buy price (ask) and the sell price (bid). The difference is the spread.
+        When DotVerse says enter at ${sig.entry}, you actually enter at ${sig.entry} + spread. This means your trade
+        starts slightly in the red before price moves in your favour.<br><br>
+        On this trade, that cost is ${sig.spreadPips!=null?sig.spreadPips+' pips':('approx $'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2))}.
+        The raw R:R of 1:${sig.rr1Raw} is calculated from clean price levels. The adjusted R:R of 1:${sig.rr}
+        reflects what your account actually experiences after that entry cost.${sig.spreadSource==='estimated'?
+        '<br><br><span style="color:rgba(237,232,216,.45);font-size:11px;">This is a typical spread estimate. Connect the DotVerse EA to get your live broker spread.</span>':''}
+      </div>
+    </details>
+  </div>`:``}
 
   <!-- LWC Chart Panel -->
   <div class="und-chart-panel" id="undChartWrap">
@@ -14742,6 +14778,8 @@ function szCalc(){
   if(assetType==='forex'){ pipSize=isJPY?0.01:0.0001; pipLabel='pips'; }
 
   const feeRate=assetType==='crypto'?0.001:0.0005;
+  // Spread data from signal (Step E — spread build)
+  const _spreadUnits = (sig&&sig.spreadCost!=null) ? sig.spreadCost : 0;
   const slDist=Math.abs(entry-sl);
   const slPips=slDist/pipSize;
 
@@ -14807,6 +14845,11 @@ function szCalc(){
   function calcTP(tp){
     const dist=Math.abs(tp-entry);
     const gross=dist*posSize;
+    // Spread dollar cost: spread_price_units × position_size (units held)
+    // The backend already deducted spread from the TP level, so we add it
+    // back to get the "raw" gross before spread was applied.
+    const spreadDollar=_spreadUnits*posSize;
+    const rawGross=gross+spreadDollar;
     const fees=posVal*feeRate;
     const net=gross-fees;
     const rr=slDist>0?(dist/slDist).toFixed(1):'—';
@@ -14815,7 +14858,7 @@ function szCalc(){
     const acctGross=(gross/(acct||1)*100).toFixed(2);
     const tpPips=dist/pipSize;
     const priceStr=tp>=100?'$'+tp.toLocaleString(undefined,{maximumFractionDigits:2}):'$'+tp.toFixed(assetType==='forex'?5:6);
-    return {dist,gross,net,fees,rr,pct,acctNet,acctGross,tpPips,priceStr};
+    return {dist,gross,net,fees,rr,pct,acctNet,acctGross,tpPips,priceStr,spreadDollar,rawGross};
   }
 
   const tpList=[[tp1,'1'],[tp2,'2'],[tp3,'3']];
@@ -14836,11 +14879,15 @@ function szCalc(){
     _s('szTP'+n+'Profit', moneyAtRisk>0?'+$'+t.net.toFixed(0)+' net':'—');
     _s('szTP'+n+'Dist',  t.tpPips.toFixed(0)+' '+pipLabel);
     _s('szTP'+n+'Pct',   assetType==='forex'?t.tpPips.toFixed(1)+' pips':(t.pct.startsWith('-')?'':'+')+t.pct+'%');
-    _s('szTP'+n+'Gross', '+$'+t.gross.toFixed(0)+' gross  (fees −$'+t.fees.toFixed(0)+')');
+    // Gross row — show spread breakdown when spread data is available
+    const _grossLine = (_spreadUnits>0&&moneyAtRisk>0)
+      ? 'Raw +$'+t.rawGross.toFixed(0)+'  ·  spread −$'+t.spreadDollar.toFixed(0)+'  ·  fees −$'+t.fees.toFixed(0)
+      : '+$'+t.gross.toFixed(0)+' gross  (fees −$'+t.fees.toFixed(0)+')';
+    _s('szTP'+n+'Gross', _grossLine);
     _s('szTP'+n+'Acct',  '+'+t.acctNet+'% net  /  +'+t.acctGross+'% gross');
-    // RR bar
+    // RR bar — sub-label shows raw alongside R:R when spread present
     _s('szRRTP'+n, moneyAtRisk>0?'+$'+t.net.toFixed(0):'—');
-    _s('szRRTP'+n+'RR', '1 : '+t.rr);
+    _s('szRRTP'+n+'RR', (_spreadUnits>0&&moneyAtRisk>0)?'raw +$'+t.rawGross.toFixed(0)+'  ·  1:'+t.rr:'1 : '+t.rr);
     // Distance bars
     const bf=document.getElementById('szBarTP'+n);
     if(bf)bf.style.width=Math.min(100,(t.dist/maxDistAbs)*100)+'%';
