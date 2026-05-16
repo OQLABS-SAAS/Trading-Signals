@@ -8067,9 +8067,13 @@ async function _sfFetchSignals(){
             reason:  r.reason || r.summary || 'Live DotVerse signal',
             // Per-signal confluence + volume — feeds Flow-Scaled Sizing so the
             // multiplier varies per signal instead of falling back to 65%/1.0×.
-            bullCount: r.bull_score || 0,
-            bearCount: r.bear_score || 0,
-            volRatio:  r.vol_ratio  || 1.0
+            bullCount:   r.bull_score   || 0,
+            bearCount:   r.bear_score   || 0,
+            volRatio:    r.vol_ratio    || 1.0,
+            spreadCost:  r.spread_cost  != null ? r.spread_cost  : null,
+            spreadPips:  r.spread_pips  != null ? r.spread_pips  : null,
+            spreadSrc:   r.spread_source || null,
+            rr1Raw:      r.rr1_raw      != null ? r.rr1_raw      : null
           };
         });
       // Multi-TF scan — keep all timeframes so users can compare
@@ -8983,9 +8987,10 @@ function _sfCard(s){
     </div>
     <div class="sig-stats">
       <span class="sig-curr">${s.curr} <span class="sig-chg ${isPos?'pos':'neg'}">(${s.chg}%)</span></span>
-      <span class="sig-rr">1:${s.rr}</span>
+      <span class="sig-rr">1:${s.rr}${s.rr1Raw&&s.rr1Raw!==s.rr?'<span style="font-size:8px;opacity:.5;margin-left:2px;">(adj)</span>':''}</span>
       <span class="sig-eta"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${s.eta}</span>
     </div>
+    ${s.spreadCost&&s.spreadCost>0?`<div style="padding:5px 14px 6px;font-family:var(--mono);font-size:9px;color:rgba(201,168,76,.65);border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;justify-content:space-between;gap:8px;"><span>Spread&thinsp;${s.spreadPips!=null?s.spreadPips+' pips':'~$'+s.spreadCost.toFixed(s.spreadCost<0.1?4:2)}&ensp;<span style="color:${s.spreadSrc==='live'?'#3dbe6c':'rgba(237,232,216,.25)'};">${s.spreadSrc==='live'?'● live':'● est.'}</span></span>${s.rr1Raw&&s.rr1Raw!==s.rr?`<span style="color:rgba(237,232,216,.3);">raw 1:${s.rr1Raw} → adj 1:${s.rr}</span>`:''}` + '</div>':''}
     <div class="sig-analysis" id="sfa-${id}">${s.analysis}</div>
     <div class="sig-tags">${s.tags.map(t=>`<span class="sig-tag">${t}</span>`).join('')}</div>
     <div class="sig-foot">
@@ -11609,6 +11614,25 @@ function showUnderstand(){
           <div class="und-sig-level tp"><span class="und-sig-lbl">TAKE PROFIT</span><span class="und-sig-price" style="color:var(--grn)">${sig.tp}</span></div>
           <div class="und-sig-level rr"><span class="und-sig-lbl">RISK/REWARD</span><span class="und-sig-price" style="color:rgba(237,232,216,.88)">1:${sig.rr}</span></div>
         </div>
+
+        <!-- Spread cost block — shown only for live BUY/SELL signals -->
+        ${(sig.spreadCost&&sig.spreadCost>0&&sig.rr)?`
+        <div style="margin-bottom:16px;padding:12px 14px;border-radius:7px;border:1px solid rgba(201,168,76,.22);background:rgba(201,168,76,.04);">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:7px;">
+            <div>
+              <div style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:rgba(201,168,76,.55);margin-bottom:4px;">BROKER SPREAD COST</div>
+              <div style="font-family:var(--mono);font-size:18px;font-weight:600;color:rgba(201,168,76,.9);">${sig.spreadPips!=null?sig.spreadPips+' pips':('~$'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2))}&thinsp;<span style="font-size:9px;font-weight:400;color:${sig.spreadSource==='live'?'#3dbe6c':'rgba(237,232,216,.3)'};">${sig.spreadSource==='live'?'● LIVE':'● EST.'}</span></div>
+            </div>
+            ${sig.rr1Raw&&sig.rr1Raw!==sig.rr?`
+            <div style="text-align:right;flex-shrink:0;">
+              <div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);letter-spacing:.04em;margin-bottom:4px;">R:R IMPACT</div>
+              <div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.35);text-decoration:line-through;">1:${sig.rr1Raw}</div>
+              <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:rgba(237,232,216,.88);">1:${sig.rr}</div>
+            </div>`:''}
+          </div>
+          <div style="font-size:11px;color:rgba(237,232,216,.48);line-height:1.55;">Your broker charges this the moment you open the trade. DotVerse already adjusts your TP levels and R:R to account for it.${sig.spreadSource==='estimated'?'&ensp;<span style="color:rgba(237,232,216,.3);">Connect the DotVerse EA for your live broker spread.</span>':''}</div>
+        </div>`:``}
+
         <!-- A3: Trade duration estimator -->
         ${(()=>{const d=_undDurInfo(sig.tf);return `<div class="und-duration-strip">
           <div class="und-dur-cell"><span class="und-dur-lbl">Hold Time</span><span class="und-dur-val">${d.hold}</span><span class="und-dur-sub">Estimated duration</span></div>
@@ -13650,11 +13674,12 @@ function showSize(){
         <span class="sz-dir-badge ${(sig.sig||'').toLowerCase()}">${sig.sig||'–'}</span>
         <span style="color:var(--mut);font-size:10px;">${sig.tf||''}</span>
       </div>
-      <div style="display:flex;gap:14px;font-size:10px;font-family:var(--mono);">
+      <div style="display:flex;gap:14px;font-size:10px;font-family:var(--mono);flex-wrap:wrap;">
         <span>Signal Entry <strong style="color:var(--txt);">${sig.entry||pf.entry||'—'}</strong></span>
         <span>SL <strong style="color:#e8706e;">${sig.sl||pf.sl||'—'}</strong></span>
         <span>TP <strong style="color:#5de8a0;">${sig.tp||pf.tp||'—'}</strong></span>
-        <span>R:R <strong style="color:rgba(237,232,216,.88);">1:${sig.rr||'—'}</strong></span>
+        <span>R:R <strong style="color:rgba(237,232,216,.88);">1:${sig.rr||'—'}</strong>${sig.rr1Raw&&sig.rr1Raw!==sig.rr?'<span style="opacity:.45;font-size:9px;"> (adj from 1:'+sig.rr1Raw+')</span>':''}</span>
+        ${sig.spreadCost&&sig.spreadCost>0?`<span style="color:rgba(201,168,76,.75);">Spread <strong style="color:rgba(201,168,76,.92);">${sig.spreadPips!=null?sig.spreadPips+' pips':'~$'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2)}</strong>&thinsp;<span style="font-size:8px;color:${sig.spreadSource==='live'?'#3dbe6c':'rgba(237,232,216,.3)'};">${sig.spreadSource==='live'?'● live':'● est.'}</span></span>`:''}
       </div>
     </div>
     <button class="sz-clear-btn" onclick="window._activeSignal=null;window._calcPrefill=null;window._verdictPlan=null;showSize()">Clear</button>
