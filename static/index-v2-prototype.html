@@ -13020,9 +13020,8 @@ function szRiskTeach(){
    ══════════════════════════════════════════════════════════════ */
 function showVerdict(){
   const el=document.getElementById('dashContent'); if(!el) return;
-  // Clear any stale polling from previous Verdict visit
+  // Clear any stale polling interval (the job ID is preserved separately)
   if (window._verdictPollInterval) { clearInterval(window._verdictPollInterval); window._verdictPollInterval = null; }
-  window._verdictRunning = false;
   const sig = window._activeSignal || {};
   const hasSignal = sig.sym && sig.sig && sig.sig !== 'Analysing…';
 
@@ -13063,7 +13062,15 @@ function showVerdict(){
     _vRenderLive(sig, window._lastVerdict, window._structuredVerdict || null);
     return;
   }
-  // Analysis runs only when user clicks "Run Analysis" button
+  // If analysis was in-flight when the user navigated away, resume polling the same job
+  if (window._verdictJobId) {
+    window._verdictRunning = true;
+    _vShowBanner('loading', 'Analysis in progress — checking for results…');
+    _vPollResult(window._verdictJobId, sig);
+    return;
+  }
+  // No analysis running or complete — show Run Analysis button
+  window._verdictRunning = false;
 }
 
 function _vRunAnalysis(){
@@ -13180,6 +13187,7 @@ function _vUpdateProgress(polls){
   }
 }
 function _vPollResult(jobId, sig){
+  window._verdictJobId = jobId; // persist so tab-switch can resume polling
   var polls = 0, maxPolls = 200, notFoundStreak = 0, maxNotFoundStreak = 15;
   // Store on window so tab changes don't kill the interval
   if (window._verdictPollInterval) clearInterval(window._verdictPollInterval);
@@ -13258,6 +13266,7 @@ function _vBuildAutoReview(s) {
 
 function _vRenderLive(sig, verdict, structured){
   window._verdictRunning = false;
+  window._verdictJobId = null;  // analysis complete — no job to resume
   // Preserve job_id for chat context BEFORE clearing it — chat endpoint needs it
   // to retrieve individual agent votes + arguments (not just the verdict text).
   // Without this, DeepSeek only gets raw verdict text from Redis, not agent reasoning.
@@ -13612,6 +13621,7 @@ function _vShowBanner(status, msg){
   // On error: unlock the button so the user can retry.
   if (status === 'error') {
     window._verdictRunning = false;
+    window._verdictJobId = null;  // failed job — clear so user can start fresh
     var _btn = document.getElementById('verdictRunBtn');
     if (_btn){ _btn.disabled = false; _btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Analysis'; }
   }
