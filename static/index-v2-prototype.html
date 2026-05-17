@@ -7120,6 +7120,7 @@ async function dvRunAnalyze(){
       reason:data.summary||'',
       chg:(data.price_change_pct!=null?((data.price_change_pct>=0?'+':'')+data.price_change_pct.toFixed(2)+'%'):''),
       price:data.price,
+      trade_type:data.trade_type||'day', htf_bias:data.htf_bias||'NEUTRAL',
       rsi:data.rsi, emaFast:data.ema_fast, emaSlow:data.ema_slow,
       emaTrend:data.ema_trend||'MIXED',
       macdHist:data.macd_hist, bbPos:data.bb_pos, bbWidth:data.bb_width,
@@ -14743,7 +14744,50 @@ function szLadderRender() {
     <div style="padding:8px 12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:6px;margin-bottom:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">
       Run a signal analysis first — DotVerse will recommend the right exit target for each trade based on your timeframe and signal confidence.
     </div>`;
-  wrap.innerHTML = _recBanner + (window._szLadder||[]).map((risk, i) => {
+  // Automation intelligence banner — backend-computed recommendation
+  const _arec = window._szAutoRec;
+  const _aLoading = !!window._szAutoRecLoading;
+  const _autoRecSection = (() => {
+    const _pillSummary = (_arec && !_arec.error) ? ['be','trail','macro','inval','sent'].map(k => {
+      const on = _arec[k];
+      const lbl = {be:'BE',trail:'TRAIL',macro:'MACRO',inval:'INVAL',sent:'SENT'}[k];
+      return '<span style="font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;background:'
+        + (on ? 'rgba(93,175,232,.13)' : 'rgba(237,232,216,.04)') + ';border:1px solid '
+        + (on ? 'rgba(93,175,232,.4)' : 'rgba(237,232,216,.12)') + ';color:'
+        + (on ? 'rgba(93,175,232,.9)' : 'rgba(237,232,216,.3)') + ';">' + lbl + ': ' + (on ? 'ON' : 'OFF') + '</span>';
+    }).join('') : '';
+    if (_aLoading) return `<div style="margin-bottom:10px;padding:10px 12px;background:rgba(93,175,232,.04);border:1px solid rgba(93,175,232,.15);border-radius:6px;display:flex;align-items:center;gap:9px;">
+      <div style="width:12px;height:12px;border:2px solid rgba(93,175,232,.4);border-top-color:rgba(93,175,232,.9);border-radius:50%;animation:spin 1s linear infinite;flex-shrink:0;"></div>
+      <span style="font-family:var(--mono);font-size:10px;color:rgba(93,175,232,.7);">DotVerse is analysing this signal — computing automation recommendations…</span>
+    </div>`;
+    if (_arec && _arec.error) return `<div style="margin-bottom:10px;padding:10px 12px;background:rgba(232,112,110,.05);border:1px solid rgba(232,112,110,.18);border-radius:6px;">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:7px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(232,112,110,.8)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.75);">${_arec.error}</span>
+      </div>
+      <button onclick="szAutoRecommend()" style="padding:4px 12px;font-family:var(--mono);font-size:9px;font-weight:700;background:rgba(93,175,232,.1);border:1px solid rgba(93,175,232,.3);border-radius:4px;color:rgba(93,175,232,.9);cursor:pointer;letter-spacing:.04em;">Try Again</button>
+    </div>`;
+    if (_arec && !_arec.error) return `<div style="margin-bottom:10px;padding:10px 12px;background:rgba(93,175,232,.06);border:1px solid rgba(93,175,232,.22);border-radius:6px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:.8px;color:rgba(93,175,232,.65);text-transform:uppercase;margin-bottom:3px;">DotVerse Automation Intelligence</div>
+          <div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.8);line-height:1.5;margin-bottom:7px;">${_arec.explanation}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">${_pillSummary}</div>
+        </div>
+        <button onclick="szAutoRecommend()" style="padding:4px 11px;font-family:var(--mono);font-size:9px;font-weight:700;background:rgba(93,175,232,.1);border:1px solid rgba(93,175,232,.3);border-radius:4px;color:rgba(93,175,232,.9);cursor:pointer;letter-spacing:.04em;white-space:nowrap;flex-shrink:0;align-self:flex-start;">Re-analyse</button>
+      </div>
+    </div>`;
+    // Default — no recommendation yet
+    const _hasSig = !!(window._activeSignal && window._activeSignal.sig && window._activeSignal.sig !== 'HOLD');
+    return `<div style="margin-bottom:10px;padding:10px 12px;background:rgba(93,175,232,.04);border:1px solid rgba(93,175,232,.14);border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:.8px;color:rgba(93,175,232,.55);text-transform:uppercase;margin-bottom:3px;">Automation Intelligence</div>
+        <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);line-height:1.45;">${_hasSig ? 'DotVerse will analyse this signal and recommend which automations to activate — based on trade type, confidence, volatility, and HTF alignment.' : 'Run a signal analysis first, then request automation recommendations for this trade.'}</div>
+      </div>
+      <button onclick="szAutoRecommend()" ${_hasSig ? '' : 'disabled'} style="padding:5px 15px;font-family:var(--mono);font-size:10px;font-weight:700;background:${_hasSig ? 'rgba(93,175,232,.12)' : 'rgba(237,232,216,.04)'};border:1px solid ${_hasSig ? 'rgba(93,175,232,.35)' : 'rgba(237,232,216,.12)'};border-radius:5px;color:${_hasSig ? 'rgba(93,175,232,.9)' : 'rgba(237,232,216,.28)'};cursor:${_hasSig ? 'pointer' : 'default'};letter-spacing:.03em;white-space:nowrap;flex-shrink:0;">Get Recommendation</button>
+    </div>`;
+  })();
+  wrap.innerHTML = _recBanner + _autoRecSection + (window._szLadder||[]).map((risk, i) => {
     const moneyAtRisk = acct * (risk/100);
     const units       = moneyAtRisk / slDist;
     const lotsStr     = units.toFixed(4);
@@ -14907,6 +14951,61 @@ function szLadderAutoToggle(rowIdx, key) {
   if (!window._szLadderAuto[rowIdx]) window._szLadderAuto[rowIdx] = _szDefaultAuto();
   window._szLadderAuto[rowIdx][key] = !window._szLadderAuto[rowIdx][key];
   szLadderRender();
+}
+
+function szAutoRecommend() {
+  const sig = window._activeSignal;
+  if (!sig || !sig.sig || sig.sig === 'HOLD') {
+    window._szAutoRec = {
+      error: !sig
+        ? 'Run a signal analysis first — DotVerse needs a live BUY or SELL signal to compute automation recommendations.'
+        : 'The current signal is HOLD — no trade is active. Automations only apply to BUY or SELL signals.'
+    };
+    szLadderRender();
+    return;
+  }
+  window._szAutoRecLoading = true;
+  window._szAutoRec = null;
+  szLadderRender();
+  dvFetch('/api/recommend-automations', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      signal:           sig.sig,
+      trade_type:       sig.trade_type || 'day',
+      confidence:       sig.conf || 'MEDIUM',
+      confidence_label: sig.confLbl || 'LIKELY',
+      bull_count:       sig.bullCount || 0,
+      bear_count:       sig.bearCount || 0,
+      atr:              sig.atr || 0,
+      entry:            sig.entry || 0,
+      htf_bias:         sig.htf_bias || 'NEUTRAL',
+      rsi:              sig.rsi || 50
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(rec) {
+    window._szAutoRecLoading = false;
+    window._szAutoRec = rec;
+    if (!rec.error) {
+      // Apply backend recommendations to ALL ladder rows
+      if (!window._szLadderAuto) window._szLadderAuto = [];
+      while (window._szLadderAuto.length < (window._szLadder||[]).length) {
+        window._szLadderAuto.push(_szDefaultAuto());
+      }
+      window._szLadderAuto = window._szLadderAuto.map(function(row) {
+        return Object.assign({}, row, {
+          be: rec.be, trail: rec.trail, macro: rec.macro, inval: rec.inval, sent: rec.sent
+        });
+      });
+    }
+    szLadderRender();
+  })
+  .catch(function() {
+    window._szAutoRecLoading = false;
+    window._szAutoRec = { error: 'Could not reach DotVerse automation engine. Check your connection and try again.' };
+    szLadderRender();
+  });
 }
 
 function szLadderUpdate(i, v) {
