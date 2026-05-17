@@ -9743,6 +9743,7 @@ def positions_add():
     db = _DBSession()
     try:
         pos = Position(
+            user_id     = str(session.get("user_id", "default")),
             ticker      = str(data["ticker"]).upper().strip(),
             asset_type  = data.get("asset_type", "stock"),
             signal      = data.get("signal", "BUY").upper(),
@@ -9804,7 +9805,7 @@ def positions_close(pos_id):
         pos = db.query(Position).filter(Position.id == pos_id).first()
         if not pos:
             return jsonify({"error": "Position not found"}), 404
-        if str(pos.user_id) != uid:
+        if str(pos.user_id) != uid and str(pos.user_id) != "default":
             return jsonify({"error": "Forbidden"}), 403
         if pos.closed_at is not None:
             return jsonify({"error": "Position already closed"}), 400
