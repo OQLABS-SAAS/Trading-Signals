@@ -6130,6 +6130,7 @@ def _recommend_automations_from_signal(data):
     entry       = float(data.get("entry")       or 0)
     htf_bias    = (data.get("htf_bias")         or "NEUTRAL").upper().strip()
     rsi         = float(data.get("rsi")         or 50)
+    target      = (data.get("target")           or "tp1").lower().strip()  # tp1 | tp2 | tp3 | trail
 
     # Compute directional percentage from raw vote counts
     total_count    = bull_count + bear_count
@@ -6155,93 +6156,72 @@ def _recommend_automations_from_signal(data):
     directional_pct = bull_pct if is_long else bear_pct
     htf_aligned     = (htf_bias == "BULLISH" and is_long) or (htf_bias == "BEARISH" and not is_long)
     htf_mixed       = htf_bias not in ("BULLISH", "BEARISH")
+    weak_signal     = conf_label in ("HYPOTHESIS", "LIKELY")
+    low_conviction  = directional_pct < 70
 
     reasons = []
 
-    # ── BE: Break Even ────────────────────────────────────────────────────────
-    # Recommended for all non-scalp trades with at least MEDIUM confidence.
-    # Scalp trades exit before BE fires (minutes — 1-ATR trigger won't be reached first).
-    be = not is_scalp and confidence in ("HIGH", "MEDIUM")
-    if be:
-        reasons.append(
-            "Break Even: when price moves 1 ATR in your favour your stop moves to entry — "
-            "you can no longer lose money on this trade."
-        )
+    # ── Target-aware automation logic ────────────────────────────────────────
+    # Each row in the ladder has a chosen exit target (tp1/tp2/tp3/trail).
+    # Automations must match that exit strategy — a TP1 row exits quickly and
+    # never benefits from trailing; a TRAIL row never needs BE because the
+    # trailing stop IS the risk manager. Logic is derived from target first,
+    # then modulated by signal confidence, trade type, and HTF alignment.
 
-    # ── TRAIL: Trailing Stop ──────────────────────────────────────────────────
-    # Swing/position trades hold long enough to lock in gains via trailing.
-    # For scalp/day: fixed TP targets capture the move more reliably.
-    # HTF alignment upgrades a medium-confidence swing to trail-eligible.
-    trail = (is_swing or is_position) and confidence == "HIGH"
-    if not trail and is_swing and htf_aligned and confidence == "MEDIUM":
-        trail = True
-    if trail:
-        reasons.append(
-            "Trailing Stop: this is a longer-hold trade in a "
-            + ("confirmed" if confidence == "HIGH" else "trending")
-            + " environment — DotVerse locks in gains as price moves in your favour."
-        )
+    if target == "trail":
+        # This row has no fixed exit — the trailing stop runs until momentum turns.
+        # It holds the longest and carries the most exposure of any ladder row.
+        be    = False        # Trail manages the stop — BE would conflict with trail logic
+        trail = True         # Trail IS the exit mechanism for this row
+        macro = True         # No fixed exit = crosses every news event
+        inval = True         # Critical — without a fixed exit, structure breaks must be caught
+        sent  = True         # Longest exposure to news sentiment of any row
+        reasons.append("Trail row: trailing stop IS the exit for this position — no fixed target.")
+        reasons.append("Macro Guard and Technical Invalidation protect the open-ended hold.")
+        reasons.append("Sentiment Watch guards against overnight news reversals.")
 
-    # ── MACRO: Macro Event Guard ──────────────────────────────────────────────
-    # Swing/position trades always cross at least one news cycle.
-    # High-confidence day trades also benefit — more capital at stake.
-    macro = (is_swing or is_position) or (is_day and confidence == "HIGH")
-    if macro:
-        if is_swing or is_position:
-            reasons.append(
-                "Macro Guard: this trade will be open during scheduled news events "
-                "(NFP, CPI, interest rate decisions). "
-                "DotVerse protects your position before high-impact releases."
-            )
-        else:
-            reasons.append(
-                "Macro Guard: high-confidence day trade — "
-                "DotVerse monitors for news events that could spike against your position."
-            )
+    elif target == "tp3":
+        # TP3 is the most ambitious target — the 'runner'. It holds longer than TP1/TP2
+        # and needs the fullest protection suite. Trail is optional: in very strong trends
+        # price can overshoot TP3, so trailing can capture additional gains beyond the target.
+        be    = True                              # Always protect the runner — BE is non-negotiable
+        trail = (is_swing or is_position) or htf_aligned  # Trail viable when trend is confirmed
+        macro = True                              # TP3 rows are held the longest before exit
+        inval = True                              # Open to more candles = more reversal risk
+        sent  = True                              # Most news exposure before target is reached
+        reasons.append("TP3 runner: Break Even activates immediately to protect this ambitious target.")
+        if trail:
+            reasons.append("Trailing Stop ON — strong trend confirmed; price may overshoot TP3.")
+        reasons.append("Macro Guard, Invalidation, and Sentiment Watch active — longest hold of fixed-exit rows.")
 
-    # ── INVAL: Technical Invalidation ────────────────────────────────────────
-    # Fires when EMA or Supertrend reverses on a CLOSED candle.
-    # Recommended when conviction is below CONFIRMED, when HTF is mixed,
-    # or when the trade will be held across multiple candles (swing/position).
-    weak_signal = conf_label in ("HYPOTHESIS", "LIKELY")
-    inval = weak_signal or htf_mixed or is_swing or is_position
-    if inval:
-        if conf_label == "HYPOTHESIS":
-            reasons.append(
-                "Technical Invalidation: this signal is a HYPOTHESIS (marginal agreement). "
-                "If the EMA or Supertrend reverses on a closed candle DotVerse exits early — "
-                "before your full stop is reached."
-            )
-        elif htf_mixed:
-            reasons.append(
-                "Technical Invalidation: the higher-timeframe trend is mixed. "
-                "DotVerse watches for structure breaks that invalidate this trade direction."
-            )
-        else:
-            reasons.append(
-                "Technical Invalidation: longer-hold trades can see technical reversals. "
-                "DotVerse monitors indicator flips on each closed candle and exits if your entry thesis breaks."
-            )
+    elif target == "tp2":
+        # TP2 rows hold past TP1 — moderate exposure. Needs BE and macro protection.
+        # Trail is OFF — this row has a fixed exit at TP2; trailing would bypass it.
+        be    = not is_scalp and confidence in ("HIGH", "MEDIUM")
+        trail = False        # Fixed exit at TP2 — trailing would let price overshoot target
+        macro = (is_swing or is_position) or (is_day and confidence == "HIGH")
+        inval = weak_signal or htf_mixed or is_swing or is_position
+        sent  = (is_swing or is_position) or low_conviction
+        if be:    reasons.append("Break Even: stop moves to entry once price moves 1 ATR in your favour.")
+        reasons.append("No Trailing Stop — this row exits at the fixed TP2 price.")
+        if macro: reasons.append("Macro Guard: this row stays open long enough to cross news events.")
+        if inval: reasons.append("Technical Invalidation: watches for EMA/Supertrend reversal on closed candles.")
+        if sent:  reasons.append("Sentiment Watch: monitors headlines while this row is held past TP1.")
 
-    # ── SENT: Sentiment Watch ─────────────────────────────────────────────────
-    # Swing/position trades are held long enough for news sentiment to move price.
-    # Also fires when directional conviction is below 70% — sentiment can be the
-    # catalyst that decides price direction when indicators are split.
-    low_conviction = directional_pct < 70
-    sent = (is_swing or is_position) or (low_conviction and confidence != "HIGH")
-    if sent:
-        if low_conviction and not (is_swing or is_position):
-            reasons.append(
-                "Sentiment Watch: directional conviction is "
-                + ("moderate" if directional_pct >= 50 else "low")
-                + f" ({round(directional_pct)}% aligned). "
-                "If 3+ negative headlines appear within 2 hours DotVerse will partially close the position."
-            )
-        else:
-            reasons.append(
-                "Sentiment Watch: longer-hold trade — DotVerse monitors real-time news "
-                "so unexpected negative sentiment does not erode your gains overnight."
-            )
+    else:  # tp1 — safest and quickest exit
+        # TP1 exits quickly — the goal is speed and probability, not running the winner.
+        # Trail is never appropriate (it would delay the quick exit that TP1 is designed for).
+        # BE is still valuable — even a quick gain deserves stop protection once in profit.
+        be    = not is_scalp and confidence in ("HIGH", "MEDIUM")
+        trail = False        # TP1 exits at the first target — trailing conflicts with quick-exit intent
+        macro = (is_swing or is_position)         # Only if the signal type holds long enough for news
+        inval = weak_signal or htf_mixed           # Weak/mixed signals need early exit protection
+        sent  = low_conviction and confidence != "HIGH"  # Only when conviction is genuinely low
+        if be:    reasons.append("Break Even: stop moves to entry once 1 ATR profit is reached — zero loss possible.")
+        reasons.append("No Trailing Stop — TP1 row is a quick, high-probability exit. Trailing delays it.")
+        if macro: reasons.append("Macro Guard active — trade type means this row may cross a news event.")
+        if inval: reasons.append("Technical Invalidation: exits early if the signal structure breaks.")
+        if sent:  reasons.append("Sentiment Watch: low directional conviction makes headline risk real.")
 
     # ── Build explanation ────────────────────────────────────────────────────
     trade_desc = {
