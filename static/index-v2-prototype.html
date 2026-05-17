@@ -9918,7 +9918,10 @@ async function showPortfolio(){
       <td style="font-family:var(--mono);font-size:11px;color:var(--t2)">${p.entry_price||'–'}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--t2)">${p.size||'–'}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--t3)">${p.opened_at?new Date(p.opened_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'–'}</td>
-      <td style="text-align:right"><button class="pos-act-btn" onclick="event.stopPropagation();pfDelete('${p.id}')">Close</button></td>
+      <td style="text-align:right">${p.closed_at
+        ? '<span style="font-size:10px;padding:2px 8px;border-radius:3px;font-family:var(--mono);background:'+(p.outcome==='WIN'?'rgba(93,232,160,.15)':p.outcome==='LOSS'?'rgba(232,112,110,.15)':'rgba(201,168,76,.12)')+';color:'+(p.outcome==='WIN'?'#5de8a0':p.outcome==='LOSS'?'#e8706e':'rgba(201,168,76,.9)')+'">'+( p.outcome||'CLOSED')+'</span>'
+        : '<button class="pos-act-btn" onclick="event.stopPropagation();pfShowCloseForm('+p.id+')">Close Trade</button>'
+      }</td>
     </tr>
     <tr id="pfexp-${p.id}" style="display:none">
       <td colspan="7" style="padding:0">
@@ -9992,7 +9995,36 @@ async function showPortfolio(){
             <button class="btn-ghost btn-pipeline" style="font-size:11px;padding:5px 14px" onclick="pfGoAnalyze('${p.ticker}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="margin-right:4px"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Analyse
             </button>
-            <button class="pos-act-btn" style="background:rgba(232,112,110,.15);border-color:rgba(232,112,110,.3);color:#e8706e;padding:5px 14px" onclick="event.stopPropagation();pfDelete('${p.id}')">Close Position</button>
+            ${p.closed_at?'<span style="font-size:11px;font-family:var(--mono);color:'+(p.outcome==='WIN'?'#5de8a0':p.outcome==='LOSS'?'#e8706e':'rgba(201,168,76,.9)')+'">&#10003; Closed · '+(p.outcome||'')+(p.close_price?' @ '+p.close_price:'')+'</span>':'<button class="pos-act-btn" style="background:rgba(232,112,110,.15);border-color:rgba(232,112,110,.3);color:#e8706e;padding:5px 14px" onclick="event.stopPropagation();pfShowCloseForm('+p.id+')">Close Trade</button>'}
+          </div>
+          <div id="pfCloseForm-${p.id}" style="display:none;margin-top:12px;padding:14px;background:rgba(232,112,110,.06);border:1px solid rgba(232,112,110,.2);border-radius:8px;">
+            <div style="font-size:11px;font-weight:700;color:#e8706e;margin-bottom:10px;font-family:var(--mono);letter-spacing:.04em;">CLOSE TRADE — Record the outcome</div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:10px;color:var(--t3);font-family:var(--mono);">Close Price *</label>
+                <input id="pfClosePrice-${p.id}" type="number" step="any" placeholder="e.g. 195.50" style="width:120px;background:rgba(18,22,30,.9);border:1px solid rgba(237,232,216,.2);border-radius:6px;color:rgba(200,210,230,.9);padding:7px 10px;font-size:12px;">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:10px;color:var(--t3);font-family:var(--mono);">Outcome</label>
+                <select id="pfCloseOutcome-${p.id}" style="background:rgba(18,22,30,.9);border:1px solid rgba(237,232,216,.2);border-radius:6px;color:rgba(200,210,230,.9);padding:7px 10px;font-size:12px;">
+                  <option value="WIN">WIN — hit a take profit</option>
+                  <option value="LOSS">LOSS — stop loss hit</option>
+                  <option value="BE">BE — broke even</option>
+                </select>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:10px;color:var(--t3);font-family:var(--mono);">Which TP hit?</label>
+                <select id="pfCloseTP-${p.id}" style="background:rgba(18,22,30,.9);border:1px solid rgba(237,232,216,.2);border-radius:6px;color:rgba(200,210,230,.9);padding:7px 10px;font-size:12px;">
+                  <option value="">SL hit / manual close</option>
+                  <option value="1">TP1 — first target</option>
+                  <option value="2">TP2 — second target</option>
+                  <option value="3">TP3 — full target</option>
+                </select>
+              </div>
+              <button onclick="pfSubmitClose(${p.id})" style="background:#e8706e;color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:12px;font-weight:700;font-family:var(--mono);cursor:pointer;letter-spacing:.03em;">Confirm Close</button>
+              <button onclick="document.getElementById('pfCloseForm-${p.id}').style.display='none'" style="background:transparent;color:var(--t3);border:1px solid rgba(237,232,216,.12);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;">Cancel</button>
+            </div>
+            <div id="pfCloseErr-${p.id}" style="display:none;color:#e8706e;font-size:11px;font-family:var(--mono);margin-top:8px;padding:6px 10px;background:rgba(232,112,110,.08);border-radius:4px;"></div>
           </div>
         </div>
       </td>
@@ -10289,8 +10321,44 @@ function pfAddPosition(){
       else _dvToast('Failed to save position','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); });
 }
 function pfDelete(id){
-  if(!confirm('Close this position?')) return;
+  if(!confirm('Remove this position entry?')) return;
   dvFetch('/api/positions/'+id,{method:'DELETE'}).then(function(){ showPortfolio(); });
+}
+function pfShowCloseForm(id){
+  // Expand row if collapsed, then show the close form
+  var row=document.getElementById('pfexp-'+id);
+  var form=document.getElementById('pfCloseForm-'+id);
+  if(!form) return;
+  if(row && row.style.display==='none'){
+    row.style.display='';
+    var chev=document.getElementById('pfchev-'+id);
+    if(chev) chev.style.transform='rotate(180deg)';
+  }
+  form.style.display = form.style.display==='none'?'block':'none';
+  if(form.style.display==='block'){
+    var priceEl=document.getElementById('pfClosePrice-'+id);
+    if(priceEl) setTimeout(function(){ priceEl.focus(); },50);
+  }
+}
+function pfSubmitClose(id){
+  var priceEl  =document.getElementById('pfClosePrice-'+id);
+  var outcomeEl=document.getElementById('pfCloseOutcome-'+id);
+  var tpEl     =document.getElementById('pfCloseTP-'+id);
+  var errEl    =document.getElementById('pfCloseErr-'+id);
+  if(!priceEl||!outcomeEl) return;
+  var closePrice=parseFloat(priceEl.value);
+  if(!closePrice||isNaN(closePrice)){
+    if(errEl){errEl.style.display='block';errEl.textContent='Please enter the price at which you closed this trade.';}
+    return;
+  }
+  var payload={close_price:closePrice,outcome:outcomeEl.value};
+  var tp=tpEl?tpEl.value:'';
+  if(tp) payload.hit_tp=parseInt(tp);
+  dvFetch('/api/positions/'+id+'/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){
+      if(r&&r.error){if(errEl){errEl.style.display='block';errEl.textContent=r.error;}return;}
+      showPortfolio();
+    });
 }
 
 // ══════════════════════════════════════════════════════════════
