@@ -2799,6 +2799,13 @@ body.tier-trader [data-tier="pro"]{display:none!important;}
 .dv-ic:hover{background:rgba(237,232,216,.05);}
 .dv-ic-lbl{font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
 .dv-ic-val{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--t1);}
+.dv-ic{cursor:pointer;}
+.dv-ic.dv-ic-active{background:rgba(201,168,76,.09)!important;border-bottom:2px solid rgba(201,168,76,.35);}
+.dv-ic-lbl::after{content:' ▾';font-size:7px;opacity:.35;vertical-align:middle;}
+.dv-ic.dv-ic-active .dv-ic-lbl::after{content:' ▴';opacity:.65;}
+#dvStatDetail{margin:-12px 0 16px;padding:14px 16px;background:rgba(201,168,76,.04);border:1px solid rgba(201,168,76,.14);border-top:none;border-radius:0 0 8px 8px;animation:fadein .18s ease;}
+#dvStatDetail .dsd-title{font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.8);letter-spacing:.09em;text-transform:uppercase;margin-bottom:7px;}
+#dvStatDetail .dsd-body{font-size:12px;line-height:1.75;color:rgba(237,232,216,.72);}
 
 /* ══════════════════════════════════════════════════════════════════
    GOLD SELECTION DESIGN LANGUAGE
@@ -11229,6 +11236,126 @@ function _undDurInfo(tf){
   return {hold:info.hold, target:targetStr, session};
 }
 
+function dvStatExpand(key, el) {
+  const sig = window._activeSignal;
+  if (!sig) return;
+  const panel = document.getElementById('dvStatDetail');
+  if (!panel) return;
+  const wasActive = el.classList.contains('dv-ic-active');
+  document.querySelectorAll('.dv-ic').forEach(c => c.classList.remove('dv-ic-active'));
+  if (wasActive) { panel.style.display = 'none'; return; }
+  el.classList.add('dv-ic-active');
+  const isBuy = sig.sig === 'BUY';
+  let title = '', body = '';
+  switch (key) {
+    case 'change': {
+      title = 'DAILY CHANGE';
+      const chg = sig.chg || '—';
+      const isPos = chg.startsWith('+'), isNeg = chg.startsWith('-');
+      body = `<strong style="color:${isPos?'#5de8a0':isNeg?'#e8706e':'rgba(237,232,216,.88)'}">${chg}</strong> — ${sig.sym}'s price has moved <strong>${chg}</strong> compared to yesterday's closing price. `
+           + (isPos ? 'A positive change means the asset has gained value today — momentum is currently in buyers\' favour.'
+                    : isNeg ? 'A negative change means the asset has fallen today — sellers have been in control.'
+                             : 'Price is roughly flat vs yesterday. Watch for a directional breakout.')
+           + '<br><br>This number alone does not determine whether to trade. A signal can fire on both up and down days — what matters is the chart structure, which DotVerse checks separately.';
+      break;
+    }
+    case 'rr': {
+      title = 'RISK : REWARD RATIO';
+      const rr = sig.rr || '—';
+      const rrNum = parseFloat(rr) || 0;
+      body = `<strong>1:${rr}</strong> means for every $1 you risk losing, you stand to gain $${rr}. If your stop loss costs you $100, your profit target pays $${(rrNum*100).toFixed(0)}.<br><br>`
+           + '<strong>Why this matters:</strong> Even if you only win 50% of your trades, a 1:2 R:R means you come out ahead over time — winning trades pay more than losing ones cost. '
+           + 'Professional traders aim for at least 1:2. '
+           + (rrNum >= 2 ? '<span style="color:#5de8a0;">This setup at 1:'+rr+' meets the professional threshold ✓</span>'
+                        : rrNum >= 1.5 ? '<span style="color:rgba(237,232,216,.65);">1:'+rr+' is workable but tight. Aim for 1:2+ for a better cushion.</span>'
+                                       : '<span style="color:#e8706e;">1:'+rr+' is below the 1:2 minimum. You would need to win more than 50% of similar trades just to break even long-term.</span>')
+           + (sig.rr1Raw && sig.rr1Raw !== sig.rr ? '<br><br>The <em>raw</em> R:R before broker spread was 1:'+sig.rr1Raw+'. The adjusted 1:'+sig.rr+' is what your account actually experiences after the spread cost.' : '');
+      break;
+    }
+    case 'spread': {
+      title = 'SPREAD — YOUR BROKER\'S ENTRY FEE';
+      const spAmt = sig.spreadPips != null ? sig.spreadPips + ' pips' : '≈$' + sig.spreadCost.toFixed(sig.spreadCost < 0.1 ? 4 : 2);
+      body = '<strong>What is spread?</strong> Your broker always shows two prices: a buy price and a sell price. The gap between them is the spread — a fee you pay the moment you open any trade. It is never charged separately; it is built silently into the price you enter at.<br><br>'
+           + 'On this trade, the spread is <strong>' + spAmt + '</strong>. <strong>DotVerse has already subtracted this from every TP target you see</strong> — so all profit figures are real after-spread numbers. No surprise deductions when you exit.<br><br>'
+           + '<strong>Spread quality: ' + (sig.spreadQuality || 'fair').toUpperCase() + '</strong> — '
+           + (sig.spreadQuality === 'tight' ? 'tight spread. Low cost to enter — ideal conditions.'
+              : sig.spreadQuality === 'wide' ? 'wide spread. More of your profit is eaten. Consider waiting for the spread to narrow, or use a broker with tighter pricing.'
+                                             : 'fair spread. Normal trading conditions for this instrument.')
+           + (sig.spreadSource !== 'live' ? '<br><br><span style="color:rgba(237,232,216,.4);font-size:11px;">This is an estimate based on typical broker spreads. Connect the DotVerse EA to get your exact live broker spread in real time.</span>' : '');
+      break;
+    }
+    case 'volatility': {
+      title = 'VOLATILITY — HOW MUCH PRICE SWINGS';
+      const atr = sig.atr;
+      const vLvl = atr != null ? (atr > 0.05 ? 'High' : atr > 0.02 ? 'Moderate' : 'Low') : '—';
+      body = '<strong>Volatility: ' + vLvl + '</strong> (ATR ' + (atr != null ? atr.toFixed(4) : '—') + ')<br><br>'
+           + 'ATR (Average True Range) measures the typical candle-to-candle movement of ' + sig.sym + '. Think of it as the \'normal heartbeat\' of the price.<br><br>'
+           + (atr > 0.05 ? '<span style="color:rgba(237,232,216,.88);">High volatility</span> — price is swinging aggressively. Your stop loss is set wider to avoid being knocked out by normal noise. Higher potential reward, but sharp moves against you are possible.'
+              : atr > 0.02 ? '<span style="color:rgba(237,232,216,.88);">Moderate volatility</span> — price is moving at a normal pace. Standard conditions. Stop and target distances are calibrated for typical market behaviour.'
+                           : '<span style="color:rgba(237,232,216,.88);">Low volatility</span> — price is moving slowly and quietly. Signals in low-volatility periods can be less decisive. When volatility expands, the move can be explosive — energy coiling before release.')
+           + '<br><br>DotVerse uses the volatility reading to set your stop loss distance. It is not arbitrary — it is sized to give the trade room to breathe without exceeding your risk.';
+      break;
+    }
+    case 'volume': {
+      title = 'VOLUME — MARKET PARTICIPATION';
+      const vR = sig.volRatio;
+      body = '<strong>' + (vR != null ? vR.toFixed(1) + '× average volume' : 'Volume loading') + '</strong><br><br>'
+           + 'Volume is how many units of ' + sig.sym + ' are being traded right now, compared to the normal amount for this time.<br><br>'
+           + (vR != null
+              ? (vR >= 1.5 ? 'At <strong>' + vR.toFixed(1) + '×</strong>, this is <em>heavy</em> activity — ' + Math.round((vR-1)*100) + '% more trading than usual. More participants agree with the move, which strongly confirms the signal.'
+                 : vR >= 1.1 ? 'At <strong>' + vR.toFixed(1) + '×</strong>, volume is above average. More traders than usual are participating — moderate confirmation.'
+                             : 'At <strong>' + vR.toFixed(1) + '×</strong>, volume is quieter than normal. Low-volume moves can reverse easily — fewer participants means less conviction behind the price action. Treat with extra caution.')
+              : 'Volume data is loading.')
+           + '<br><br><strong>Rule of thumb:</strong> Always prefer signals where volume is above 1.1×. Volume is the fuel behind price — without it, a move can stall or reverse without warning.';
+      break;
+    }
+    case 'rsi': {
+      title = 'RSI — MOMENTUM GAUGE (0 to 100)';
+      const rsi = sig.rsi;
+      body = '<strong>RSI ' + (rsi != null ? rsi.toFixed(1) : '—') + '</strong><br><br>'
+           + 'RSI (Relative Strength Index) tells you whether an asset is running out of buying energy or selling energy. Scale runs 0 to 100:<br><br>'
+           + '<span style="color:#e8706e;">● Above 70 = Overbought.</span> Buyers may be exhausted. Price could slow or pull back.<br>'
+           + '<span style="color:#5de8a0;">● Below 30 = Oversold.</span> Sellers may be exhausted. Price could bounce upward.<br>'
+           + '<span style="color:rgba(237,232,216,.5);">● 30 to 70 = Neutral zone.</span> Room to move in either direction.<br><br>'
+           + (rsi != null
+              ? 'Currently <strong>' + rsi.toFixed(1) + '</strong> — ' + (rsi < 30 ? 'oversold. Selling pressure may be near exhaustion, which supports a potential upward bounce.' : rsi > 70 ? 'overbought. Buying pressure is stretched thin. Extra caution warranted on a BUY at this level.' : 'in the neutral zone. No momentum extreme — the trade has room to develop in the signal direction.')
+              : 'RSI data is loading.');
+      break;
+    }
+    case 'timeframe': {
+      title = 'TIMEFRAME — HOW LONG THIS TRADE LASTS';
+      const tf = sig.tf || '—';
+      const tfMap = {
+        '15M':'Very short-term (scalp). Target expected within minutes to 1–2 hours. Move fast — these setups can flip quickly and need close attention.',
+        '1H':'Short-term (intraday). Trade typically plays out over several hours to half a day. Good for traders who can check charts a few times per day.',
+        '4H':'Medium-term (swing entry). Setup usually resolves over 1–3 days. You do not need to watch every candle — checking morning and evening is enough.',
+        '1D':'Daily chart (position/swing). Multi-day to multi-week hold. Set your alerts, do not micromanage. Requires patience — price needs time to reach the target.',
+        '1W':'Weekly chart (position trade). Weeks to months for the target to be reached. For serious swing traders. Stop is wider but the profit opportunity is larger.',
+        '1M':'Monthly chart (macro position). Months to over a year. Entry precision matters less; conviction in the broad trend matters most.'
+      };
+      body = '<strong>Timeframe: ' + tf + '</strong><br><br>'
+           + (tfMap[tf] || 'Analysis based on the ' + tf + ' chart.')
+           + '<br><br><strong>Key rule:</strong> Do not check a 4H or higher trade every 5 minutes. Short-term noise is completely normal and does not mean your trade is wrong. The setup needs time — trust the levels.';
+      break;
+    }
+    case 'winrate': {
+      title = 'WIN RATE — HISTORICAL PERFORMANCE';
+      const wr = sig.winRate;
+      body = '<strong>' + (wr != null ? wr.toFixed(0) + '%' : 'Not yet available') + '</strong><br><br>'
+           + (wr != null
+              ? 'In backtesting, this exact type of setup on ' + sig.sym + ' worked <strong>' + wr.toFixed(0) + '% of the time</strong>. '
+                + (wr >= 55 ? 'That is a strong track record — more wins than losses over time.'
+                   : wr >= 45 ? 'Around 50/50 historically. The setup can still be profitable as long as the R:R is above 1:1 — winning trades pay more than losing ones cost.'
+                              : 'Below 50% historically. This needs a good R:R ratio to be worth taking — the reward on winning trades must outweigh the cost of losing ones.')
+                + '<br><br><span style="color:rgba(237,232,216,.4);font-size:11px;">Past results do not guarantee future performance. Use this as one data point alongside the live analysis.</span>'
+              : 'Click "Backtest strategy" below to see how this setup has historically performed. Real data is always better than guessing.');
+      break;
+    }
+  }
+  panel.innerHTML = '<div class="dsd-title">' + title + '</div><div class="dsd-body">' + body + '</div>';
+  panel.style.display = '';
+}
+
 function showUnderstand(){
   const el=document.getElementById('dashContent'); if(!el) return;
   // Empty state — no signal selected
@@ -11490,39 +11617,40 @@ function showUnderstand(){
 
   <!-- Info strip — real values from API -->
   <div class="dv-info-strip">
-    <div class="dv-ic">
+    <div class="dv-ic" id="dvStat_change" onclick="dvStatExpand('change',this)">
       <div class="dv-ic-lbl">Change</div>
       <div class="dv-ic-val" style="color:${sig.chg&&sig.chg.startsWith('+')?'#5de8a0':sig.chg&&sig.chg.startsWith('-')?'#e8706e':'var(--crys)'}">${sig.chg||'–'}</div>
     </div>
-    <div class="dv-ic">
+    <div class="dv-ic" id="dvStat_rr" onclick="dvStatExpand('rr',this)">
       <div class="dv-ic-lbl">R:R${sig.rr1Raw&&sig.rr1Raw!==sig.rr?' adj':''}</div>
       <div class="dv-ic-val" style="color:rgba(237,232,216,.88)">1:${sig.rr||'–'}</div>
     </div>
-    ${sig.spreadCost!=null&&sig.rr?`<div class="dv-ic">
+    ${sig.spreadCost!=null&&sig.rr?`<div class="dv-ic" id="dvStat_spread" onclick="dvStatExpand('spread',this)">
       <div class="dv-ic-lbl">Spread</div>
       <div class="dv-ic-val" style="color:rgba(237,232,216,.65);font-size:10px;">${sig.spreadPips!=null?sig.spreadPips+'pip':('~$'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2))}${sig.spreadSource==='live'?' <span style="color:#3dbe6c;font-size:9px;">live</span>':' <span style="color:rgba(237,232,216,.4);font-size:9px;">est.</span>'}</div>
     </div>`:''}
-    <div class="dv-ic">
+    <div class="dv-ic" id="dvStat_volatility" onclick="dvStatExpand('volatility',this)">
       <div class="dv-ic-lbl">Volatility</div>
       <div class="dv-ic-val">${sig.atr!=null?(sig.atr>0.05?'High':sig.atr>0.02?'Moderate':'Low'):'–'}</div>
     </div>
-    <div class="dv-ic">
+    <div class="dv-ic" id="dvStat_volume" onclick="dvStatExpand('volume',this)">
       <div class="dv-ic-lbl">Volume</div>
       <div class="dv-ic-val" style="color:${sig.volRatio!=null&&sig.volRatio>=1.2?'#5de8a0':'inherit'}">${sig.volRatio!=null?sig.volRatio.toFixed(1)+'×':'–'}</div>
     </div>
-    <div class="dv-ic">
+    <div class="dv-ic" id="dvStat_rsi" onclick="dvStatExpand('rsi',this)">
       <div class="dv-ic-lbl">RSI</div>
       <div class="dv-ic-val" style="color:${sig.rsi!=null&&sig.rsi<30?'#5de8a0':sig.rsi!=null&&sig.rsi>70?'#e8706e':'inherit'}">${sig.rsi!=null?sig.rsi.toFixed(1):'–'}</div>
     </div>
-    <div class="dv-ic">
+    <div class="dv-ic" id="dvStat_timeframe" onclick="dvStatExpand('timeframe',this)">
       <div class="dv-ic-lbl">Timeframe</div>
       <div class="dv-ic-val">${sig.tf}</div>
     </div>
-    <div class="dv-ic">
+    <div class="dv-ic" id="dvStat_winrate" onclick="dvStatExpand('winrate',this)">
       <div class="dv-ic-lbl">Win Rate</div>
       <div class="dv-ic-val" style="color:${sig.winRate!=null&&sig.winRate>=55?'#5de8a0':sig.winRate!=null&&sig.winRate<45?'#e8706e':'inherit'}">${sig.winRate!=null?sig.winRate.toFixed(0)+'%':'–'}</div>
     </div>
   </div>
+  <div id="dvStatDetail" style="display:none;"></div>
 
   <!-- Spread education strip — only when trade signal is active -->
   ${(sig.rr&&sig.spreadCost!=null&&sig.rr1Raw)?`<div style="margin:0 0 8px 0;border-radius:8px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.02);overflow:hidden;">
