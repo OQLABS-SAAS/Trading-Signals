@@ -6099,6 +6099,197 @@ def automation_settings_save():
     finally:
         db.close()
 
+
+# ─── AUTOMATION INTELLIGENCE — signal-aware recommendation engine ─────────────
+
+def _recommend_automations_from_signal(data):
+    """Backend compute layer: decide which automations to recommend for a trade.
+
+    All recommendation logic lives here. The frontend sends signal fields and
+    receives {be, trail, macro, inval, sent, explanation}. Zero frontend if/else.
+
+    Decision factors:
+      trade_type:       scalp / day / swing / position
+      confidence:       HIGH / MEDIUM / LOW
+      confidence_label: CONFIRMED / LIKELY / HYPOTHESIS
+      signal:           BUY / SELL / HOLD
+      bull_count:       raw integer — bullish indicator votes
+      bear_count:       raw integer — bearish indicator votes
+      atr:              Average True Range
+      entry:            entry price
+      htf_bias:         BULLISH / BEARISH / NEUTRAL
+      rsi:              RSI value
+    """
+    trade_type  = (data.get("trade_type")       or "day").lower().strip()
+    confidence  = (data.get("confidence")       or "MEDIUM").upper().strip()
+    conf_label  = (data.get("confidence_label") or "LIKELY").upper().strip()
+    signal      = (data.get("signal")           or "HOLD").upper().strip()
+    bull_count  = int(data.get("bull_count")    or 0)
+    bear_count  = int(data.get("bear_count")    or 0)
+    atr         = float(data.get("atr")         or 0)
+    entry       = float(data.get("entry")       or 0)
+    htf_bias    = (data.get("htf_bias")         or "NEUTRAL").upper().strip()
+    rsi         = float(data.get("rsi")         or 50)
+
+    # Compute directional percentage from raw vote counts
+    total_count    = bull_count + bear_count
+    bull_pct       = (bull_count / total_count * 100) if total_count > 0 else 50.0
+    bear_pct       = (bear_count / total_count * 100) if total_count > 0 else 50.0
+
+    # No active trade → no automations applicable
+    if signal == "HOLD":
+        return {
+            "be": False, "trail": False, "macro": False, "inval": False, "sent": False,
+            "explanation": (
+                "No active trade signal — automations are not applicable. "
+                "Wait for a BUY or SELL signal before setting up automations."
+            )
+        }
+
+    is_scalp    = trade_type == "scalp"
+    is_day      = trade_type == "day"
+    is_swing    = trade_type == "swing"
+    is_position = trade_type == "position"
+    is_long     = signal == "BUY"
+
+    directional_pct = bull_pct if is_long else bear_pct
+    htf_aligned     = (htf_bias == "BULLISH" and is_long) or (htf_bias == "BEARISH" and not is_long)
+    htf_mixed       = htf_bias not in ("BULLISH", "BEARISH")
+
+    reasons = []
+
+    # ── BE: Break Even ────────────────────────────────────────────────────────
+    # Recommended for all non-scalp trades with at least MEDIUM confidence.
+    # Scalp trades exit before BE fires (minutes — 1-ATR trigger won't be reached first).
+    be = not is_scalp and confidence in ("HIGH", "MEDIUM")
+    if be:
+        reasons.append(
+            "Break Even: when price moves 1 ATR in your favour your stop moves to entry — "
+            "you can no longer lose money on this trade."
+        )
+
+    # ── TRAIL: Trailing Stop ──────────────────────────────────────────────────
+    # Swing/position trades hold long enough to lock in gains via trailing.
+    # For scalp/day: fixed TP targets capture the move more reliably.
+    # HTF alignment upgrades a medium-confidence swing to trail-eligible.
+    trail = (is_swing or is_position) and confidence == "HIGH"
+    if not trail and is_swing and htf_aligned and confidence == "MEDIUM":
+        trail = True
+    if trail:
+        reasons.append(
+            "Trailing Stop: this is a longer-hold trade in a "
+            + ("confirmed" if confidence == "HIGH" else "trending")
+            + " environment — DotVerse locks in gains as price moves in your favour."
+        )
+
+    # ── MACRO: Macro Event Guard ──────────────────────────────────────────────
+    # Swing/position trades always cross at least one news cycle.
+    # High-confidence day trades also benefit — more capital at stake.
+    macro = (is_swing or is_position) or (is_day and confidence == "HIGH")
+    if macro:
+        if is_swing or is_position:
+            reasons.append(
+                "Macro Guard: this trade will be open during scheduled news events "
+                "(NFP, CPI, interest rate decisions). "
+                "DotVerse protects your position before high-impact releases."
+            )
+        else:
+            reasons.append(
+                "Macro Guard: high-confidence day trade — "
+                "DotVerse monitors for news events that could spike against your position."
+            )
+
+    # ── INVAL: Technical Invalidation ────────────────────────────────────────
+    # Fires when EMA or Supertrend reverses on a CLOSED candle.
+    # Recommended when conviction is below CONFIRMED, when HTF is mixed,
+    # or when the trade will be held across multiple candles (swing/position).
+    weak_signal = conf_label in ("HYPOTHESIS", "LIKELY")
+    inval = weak_signal or htf_mixed or is_swing or is_position
+    if inval:
+        if conf_label == "HYPOTHESIS":
+            reasons.append(
+                "Technical Invalidation: this signal is a HYPOTHESIS (marginal agreement). "
+                "If the EMA or Supertrend reverses on a closed candle DotVerse exits early — "
+                "before your full stop is reached."
+            )
+        elif htf_mixed:
+            reasons.append(
+                "Technical Invalidation: the higher-timeframe trend is mixed. "
+                "DotVerse watches for structure breaks that invalidate this trade direction."
+            )
+        else:
+            reasons.append(
+                "Technical Invalidation: longer-hold trades can see technical reversals. "
+                "DotVerse monitors indicator flips on each closed candle and exits if your entry thesis breaks."
+            )
+
+    # ── SENT: Sentiment Watch ─────────────────────────────────────────────────
+    # Swing/position trades are held long enough for news sentiment to move price.
+    # Also fires when directional conviction is below 70% — sentiment can be the
+    # catalyst that decides price direction when indicators are split.
+    low_conviction = directional_pct < 70
+    sent = (is_swing or is_position) or (low_conviction and confidence != "HIGH")
+    if sent:
+        if low_conviction and not (is_swing or is_position):
+            reasons.append(
+                "Sentiment Watch: directional conviction is "
+                + ("moderate" if directional_pct >= 50 else "low")
+                + f" ({round(directional_pct)}% aligned). "
+                "If 3+ negative headlines appear within 2 hours DotVerse will partially close the position."
+            )
+        else:
+            reasons.append(
+                "Sentiment Watch: longer-hold trade — DotVerse monitors real-time news "
+                "so unexpected negative sentiment does not erode your gains overnight."
+            )
+
+    # ── Build explanation ────────────────────────────────────────────────────
+    trade_desc = {
+        "scalp":    "scalp trade (minutes to 1–2 hours)",
+        "day":      "day trade (hours, closes same day)",
+        "swing":    "swing trade (1–5 days)",
+        "position": "position trade (days to weeks)",
+    }.get(trade_type, f"{trade_type} trade")
+
+    conf_desc = {
+        "CONFIRMED":  "confirmed by TradingView's 26-indicator score",
+        "LIKELY":     "likely — strong indicator agreement",
+        "HYPOTHESIS": "hypothesis — indicator agreement is marginal",
+    }.get(conf_label, confidence.lower() + " confidence")
+
+    if not reasons:
+        explanation = (
+            f"This {trade_desc} ({conf_desc}) is fast-moving with clear levels. "
+            "No automations are needed — use your fixed TP targets and pre-set stop loss."
+        )
+    else:
+        on_list = ", ".join(
+            k.upper() for k, v in [("be", be), ("trail", trail), ("macro", macro), ("inval", inval), ("sent", sent)] if v
+        )
+        explanation = (
+            f"This {trade_desc} ({conf_desc}). "
+            f"DotVerse activated {len(reasons)} automation{'s' if len(reasons) != 1 else ''} ({on_list}). "
+            + " ".join(reasons)
+        )
+
+    return {"be": be, "trail": trail, "macro": macro, "inval": inval, "sent": sent,
+            "explanation": explanation}
+
+
+@app.route("/api/recommend-automations", methods=["POST"])
+@login_required
+def recommend_automations():
+    """Signal-aware automation recommendation endpoint.
+    Receives signal fields, returns {be, trail, macro, inval, sent, explanation}.
+    All decision logic is in _recommend_automations_from_signal() — zero frontend if/else."""
+    try:
+        data   = request.json or {}
+        result = _recommend_automations_from_signal(data)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ─── USER SETTINGS (per-user preferences for the 8 Settings sub-panels) ─────
 
 def _user_settings_to_dict(s):
