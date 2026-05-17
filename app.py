@@ -6781,6 +6781,7 @@ def live_price():
     asset_type = request.args.get("asset_type", "stock").strip().lower()
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
+    ticker = normalise_ticker(ticker, asset_type)
     try:
         import yfinance as yf
         hist = yf.Ticker(ticker).history(period="1d", interval="1m")

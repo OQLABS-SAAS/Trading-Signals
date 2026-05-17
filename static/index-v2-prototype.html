@@ -4692,6 +4692,8 @@ function setNav(id){
   }
   // Stop live price WebSocket when leaving SIZE tab
   if (id !== 'size' && typeof _szLivePriceStop === 'function') _szLivePriceStop();
+  // Stop signal card live price poll when leaving SIGNALS tab
+  if (id !== 'signals' && typeof _sfStopLivePrices === 'function') _sfStopLivePrices();
 }
 // ── Tier selector ──────────────────────────────────────────────────────────────
 let _selectedTier = 'beginner';
@@ -7937,6 +7939,7 @@ function applyCondFilter(type, label, desc){
 }
 
 function showSignalFeed(){
+  _sfStopLivePrices();   // clear any running price-refresh interval from previous view
   // Reset trade type filter to 'all' every time Signals tab is opened
   window._stratMode = 'all';
   document.querySelectorAll('.strat-pill').forEach(p=>p.classList.toggle('active', p.id==='sm-all'));
@@ -7957,6 +7960,7 @@ function showSignalFeed(){
     if (_cache.opps) {
       window._rmOpps = _cache.opps;
       _sfUpdateMetrics(_cache.opps);
+      _sfStartLivePrices(_cache.displayOpps || _cache.opps);   // restart live-price strip from cache (displayOpps preserves card index alignment)
     }
     // Hide progress bar — not needed when restoring from cache
     var btBar = document.getElementById('sfBtBar');
@@ -8334,6 +8338,8 @@ async function _sfFetchSignals(){
       + (o.spreadCost && o.spreadCost > 0 ? '<div style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;"><span style="color:rgba(201,168,76,.45);">spread adj</span><span style="padding:1px 6px;border-radius:3px;font-size:8px;letter-spacing:.05em;' + ({'wide':'background:rgba(224,85,85,.12);color:#e05555;','fair':'background:rgba(237,232,216,.07);color:rgba(237,232,216,.4);','tight':'background:rgba(61,190,108,.1);color:#3dbe6c;'}[o.spreadQuality||'fair']||'') + '">' + (o.spreadQuality||'fair').toUpperCase() + '</span>' + (o.spreadSrc === 'live' ? '<span style="display:inline-flex;align-items:center;gap:3px;color:#3dbe6c;font-size:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#3dbe6c;animation:lpulse 1.8s ease-in-out infinite;flex-shrink:0;"></span>LIVE</span>' : '') + '</div>' : '')
       + '<div class="opp-reason">' + o.reason + '</div>'
       + ((o.confLbl==='HYPOTHESIS'||o.confLbl==='LOW'||(o.conf||0)<70)?'<div style="padding:0 14px;margin-top:6px;font-size:9px;color:rgba(201,168,76,.8);font-family:var(--mono);"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" style="display:inline-block;vertical-align:-1px;margin-right:3px"><path d="M6 2L11 10H1L6 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="6" y1="5" x2="6" y2="7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="6" cy="9" r=".7" fill="currentColor"/></svg> Lower confidence · consider smaller position</div>':'')
+      + (o.sig !== 'HOLD' && o.entry ? '<div id="lp-' + o.sym.replace(/[^a-zA-Z0-9]/g,'') + '-' + i + '" style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);">'
+        + '<span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.2);flex-shrink:0;"></span>loading live price…</div>' : '')
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
       + '</div></div>';
@@ -8343,9 +8349,12 @@ async function _sfFetchSignals(){
   const listNow = document.getElementById('sfOppsList');
   if(listNow) listNow.innerHTML = _finalHtml;
   // Cache results so navigating away and back restores instantly (5-min TTL)
-  window._sfResultCache = { html: _finalHtml, opps: verifiedOpps, ts: Date.now() };
+  // displayOpps cached separately — _sfStartLivePrices needs it to match card IDs (index-based)
+  window._sfResultCache = { html: _finalHtml, opps: verifiedOpps, displayOpps: displayOpps, ts: Date.now() };
   // Update metric cards with real data
   _sfUpdateMetrics(verifiedOpps);
+  // Start live price strips — show current price vs entry on every card
+  _sfStartLivePrices(displayOpps);
 
   /* ── Scanner tab: leave empty — user clicks "Run Scan" to populate ── */
   var tbody = document.getElementById('scTableBody');
@@ -8398,6 +8407,73 @@ function _sfSetProgress(fill, lbl, pct, txt){
 }
 function _sfOutsideClick(e){
   if(!e.target.closest('.sf-sort-wrap')){ _sfSortOpen=false; _sfApplySortDd(); }
+}
+
+/* ── D1: Live price strip — shows current price vs entry on each signal card ──
+   Polls /api/live-price every 30s. Clears on nav-away via _sfStopLivePrices(). */
+function _sfStopLivePrices(){
+  if(window._sfLivePriceTimer){ clearInterval(window._sfLivePriceTimer); window._sfLivePriceTimer = null; }
+}
+async function _sfStartLivePrices(opps){
+  _sfStopLivePrices();
+  if(!opps || !opps.length) return;
+
+  async function _lpFetch(){
+    await Promise.all(opps.map(async function(o, i){
+      var elemId = 'lp-' + o.sym.replace(/[^a-zA-Z0-9]/g,'') + '-' + i;
+      var el = document.getElementById(elemId);
+      if(!el) return;
+      // HOLD signals have no entry — strip hidden in template, skip
+      if(o.sig === 'HOLD' || !o.entry) return;
+      var assetParam = o.asset === 'equity' ? 'stock' : (o.asset || 'stock');
+      try {
+        var res = await dvFetchT('/api/live-price?ticker=' + encodeURIComponent(o.sym)
+          + '&asset_type=' + encodeURIComponent(assetParam), {}, 5000);
+        if(!res || !res.price) return;
+        var live     = res.price;
+        var entryNum = parseFloat(String(o.entry).replace(/,/g,''));
+        if(!isFinite(entryNum) || entryNum <= 0) return;
+
+        var distPct = ((live - entryNum) / entryNum) * 100;
+        var abs     = Math.abs(distPct);
+        var isBuy   = o.sig === 'BUY';
+        // Favourable = moving toward the trade (below entry for BUY, above entry for SELL)
+        var fav = isBuy ? distPct <= 0 : distPct >= 0;
+
+        var colour, dotBg, label;
+        if(abs <= 0.5){
+          colour = '#5de8a0'; dotBg = '#5de8a0';
+          label  = 'At entry — good time to consider entering';
+        } else if(fav && abs <= 3){
+          colour = '#5de8a0'; dotBg = '#5de8a0';
+          label  = abs.toFixed(1) + '% ' + (isBuy ? 'below' : 'above') + ' entry — discount vs signal price';
+        } else if(!fav && abs <= 2){
+          colour = 'rgba(201,168,76,.85)'; dotBg = '#d4870a';
+          label  = abs.toFixed(1) + '% ' + (isBuy ? 'above' : 'below') + ' entry — slight chase, consider waiting';
+        } else if(!fav && abs <= 5){
+          colour = 'rgba(224,85,85,.9)'; dotBg = '#e05555';
+          label  = abs.toFixed(1) + '% from entry — wait for a pullback before entering';
+        } else {
+          colour = '#e05555'; dotBg = '#e05555';
+          label  = abs.toFixed(1) + '% from entry — chasing, high risk of entering at a bad price';
+        }
+
+        // Price display precision
+        var priceStr = live >= 1000 ? live.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
+                     : live >= 1    ? live.toFixed(4)
+                     : live.toPrecision(4);
+
+        el.innerHTML = '<span style="width:5px;height:5px;border-radius:50%;background:' + dotBg
+          + ';flex-shrink:0;animation:lpulse 2s ease-in-out infinite;"></span>'
+          + '<span style="color:' + colour + ';font-weight:600;">Now ' + priceStr + '</span>'
+          + '<span style="color:rgba(237,232,216,.2);margin:0 4px;">·</span>'
+          + '<span style="color:' + colour + ';">' + label + '</span>';
+      } catch(e){ /* silent — strip stays as placeholder on error */ }
+    }));
+  }
+
+  _lpFetch();  // immediate first pass
+  window._sfLivePriceTimer = setInterval(_lpFetch, 30000);
 }
 function buildConfRing(conf) {
   const c = Math.round(conf) || 0;
