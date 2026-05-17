@@ -9288,6 +9288,11 @@ class Position(_Base):
     tp1_price    = Column(Float,      nullable=True)
     timeframe    = Column(String(8),  nullable=True)
     opened_at    = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    # D4: close-trade fields (all nullable — NULL means position still open)
+    outcome      = Column(String(10),  nullable=True)   # WIN / LOSS / BE
+    close_price  = Column(Float,       nullable=True)
+    closed_at    = Column(DateTime,    nullable=True)
+    hit_tp       = Column(Integer,     nullable=True)   # 1, 2, 3 or NULL
 
 class OptimisationResult(_Base):
     """Best indicator parameters per asset class found by RQ grid search."""
@@ -9664,6 +9669,11 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE scan_alerts ADD COLUMN IF NOT EXISTS tp3 FLOAT"))
                 _conn.execute(text("ALTER TABLE scan_alerts ADD COLUMN IF NOT EXISTS entry_confluence FLOAT"))
                 _conn.execute(text("ALTER TABLE scan_alerts ADD COLUMN IF NOT EXISTS entry_atr FLOAT"))
+                # D4: close-trade columns on positions
+                _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS outcome VARCHAR(10)"))
+                _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS close_price FLOAT"))
+                _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP"))
+                _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS hit_tp INTEGER"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")
@@ -9713,6 +9723,10 @@ def positions_get():
             "tp1_price":   p.tp1_price,
             "timeframe":   p.timeframe,
             "opened_at":   p.opened_at.isoformat() if p.opened_at else None,
+            "outcome":     p.outcome,
+            "close_price": p.close_price,
+            "closed_at":   p.closed_at.isoformat() if p.closed_at else None,
+            "hit_tp":      p.hit_tp,
         } for p in rows])
     finally:
         db.close()
@@ -9761,6 +9775,56 @@ def positions_delete(pos_id):
         db.delete(pos)
         db.commit()
         return jsonify({"status": "deleted"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+# ─── D4: Close a position ────────────────────────────────────
+
+@app.route("/api/positions/<int:pos_id>/close", methods=["POST"])
+@login_required
+def positions_close(pos_id):
+    if not _DBSession:
+        return jsonify({"error": "Database not configured"}), 503
+    data = request.get_json(force=True) or {}
+    close_price = data.get("close_price")
+    outcome     = (data.get("outcome") or "").upper().strip()
+    hit_tp      = data.get("hit_tp")   # int 1/2/3 or null
+
+    if close_price is None:
+        return jsonify({"error": "close_price is required"}), 400
+    if outcome not in ("WIN", "LOSS", "BE", ""):
+        return jsonify({"error": "outcome must be WIN, LOSS, or BE"}), 400
+
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        pos = db.query(Position).filter(Position.id == pos_id).first()
+        if not pos:
+            return jsonify({"error": "Position not found"}), 404
+        if str(pos.user_id) != uid:
+            return jsonify({"error": "Forbidden"}), 403
+        if pos.closed_at is not None:
+            return jsonify({"error": "Position already closed"}), 400
+
+        pos.close_price = float(close_price)
+        pos.outcome     = outcome or None
+        pos.closed_at   = datetime.utcnow()
+        pos.hit_tp      = int(hit_tp) if hit_tp is not None else None
+        db.commit()
+
+        return jsonify({
+            "id":          pos.id,
+            "ticker":      pos.ticker,
+            "signal":      pos.signal,
+            "entry_price": pos.entry_price,
+            "close_price": pos.close_price,
+            "outcome":     pos.outcome,
+            "closed_at":   pos.closed_at.isoformat(),
+            "hit_tp":      pos.hit_tp,
+        })
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
