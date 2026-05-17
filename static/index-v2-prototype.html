@@ -14219,6 +14219,8 @@ function showSize(){
         </div>
       </div>
 
+      <!-- D2: Risk of Ruin panel -->
+      <div id="szRoRPanel" style="display:none;margin-top:8px;border-radius:8px;border:1px solid rgba(93,232,160,.2);padding:12px 14px;transition:background .3s,border-color .3s;"></div>
 
     </div><!-- /sz-right -->
   </div><!-- /sz-layout -->
@@ -15259,6 +15261,7 @@ function szCalc(){
   // Store calculated size so updateFlowBadge can compute recommended lots
   window._szLastCalc = { posSize, lots, lotsDisplay, assetType, moneyAtRisk };
   updateFlowBadge();
+  if(typeof szRoRUpdate === 'function') szRoRUpdate();
 }
 
 function szRRToggle(key){
@@ -15274,6 +15277,61 @@ function szRRToggle(key){
   detail.innerHTML=bar._rrDetails[key]();
   detail.style.display='block';
   bar._rrActive=key;
+}
+
+// D2 — Risk of Ruin panel
+function szRoRUpdate(){
+  var panel = document.getElementById('szRoRPanel');
+  if(!panel) return;
+  var acct = parseFloat((document.getElementById('szAcct')||{}).value) || 0;
+  var risk = parseFloat((document.getElementById('szRisk')||{}).value) || 0;
+  if(!acct || !risk || risk <= 0){ panel.style.display='none'; return; }
+  var r = risk / 100;
+  var n50, n99;
+  if(r >= 1){ n50 = 1; n99 = 1; }
+  else {
+    n50 = Math.ceil(Math.log(0.5) / Math.log(1 - r));
+    n99 = Math.ceil(Math.log(0.01) / Math.log(1 - r));
+  }
+  var n50Disp = n50 > 9999 ? '>9,999' : n50.toLocaleString();
+  var n99Disp = n99 > 9999 ? '>9,999' : n99.toLocaleString();
+  var d50 = Math.round(acct * 0.5).toLocaleString('en-US');
+  var d99 = Math.round(acct * 0.99).toLocaleString('en-US');
+  var col, bg, border, label, labelCol, explain;
+  if(risk <= 1){
+    col='#5de8a0'; bg='rgba(93,232,160,.05)'; border='rgba(93,232,160,.2)';
+    label='SAFE'; labelCol='#5de8a0';
+    explain='At <strong style="color:#5de8a0;">'+risk+'% risk</strong> per trade you can absorb <strong style="color:#5de8a0;">'+n50Disp+' losses in a row</strong> before losing half your account. This is the recommended range for beginners — your account survives long enough to learn from mistakes.';
+  } else if(risk <= 3){
+    col='#d4870a'; bg='rgba(201,168,76,.05)'; border='rgba(201,168,76,.22)';
+    label='CAUTION'; labelCol='#d4870a';
+    explain='At <strong style="color:#d4870a;">'+risk+'% risk</strong> per trade, <strong style="color:#d4870a;">'+n50Disp+' consecutive losses</strong> cuts your account in half. This is manageable for experienced traders but even a moderate losing streak is painful.';
+  } else {
+    col='#e05555'; bg='rgba(224,85,85,.06)'; border='rgba(224,85,85,.25)';
+    label='HIGH RISK'; labelCol='#e05555';
+    explain='At <strong style="color:#e05555;">'+risk+'% risk</strong> per trade, just <strong style="color:#e05555;">'+n50Disp+' losses in a row</strong> halves your account. Every good strategy has losing streaks — at this risk level a normal streak can be account-ending.';
+  }
+  panel.style.display='block';
+  panel.style.background=bg;
+  panel.style.borderColor=border;
+  panel.innerHTML=
+    '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">'
+    +'<span style="font-family:var(--mono);font-size:8px;letter-spacing:1.4px;color:var(--mut);font-weight:700;text-transform:uppercase;flex:1;">RISK OF RUIN</span>'
+    +'<span style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.06em;padding:2px 8px;border-radius:3px;background:'+col+'22;color:'+labelCol+';">'+label+'</span>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">'
+    +'<div style="text-align:center;padding:10px 8px;border-radius:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);">'
+    +'<div style="font-family:var(--mono);font-size:22px;font-weight:700;color:'+col+';">'+n50Disp+'</div>'
+    +'<div style="font-family:var(--mono);font-size:8px;color:var(--mut);letter-spacing:.04em;margin-top:3px;line-height:1.4;">CONSECUTIVE LOSSES</div>'
+    +'<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);margin-top:3px;">to lose 50% ($'+d50+')</div>'
+    +'</div>'
+    +'<div style="text-align:center;padding:10px 8px;border-radius:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);">'
+    +'<div style="font-family:var(--mono);font-size:22px;font-weight:700;color:#e05555;">'+n99Disp+'</div>'
+    +'<div style="font-family:var(--mono);font-size:8px;color:var(--mut);letter-spacing:.04em;margin-top:3px;line-height:1.4;">CONSECUTIVE LOSSES</div>'
+    +'<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);margin-top:3px;">to wipe account ($'+d99+')</div>'
+    +'</div>'
+    +'</div>'
+    +'<div style="font-size:11px;color:rgba(237,232,216,.7);line-height:1.65;">'+explain+'</div>';
 }
 
 // ══════════════════════════════════════════════════════════════

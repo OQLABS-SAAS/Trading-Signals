@@ -1206,10 +1206,73 @@ Static code analysis is not verification.
 
 Also ask: **"Is this the simplest correct solution? Could it be meaningfully shorter without losing correctness?"** Complexity that cannot be justified is a bug.
 
+---
+
+## THREE MANDATORY ROLE LENSES — RUN BEFORE EVERY IMPLEMENTATION
+
+These are not optional. Every non-trivial change must pass all three lenses before Gate 3 opens.
+
+---
+
+### LENS 1 — SYSTEMS ARCHITECT
+
+Before touching any code, answer these questions:
+
+1. **Fit:** Does this change fit the existing architecture, or am I introducing a new pattern that conflicts with it?
+2. **Data flow:** What is the full data path this change touches — from user input → JS → API → Python → DB/cache → response → DOM?
+3. **Coupling:** Am I tightly coupling two things that should be independent? Does this create a dependency that will be painful to undo?
+4. **Scalability:** If this feature is used by 1,000 users simultaneously, does it hold? (e.g. polling intervals, scan endpoint costs, DB writes per signal)
+5. **Single responsibility:** Is each function/endpoint doing one thing? Am I reaching into another feature's domain?
+6. **Reversibility:** Can this be rolled back cleanly if it breaks something in production?
+
+**Gate:** If any answer is "no" or "I don't know" — stop. Resolve it before writing a single line.
+
+---
+
+### LENS 2 — SENIOR PRINCIPAL ENGINEER
+
+Before touching any code, answer these questions:
+
+1. **Blast radius:** What is the full list of features, endpoints, and UI components that share any code path with what I'm changing? (Use GitNexus `gitnexus_impact` — mandatory.)
+2. **Silent breakage:** What could this change break that would produce no error — just wrong behaviour or wrong numbers?
+3. **Technical debt:** Am I solving the symptom or the root cause? Will this fix require another fix in 3 sessions?
+4. **Maintainability:** If a different developer read this code in 6 months, would they understand what it does and why?
+5. **Standards:** Am I matching the conventions already established in this codebase (naming, error handling, response shapes, ID schemes)?
+6. **Pride test:** Would I be comfortable showing this diff to a senior engineering review? If not — why not, and how do I fix that?
+
+**Gate:** If the blast radius is HIGH or CRITICAL per GitNexus — warn the user explicitly before proceeding. Do not downplay it.
+
+---
+
+### LENS 3 — QA ENGINEER
+
+Before writing success criteria, answer these questions (this is the failure brainstorm — it comes FIRST):
+
+1. **Happy path:** State the exact steps that prove it works under normal conditions.
+2. **Empty/null inputs:** What if the backend returns null, empty array, missing fields, or wrong types?
+3. **Edge values:** Zero, negative, very large numbers, identical values, boundary conditions.
+4. **Async race conditions:** What if the user navigates away mid-fetch? What if two fetches fire simultaneously? What if the DOM element is gone by the time the response arrives?
+5. **Cross-feature regression:** Run through the DotVerse feature checklist mentally. Which features share a code path with this change? Are they still intact?
+6. **Beginner misuse:** What does a confused beginner do with this feature that a developer would never do? Does it break or mislead them?
+7. **Production-only risks:** What cannot be tested in sandbox (live API, Redis, Railway networking) — and what is the exact browser step that would catch it?
+
+**Output format — every verification section must include:**
+```
+HAPPY PATH TESTED:    [exact steps + expected output]
+EDGE CASES TESTED:    [list]
+REGRESSION CHECKED:   [features confirmed intact]
+NOT TESTED:           [what sandbox cannot cover + why]
+RESIDUAL RISK:        [specific risk + browser test that catches it]
+```
+
+**Gate:** Success criteria written BEFORE the failure brainstorm are invalid. Rewrite them.
+
+---
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Trading-Signals** (712543 symbols, 1935136 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Trading-Signals** (711260 symbols, 1933430 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
