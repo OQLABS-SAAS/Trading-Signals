@@ -2470,6 +2470,7 @@ body.tier-trader [data-tier="pro"]{display:none!important;}
 .sz-tp-main{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;}
 .sz-tp-name{font-family:var(--mono);font-size:10px;font-weight:700;color:rgba(255,255,255,.5);letter-spacing:.5px;}
 .sz-tp-price{font-family:var(--mono);font-size:12px;color:var(--txt);margin-top:2px;}
+.sz-tp-raw-price{font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.3);text-decoration:line-through;margin-top:1px;}
 .sz-tp-mid{text-align:center;}
 .sz-tp-rr{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--crys);}
 .sz-tp-hint{font-family:var(--mono);font-size:9px;color:var(--mut);margin-top:2px;}
@@ -13940,7 +13941,7 @@ function showSize(){
         <div style="padding:6px 12px;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mut);font-weight:700;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.06);">TAKE PROFIT LEVELS · click to expand</div>
         <div class="sz-tp-row" id="szTPRow1" onclick="this.classList.toggle('open')">
           <div class="sz-tp-main">
-            <div><div class="sz-tp-name">TP 1</div><div class="sz-tp-price" id="szTP1Price">—</div></div>
+            <div><div class="sz-tp-name">TP 1</div><div class="sz-tp-price" id="szTP1Price">—</div><div class="sz-tp-raw-price" id="szTP1RawPrice" style="display:none;"></div></div>
             <div class="sz-tp-mid"><div class="sz-tp-rr" id="szTP1RR">—</div><div class="sz-tp-hint">First target</div></div>
             <div><div class="sz-tp-profit grn" id="szTP1Profit">—</div><div class="sz-tp-expand">▼ details</div></div>
           </div>
@@ -13953,7 +13954,7 @@ function showSize(){
         </div>
         <div class="sz-tp-row" id="szTPRow2" onclick="this.classList.toggle('open')">
           <div class="sz-tp-main">
-            <div><div class="sz-tp-name">TP 2</div><div class="sz-tp-price" id="szTP2Price">—</div></div>
+            <div><div class="sz-tp-name">TP 2</div><div class="sz-tp-price" id="szTP2Price">—</div><div class="sz-tp-raw-price" id="szTP2RawPrice" style="display:none;"></div></div>
             <div class="sz-tp-mid"><div class="sz-tp-rr" id="szTP2RR">—</div><div class="sz-tp-hint">Extended target</div></div>
             <div><div class="sz-tp-profit grn" id="szTP2Profit">—</div><div class="sz-tp-expand">▼ details</div></div>
           </div>
@@ -13966,7 +13967,7 @@ function showSize(){
         </div>
         <div class="sz-tp-row" id="szTPRow3" onclick="this.classList.toggle('open')">
           <div class="sz-tp-main">
-            <div><div class="sz-tp-name">TP 3</div><div class="sz-tp-price" id="szTP3Price">—</div></div>
+            <div><div class="sz-tp-name">TP 3</div><div class="sz-tp-price" id="szTP3Price">—</div><div class="sz-tp-raw-price" id="szTP3RawPrice" style="display:none;"></div></div>
             <div class="sz-tp-mid"><div class="sz-tp-rr" id="szTP3RR">—</div><div class="sz-tp-hint">Maximum target</div></div>
             <div><div class="sz-tp-profit grn" id="szTP3Profit">—</div><div class="sz-tp-expand">▼ details</div></div>
           </div>
@@ -14908,6 +14909,7 @@ function szCalc(){
     return {dist,gross,net,fees,rr,pct,acctNet,acctGross,tpPips,priceStr,spreadDollar,rawGross};
   }
 
+  const _isBuy = sl < entry;
   const tpList=[[tp1,'1'],[tp2,'2'],[tp3,'3']];
   const maxDistAbs=Math.max(
     tp1?Math.abs(tp1-entry):0,
@@ -14922,6 +14924,18 @@ function szCalc(){
     anyTP=true;
     const t=calcTP(tp);
     _s('szTP'+n+'Price', t.priceStr);
+    // Show raw (pre-spread) price struck-through when spread data present
+    const _rawPriceEl=document.getElementById('szTP'+n+'RawPrice');
+    if(_rawPriceEl){
+      if(_spreadUnits>0){
+        const _rawTP=_isBuy?tp+_spreadUnits:tp-_spreadUnits;
+        const _rawStr=_rawTP>=100?'$'+_rawTP.toLocaleString(undefined,{maximumFractionDigits:2}):'$'+_rawTP.toFixed(assetType==='forex'?5:6);
+        _rawPriceEl.textContent=_rawStr+' before spread';
+        _rawPriceEl.style.display='';
+      }else{
+        _rawPriceEl.style.display='none';
+      }
+    }
     _s('szTP'+n+'RR',    'R:R 1 : '+t.rr);
     _s('szTP'+n+'Profit', moneyAtRisk>0?'+$'+t.net.toFixed(0)+' net':'—');
     _s('szTP'+n+'Dist',  t.tpPips.toFixed(0)+' '+pipLabel);
