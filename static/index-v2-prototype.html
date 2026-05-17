@@ -13897,6 +13897,8 @@ function _vPreloadSize(){
   window._szLadder = riskLadder.slice(0, positions);
   // Assign sensible default targets: first→TP1, second→TP2, rest→TP3
   window._szLadderTargets = riskLadder.slice(0, positions).map(function(_, idx){ return _szDefaultTarget(idx); });
+  // Each new Verdict-assigned row gets automation defaults from global settings
+  window._szLadderAuto = riskLadder.slice(0, positions).map(function(){ return _szDefaultAuto(); });
   setNav('size'); showSize();
   // After showSize() renders, fill szRisk with first-position risk % from the
   // verdict ladder and trigger recalculation so the user sees live numbers.
@@ -14638,6 +14640,18 @@ function _szDefaultTarget(i) {
   if (i === 1) return 'tp2';
   return 'tp3';
 }
+// Per-row automation toggle defaults — read from global _autoSettings so they stay in sync
+function _szDefaultAuto() {
+  var a = window._autoSettings || {};
+  return {
+    be:    a.breakeven             !== false,   // true by default (global default is true)
+    trail: a.trailing              !== false,   // true by default
+    macro: !!a.autoMacroResponse,              // false by default
+    inval: !!a.autoInvalidationAct,            // false by default
+    sent:  !!a.autoSentimentWatch              // false by default
+  };
+}
+window._szLadderAuto = window._szLadderAuto || (window._szLadder||[1.0,1.5,2.0,2.5,3.0]).map(function(){ return _szDefaultAuto(); });
 function szLadderTargetUpdate(i, val) {
   if (!window._szLadderTargets) window._szLadderTargets = [];
   window._szLadderTargets[i] = val;
@@ -14752,35 +14766,64 @@ function szLadderRender() {
     // Which TP price this row will use (for profit highlight)
     const targetProfit = target === 'tp1' ? p1 : target === 'tp2' ? p2 : target === 'tp3' ? p3 : p3;
     const targetDist   = target === 'tp1' ? tp1Dist : target === 'tp2' ? tp2Dist : target === 'tp3' ? tp3Dist : tp3Dist;
-    return `<div style="display:grid;grid-template-columns:32px 110px 120px 100px 62px 62px 62px 160px 24px;gap:6px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-radius:5px;">
-      <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
-      <div style="display:flex;align-items:center;gap:6px;">
-        <input type="number" step="0.1" min="0.1" max="10" value="${risk}" onchange="szLadderUpdate(${i}, this.value)"
-          style="width:52px;padding:4px 6px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
-        <span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);">%</span>
-      </div>
-      <div style="font-family:var(--mono);font-size:10px;color:rgba(232,112,110,.85);line-height:1.4;">
-        <div style="font-weight:600;">${slFmt}</div>
-        <div style="font-size:8px;color:rgba(237,232,216,.35);">SL price</div>
-        <div style="margin-top:2px;">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
-      </div>
-      <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.85);">${lotsStr}<div style="font-size:8px;color:rgba(237,232,216,.4);">lots</div></div>
-      ${tpCell(p1, 'TP1')}
-      ${tpCell(p2, 'TP2')}
-      ${tpCell(p3, 'TP3')}
-      <div>
-        <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;margin-bottom:4px;font-family:var(--mono);">TARGET</div>
-        <div style="display:flex;gap:3px;flex-wrap:wrap;">
-          ${['tp1','tp2','tp3','trail'].map(v => {
-            const btnLabels = {tp1:'TP1', tp2:'TP2', tp3:'TP3', trail:'TRAIL'};
-            const btnCols   = {tp1:'rgba(93,232,160,.9)', tp2:'rgba(201,168,76,.95)', tp3:'rgba(93,175,232,.9)', trail:'rgba(232,165,80,.9)'};
-            const on = target === v;
-            return '<button onclick="szLadderTargetUpdate('+i+',\''+v+'\')" style="padding:3px 7px;font-family:var(--mono);font-size:9px;font-weight:700;border-radius:3px;cursor:pointer;transition:all .12s;border:1px solid '+(on ? btnCols[v] : 'rgba(237,232,216,.14)')+';background:'+(on ? btnCols[v].replace('.9)',',.18)').replace('.95)',',.18)') : 'transparent')+';color:'+(on ? btnCols[v] : 'rgba(237,232,216,.38)')+';line-height:1.6;">'+btnLabels[v]+'</button>';
-          }).join('')}
+    // Per-row automation state (falls back to global defaults if not yet set)
+    const auto = (window._szLadderAuto && window._szLadderAuto[i]) || _szDefaultAuto();
+    // Build automation sub-row pills
+    const _autoPillDefs = [
+      {key:'be',    label:'BE',    short:'Lock in risk-free', desc:'Moves your stop loss to your entry price once TP1 is hit — your maximum loss on this trade becomes zero.'},
+      {key:'trail', label:'TRAIL', short:'Run the winner',    desc:'An ATR-based trailing stop that follows price upward as it moves in your favour — locks in profit automatically.'},
+      {key:'macro', label:'MACRO', short:'Major news shield', desc:'Automatically pauses or tightens this trade if a major scheduled economic event fires while the trade is live.'},
+      {key:'inval', label:'INVAL', short:'Key break guard',   desc:'Tightens your stop the moment price breaks a key structure level that invalidates the reason you entered this trade.'},
+      {key:'sent',  label:'SENT',  short:'Mood shield',       desc:'Reduces position size or exits if real-time market sentiment turns strongly against your trade direction.'}
+    ];
+    const _autoPillsHtml = _autoPillDefs.map(p => {
+      const on = auto[p.key];
+      const onCol = p.key === 'be' ? 'rgba(61,190,108,.9)' : 'rgba(201,168,76,.95)';
+      const onBg  = p.key === 'be' ? 'rgba(61,190,108,.1)' : 'rgba(201,168,76,.1)';
+      const offCol = 'rgba(237,232,216,.32)';
+      return '<button onclick="szLadderAutoToggle('+i+',\''+p.key+'\')" title="'+p.desc+'" style="cursor:pointer;padding:4px 8px 5px 8px;border-radius:4px;text-align:left;border:1px solid '+(on ? onCol : 'rgba(237,232,216,.1)')+';background:'+(on ? onBg : 'transparent')+';transition:border .12s,background .12s;min-width:64px;outline:none;">'
+        + '<div style="display:flex;align-items:center;gap:4px;">'
+        + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;color:'+(on ? onCol : offCol)+';">'+p.label+'</span>'
+        + '<span style="font-family:var(--mono);font-size:7px;color:'+(on ? onCol : 'rgba(237,232,216,.22)')+';background:'+(on ? onBg : 'rgba(237,232,216,.04)')+';padding:1px 3px;border-radius:2px;">'+(on?'ON':'OFF')+'</span>'
+        + '</div>'
+        + '<div style="font-family:var(--mono);font-size:7px;color:'+(on ? onCol.replace('.9)','.55)').replace('.95)','.55)') : 'rgba(237,232,216,.22)')+';margin-top:2px;line-height:1.2;white-space:nowrap;">'+p.short+'</div>'
+        + '</button>';
+    }).join('');
+    return `<div style="margin-bottom:5px;">
+      <div style="display:grid;grid-template-columns:32px 110px 120px 100px 62px 62px 62px 160px 24px;gap:6px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-radius:5px 5px 0 0;">
+        <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="number" step="0.1" min="0.1" max="10" value="${risk}" onchange="szLadderUpdate(${i}, this.value)"
+            style="width:52px;padding:4px 6px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
+          <span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);">%</span>
         </div>
-        ${targetDist && targetProfit ? `<div style="font-size:8.5px;font-family:var(--mono);color:${tgtCol};margin-top:4px;font-weight:700;">+$${targetProfit.toLocaleString(undefined,{maximumFractionDigits:0})}</div>` : ''}
+        <div style="font-family:var(--mono);font-size:10px;color:rgba(232,112,110,.85);line-height:1.4;">
+          <div style="font-weight:600;">${slFmt}</div>
+          <div style="font-size:8px;color:rgba(237,232,216,.35);">SL price</div>
+          <div style="margin-top:2px;">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.85);">${lotsStr}<div style="font-size:8px;color:rgba(237,232,216,.4);">lots</div></div>
+        ${tpCell(p1, 'TP1')}
+        ${tpCell(p2, 'TP2')}
+        ${tpCell(p3, 'TP3')}
+        <div>
+          <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;margin-bottom:4px;font-family:var(--mono);">TARGET</div>
+          <div style="display:flex;gap:3px;flex-wrap:wrap;">
+            ${['tp1','tp2','tp3','trail'].map(v => {
+              const btnLabels = {tp1:'TP1', tp2:'TP2', tp3:'TP3', trail:'TRAIL'};
+              const btnCols   = {tp1:'rgba(93,232,160,.9)', tp2:'rgba(201,168,76,.95)', tp3:'rgba(93,175,232,.9)', trail:'rgba(232,165,80,.9)'};
+              const on = target === v;
+              return '<button onclick="szLadderTargetUpdate('+i+',\''+v+'\')" style="padding:3px 7px;font-family:var(--mono);font-size:9px;font-weight:700;border-radius:3px;cursor:pointer;transition:all .12s;border:1px solid '+(on ? btnCols[v] : 'rgba(237,232,216,.14)')+';background:'+(on ? btnCols[v].replace('.9)',',.18)').replace('.95)',',.18)') : 'transparent')+';color:'+(on ? btnCols[v] : 'rgba(237,232,216,.38)')+';line-height:1.6;">'+btnLabels[v]+'</button>';
+            }).join('')}
+          </div>
+          ${targetDist && targetProfit ? `<div style="font-size:8.5px;font-family:var(--mono);color:${tgtCol};margin-top:4px;font-weight:700;">+$${targetProfit.toLocaleString(undefined,{maximumFractionDigits:0})}</div>` : ''}
+        </div>
+        <button onclick="szLadderRemove(${i})" style="background:none;border:none;color:rgba(232,112,110,.6);cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button>
       </div>
-      <button onclick="szLadderRemove(${i})" style="background:none;border:none;color:rgba(232,112,110,.6);cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button>
+      <div style="padding:5px 9px 7px 9px;background:rgba(0,0,0,.18);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-top:none;border-radius:0 0 5px 5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.28);letter-spacing:.6px;min-width:78px;padding-top:1px;">AUTOMATION</div>
+        ${_autoPillsHtml}
+      </div>
     </div>`;
   }).join('') +
   // Totals row — sums across all ladder rows
@@ -14842,12 +14885,21 @@ function szLadderAdd() {
   window._szLadder.push(Math.min(10, Math.round((last + 0.5) * 10) / 10));
   if (!window._szLadderTargets) window._szLadderTargets = [];
   window._szLadderTargets.push(_szDefaultTarget(window._szLadder.length - 1));
+  if (!window._szLadderAuto) window._szLadderAuto = [];
+  window._szLadderAuto.push(_szDefaultAuto());
   szLadderRender();
 }
 function szLadderRemove(i) {
   window._szLadder.splice(i, 1);
   if (window._szLadderTargets) window._szLadderTargets.splice(i, 1);
-  if (window._szLadder.length === 0) { window._szLadder = [1.0]; window._szLadderTargets = ['tp1']; }
+  if (window._szLadderAuto) window._szLadderAuto.splice(i, 1);
+  if (window._szLadder.length === 0) { window._szLadder = [1.0]; window._szLadderTargets = ['tp1']; window._szLadderAuto = [_szDefaultAuto()]; }
+  szLadderRender();
+}
+function szLadderAutoToggle(rowIdx, key) {
+  if (!window._szLadderAuto) window._szLadderAuto = (window._szLadder||[]).map(function(){ return _szDefaultAuto(); });
+  if (!window._szLadderAuto[rowIdx]) window._szLadderAuto[rowIdx] = _szDefaultAuto();
+  window._szLadderAuto[rowIdx][key] = !window._szLadderAuto[rowIdx][key];
   szLadderRender();
 }
 function szLadderUpdate(i, v) {
