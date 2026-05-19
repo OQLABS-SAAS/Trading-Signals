@@ -6121,6 +6121,12 @@ def _recommend_automations_from_signal(data):
       rsi:              RSI value
     """
     trade_type  = (data.get("trade_type")       or "day").lower().strip()
+    # S1f: normalise long-form labels from get_analysis() e.g. "Day Trade" → "day"
+    if   "day"      in trade_type: trade_type = "day"
+    elif "scalp"    in trade_type: trade_type = "scalp"
+    elif "swing"    in trade_type: trade_type = "swing"
+    elif "position" in trade_type: trade_type = "position"
+    else:                           trade_type = "day"
     # confidence may arrive as a numeric score (e.g. 82) from the frontend's sig.conf field.
     # Convert numeric scores to HIGH/MEDIUM/LOW so string comparisons in the logic below work.
     _raw_conf = data.get("confidence")
@@ -7985,6 +7991,8 @@ def scan_list():
                         "spread_source":  analysis.get("spread_source"),
                         "spread_pips":    analysis.get("spread_pips"),
                         "rr1_raw":        analysis.get("rr1_raw"),
+                        "trade_type":     analysis.get("trade_type","day"),
+                        "htf_bias":       analysis.get("htf_bias","NEUTRAL"),
                     }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
