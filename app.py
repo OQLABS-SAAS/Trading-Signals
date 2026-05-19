@@ -2695,6 +2695,16 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         except Exception: user_id = None
     user_risk, threshold = _get_user_risk_setting(user_id)
 
+    # ── C2: VIX Macro Gate — Redis-cached 15 min, negligible latency ──────────
+    # Fetch the current VIX zone. If Redis has a recent result this costs ~1ms.
+    # REDUCED zone (VIX 15-25): tighten confluence gate to 75% minimum — elevated
+    # fear makes oscillators noisier, so we require stronger agreement before
+    # showing a signal. NO_TRADE zone (VIX 25+): handled after all gates below.
+    _vix_ctx = _get_vix_score()
+    _macro_override = False
+    if _vix_ctx["zone"] == "REDUCED":
+        threshold = max(threshold, 0.75)
+
     if bull_pct >= threshold:
         signal = "BUY"
     elif bear_pct >= threshold:
@@ -2837,6 +2847,16 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         print(f"[gate] minimum votes ({total_votes} < {MIN_VOTES_FOR_SIGNAL}) — downgrading {signal} to HOLD on {ticker}")
         signal = "HOLD"
         gate_note = gate_note or f"Only {total_votes} indicator{'s' if total_votes != 1 else ''} voted — need at least {MIN_VOTES_FOR_SIGNAL} for an actionable signal."
+
+    # ── C2: VIX NO_TRADE zone — suppress all BUY/SELL signals ───────────────
+    # VIX > 25 means panic-driven markets where technical analysis is unreliable.
+    # Override any directional signal to HOLD regardless of indicator agreement.
+    # macro_override=True is returned so the frontend can show the suppression
+    # message and the red VIX badge (rendered in C3).
+    if _vix_ctx["zone"] == "NO_TRADE" and signal != "HOLD":
+        print(f"[vix-gate] NO_TRADE zone (VIX {_vix_ctx['vix']}) — overriding {signal} to HOLD on {ticker}")
+        signal = "HOLD"
+        _macro_override = True
 
     # Trade-type profile resolved up-front so it's available even on HOLD
     # signals where the SL/TP block is skipped — the response dict at the
@@ -3076,6 +3096,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         "tv_signal_used": tv_signal_used,
         "tv_rec_label": tv.get("tv_rec_label") if tv else None,
         "tv_rec_all": tv.get("tv_rec_all") if tv else None,
+        # ── C2: VIX Macro Gate context ────────────────────────────────────────
+        # macro_context: the full VIX zone dict so C3 frontend can render the badge.
+        # macro_override: True only when NO_TRADE zone forced a HOLD.
+        "macro_context":  _vix_ctx,
+        "macro_override": _macro_override,
         # ── 3d: Confidence label (restored TV-aware vocabulary 2026-04-29) ────
         # CONFIRMED  — TV scanner data used (26-indicator score) OR very strong net (>=5)
         # LIKELY     — TV BUY/SELL with medium conviction OR net >= 3 from local stack
