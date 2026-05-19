@@ -220,6 +220,762 @@ The brainstorm must answer (each as a numbered item):
 
 ---
 
+## ⚠️ CURRENT SESSION STATE — READ THIS BEFORE ANYTHING ELSE — 2026-05-19
+
+---
+
+### ⚠️ NON-NEGOTIABLE ARCHITECTURAL PRINCIPLES — APPLY EVERY SESSION
+
+**Principle 1 — ALL AUTOMATIONS ARE BACKEND-COMPUTE DRIVEN (added 2026-05-17)**
+Every automation decision — recommendation AND execution — is computed server-side. Zero frontend if/else logic for automation logic. DotVerse is an intelligent trading partner; every decision the machine can compute must be computed by the machine.
+- Layer 1 (Recommendation): `/api/recommend-automations` backend endpoint computes `{be, trail, macro, inval, sent}` from real signal data. `szAutoRecommend()` frontend function calls this endpoint — displays result only.
+- Layer 2 (Execution): `run_watch_job` and `_global_automation_job` run server-side on schedule. Each automation toggle has an explicit, fully specified backend condition. No toggle fires based on frontend state.
+
+**Principle 2 — SIGNALS ARE THE FUEL FOR ALL AUTOMATIONS (confirmed 2026-05-18)**
+An incomplete signal = broken automation compute. Every field that automations depend on (`trade_type`, `htf_bias`, `rsi`, `atr`, `confidence` as float) MUST be populated on EVERY code path — full analysis path AND scanner path. If scanner path doesn't forward these fields, the automation recommendation engine runs on defaults and its output is meaningless. Fix the data pipeline before building the compute logic.
+
+**Principle 3 — NO PRICE PREDICTIONS FROM LLMs, NO IMAGE ANALYSIS FOR PATTERNS (from PDF 2026-05-18)**
+Hard constraint from professional trading framework: LLMs are sentiment judges only (Finnhub → DeepSeek → score + reasoning). They do not predict price direction. Pattern recognition (FVG, CHOCH, etc.) is mechanically computed from OHLCV data only. No LLM sees a chart image and outputs a trade signal.
+
+**Principle 4 — BEGINNERS-FIRST (founding principle)**
+Every recommendation, warning, calculation output, and automation action must be explained in plain English. Numbers alone are not enough. Advanced features live behind progressive disclosure. Default settings are safe for someone who does not know what they are doing.
+
+---
+
+### WHERE WE ARE IN THE BUILD — 2026-05-19
+
+**Source of truth: "DotVerse — What We're Building & In What Order" (10 steps)**
+
+| Step | Description | Status |
+|---|---|---|
+| IMMEDIATE | Fix .upper() crash + clear git lock | `.upper()` DONE (406e984). Git lock: user must run rm command. |
+| STEP 1 | Fix signal data pipeline (scanner trade_type/htf_bias, RSI/ATR dead code, server-side derivation) | S1b+S1c+S1f WRITTEN — pending commit. S1d+S1e (wire RSI/ATR) NOT YET DONE. |
+| STEP 2 | VIX Market Fear Gate (fetch, 3 zones, Telegram alert, badge) | NOT STARTED |
+| STEP 3 | Fix 3 small bugs: trailing default, flow-scaled loop, refresh flicker | **ALL DONE** — trailing=1.0 confirmed, flow-scaled fixed, flicker fixed |
+| STEP 4 | Plain-English guidance on every element (`window._dvGuide`, `dvGuideInit()`, `data-guide` attrs) | NOT STARTED — zero code |
+| STEP 5 | Full automation execution engine (MACRO/INVAL/SENT/BE/TRAIL in `run_watch_job`) | NOT STARTED |
+| STEP 6 | Signal quality: regime detection, session filter, signal expiry, spread modelling | NOT STARTED |
+| STEP 7 | Portfolio intelligence: win rate, correlation risk, drawdown, Telegram, auto-scanner | NOT STARTED |
+| STEP 8 | SMC: FVG, liquidity grab, displacement candle, CHOCH | NOT STARTED |
+| STEP 9 | Validation: cost review, Monte Carlo, sensitivity analysis, walk-forward testing | NOT STARTED |
+| STEP 10 | Long-term: tab cleanup, exit tracking, MT5/Telegram settings, tier gating, live news | NOT STARTED |
+
+**Current position: at the STEP 1 → STEP 2 boundary.**
+Next action: user clears git lock → commit pending changes (S1b+S1c+S1f+Optimise Reset) → complete S1d+S1e → STEP 2.
+
+**🔒 IMMEDIATE BLOCKER — git lock files.** Two files blocking all commits. User must run from Terminal:
+```
+rm /Users/oq/Documents/trading-signals-saas/.git/index.lock
+rm /Users/oq/Documents/trading-signals-saas/.git/HEAD.lock
+```
+Bash sandbox cannot remove them (EPERM — owned by Mac host filesystem).
+
+**Last live-verified feature:** C1 — automation sub-rows rendering in Size tab ladder. Verified in browser 2026-05-17.
+
+---
+
+### PENDING COMMIT — WRITTEN THIS SESSION, NOT YET COMMITTED
+
+**One atomic commit containing all four changes:**
+Commit message: `fix(signal): trade_type normalization + scanner pipeline + Optimise reset`
+
+**Change 1 — S1f — `app.py` lines 6123–6129:**
+Normalizes long-form `trade_type` labels from `get_analysis()` (e.g. `"Day Trade"`) into short-form tokens (`"day"`) before `_recommend_automations_from_signal` evaluates them. Without this, all four type flags are always `False` and automation recommendations are meaningless.
+PATH A sandbox verified: 9/9 test cases pass (including all four long-form variants).
+```python
+trade_type = (data.get("trade_type") or "day").lower().strip()
+# S1f: normalise long-form labels from get_analysis() e.g. "Day Trade" → "day"
+if   "day"      in trade_type: trade_type = "day"
+elif "scalp"    in trade_type: trade_type = "scalp"
+elif "swing"    in trade_type: trade_type = "swing"
+elif "position" in trade_type: trade_type = "position"
+else:                           trade_type = "day"
+```
+
+**Change 2 — S1b — `app.py` lines 7985–7990:**
+`/api/scan-list` response dict now includes `trade_type` and `htf_bias` fields. `get_analysis()` already computes them — they were not being forwarded to the scanner response.
+```python
+"trade_type": analysis.get("trade_type", "day"),
+"htf_bias":   analysis.get("htf_bias", "NEUTRAL"),
+```
+
+**Change 3 — S1c — `static/index-v2-prototype.html` ~lines 9005–9040:**
+`loadScannerSignal(a)` now maps `trade_type` and `htf_bias` into `window._activeSignal`. Added `_dvDeriveTradeType(tf)` helper as fallback when backend doesn't provide the field.
+```javascript
+function _dvDeriveTradeType(tf) {
+  var raw = (tf || '').toLowerCase();
+  if (raw === '15m' || raw === '5m' || raw === '1m') return 'scalp';
+  if (raw === '1h'  || raw === '30m')                return 'day';
+  if (raw === '4h'  || raw === '1d')                 return 'swing';
+  return 'position';
+}
+// In loadScannerSignal() _activeSignal object:
+trade_type: a.trade_type || _dvDeriveTradeType(a.tf || '1h'),
+htf_bias:   a.htf_bias   || 'NEUTRAL',
+```
+
+**Change 4 — Optimise Reset — `static/index-v2-prototype.html` ~lines 14816–14839 + 14961–14973:**
+Added `szLadderAutoReset(rowIdx)` function. Added Re-run / Reset UX to `szLadderRender()` template — shows "↺ Re-run" label when a recommendation exists, adds "✕ Reset" button to clear the Optimise result and restore default automation state.
+```javascript
+function szLadderAutoReset(rowIdx) {
+  if (window._szRowRec)        window._szRowRec[rowIdx]        = null;
+  if (window._szRowRecLoading) window._szRowRecLoading[rowIdx] = false;
+  if (window._szLadderAuto)    window._szLadderAuto[rowIdx]    = _szDefaultAuto();
+  szLadderRender();
+}
+```
+
+---
+
+### DOCUMENT AWARENESS — READ ALL FOUR AT SESSION START
+
+These four documents together form the complete source of truth. Reading only one gives an incomplete picture. This has caused repeated "where is the full build plan?" corrections from Omar.
+
+| Document | Location | What it contains |
+|---|---|---|
+| `CLAUDE.md` | repo root | Most detailed execution order, architecture map, session state |
+| `IMPLEMENTATION_PLAN.md` | repo root | Phases A–G broader roadmap (bugs → fake data → settings → tier gating) |
+| `DotVerse_BuildPlan_2026.pdf` | uploaded (not in repo) | GAP 2–6 analysis + Identity Architecture rule |
+| `new build doc.pages` | uploaded (updated 2026-05-19) | Omar's plain-English version — updated each session |
+
+**`DotVerse_BuildPlan_2026.pdf` key facts (must re-read when available):**
+- Identity Architecture: EA always `user_id="default"`. Human users `str(session["user_id"])`. Queries serving EA must include `"default"` in filter: `MT5Order.user_id.in_([uid, "default"])`. `_get_automation_settings` must prefer human row over default row.
+- GAP 2: live position event monitor — NOT DONE
+- GAP 3: EMA cross + Supertrend flip detection — NOT DONE
+- GAP 4: invalidation alert diagnostic detail — NOT DONE
+- GAP 5: Finnhub news sentiment — NOT DONE
+- GAP 6: ATR trailing 2.0→1.0 — DONE (line 4331/4363 already 1.0)
+
+**`new build doc.pages` was modified 2026-05-19T17:30:11+0300 — may contain new items not yet in CLAUDE.md. Ask Omar to paste new sections as text if .iwa binary cannot be read.**
+
+---
+
+### KNOWN BROKEN PATHS — updated 2026-05-19
+
+- ~~Scanner path: `loadScannerSignal(a)` does NOT map `trade_type` or `htf_bias`~~ → **FIXED by S1c (pending commit)**
+- ~~Scanner path: `/api/scan-list` does NOT include `trade_type` or `htf_bias`~~ → **FIXED by S1b (pending commit)**
+- ~~`_recommend_automations_from_signal`: `"Day Trade"` → `"day trade"` ≠ `"day"` → all type flags False~~ → **FIXED by S1f (pending commit)**
+- ~~`_recommend_automations_from_signal`: `confidence = (data.get("confidence") or "MEDIUM").upper()` → AttributeError~~ → **FIXED — commit 406e984**
+- ~~ATR trailing default 2.0~~ → **already 1.0 — confirmed line 4331/4363**
+- ~~Refresh-logout flicker~~ → **already fixed — `vLanding` div has no `active` class (line 4277)**
+- `_recommend_automations_from_signal`: RSI zone and ATR magnitude extracted but never used in conditionals → **S1d + S1e — NOT YET DONE**
+- VIX macro gate: not yet implemented → **S1g through S1j — NOT YET DONE**
+- Guidance layer (`window._dvGuide`, `data-guide` attrs): zero code written → **Block G1 — NOT YET STARTED**
+
+---
+
+### ARCHITECTURE MAP (provided by Omar 2026-05-17 — authoritative)
+
+**Frontend** (`static/index-v2-prototype.html`, ~15,000 lines):
+```
+Shared state:  window._activeSignal, window._autoSettings, window._szLadder[]
+Shared fns:    szLadderRender(), recalc(), dvFetch(), showView()
+Tab fns:       showMarket(), showSignal(), showSize(), showAutomations()...
+```
+
+**Backend** (`app.py`, Flask, Railway):
+```
+/api/analyze              → calculate_indicators() → get_analysis()
+/api/recommend-automations → _recommend_automations_from_signal() → {be,trail,macro,inval,sent}
+/api/positions            → PostgreSQL positions table
+/api/signals/history      → PostgreSQL signal_history table
+/api/verdict              → RQ job → TradingAgents
+/api/notifications        → PostgreSQL notifications table
+```
+
+**Infrastructure:**
+```
+PostgreSQL  metro.proxy.rlwy.net:46116  (sslmode=disable)
+Redis       metro.proxy.rlwy.net:20577
+RQ Worker   Railway worker service (start.sh → python run_worker.py + gunicorn)
+```
+
+**Key state variables and their correct values (full analysis path — `window._activeSignal`):**
+```js
+{
+  sym, tf, asset,
+  sig,          // 'BUY' | 'SELL' | 'HOLD'
+  entry, sl, tp1, tp2, tp3,
+  trade_type,   // 'scalp' | 'day' | 'swing' | 'position' — derived server-side from TF
+  htf_bias,     // 'BULLISH' | 'BEARISH' | 'NEUTRAL' — from get_analysis()
+  conf,         // numeric float e.g. 82.3 — NOT string
+  conf_lbl,     // 'CONFIRMED' | 'LIKELY' | 'HYPOTHESIS'
+  rsi,          // numeric e.g. 58.4
+  atr,          // numeric e.g. 0.0034
+  bull_pct, bear_pct,
+  macro_context // {vix, score, zone, message} — added by Block S1
+}
+```
+
+**Known broken paths — see updated list in KNOWN BROKEN PATHS section above (updated 2026-05-19)**
+
+---
+
+### COMPLETE UNIFIED BUILD PLAN — REVISED 2026-05-18
+
+---
+
+#### IMMEDIATE — Before anything else (unlock + first commit)
+
+| Step | Action | File | Verification |
+|---|---|---|---|
+| 0a | User runs `rm /Users/oq/Documents/trading-signals-saas/.git/HEAD.lock` from Terminal | — | `git status` shows clean |
+| 0b | Commit numeric confidence fix (PATH A sandbox-verified this session) | `app.py` lines 6124-6134 | `git commit -m "fix: confidence int.upper() AttributeError in recommend-automations"` |
+| 0c | Commit C1a (hover tooltips — already coded) | `index-v2-prototype.html` | Separate commit — one change per commit |
+| 0d | Implement and commit C1c (see spec below) | `app.py` + `index-v2-prototype.html` | Browser: Optimise button returns real computed values, not defaults |
+
+**Numeric confidence fix (PATH A verified — commit 0b):**
+```python
+# Lines 6124-6134 in app.py — replaces single-line .upper() call
+_raw_conf = data.get("confidence")
+if _raw_conf is None or _raw_conf == "":
+    confidence = "MEDIUM"
+else:
+    try:
+        _conf_num = float(_raw_conf)
+        confidence = "HIGH" if _conf_num >= 80 else ("MEDIUM" if _conf_num >= 65 else "LOW")
+    except (TypeError, ValueError):
+        confidence = str(_raw_conf).upper().strip() or "MEDIUM"
+```
+
+---
+
+#### C1c — Backend Automation Recommendations Endpoint
+
+**File:** `app.py`
+**New endpoint:** `POST /api/recommend-automations` (already exists, needs fixing)
+**Root fix:** `_recommend_automations_from_signal(data)` — wire RSI zone and ATR magnitude into actual conditionals (currently dead code). Use real trade_type (never default to 'day' — derive from TF if missing). Use real htf_bias.
+
+**Complete compute logic for `_recommend_automations_from_signal`:**
+```python
+def _recommend_automations_from_signal(data):
+    # 1. Numeric-safe confidence (already fixed in 0b)
+    confidence = ...  # HIGH / MEDIUM / LOW
+
+    # 2. Trade type — derive from TF if not provided (never trust 'day' default blindly)
+    trade_type = data.get("trade_type") or _derive_trade_type(data.get("tf", "1H"))
+    # _derive_trade_type: 15m→scalp, 1H→day, 4H/1D→swing, 1W/1M→position
+
+    # 3. HTF bias — use real value, not NEUTRAL default
+    htf_bias = (data.get("htf_bias") or "NEUTRAL").upper()
+
+    # 4. RSI zone — NOW USED IN CONDITIONALS
+    rsi = float(data.get("rsi") or 50)
+    rsi_zone = "oversold" if rsi < 33 else ("overbought" if rsi > 67 else "neutral")
+
+    # 5. ATR magnitude — NOW USED IN CONDITIONALS
+    atr = float(data.get("atr") or 0)
+    entry = float(data.get("entry") or 1)
+    atr_pct = (atr / entry * 100) if entry > 0 else 0
+    high_vol = atr_pct > 2.0  # >2% ATR relative to price = high volatility
+
+    # 6. Signal direction
+    sig = (data.get("signal") or data.get("sig") or "HOLD").upper()
+
+    # COMPUTE LOGIC:
+    # BE: recommend when confidence HIGH, not scalp (scalp exits too fast for BE to matter),
+    #     not overbought/oversold RSI (extremes may reverse before 1 ATR move)
+    be = (confidence == "HIGH" and trade_type != "scalp"
+          and rsi_zone == "neutral" and not high_vol)
+
+    # TRAIL: recommend for trending conditions — high confidence, swing/position,
+    #        HTF aligned with trade, normal volatility so trail doesn't get stopped prematurely
+    trail = (confidence in ("HIGH", "MEDIUM") and trade_type in ("swing", "position")
+             and htf_bias in ("BULLISH" if sig == "BUY" else ("BEARISH",)) and not high_vol)
+
+    # MACRO: recommend when holding through news windows — day/swing/position trades,
+    #        not scalps (scalps exit before news lands)
+    macro = trade_type in ("day", "swing", "position")
+
+    # INVAL: recommend when signal is based on technical structure — always useful for
+    #        swing/position where invalidation can save large losses; also day on high vol
+    inval = (trade_type in ("swing", "position")
+             or (trade_type == "day" and high_vol))
+
+    # SENT: recommend when news sentiment can move the asset — crypto and forex most sensitive,
+    #       high-confidence signals only (sentiment guard on good trades, not weak ones)
+    asset_type = data.get("asset_type") or data.get("asset") or ""
+    sent = (confidence == "HIGH"
+            and asset_type.lower() in ("crypto", "forex", "")
+            and trade_type in ("day", "swing", "position"))
+
+    return {
+        "be": be, "trail": trail, "macro": macro, "inval": inval, "sent": sent,
+        "reasoning": {
+            "be": "Confidence HIGH, trend conditions neutral — break even protects this trade." if be else "Not recommended: scalp exits too fast / RSI extreme / high vol.",
+            "trail": "Trending structure with HTF alignment — trailing stop locks in gains." if trail else "Not recommended: weak signal or ranging market.",
+            "macro": "This trade holds through news windows — macro guard recommended." if macro else "Scalp closes before news impact.",
+            "inval": "Technical invalidation guard recommended for this trade duration." if inval else "Not recommended for this trade type.",
+            "sent": "Asset sensitive to sentiment — news guard recommended." if sent else "Not recommended: weak signal or short-term trade."
+        }
+    }
+```
+
+**Frontend:** `szAutoRecommend(rowIdx)` sends real data from `window._activeSignal` (after scanner path fix in S1b/S1c). Displays computed result with per-toggle reasoning in plain English.
+
+---
+
+#### Block 1 — Bug Fixes
+
+| Item | Risk | Spec |
+|---|---|---|
+| ITEM 8 | LOW | ATR trailing default 2.0× → 1.0×. `app.py` — `AutomationSettings` model default value + `_init_db` seed + `_get_automation_settings` fallback. One commit. |
+| ITEM 9 | MEDIUM | Flow-scaled sizing feedback loop. **Option 1 (recommended):** `window._userBaseRisk` variable set ONLY on user keystroke (`szRisk` oninput), never on programmatic write. `updateFlowBadge` reads from `window._userBaseRisk` not from `szRisk.value`. Initialize `window._userBaseRisk` from `szRisk.value` on page load. FIRST verify in browser with DevTools that programmatic `inp.value = X` does NOT fire oninput — if it does, add `window._isInternalRiskWrite = true` flag before write, reset in oninput handler. |
+| ITEM 10 | LOW | Refresh-logout flicker. Remove `class="active"` from `<div class="view active" id="vLanding">` at line 4046 in `index-v2-prototype.html`. Add explicit `showView('vLanding')` call in the `_bootAuthCheck` IIFE else-branch (unauthenticated path). |
+
+---
+
+#### Block S1 — Signal Foundation (MUST COMPLETE BEFORE BLOCK 2)
+
+**Why this block exists:** Automations are only as good as the signal data feeding them. Currently: trade_type always 'day' from scanner, htf_bias always 'NEUTRAL', RSI and ATR dead code in recommendation engine, confidence crashes on numeric input. Fix the data pipeline first. Then wire the compute logic. Then build execution.
+
+| Item | Risk | File | Spec |
+|---|---|---|---|
+| **S1a** | LOW | `app.py` | Numeric confidence fix — already PATH A verified. Commit 0b above. |
+| **S1b** | LOW | `app.py` | `/api/scan-list` response dict: add `trade_type` and `htf_bias` fields. `get_analysis()` already computes them — they exist in the result dict but are not forwarded in the scan-list response. One-line add per field. |
+| **S1c** | LOW | `index-v2-prototype.html` | `loadScannerSignal(a)` — add `trade_type: a.trade_type \|\| _deriveTf(a.tf)` and `htf_bias: a.htf_bias \|\| 'NEUTRAL'` mappings into `window._activeSignal`. `_deriveTf(tf)` frontend helper: '15m'→'scalp', '1H'→'day', '4H'→'swing', '1D'→'swing', '1W'→'position', '1M'→'position'. |
+| **S1d** | LOW | `app.py` | Wire RSI zone into `_recommend_automations_from_signal` conditionals (see C1c spec above — currently extracted but unused). |
+| **S1e** | LOW | `app.py` | Wire ATR magnitude into `_recommend_automations_from_signal` conditionals (see C1c spec above — currently extracted but unused). |
+| **S1f** | LOW | `app.py` | Server-side trade_type derivation: `_derive_trade_type(tf)` helper function. Called in `_recommend_automations_from_signal` when `data.get("trade_type")` is missing or 'day' as fallback. Never trust frontend-sent trade_type alone. |
+| **S1g** | MEDIUM | `app.py` | **VIX Macro Gate — `_get_vix_score()` function.** Fetches `^VIX` via yfinance. Redis-cached 15 minutes (`vix_score` key). Returns `{vix: float, score: int(0-100), zone: str, message: str}`. Score computation: VIX < 12 → score 95 (very calm), VIX 12-15 → score 80 (calm), VIX 15-20 → score 60 (Reduced), VIX 20-25 → score 40 (Reduced high), VIX 25-30 → score 20 (No-Trade), VIX > 30 → score 5 (Extreme fear). Zones: score ≥ 70 → 'FULL' (trade normally). score 40-69 → 'REDUCED' (tighten confidence gate). score < 40 → 'NO_TRADE' (suppress signals). |
+| **S1h** | HIGH | `app.py` | **`_global_automation_job()` — global automation layer.** RQ-scheduled function, runs every 5 minutes. (1) Fetches VIX score via `_get_vix_score()`. (2) Fetches economic calendar for next 24 hours. (3) For every open `watch` record in DB: evaluates global macro conditions. If VIX NO_TRADE zone: sends Telegram notification to user: "DotVerse Macro Alert: VIX at [X] — extreme market fear detected. All new signals are suppressed. Existing positions: review manually." Does NOT auto-close positions (that is user decision). If HIGH-impact event for an instrument's currency in < 2 hours: marks that watch as `macro_alert=True` in DB so `run_watch_job` can check. Redis key `global_macro_cache` with 5-min TTL. |
+| **S1i** | MEDIUM | `app.py` | **Dynamic confidence gate in `get_analysis()`.** After `_get_vix_score()` call (cached — no latency): if zone == 'REDUCED' → raise confluence gate from 65% to 75% for this signal. If zone == 'NO_TRADE' → override signal to HOLD regardless of indicators, return `macro_override: True` in response. Plain-English message in response: "DotVerse has suppressed this signal — market fear (VIX [X]) is too high for reliable technical signals right now. Wait for calmer conditions." |
+| **S1j** | LOW | `app.py` + `index-v2-prototype.html` | `get_analysis()` returns `macro_context: {vix, score, zone, message}`. Frontend signal card shows macro context badge: green for FULL, amber for REDUCED, red for NO_TRADE. Hover tooltip explains VIX in plain English: "VIX is the Wall Street fear gauge. Above 25 = panic in markets — signals are less reliable. DotVerse tightened or suppressed this signal to protect you." |
+
+---
+
+#### Block G1 — Guidance Layer Pass 1 (must ship before Block 2)
+
+**Principle:** DotVerse is a beginners-first app. Every element a beginner touches on every trade must explain itself. Without this layer, every signal card, every automation toggle, and every calculator output is opaque. Pass 1 covers the core trading flow.
+
+**Technical architecture — one system, not 50 individual implementations:**
+
+```js
+window._dvGuide = {
+  'signal-buy':        { title: 'BUY Signal', body: '...', example: '...' },
+  'confidence-ring':   { title: 'Confidence', body: '...', example: '...' },
+  // all elements keyed by data-guide attribute
+}
+
+function dvGuideInit() {
+  document.querySelectorAll('[data-guide]').forEach(el => {
+    const cfg = window._dvGuide[el.getAttribute('data-guide')];
+    if (!cfg) return;
+    // desktop: mouseenter/mouseleave tooltip
+    // mobile: tap to toggle popover
+  });
+}
+```
+
+`dvGuideInit()` called after every `szLadderRender()`, `renderSignal()`, `recalc()`, and tab-show function.
+
+**Pass 1 — Signal Card guidance content:**
+
+| Key | Title | What it explains |
+|---|---|---|
+| `signal-buy` | BUY Signal | Market conditions favour a price rise. Enter long at the entry price shown. Place your stop loss below entry. |
+| `signal-sell` | SELL Signal | Market conditions favour a price fall. Enter short at the entry price shown. Place your stop loss above entry. |
+| `signal-hold` | HOLD — No Trade | Conditions are not clear enough to take a trade right now. Wait for a fresh signal or try a different timeframe. |
+| `confidence-ring` | Confidence Score | How many of DotVerse's indicators agree on this signal. 65% = minimum threshold to trade. 85%+ = strong agreement. |
+| `confidence-confirmed` | CONFIRMED | TradingView data and DotVerse indicators align. Highest reliability. |
+| `confidence-likely` | LIKELY | DotVerse indicators show clear agreement. Good signal. |
+| `confidence-hypothesis` | HYPOTHESIS | Weak agreement. Take smaller size or wait for confirmation. |
+| `trade-type-scalp` | Scalp Trade | Hold minutes to 1–2 hours. Tight stops. Quick in, quick out. Requires active monitoring. |
+| `trade-type-day` | Day Trade | Hold hours, close before end of day. No overnight risk. Moderate monitoring required. |
+| `trade-type-swing` | Swing Trade | Hold 1–5 days. Rides a price wave. Can set alerts and check occasionally. |
+| `trade-type-position` | Position Trade | Hold days to weeks. Follows a major trend. Widest stops, highest patience required. |
+| `entry-price` | Entry Price | The price level where DotVerse recommends opening the trade. Wait for price to reach this level before entering. |
+| `stop-loss` | Stop Loss | If price hits this level, your trade is wrong and DotVerse exits automatically. This is your maximum loss point. |
+| `tp1` | TP1 — First Target | Highest probability target. Safe, quick gain. Best for beginners and uncertain markets. Exit your full position here. |
+| `tp2` | TP2 — Second Target | Moderate probability. You stay in past TP1 hoping for more. Risk: price may reverse before reaching TP2. |
+| `tp3` | TP3 — Third Target | Most ambitious. Only for strong trends with clear open space. Lowest probability, highest reward. |
+| `rr-ratio` | Risk:Reward Ratio | 1:2 means for every $1 you risk, you can gain $2. A professional minimum is 1:1.5. Below 1:1 — skip the trade. |
+| `bull-pct` | Bull % | Percentage of DotVerse's indicators pointing upward for this asset right now. |
+| `bear-pct` | Bear % | Percentage of DotVerse's indicators pointing downward for this asset right now. |
+| `atr-value` | ATR — Average True Range | How much this asset typically moves per candle. DotVerse uses ATR to set your stop loss and targets. Higher ATR = wider stops needed. |
+| `rsi-value` | RSI — Momentum Gauge | Above 70 = overbought (price may pull back). Below 30 = oversold (price may bounce). Between 30–70 = neutral momentum. |
+| `mtf-row` | Multi-Timeframe Alignment | Shows whether higher and lower timeframes agree with this signal. More green = stronger confirmation. All aligned = highest probability setup. |
+| `macro-context` | Market Fear Level (VIX) | VIX is Wall Street's fear gauge. Green = calm markets, signals are reliable. Amber = elevated fear, DotVerse tightened the signal threshold. Red = panic mode, DotVerse suppressed this signal to protect you. |
+
+**Pass 1 — Calculator guidance content:**
+
+| Key | Title | What it explains |
+|---|---|---|
+| `calc-account` | Account Size | Your total trading capital. DotVerse uses this to calculate how much to risk per trade. |
+| `calc-risk-pct` | Risk % Per Trade | The percentage of your account you are willing to lose if this trade hits the stop loss. 1% is recommended for beginners — on a $1,000 account that is $10 maximum loss. |
+| `calc-leverage` | Leverage | Multiplies your buying power. 10× leverage means $100 controls $1,000 of position. Higher leverage = higher risk. Beginners: use 2–5× maximum. |
+| `calc-position-size` | Position Size | How many units, lots, or shares to buy. Enter this number in your MT5 trading platform. |
+| `calc-money-at-risk` | Money at Risk | The exact dollar amount you lose if price hits your stop loss. This should never exceed your risk % × account size. |
+| `calc-margin` | Margin Required | The capital your broker holds as collateral for this trade. Not your profit or loss — just reserved funds. |
+| `calc-effective-rr` | Effective R:R (After Spread) | Your real risk:reward after the broker's spread is deducted. Always lower than the theoretical R:R. If this drops below 1.5, reconsider the trade. |
+| `flow-scale` | Flow-Scaled Sizing | DotVerse has adjusted the suggested risk for this specific trade based on its confidence, volatility, and signal strength. Shown as a multiplier of your default risk. |
+| `risk-of-ruin` | Risk of Ruin | The mathematical probability of losing your entire account at this risk % over many trades. At 1% risk with a 50% win rate, risk of ruin is near zero. At 5%, it rises sharply. |
+
+**Pass 1 — Automation toggles guidance content:**
+
+| Key | Title | What it explains |
+|---|---|---|
+| `auto-be` | Break Even | When price moves 1 ATR in your favour, DotVerse automatically moves your stop loss to your entry price. You cannot lose money on this trade after BE fires. |
+| `auto-trail` | Trailing Stop | DotVerse moves your stop loss upward (for BUY) or downward (for SELL) as price moves in your favour. Locks in profit automatically. Closes the trade when momentum turns. |
+| `auto-macro` | Macro Event Guard | Before high-impact news events (NFP, CPI, interest rate decisions), DotVerse checks your position profit and responds intelligently — protecting gains or closing early to avoid the volatility spike. |
+| `auto-inval` | Technical Invalidation | If the EMA or Supertrend indicator reverses against your trade on a closed candle, DotVerse tightens your stop or closes the trade. Your original entry thesis is no longer valid. |
+| `auto-sent` | Sentiment Watch | DotVerse monitors real-time news for your asset. If 3 or more negative headlines appear within 2 hours, it partially closes your position to lock in gains before sentiment affects the price. |
+| `auto-recommended` | DotVerse Recommendation | Based on this signal's trade type, confidence, volatility, and market conditions, DotVerse has pre-selected the automations most likely to protect this trade. You can override any toggle. |
+
+**Rule:** Every new feature in Block 2 onwards ships with its guidance content in `_dvGuide`. Guidance is part of the definition of done — not a separate task.
+
+---
+
+#### Block 2 — Full Automation Compute Engine
+
+**Architecture:** Two layers. Global (all positions, every 5 min). Per-position (individual watch, frequency by trade_type). Priority order per cycle per position: **MACRO > INVAL > SENT > BE > TRAIL**. Only ONE action fires per cycle. If MACRO fires, INVAL does not evaluate. If neither MACRO nor INVAL fires, evaluate SENT. Etc.
+
+**Per-position cycle frequency by trade_type:**
+- scalp: every 60 seconds
+- day: every 5 minutes
+- swing: every 15 minutes
+- position: every 30 minutes
+
+---
+
+**ITEM 11 — DB Schema + Act Tab (prerequisite for ITEM 12-14)**
+
+Risk: HIGH. File: `app.py`.
+
+5 new columns on `automation_settings` table (add via `ALTER TABLE` in `_init_db`, with `IF NOT EXISTS`):
+- `auto_macro_response` BOOLEAN DEFAULT TRUE
+- `auto_invalidation_act` BOOLEAN DEFAULT TRUE
+- `auto_sentiment_watch` BOOLEAN DEFAULT TRUE
+- `macro_hours_threshold` FLOAT DEFAULT 2.0 (hours before event to act)
+- `auto_close_pct` FLOAT DEFAULT 0.5 (used as the base % — P&L adjusts actual %)
+
+`_get_automation_settings` extended to return all 5 new fields.
+
+On watch creation: seed these fields from `recommended_automations` returned by `_recommend_automations_from_signal`.
+
+Act tab toggles: each toggle shows name + one-sentence plain-English description + current state. Toggle changes call `PATCH /api/watches/{id}/automations`.
+
+---
+
+**ITEM 12 — MACRO Execution Compute**
+
+Risk: HIGH. File: `app.py`, function `run_watch_job`.
+
+Three conditions ALL must be true before firing:
+
+```python
+# Condition 1: HIGH-impact economic event detected
+events = _fetch_economic_calendar()  # Forex Factory or Investing.com API, cached 30 min
+relevant_events = [e for e in events
+                   if e['impact'] == 'HIGH'
+                   and _event_hours_away(e) <= settings.macro_hours_threshold]
+
+# Condition 2: Event is relevant to the instrument
+# Relevance map: USD events → all USD pairs (EURUSD, GBPUSD, USDJPY...) + BTC-USD + XAU/USD
+# EUR events → EURUSD, EURGBP, EURJPY only. NOT crypto unless EUR/crypto pair.
+relevant_to_instrument = any(_event_affects_instrument(e, watch.ticker) for e in relevant_events)
+
+# Condition 3: ALL of the above true → then P&L-aware response
+if relevant_events and relevant_to_instrument:
+    pnl_r = _compute_pnl_r(watch)  # (live_price - entry) / atr for BUY; (entry - live_price) / atr for SELL
+    if pnl_r < 0.5:
+        action = 'CLOSE'     # Position barely in profit or losing — close to avoid catastrophic event loss
+        message = f"Macro guard closed your {watch.ticker} position. High-impact news event in {round(hours_away,1)}h with only {round(pnl_r,2)}R profit — not worth the risk."
+    elif pnl_r < 1.5:
+        action = 'MOVE_BE'   # Decent profit — lock in by moving SL to entry
+        message = f"Macro guard moved stop to break even on {watch.ticker}. High-impact event approaching with {round(pnl_r,2)}R profit secured."
+    else:
+        action = 'TIGHTEN_TRAIL'  # Strong profit — tighten trail to 0.5× ATR to keep most gains
+        message = f"Macro guard tightened trailing stop on {watch.ticker}. Locking in {round(pnl_r,2)}R before high-impact news."
+    # Execute action via MT5 EA, update DB, send Telegram notification with plain-English message
+```
+
+---
+
+**ITEM 13 — INVAL Execution Compute**
+
+Risk: HIGH. File: `app.py`, function `run_watch_job`.
+
+Two conditions BOTH must be true. Plus HTF check modifies action:
+
+```python
+# Condition 1: EMA cross OR Supertrend flip on trade timeframe
+# Fetch last 2 closed candles on watch.timeframe
+ind = calculate_indicators(ticker, watch.timeframe, asset_type)
+ema_crossed = _detect_ema_cross(ind)         # True if fast EMA crossed slow EMA against trade direction
+st_flipped = _detect_supertrend_flip(ind)    # True if Supertrend switched side against trade direction
+
+# Condition 2: CLOSED CANDLE ONLY — no intra-candle triggers
+# calculate_indicators() fetches completed bars only (last bar excluded or marked incomplete)
+# This is enforced in the data fetch — never evaluate open/current candle
+
+if ema_crossed or st_flipped:
+    # HTF alignment check — fetch next timeframe up
+    htf_tf = _next_tf_up(watch.timeframe)  # 15m→1H, 1H→4H, 4H→1D, 1D→1W
+    htf_ind = calculate_indicators(ticker, htf_tf, asset_type)
+    htf_still_valid = _htf_in_trade_direction(htf_ind, watch.direction)
+
+    if htf_still_valid:
+        # PULLBACK WARNING — do not close, just notify
+        action = 'WARN'
+        message = f"Technical warning on {watch.ticker}: {watch.timeframe} indicator reversed but {htf_tf} timeframe still confirms the trade direction. This may be a pullback, not a reversal. Monitor closely."
+    else:
+        # BOTH trade TF and HTF show breakdown — close or tighten
+        pnl_r = _compute_pnl_r(watch)
+        if pnl_r > 1.0:
+            action = 'TIGHTEN_SL'  # Enough profit — tighten SL to lock some in before closing
+        else:
+            action = 'CLOSE'
+        message = f"Technical invalidation on {watch.ticker}: EMA/Supertrend reversed on {watch.timeframe} AND {htf_tf} — original trade thesis broken. {'Stop tightened.' if action=='TIGHTEN_SL' else 'Position closed.'}"
+```
+
+---
+
+**ITEM 14 — SENT Execution Compute**
+
+Risk: HIGH. File: `app.py`, function `run_watch_job`.
+
+Three-step pipeline. Three negative headlines minimum. P&L-adjusted partial close:
+
+```python
+# Step 1: Fetch Finnhub news for ticker (last 2 hours)
+headlines = _fetch_finnhub_news(watch.ticker, hours=2)
+
+# Step 2: DeepSeek sentiment judge
+# Prompt: "You are a financial news sentiment analyser. For each headline, return:
+#   {score: -1 to +1 float, sentiment: 'positive'|'neutral'|'negative', reasoning: one sentence why}"
+# DeepSeek DOES NOT predict price direction. It classifies sentiment only.
+results = _deepseek_sentiment_batch(headlines)
+negative = [r for r in results if r['sentiment'] == 'negative' and r['score'] < -0.3]
+
+# Condition: minimum 3 negative headlines within 2 hours
+if len(negative) >= 3:
+    pnl_r = _compute_pnl_r(watch)
+
+    # P&L-adjusted close percentage
+    if pnl_r < 0.5:
+        close_pct = 0.50   # Only small profit — close half to secure something
+    elif pnl_r < 2.0:
+        close_pct = 0.25   # Decent profit — close quarter, let rest run
+    else:
+        close_pct = 0.15   # Strong profit — close 15% only, protect the bulk
+
+    # Pick most negative headline for user-facing message
+    worst = min(negative, key=lambda r: r['score'])
+    message = (f"Sentiment guard partially closed {round(close_pct*100)}% of your {watch.ticker} position. "
+               f"DotVerse detected {len(negative)} negative headlines in 2 hours. "
+               f"AI reasoning: {worst['reasoning']}")
+    # Execute partial close via MT5 EA, update DB, send Telegram
+```
+
+---
+
+**BE Execution Compute (run_watch_job)**
+
+```python
+# Break Even: price moved 1 ATR in trade direction AND SL not already at/past entry
+live_price = _fetch_live_price(watch.ticker)
+distance_moved = abs(live_price - watch.entry)
+atr = watch.signal_atr  # stored at signal time
+
+if distance_moved >= atr:
+    sl_already_be = (watch.direction == 'BUY' and watch.current_sl >= watch.entry) or \
+                    (watch.direction == 'SELL' and watch.current_sl <= watch.entry)
+    if not sl_already_be:
+        # Move SL to entry in DB + command MT5 EA
+        new_sl = watch.entry
+        _update_sl_db(watch.id, new_sl)
+        _mt5_modify_sl(watch.ticket, new_sl)
+        message = f"Break even activated on {watch.ticker}. Stop loss moved to entry at {watch.entry}. You cannot lose on this trade now."
+        _send_telegram(message)
+```
+
+---
+
+**TRAIL Execution Compute (run_watch_job)**
+
+```python
+# Trailing stop: price keeps moving → ratchet SL up (BUY) or down (SELL) by ATR units
+# Close if price reverses through trail
+live_price = _fetch_live_price(watch.ticker)
+atr = watch.signal_atr
+trail_mult = settings.atr_trail_mult  # default 1.0× (ITEM 8 fix)
+
+if watch.direction == 'BUY':
+    new_trail_sl = live_price - (atr * trail_mult)
+    if new_trail_sl > watch.current_sl:  # Only move UP, never down (ratchet)
+        _update_sl_db(watch.id, new_trail_sl)
+        _mt5_modify_sl(watch.ticket, new_trail_sl)
+    if live_price <= watch.current_sl:   # Price hit trail — close
+        _close_position(watch)
+        message = f"Trailing stop closed {watch.ticker}. Momentum reversed — position closed to protect gains."
+        _send_telegram(message)
+elif watch.direction == 'SELL':
+    new_trail_sl = live_price + (atr * trail_mult)
+    if new_trail_sl < watch.current_sl:  # Only move DOWN, never up (ratchet)
+        _update_sl_db(watch.id, new_trail_sl)
+        _mt5_modify_sl(watch.ticket, new_trail_sl)
+    if live_price >= watch.current_sl:
+        _close_position(watch)
+        message = f"Trailing stop closed {watch.ticker}. Momentum reversed — position closed to protect gains."
+        _send_telegram(message)
+```
+
+---
+
+#### Block 3 — Signal Quality
+
+| Item | Risk | Spec |
+|---|---|---|
+| N1 — Regime Detection | MEDIUM | `calculate_indicators()` computes `atr_regime`: current ATR vs 50-period rolling mean. <70% → RANGING. >130% → TRENDING. `get_analysis()` returns `market_regime`. Signal card regime badge. Breakout in RANGING → plain-English warning. Reversal in TRENDING → plain-English warning. |
+| N2 — Session Filter | MEDIUM | `get_analysis()` returns `session_context`. Forex: London 07:00–16:00 UTC, NY 12:00–21:00 UTC. Crypto: 24/7 but flag 00:00–06:00 UTC. Stocks: exchange hours only. Signal card session badge. Off-hours warning: "Spreads are wider and moves are less reliable outside primary session." |
+| N3 — Signal Expiry | LOW | `signal_history` gains `expires_at`. Expiry by trade_type: scalp=4h, day=24h, swing=72h, position=7d. `run_watch_job` checks expiry — fires Telegram if expired without entry. Expired signals greyed in history. |
+| N4 — Spread + Slippage | LOW | `recalc()` gains `effectiveRR`. Spread by asset class: forex majors 1-2 pips, minors 3-5 pips, crypto 0.1% round-trip, stocks 0.05%, indices 0.5-1 pt. `effectiveSL = SL + spread`. `effectiveTP = TP - spread`. If effectiveRR < 1.5: amber warning shown. |
+
+---
+
+#### Block 4 — Portfolio Intelligence
+
+| Item | Risk | Spec |
+|---|---|---|
+| D5 — Win Rate + Expectancy | MEDIUM | `signal_history` gains `outcome` (WIN/LOSS/OPEN), `actual_exit_price`, `actual_pnl_r`. `/api/signals/stats` returns `win_rate`, `avg_win_r`, `avg_loss_r`, `expectancy`, `sample_size` by asset_class + timeframe. Gate: no display until sample_size ≥ 30 — show "Building track record — [n]/30 signals recorded." Plain-English expectancy explanation. |
+| N5 — Portfolio Correlation | HIGH | `/api/positions/correlation-risk`. Groups by base/quote currency exposure. Flags when combined directional exposure on single currency > 3% account risk. Returns `correlation_warnings[]` with plain-English explanation. Portfolio tab shows banner. |
+| N6 — Drawdown Tracking | MEDIUM | `equity_snapshots` table (user_id, equity, snapshotted_at — written on every close). `/api/portfolio/drawdown`: peak_equity, current_drawdown_pct, max_historical_drawdown_pct, consecutive_losses. Auto-scale: >5% drawdown → recommended risk 0.5%. >10% → 0.25% with plain-English alert. Drawdown gauge on portfolio tab. |
+| D3 — Telegram Alerts | MEDIUM | Railway env vars: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. Alert triggers: new signal, expiry, MACRO/INVAL/SENT fires (with plain-English DeepSeek reasoning), drawdown breach, correlation warning. Every alert explains WHY in plain English. |
+| D6 — Watchlist Auto-scan | HIGH | RQ job every 15 min. HIGH-confidence signals only. Circuit breaker: max 5 alerts/hour/user — consolidate into digest if exceeded. Sends via D3. |
+
+---
+
+#### Block 5 — SMC Detection (rescoped)
+
+| Item | Risk | Spec |
+|---|---|---|
+| D7 — SMC Rescoped | HIGH | **Dropped: order block detection** (too subjective, high false-positive rate). **Four mechanically precise structures only:** (1) Fair Value Gap (FVG): 3-candle pattern — candle 3 does not overlap candle 1's wick. (2) Liquidity grab: equal highs/lows (within 0.1%) swept and rejected in same or next candle. (3) Displacement candle: body > 2× ATR. (4) CHOCH: first swing high broken after downtrend, or first swing low broken after uptrend. All four in `get_analysis()` as `smc_structures[]`. Signal card shows each with plain-English explanation. |
+
+---
+
+#### Block G2 — Guidance Layer Pass 2 (ongoing)
+
+**Rule:** Every item in Blocks S1–5 ships with its `_dvGuide` entries. Guidance is part of definition of done.
+
+| Feature | Guidance keys needed |
+|---|---|
+| S1g/S1j Macro Gate + VIX | `macro-context`, `macro-full`, `macro-reduced`, `macro-notrade` |
+| N1 Regime Detection | `regime-trending`, `regime-ranging` |
+| N2 Session Filter | `session-london`, `session-ny`, `session-asia`, `session-offhours` |
+| N3 Signal Expiry | `signal-expires-at` |
+| N4 Spread Modelling | covered by `calc-effective-rr` Pass 1 |
+| D5 Win Rate + Expectancy | `win-rate`, `expectancy`, `avg-win-r`, `avg-loss-r`, `sample-size-gate` |
+| N5 Correlation Monitor | `correlation-warning` |
+| N6 Drawdown Tracking | `drawdown-gauge`, `drawdown-auto-scale` |
+| D7 SMC Structures | `smc-fvg`, `smc-liquidity-grab`, `smc-displacement`, `smc-choch` |
+| Scanner | `scanner-prescreen`, `scanner-full-analysis`, `scanner-high-confidence` |
+| Portfolio VaR | `var-figure` |
+| MACRO automation | `auto-macro-close`, `auto-macro-be`, `auto-macro-tighten` |
+| INVAL automation | `auto-inval-close`, `auto-inval-warn` |
+| SENT automation | `auto-sent-partial` |
+
+---
+
+#### Block V — Validation (new — from PDF "Hybrid Deterministic & Non-Deterministic AI Trading Systems")
+
+**Why this block exists:** The PDF framework identifies a critical gap — DotVerse generates signals and tracks performance but has no systematic validation of whether its strategy parameters are robust or curve-fitted. Walk-forward testing and Monte Carlo confirm robustness. Sensitivity analysis identifies fragile parameter regions. Cost review ensures live profitability after spread/commission.
+
+| Item | Risk | Spec |
+|---|---|---|
+| V1 — Walk-Forward Testing | HIGH | New RQ job: `run_walk_forward(asset_type, timeframe)`. Splits historical data into rolling in-sample (80%) + out-of-sample (20%) windows (5 windows minimum). Optimises RSI period, ATR mult, EMA periods on in-sample. Tests on out-of-sample. Reports: average out-of-sample Sharpe, win rate, expectancy per window. If any window out-of-sample Sharpe < 0.5: flags parameter set as "potentially curve-fitted." Results written to `validation_results` table. `/api/validate/walk-forward` endpoint. |
+| V2 — Monte Carlo Simulation | MEDIUM | Given a sequence of historical trade outcomes (R-multiples from signal_history), run 1,000 random permutations of trade order. For each permutation: compute max drawdown and final account value. Returns: 5th percentile worst drawdown, 95th percentile max drawdown, median final equity, probability of 20%+ drawdown. Shows trader: "Even with the same trades in a different order, your worst expected drawdown is X%." Plain-English explanation of what this means for position sizing. |
+| V3 — Sensitivity Analysis | MEDIUM | For each optimised parameter (RSI period, ATR mult, EMA fast/slow): vary ±20% from optimal and record Sharpe change. If Sharpe drops > 30% from ±10% parameter change → flag as "fragile parameter — strategy performance depends heavily on this exact value." If Sharpe is stable across ±20% → flag as "robust." Report surfaced in validation dashboard. |
+| V4 — Live Cost Review | LOW | `recalc()` and `get_analysis()` already deduct 0.2% round-trip fee. V4 adds: (1) Per-trade cost tracking in `signal_history` (`estimated_cost_r` column = fee / (SL_distance / atr)). (2) `/api/signals/cost-analysis` endpoint: total fees paid in R across all closed trades, fee drag on expectancy. If fee drag > 0.1R per trade on average → amber warning: "Your broker costs are reducing your edge. Consider tighter spreads or fewer trades." |
+
+---
+
+#### Block 6 — Long-Term (IMPLEMENTATION_PLAN.md Phases D–G)
+
+| Phase | Description |
+|---|---|
+| D | Context tab removal, pre-trade gate folded into Market + Signal tabs |
+| E | Target vs actual tracking, portfolio performance analytics |
+| F1 | Settings fully wired — per-user MT5 + Telegram credentials, EA outage escalation (60s→5min→15min→30min→admin alert) |
+| F2 | Tier gating — Free ($0: 5 signals/day, 1 TF, 1 asset class, 3 positions, 2 watches), Pro ($39/mo: unlimited, MT5 EA, Pine Script), Elite ($99/mo: optimisation worker, API access) |
+| G | Live news + trending tickers — Finnhub + CryptoCompare + CoinGecko + NASDAQ IPOs |
+
+---
+
+### ABSOLUTE EXECUTION ORDER
+
+Every item in this sequence must be runtime-verified in a live browser before the next begins. No bundling. One commit per change.
+
+```
+0a  → user removes git lock file from Terminal
+0b  → commit numeric confidence fix (PATH A verified)
+0c  → commit C1a (hover tooltips)
+0d  → implement + commit C1c (backend recommend-automations with full compute)
+
+BLOCK 1:
+1   → ITEM 8 (ATR trailing default fix)
+2   → ITEM 9 (flow-scaled feedback loop)
+3   → ITEM 10 (refresh-logout flicker)
+
+BLOCK S1 (signal foundation — all before any automation wiring):
+S1b → scanner path: add trade_type + htf_bias to /api/scan-list response
+S1c → frontend: loadScannerSignal maps trade_type + htf_bias
+S1d → wire RSI zone into recommend function
+S1e → wire ATR magnitude into recommend function
+S1f → server-side trade_type derivation helper
+S1g → _get_vix_score() + Redis cache
+S1h → _global_automation_job() RQ scheduler
+S1i → dynamic confidence gate tightening in get_analysis()
+S1j → macro_context in response + frontend badge
+
+BLOCK G1:
+G1  → full guidance layer: _dvGuide, dvGuideInit(), all data-guide attributes
+
+BLOCK 2 (automation execution — requires Block S1 complete):
+11  → DB schema: 5 new automation_settings cols + Act tab toggles
+12  → MACRO execution compute in run_watch_job
+13  → INVAL execution compute in run_watch_job
+14  → SENT execution compute in run_watch_job
+BE  → BE execution compute (if not already wired)
+TRL → TRAIL execution compute (if not already wired)
+
+BLOCK 3:
+N1  → regime detection
+N2  → session filter
+N3  → signal expiry
+N4  → spread + slippage
+
+BLOCK 4:
+D5  → win rate + expectancy
+N5  → portfolio correlation
+N6  → drawdown tracking
+D3  → Telegram alerts (requires Railway env vars from user)
+D6  → watchlist auto-scan
+
+BLOCK 5:
+D7  → SMC structures (FVG, liquidity grab, displacement, CHOCH)
+
+BLOCK V:
+V4  → live cost review (lowest risk, ships with Block 4)
+V2  → Monte Carlo simulation
+V3  → sensitivity analysis
+V1  → walk-forward testing (highest complexity — last)
+
+BLOCK 6: long-term phases
+```
+
+---
+
+### REFERENCE FILES
+- Memory MCP: entities "DotVerse Automation Architecture", "DotVerse Unified Build Plan 2026-05-18", "DotVerse Session 2026-05-18"
+- Long-term plan: `IMPLEMENTATION_PLAN.md` (Phases A→G, 30–45 sessions)
+- Gap plan: `tasks/REVISED_BUILD_PLAN_GAP7-9.md`
+- Architecture audit: `AUDIT_2026-05-01.md`
+- RC Manifest: `RC_MANIFEST.md`
+- PDF framework: "Hybrid Deterministic & Non-Deterministic AI Trading Systems" — incorporated into Block S1 (VIX Macro Gate), Block V (Validation), Block 2 (SENT compute via DeepSeek), Principle 3 (no LLM price prediction)
+
+---
+
 ## KNOWN BUGS — READ THIS FIRST EVERY SESSION
 
 These are unresolved bugs confirmed by the user. Do not mark any as fixed until runtime verified in a live browser.
@@ -836,6 +1592,13 @@ Claude must never wait for the user to ask "how sure are you?" before reassessin
 
 **NO NOISE AFTER COMMIT:**
 - After committing: state the commit hash and one line summary. Stop. Do not add deploy instructions, feature checklists, or next steps unless asked.
+
+**POST-PUSH VERIFICATION — MANDATORY, NON-NEGOTIABLE:**
+After every push, Claude must:
+1. Go to Railway and wait until the deployment shows "Deployment successful" (do not proceed until confirmed active)
+2. Go to DotVerse on Chrome and verify the specific feature that was just deployed works correctly in the live app
+3. Only after 100% live verification, return to the user and confirm it is done
+Claude must never return to the user after a push without completing both steps above. "Push successful" is not verification. Railway active is not verification. Only confirmed working behaviour in the live browser counts.
 
 **Next session:** No pending bugs. Run Six Stop Gates before starting any new work.
 
