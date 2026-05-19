@@ -6440,6 +6440,53 @@ def automation_settings_save():
         db.close()
 
 
+# ─── VIX MARKET FEAR GATE ─────────────────────────────────────────────────────
+
+def _get_vix_score():
+    """Fetch ^VIX, compute zone/score/message. Redis-cached 15 min (key: vix_score).
+    Always returns a safe dict — never raises. On any error returns FULL zone so
+    signals are never suppressed due to a data-fetch failure.
+    """
+    cache_key = "vix_score"
+    try:
+        if _redis:
+            cached = _redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+    except Exception:
+        pass
+
+    try:
+        import yfinance as yf
+        hist = yf.Ticker("^VIX").history(period="1d")
+        if hist.empty or "Close" not in hist.columns:
+            raise ValueError("No VIX data returned")
+        vix = float(hist["Close"].iloc[-1])
+    except Exception:
+        return {
+            "vix": None, "score": 70, "zone": "FULL",
+            "message": "VIX data temporarily unavailable. Trading normally."
+        }
+
+    # Score + zone computation
+    if   vix < 12:  score, zone = 95, "FULL";     msg = f"Markets are very calm (VIX {vix:.1f}). Excellent conditions for trading."
+    elif vix < 15:  score, zone = 80, "FULL";     msg = f"Markets are calm (VIX {vix:.1f}). Good conditions for trading."
+    elif vix < 20:  score, zone = 60, "REDUCED";  msg = f"Moderate uncertainty (VIX {vix:.1f}). DotVerse has raised the confidence threshold to protect you."
+    elif vix < 25:  score, zone = 40, "REDUCED";  msg = f"Elevated market fear (VIX {vix:.1f}). Only high-confidence signals will be shown."
+    elif vix < 30:  score, zone = 20, "NO_TRADE"; msg = f"High market fear (VIX {vix:.1f}). Signals suppressed — technical analysis is less reliable in panicked markets. Wait for VIX to fall below 25."
+    else:           score, zone =  5, "NO_TRADE"; msg = f"Extreme market fear (VIX {vix:.1f}). All signals suppressed. Wait for conditions to stabilise before trading."
+
+    result = {"vix": round(vix, 2), "score": score, "zone": zone, "message": msg}
+
+    try:
+        if _redis:
+            _redis.setex(cache_key, 900, json.dumps(result))  # 15-min TTL
+    except Exception:
+        pass
+
+    return result
+
+
 # ─── AUTOMATION INTELLIGENCE — signal-aware recommendation engine ─────────────
 
 def _recommend_automations_from_signal(data):
