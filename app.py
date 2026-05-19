@@ -3609,11 +3609,16 @@ def run_watch_job():
             # PDF spec (Chapter 8): queue a trailing modify only when ATR trail
             # distance changes by >10% from the previously-queued value.
             # Without this gate every 60s tick floods the EA on stable days.
+            # Per-trade trail_on: read from watch record in DB (set by Optimise at watch creation).
+            # Falls back to False if not set — no automation fires unless explicitly enabled.
             try:
                 atr_val  = ind.get("atr", 0)
                 price_val= ind.get("price", 1)
                 cfg      = _get_automation_settings(w.get("user_id", "default"))
-                if cfg.get("trailing_on") and atr_val > 0:
+                # Per-watch trail_on takes precedence over global setting.
+                # w["trail_on"] is set from the Watch DB record loaded into watch_registry.
+                _per_watch_trail = w.get("trail_on", False)
+                if _per_watch_trail and atr_val > 0:
                     atr_mult   = float(cfg.get("trailing_atr_mult", 1.0))
                     trail_dist = _atr_to_pips(atr_val * atr_mult, asset_type, price_val)
                     # Find open MT5 positions in this symbol
@@ -3668,12 +3673,125 @@ def run_watch_job():
             except Exception as _trail_err:
                 print(f"[trail] ATR trailing update error: {_trail_err}")
 
+            # ── Automatic Break Even ────────────────────────────────────────────────
+            # Per-trade: only fires when watch.be_on is True (set by Optimise + trader confirm).
+            # Condition: price has moved >= 1 ATR from entry AND SL not already at/past entry.
+            # Action: write MT5Order(MODIFY, sl=entry_price) — EA executes within 5s.
+            # No Telegram tap required — fully automatic.
+            # Dedup: Redis key per ticket — fires only once per trade.
+            if w.get("be_on", False):
+                try:
+                    _be_entry    = w.get("entry_price") or None
+                    _be_atr      = w.get("entry_atr")   or None
+                    if _be_entry and _be_atr and _be_atr > 0:
+                        _be_uid  = str(w.get("user_id", "default"))
+                        with mt5_state_lock:
+                            _be_state = mt5_state.get(_be_uid) or mt5_state.get("default", {})
+                        if not _be_state.get("spread_warning"):
+                            _be_sym   = _mt5_symbol(ticker, asset_type)
+                            _be_price = float(ind.get("price") or 0)
+                            for _be_pos in _be_state.get("positions", []):
+                                if (_be_pos.get("symbol","") or "").upper() != _be_sym.upper():
+                                    continue
+                                _be_ticket = _be_pos.get("ticket")
+                                if not _be_ticket or not _DBSession:
+                                    continue
+                                _be_dedup = f"be_fired:{_be_uid}:{_be_ticket}"
+                                _be_done  = False
+                                try:
+                                    if _redis_client:
+                                        _be_done = bool(_redis_client.get(_be_dedup))
+                                except Exception:
+                                    pass
+                                if _be_done:
+                                    continue  # Already fired for this trade
+                                # Determine trade direction and distance from entry
+                                _be_order_type = (_be_pos.get("type") or "buy").lower()
+                                _be_is_buy     = "buy" in _be_order_type
+                                _be_curr_sl    = _be_pos.get("sl") or _be_pos.get("stop_loss") or 0
+                                try:
+                                    _be_curr_sl = float(_be_curr_sl)
+                                except (TypeError, ValueError):
+                                    _be_curr_sl = 0.0
+                                # SL already at or past entry = BE already active, skip
+                                _be_sl_at_entry = (
+                                    (_be_is_buy  and _be_curr_sl >= float(_be_entry))
+                                    or
+                                    (not _be_is_buy and _be_curr_sl <= float(_be_entry) and _be_curr_sl > 0)
+                                )
+                                if _be_sl_at_entry:
+                                    try:
+                                        if _redis_client:
+                                            _redis_client.setex(_be_dedup, 604800, "1")  # 7 days
+                                    except Exception:
+                                        pass
+                                    continue
+                                # Check: price moved >= 1 ATR from entry in trade direction
+                                _be_moved = (
+                                    (_be_is_buy  and _be_price >= float(_be_entry) + float(_be_atr))
+                                    or
+                                    (not _be_is_buy and _be_price <= float(_be_entry) - float(_be_atr))
+                                )
+                                if _be_moved:
+                                    _be_db = _DBSession()
+                                    try:
+                                        _be_order = MT5Order(
+                                            user_id      = _be_uid,
+                                            symbol       = _be_sym,
+                                            order_type   = "MODIFY",
+                                            volume       = 0,
+                                            price        = float(_be_entry),
+                                            action       = "modify_sl",
+                                            sl           = float(_be_entry),
+                                            close_ticket = int(_be_ticket),
+                                            status       = "pending",
+                                            comment      = f"Auto BE: price moved 1 ATR from {_be_entry:.5g}",
+                                        )
+                                        _be_db.add(_be_order)
+                                        _be_db.commit()
+                                        # Mark as fired so it never fires again for this ticket
+                                        try:
+                                            if _redis_client:
+                                                _redis_client.setex(_be_dedup, 604800, "1")  # 7 days
+                                        except Exception:
+                                            pass
+                                        # Inform trader via Telegram — they set this up themselves
+                                        try:
+                                            _dir_word = "BUY" if _be_is_buy else "SELL"
+                                            send_telegram_keyboard(
+                                                f"✅ Break Even Activated — {ticker}\n"
+                                                f"Position #{_be_ticket} ({_dir_word})\n\n"
+                                                f"Price moved 1 ATR from your entry ({_be_entry:.5g}). "
+                                                f"Stop loss has been moved to your entry price. "
+                                                f"You cannot lose money on this trade now.\n\n"
+                                                f"DotVerse will continue monitoring for TP targets.",
+                                                [[{"text": "✓ Understood",
+                                                   "callback_data": f"ignore|{_be_ticket}|{_be_sym}|be_ack"}]]
+                                            )
+                                        except Exception as _be_tg_err:
+                                            print(f"[be] Telegram notify error: {_be_tg_err}")
+                                        print(f"[be] {ticker} #{_be_ticket}: "
+                                              f"price {_be_price:.5g} moved >= 1 ATR from entry {_be_entry:.5g} "
+                                              f"— BE order written, EA will execute")
+                                    except Exception as _be_write_err:
+                                        _be_db.rollback()
+                                        print(f"[be] MT5Order write error: {_be_write_err}")
+                                    finally:
+                                        _be_db.close()
+                except Exception as _be_outer:
+                    print(f"[be] outer error for {ticker}: {_be_outer}")
+
             # ── Phase 5: Signal Invalidation + ATR Expansion Detection ──────────────
-            # Runs for every watched ticker that has open MT5 positions.
+            # Per-trade: gated on watch.inval_on (set by Optimise + trader confirm).
+            # If inval_on is False for this watch, skip the entire block.
             # 1) If current bull_pct drops below 50%, the original trade setup has
             #    lost its technical basis — notify the user so they can protect capital.
             # 2) If current ATR >= 2× the ATR recorded at entry, volatility has expanded
             #    and TP targets may now be too conservative — notify to re-run analysis.
+            # EMA cross (5c) and Supertrend flip (5d) also gated on inval_on.
+            # Per-trade gates — read once, used to short-circuit each detection block.
+            _inval_enabled = w.get("inval_on", False)
+            _macro_enabled = w.get("macro_on", False)
             try:
                 _inv_sym    = _mt5_symbol(ticker, asset_type)
                 _curr_bpct  = _quick_bull_pct(ind)
@@ -3737,7 +3855,8 @@ def run_watch_job():
                         _uid    = str(w.get("user_id", "default"))
 
                         # ── 5a: Signal invalidation ────────────────────────────────
-                        if _e_conf is not None and _curr_bpct < 0.50:
+                        # Gated on watch.inval_on — only fires when trader enabled via Optimise.
+                        if _inval_enabled and _e_conf is not None and _curr_bpct < 0.50:
                             _inv_dedup = f"inv_alert:{_uid}:{_ticket}:{now.strftime('%Y-%m-%d-%H')}"
                             _inv_seen  = False
                             try:
@@ -3834,7 +3953,8 @@ def run_watch_job():
                                       f"conf {_e_conf*100:.0f}% → {_curr_bpct*100:.0f}% — alert sent")
 
                         # ── 5b: ATR expansion ─────────────────────────────────────
-                        if _e_atr is not None and _e_atr > 0 and _curr_atr >= _e_atr * 2.0:
+                        # Gated on watch.inval_on — same guard as 5a.
+                        if _inval_enabled and _e_atr is not None and _e_atr > 0 and _curr_atr >= _e_atr * 2.0:
                             _atr_dedup = f"atr_exp:{_uid}:{_ticket}:{now.strftime('%Y-%m-%d-%H')}"
                             _atr_seen  = False
                             try:
@@ -3899,7 +4019,7 @@ def run_watch_job():
                                 (_order_type_ema == "SELL" and _prev_ema_cross == "below" and _curr_ema_cross == "above")
                             )
                         )
-                        if _ema_fire:
+                        if _inval_enabled and _ema_fire:
                             _ema_dedup = f"ema_cross:{_ticket}:{now.strftime('%Y-%m-%d')}"
                             _ema_seen  = False
                             try:
@@ -3973,7 +4093,7 @@ def run_watch_job():
                                 (_order_type_st == "SELL" and _prev_st_bull is False and _curr_st_bull is True)
                             )
                         )
-                        if _st_fire:
+                        if _inval_enabled and _st_fire:
                             _st_dedup = f"st_flip:{_ticket}:{now.strftime('%Y-%m-%d')}"
                             _st_seen  = False
                             try:
@@ -4030,6 +4150,7 @@ def run_watch_job():
                                       f"{_order_type_st} flip {'BULLISH→BEARISH' if _order_type_st=='BUY' else 'BEARISH→BULLISH'} — alert sent")
 
                         # ── GAP 2: Event-triggered Telegram alert ─────────────────
+                        # Gated on watch.macro_on — only fires when trader enabled via Optimise.
                         # PDF spec Ch.5: when a HIGH/MEDIUM macro event is within 48h
                         # and expected volatility >= stop distance, fire a Telegram
                         # keyboard so the trader can act with one tap.
@@ -4038,7 +4159,7 @@ def run_watch_job():
                         # branches in telegram_webhook — no new handler needed.
                         _evt_sl   = _pos.get("sl") or (_stored.sl if _stored else None)
                         _evt_open = _pos.get("open_price") or _pos.get("price_open")
-                        if _evt_sl and _evt_open and _redis_client:
+                        if _macro_enabled and _evt_sl and _evt_open and _redis_client:
                             try:
                                 _macro_ev  = _get_macro_context_inline(ticker, asset_type).get("events", [])
                                 _curr_px   = float(ind.get("price") or 0)
@@ -7674,6 +7795,20 @@ def add_watch():
         key            = f"{user_id}_{ticker}_{timeframe}"
         current_signal = body.get("current_signal", "HOLD") or "HOLD"
 
+        # Per-trade automation flags — sent from frontend _szLadderAuto[rowIdx] after Optimise runs.
+        # All default False — backend compute (Optimise) must explicitly enable each one.
+        auto_flags = body.get("automations") or {}
+        be_on      = bool(auto_flags.get("be",    False))
+        trail_on   = bool(auto_flags.get("trail", False))
+        macro_on   = bool(auto_flags.get("macro", False))
+        inval_on   = bool(auto_flags.get("inval", False))
+        sent_on    = bool(auto_flags.get("sent",  False))
+        # Signal levels at time of watch — used by BE and TRAIL compute in run_watch_job
+        try: entry_price = float(body.get("entry_price")) if body.get("entry_price") is not None else None
+        except (TypeError, ValueError): entry_price = None
+        try: entry_atr   = float(body.get("entry_atr"))   if body.get("entry_atr")   is not None else None
+        except (TypeError, ValueError): entry_atr = None
+
         ch_labels = {"sms": "SMS", "whatsapp": "WhatsApp", "telegram": "Telegram"}
         ch_str    = " + ".join(ch_labels.get(c, c) for c in alert_channels)
 
@@ -7681,6 +7816,12 @@ def add_watch():
         with watch_lock:
             if key in watch_registry:
                 watch_registry[key]["alert_channels"] = alert_channels
+                # Update in-memory automation state too
+                watch_registry[key]["be_on"]    = be_on
+                watch_registry[key]["trail_on"] = trail_on
+                watch_registry[key]["macro_on"] = macro_on
+                watch_registry[key]["inval_on"] = inval_on
+                watch_registry[key]["sent_on"]  = sent_on
                 _is_update = True
             else:
                 watch_registry[key] = {
@@ -7694,9 +7835,17 @@ def add_watch():
                     "last_reason":    "Not checked yet",
                     "last_price":     None,
                     "added_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+                    "be_on":    be_on,
+                    "trail_on": trail_on,
+                    "macro_on": macro_on,
+                    "inval_on": inval_on,
+                    "sent_on":  sent_on,
                 }
 
-        _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id)
+        _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id,
+                          be_on=be_on, trail_on=trail_on, macro_on=macro_on,
+                          inval_on=inval_on, sent_on=sent_on,
+                          entry_price=entry_price, entry_atr=entry_atr)
 
         if _is_update:
             return jsonify({"status": "updated", "key": key,
@@ -7767,6 +7916,15 @@ def list_watches():
                     "added_at":        r.created_at.strftime("%Y-%m-%d %H:%M UTC"),
                     "interval_min":    ALERT_INTERVALS.get(r.timeframe, 300) // 60,
                     "live_commentary": mem.get("live_commentary"),
+                    # Per-trade automation state
+                    "be_on":           getattr(r, "be_on",    False) or False,
+                    "trail_on":        getattr(r, "trail_on", False) or False,
+                    "macro_on":        getattr(r, "macro_on", False) or False,
+                    "inval_on":        getattr(r, "inval_on", False) or False,
+                    "sent_on":         getattr(r, "sent_on",  False) or False,
+                    "entry_price":     getattr(r, "entry_price", None),
+                    "entry_atr":       getattr(r, "entry_atr",   None),
+                    "watch_id":        r.id,
                 })
         except Exception as _e:
             print(f"[list_watches] DB error: {_e}")
@@ -9570,6 +9728,15 @@ class Watch(_Base):
     asset_type     = Column(String(16),  nullable=False, default="stock")
     timeframe      = Column(String(8),   nullable=False)
     alert_channels = Column(String(128), nullable=False, default="telegram")
+    # Per-trade automation flags — set by DotVerse backend compute (Optimise) at watch creation.
+    # Trader can override individually. run_watch_job reads these per-watch instead of global settings.
+    be_on          = Column(Boolean,     nullable=False, default=False)  # Break even at 1 ATR move
+    trail_on       = Column(Boolean,     nullable=False, default=False)  # ATR trailing stop
+    macro_on       = Column(Boolean,     nullable=False, default=False)  # High-impact news guard
+    inval_on       = Column(Boolean,     nullable=False, default=False)  # EMA/Supertrend invalidation
+    sent_on        = Column(Boolean,     nullable=False, default=False)  # Sentiment watch (Finnhub)
+    entry_price    = Column(Float,       nullable=True)                  # Signal entry at time of watch
+    entry_atr      = Column(Float,       nullable=True)                  # ATR at time of watch (for BE compute)
     created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
 
 class Notification(_Base):
@@ -9693,17 +9860,30 @@ class ScanAlert(_Base):
 
 # ─── WATCH DB HELPERS ─────────────────────────────────────────
 
-def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="legacy"):
-    """Upsert a watch into the database."""
+def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="legacy",
+                      be_on=False, trail_on=False, macro_on=False, inval_on=False, sent_on=False,
+                      entry_price=None, entry_atr=None):
+    """Upsert a watch into the database, including per-trade automation flags."""
     if not _DBSession: return
     db = _DBSession()
     try:
         existing = db.query(Watch).filter_by(user_id=user_id, ticker=ticker, timeframe=timeframe).first()
         if existing:
             existing.alert_channels = json.dumps(alert_channels)
+            # Update automation flags on re-watch (trader may have changed Optimise settings)
+            existing.be_on       = be_on
+            existing.trail_on    = trail_on
+            existing.macro_on    = macro_on
+            existing.inval_on    = inval_on
+            existing.sent_on     = sent_on
+            if entry_price is not None: existing.entry_price = entry_price
+            if entry_atr   is not None: existing.entry_atr   = entry_atr
         else:
             db.add(Watch(user_id=user_id, ticker=ticker, asset_type=asset_type, timeframe=timeframe,
-                         alert_channels=json.dumps(alert_channels)))
+                         alert_channels=json.dumps(alert_channels),
+                         be_on=be_on, trail_on=trail_on, macro_on=macro_on,
+                         inval_on=inval_on, sent_on=sent_on,
+                         entry_price=entry_price, entry_atr=entry_atr))
         db.commit()
     except Exception as _e:
         db.rollback()
@@ -9753,6 +9933,13 @@ def _load_watches_from_db():
                         "last_reason":    "Not checked yet",
                         "last_price":     None,
                         "added_at":       r.created_at.strftime("%Y-%m-%d %H:%M UTC"),
+                        # Per-trade automation flags — loaded from DB so run_watch_job
+                        # reads per-watch values, not global settings.
+                        "be_on":    getattr(r, "be_on",    False) or False,
+                        "trail_on": getattr(r, "trail_on", False) or False,
+                        "macro_on": getattr(r, "macro_on", False) or False,
+                        "inval_on": getattr(r, "inval_on", False) or False,
+                        "sent_on":  getattr(r, "sent_on",  False) or False,
                     }
                     loaded += 1
         print(f"[watch] Loaded {loaded} watches from DB")
@@ -9863,6 +10050,15 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS close_price FLOAT"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS hit_tp INTEGER"))
+                # Per-trade automation flags on watches (architecture redesign 2026-05-19)
+                # All default FALSE — Optimise (backend compute) must explicitly enable each.
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS be_on BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS trail_on BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS macro_on BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS inval_on BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS sent_on BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS entry_price FLOAT"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS entry_atr FLOAT"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")

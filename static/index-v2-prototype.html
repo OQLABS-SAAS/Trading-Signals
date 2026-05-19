@@ -7798,11 +7798,28 @@ function wlRender(wrap){
 }
 
 // ── DotVerse Watch Alert ───────────────────────────────────────────────────
-async function dvSetWatch(){
+async function dvSetWatch(rowIdx){
   const sig=window._activeSignal;
   if(!sig||!sig.sym){_dvToast('Run analysis first','rgba(232,112,110,.15)','rgba(232,112,110,.4)');return;}
+  // Per-trade automation flags — use the specified ladder row's Optimise result,
+  // or row 0 (primary row) if no rowIdx provided. All false if Optimise not yet run.
+  var idx = (typeof rowIdx === 'number') ? rowIdx : 0;
+  var autoState = (window._szLadderAuto && window._szLadderAuto[idx]) || {be:false,trail:false,macro:false,inval:false,sent:false};
   const data=await dvFetch('/api/watch',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ticker:sig.sym,asset_type:sig.asset||'auto',timeframe:sig.tf||'4H'})});
+    body:JSON.stringify({
+      ticker:      sig.sym,
+      asset_type:  sig.asset||'auto',
+      timeframe:   sig.tf||'4H',
+      automations: {
+        be:    !!autoState.be,
+        trail: !!autoState.trail,
+        macro: !!autoState.macro,
+        inval: !!autoState.inval,
+        sent:  !!autoState.sent
+      },
+      entry_price: sig.entry || null,
+      entry_atr:   sig.atr   || null
+    })});
   if(data) _dvToast('Alert set for '+sig.sym,'rgba(61,190,108,.15)','rgba(61,190,108,.4)');
   else _dvToast('Alert unavailable','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
 }
@@ -18113,19 +18130,28 @@ async function showAutomations() {
   +   '</label>'
   + '</div>'
 
-  // ── Section 1: Trade Protection
+  // ── Section 1: Trade Protection (global account-level execution params)
+  // Note: Break Even and Trailing Stop are per-trade as of 2026-05-19.
+  // They are set per-trade via Optimise on the Size tab — not here.
+  // This section now covers: TP scaling, weekend close, and the ATR
+  // multiplier that governs HOW trailing calculates its distance.
   + section(
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--grn)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
       'Trade Protection',
-      'Automatically safeguards every trade you open',
-      row('breakeven', 'Lock in profits after Target 1',
-          'Once price hits Target 1, DotVerse moves your stop loss to your entry price — you can no longer lose money on this trade.',
-          s.breakeven, true,
-          '')
-      + row('trailing', 'Trail the stop as price moves (ATR-dynamic)',
-          'The stop loss follows price automatically. Distance = ATR × multiplier — adapts to market volatility. E.g. 2× ATR on BTC ≈ $2,000 pts. Recalculated every 60 seconds by the watch engine.',
-          s.trailing, true,
-          sliderSub('trailingAtrMult', s.trailingAtrMult || 2.0, 0.5, 5.0, '× ATR distance (recalculated live)', 'ATR multiplier'))
+      'Automatic safeguards for every trade you open',
+      '<div style="padding:11px 14px;background:rgba(201,168,76,.04);border-bottom:1px solid rgba(201,168,76,.15);">'
+      + '<div style="display:flex;align-items:flex-start;gap:10px;">'
+      +   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amb)" stroke-width="2.2" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+      +   '<div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.85);line-height:1.6;">'
+      +     '<strong>Break Even and Trailing Stop are now per-trade.</strong> Set them on the Size tab using Optimise — DotVerse backend compute determines the right settings for each specific signal. The ATR multiplier below governs <em>how far</em> the trail sits from price when trailing is active.'
+      +   '</div>'
+      + '</div>'
+      + '</div>'
+      + '<div style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
+      +   '<div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);margin-bottom:3px;">ATR Trailing Multiplier <span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(61,190,108,.1);border:1px solid rgba(61,190,108,.2);color:#3dbe6c;margin-left:5px;">EXECUTION PARAM</span></div>'
+      +   '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5;">Controls how far the trailing stop sits from the current price. 1× ATR = tight trail (locks gains faster, may close early on pullbacks). 2× ATR = looser trail (survives pullbacks, gives back more profit before closing).</div>'
+      +   sliderSub('trailingAtrMult', s.trailingAtrMult || 1.0, 0.5, 5.0, '× ATR distance (recalculated live)', 'Trail distance')
+      + '</div>'
       + row('autoTP1', 'Auto-take 50% profit at Target 1',
           'When Target 1 is hit, DotVerse automatically closes half your position and lets the rest run to Target 2.',
           s.autoTP1, true, '')
@@ -18226,37 +18252,124 @@ async function showAutomations() {
       + '</div>'
     )
 
-  // ── Section 6: Auto-Adjustment
+  // ── Section 6: Execution Parameters
   + section(
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amb)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>',
-      'Auto-Adjustment',
-      'DotVerse adapts your trade automatically when conditions change mid-position',
-      row('autoMacroResponse', 'Auto protect before high-impact news',
-          'When a HIGH-impact economic event (NFP, CPI, rate decision) is within the threshold window and your trade is in profit, DotVerse automatically moves your stop loss to your entry price. You wake up protected — you cannot lose what you made.',
-          s.autoMacroResponse, true,
-          '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd);">'
-          + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);white-space:nowrap;">Act when event is within</span>'
-          + '<input type="range" min="1" max="12" value="' + (s.macroHoursThreshold || 4) + '" style="flex:1;accent-color:var(--amb);height:3px;" oninput="_autoSettings.macroHoursThreshold=parseFloat(this.value);document.getElementById(\'av_macroHrs\').textContent=this.value;_autoPersist();">'
-          + '<span style="font-family:var(--mono);font-size:10px;color:var(--t2);width:24px;text-align:right;" id="av_macroHrs">' + (s.macroHoursThreshold || 4) + '</span>'
-          + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">hours</span>'
-          + '</div>')
-      + row('autoInvalidationAct', 'Auto tighten stop when trend reverses',
-          'When the trend signal that started your trade flips (EMA crossover or Supertrend direction change), DotVerse automatically tightens your stop loss to lock partial profit. Your original entry thesis is gone — your money is protected.',
-          s.autoInvalidationAct, true, '')
-      + row('autoSentimentWatch', 'Auto partial close on negative news sentiment',
-          'When news headlines for your asset turn sharply negative mid-trade, DotVerse automatically closes a portion of your position. Protects against news-driven reversals before they reach your stop loss.',
-          s.autoSentimentWatch, false,
-          '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd);">'
-          + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);white-space:nowrap;">Close</span>'
-          + '<input type="range" min="10" max="100" step="5" value="' + (s.autoClosePct || 50) + '" style="flex:1;accent-color:var(--amb);height:3px;" oninput="_autoSettings.autoClosePct=parseFloat(this.value);document.getElementById(\'av_closePct\').textContent=this.value;_autoPersist();">'
-          + '<span style="font-family:var(--mono);font-size:10px;color:var(--t2);width:28px;text-align:right;" id="av_closePct">' + (s.autoClosePct || 50) + '</span>'
-          + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">% of position</span>'
-          + '</div>')
+      'Execution Parameters',
+      'These settings control HOW automations execute — not whether they fire. Per-trade on/off is set in the Size tab.',
+      // Macro hours threshold
+      '<div style="padding:12px 0;border-bottom:1px solid var(--bd);">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+      + '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--t1);">Macro guard window</span>'
+      + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">EXECUTION PARAM</span>'
+      + '</div>'
+      + '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-bottom:10px;line-height:1.5;">'
+      + 'When a HIGH-impact news event (NFP, CPI, rate decision) is within this many hours, the Macro Guard fires for any watch that has Macro enabled. Wider window = more protection but more interruptions.'
+      + '</div>'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);white-space:nowrap;">Act when event within</span>'
+      + '<input type="range" min="1" max="12" value="' + (s.macroHoursThreshold || 4) + '" style="flex:1;accent-color:var(--amb);height:3px;" oninput="_autoSettings.macroHoursThreshold=parseFloat(this.value);document.getElementById(\'av_macroHrs\').textContent=this.value;_autoPersist();">'
+      + '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--t2);width:20px;text-align:right;" id="av_macroHrs">' + (s.macroHoursThreshold || 4) + '</span>'
+      + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">hrs</span>'
+      + '</div>'
+      + '</div>'
+      // Auto close %
+      + '<div style="padding:12px 0;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+      + '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--t1);">Sentiment partial-close %</span>'
+      + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">EXECUTION PARAM</span>'
+      + '</div>'
+      + '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-bottom:10px;line-height:1.5;">'
+      + 'When the Sentiment guard detects 3+ negative headlines mid-trade, DotVerse closes this percentage of your position. P&L at the time adjusts the actual amount — this is the starting baseline.'
+      + '</div>'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);white-space:nowrap;">Close</span>'
+      + '<input type="range" min="10" max="100" step="5" value="' + (s.autoClosePct || 50) + '" style="flex:1;accent-color:var(--amb);height:3px;" oninput="_autoSettings.autoClosePct=parseFloat(this.value);document.getElementById(\'av_closePct\').textContent=this.value;_autoPersist();">'
+      + '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--t2);width:28px;text-align:right;" id="av_closePct">' + (s.autoClosePct || 50) + '</span>'
+      + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">% of position</span>'
+      + '</div>'
+      + '</div>'
+    )
+
+  // ── Section 7: Live Watch Dashboard
+  + section(
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amb)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+      'Active Watches & Automation State',
+      'Each active watch shows which automations are armed for that specific trade. Per-trade on/off is set in the Size tab when you place the watch.',
+      '<div id="av_watchDash" style="margin-top:4px;">'
+      + '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);text-align:center;padding:16px 0;">Loading watches...</div>'
+      + '</div>'
+      + '<div style="margin-top:10px;text-align:right;">'
+      + '<button onclick="avLoadWatchDash()" style="font-family:var(--mono);font-size:10px;padding:4px 10px;background:transparent;border:1px solid var(--bd);color:var(--t3);border-radius:4px;cursor:pointer;">Refresh</button>'
+      + '</div>'
     )
 
   + '<div style="height:40px;"></div>';
+
+  // Populate the watch dashboard now that the DOM node exists
+  setTimeout(avLoadWatchDash, 0);
 }
 
+
+// ── Automation Tab: Live Watch Dashboard ──────────────────────────────────────
+async function avLoadWatchDash(){
+  var el = document.getElementById('av_watchDash');
+  if(!el) return;
+  el.innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);text-align:center;padding:16px 0;">Loading...</div>';
+  try{
+    var d = await dvFetch('/api/watches');
+    var watches = (d && Array.isArray(d.watches)) ? d.watches : [];
+    if(!watches.length){
+      el.innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);text-align:center;padding:16px 0;">'
+        + 'No active watches. Go to the Size tab, set your automation preferences, then click the Watch button on a signal.'
+        + '</div>';
+      return;
+    }
+
+    var FLAG_CFG = [
+      { key:'be_on',    label:'BE',    title:'Break Even',    color:'#5de8a0' },
+      { key:'trail_on', label:'TRAIL', title:'Trailing Stop', color:'#60a5fa' },
+      { key:'macro_on', label:'MACRO', title:'Macro Guard',   color:'#d4870a' },
+      { key:'inval_on', label:'INVAL', title:'Invalidation',  color:'#c9a84c' },
+      { key:'sent_on',  label:'SENT',  title:'Sentiment',     color:'#a78bfa' },
+    ];
+
+    var rows = watches.map(function(w){
+      var flags = FLAG_CFG.map(function(f){
+        var on = !!w[f.key];
+        return '<span title="' + f.title + ': ' + (on ? 'ARMED' : 'OFF') + '" style="'
+          + 'display:inline-flex;align-items:center;justify-content:center;'
+          + 'font-family:var(--mono);font-size:9px;font-weight:700;'
+          + 'padding:2px 5px;border-radius:3px;cursor:default;'
+          + (on
+            ? 'background:' + f.color + '22;color:' + f.color + ';border:1px solid ' + f.color + '44;'
+            : 'background:transparent;color:rgba(237,232,216,.2);border:1px solid rgba(237,232,216,.08);')
+          + '">' + f.label + '</span>';
+      }).join('');
+
+      var sigColor = w.last_signal==='BUY' ? '#5de8a0' : w.last_signal==='SELL' ? '#f07070' : 'rgba(237,232,216,.4)';
+      var entryStr = w.entry_price ? ('@ ' + parseFloat(w.entry_price).toPrecision(6)) : '';
+      var atrStr   = w.entry_atr   ? ('ATR ' + parseFloat(w.entry_atr).toPrecision(4))  : '';
+
+      return '<div style="padding:10px 0;border-bottom:1px solid rgba(237,232,216,.06);">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+        +   '<div style="display:flex;align-items:center;gap:8px;">'
+        +     '<span style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--t1);">' + (w.ticker||'—') + '</span>'
+        +     '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">' + (w.timeframe||'') + '</span>'
+        +     '<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + sigColor + ';">' + (w.last_signal||'…') + '</span>'
+        +   '</div>'
+        +   '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">' + (w.last_check||'—') + '</span>'
+        + '</div>'
+        + '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">' + flags + '</div>'
+        + (entryStr||atrStr ? '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);">' + [entryStr,atrStr].filter(Boolean).join(' · ') + '</div>' : '')
+        + '</div>';
+    }).join('');
+
+    el.innerHTML = rows;
+  }catch(e){
+    if(el) el.innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:#f07070;padding:12px 0;">Failed to load watches. Check your connection.</div>';
+  }
+}
 
 function actToggleAdvanced(){
   const panel = document.getElementById('actAdvancedOpts');
