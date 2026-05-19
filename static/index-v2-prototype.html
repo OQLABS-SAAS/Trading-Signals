@@ -12296,6 +12296,26 @@ function showUnderstand(){
       <button class="flow-btn-next btn-pipeline" onclick="setNav('size');showSize();">Size Position → SIZE</button>
     </div>
   </div>`;
+  // ── C3b: VIX badge async fallback ─────────────────────────────────────────
+  // When the signal was loaded via loadScannerSignal() (signal feed cards),
+  // _activeSignal.macro_context is not set and vixBadgeHtml above is empty.
+  // Fetch /api/vix once asynchronously, store the result, then re-render
+  // showUnderstand() so the badge appears without requiring a full Analyse click.
+  // _vix_fetching flag prevents a re-entry loop.
+  if (!sig.macro_context && !sig._vix_fetching) {
+    sig._vix_fetching = true;
+    dvFetch('/api/vix').then(function(v) {
+      if (v && v.vix != null && window._activeSignal) {
+        window._activeSignal.macro_context = v;
+      }
+      if (window._activeSignal) window._activeSignal._vix_fetching = false;
+      var _navEl = document.querySelector('.nav-item.active');
+      var _navName = _navEl ? (_navEl.dataset.nav || '') : '';
+      if (_navName === 'understand' || !_navName) showUnderstand();
+    }).catch(function() {
+      if (window._activeSignal) window._activeSignal._vix_fetching = false;
+    });
+  }
   // Wait for DOM layout before initialising charts. Without this,
   // wrap.clientWidth can be 0 during the initial render, creating
   // zero-width charts that show no bars even when data is set.
