@@ -3781,6 +3781,225 @@ def run_watch_job():
                 except Exception as _be_outer:
                     print(f"[be] outer error for {ticker}: {_be_outer}")
 
+            # ── Phase 4b: Sentiment Watch (SENT) ─────────────────────────────────────
+            # Per-trade: gated on watch.sent_on (set by Optimise + trader confirm).
+            # Pipeline: Finnhub headlines (last 2h) → DeepSeek batch sentiment →
+            # if 3+ validated negatives → Telegram keyboard alert (trader taps to act).
+            # NO automatic execution — human confirms every partial close.
+            # Validation: score in [-1,+1], sentiment=="negative" AND score<-0.3, both
+            # required. Dedup: max 1 alert per ticker per hour per user.
+            if w.get("sent_on", False):
+                try:
+                    _ds_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+                    _fh_key = os.environ.get("FINNHUB_API_KEY",  "").strip()
+                    if not _ds_key or not _fh_key:
+                        print(f"[sent] {ticker}: DEEPSEEK_API_KEY or FINNHUB_API_KEY not set — skipping")
+                    else:
+                        # ── Step 1: Fetch headlines from Finnhub (last 2 hours) ──────
+                        _sent_uid  = str(w.get("user_id", "default"))
+                        _sent_now  = datetime.utcnow()
+                        _sent_from = (_sent_now - timedelta(hours=2)).strftime("%Y-%m-%d")
+                        _sent_to   = _sent_now.strftime("%Y-%m-%d")
+                        _sent_sym  = ticker.upper().split("-")[0].replace("^", "")
+
+                        _sent_r = None
+                        try:
+                            if asset_type in ("stock", "index"):
+                                _sent_r = requests.get(
+                                    "https://finnhub.io/api/v1/company-news",
+                                    params={"symbol": _sent_sym, "from": _sent_from,
+                                            "to": _sent_to, "token": _fh_key},
+                                    timeout=6,
+                                )
+                            elif asset_type == "crypto":
+                                _sent_r = requests.get(
+                                    "https://finnhub.io/api/v1/news",
+                                    params={"category": "crypto", "token": _fh_key},
+                                    timeout=6,
+                                )
+                            else:
+                                _sent_r = requests.get(
+                                    "https://finnhub.io/api/v1/news",
+                                    params={"category": "general", "token": _fh_key},
+                                    timeout=6,
+                                )
+                        except Exception as _sent_fetch_err:
+                            print(f"[sent] {ticker}: Finnhub fetch error: {_sent_fetch_err}")
+
+                        if _sent_r is None or _sent_r.status_code != 200:
+                            pass  # no headlines — skip silently
+                        else:
+                            _sent_raw = _sent_r.json() if isinstance(_sent_r.json(), list) else []
+                            # Filter to last 2 hours by Unix timestamp
+                            _sent_cutoff = (_sent_now - timedelta(hours=2)).timestamp()
+                            _sent_headlines = []
+                            for _art in _sent_raw[:40]:
+                                _hl = (_art.get("headline") or _art.get("title") or "").strip()
+                                _ts = _art.get("datetime", 0) or 0
+                                if _hl and (float(_ts) >= _sent_cutoff if _ts else True):
+                                    _sent_headlines.append(_hl[:120])  # cap length
+
+                            if not _sent_headlines:
+                                print(f"[sent] {ticker}: no headlines in last 2h")
+                            else:
+                                # ── Step 2: DeepSeek batch sentiment ─────────────────
+                                # Build numbered list for the prompt
+                                _hl_block = "\n".join(
+                                    f"{i+1}. {h}" for i, h in enumerate(_sent_headlines[:10])
+                                )
+                                _ds_prompt = (
+                                    "You are a financial news sentiment classifier. "
+                                    "For each numbered headline below, return ONLY a JSON array "
+                                    "where each element is an object with exactly three keys: "
+                                    "\"score\" (float from -1.0 to +1.0), "
+                                    "\"sentiment\" (one of: positive, neutral, negative), "
+                                    "\"reasoning\" (one plain-English sentence explaining why, max 15 words). "
+                                    "Do not add any text outside the JSON array. "
+                                    "Headlines:\n" + _hl_block
+                                )
+                                _ds_results = []
+                                try:
+                                    import openai as _oai
+                                    _ds_client = _oai.OpenAI(
+                                        api_key=_ds_key,
+                                        base_url="https://api.deepseek.com",
+                                    )
+                                    _ds_resp = _ds_client.chat.completions.create(
+                                        model="deepseek-chat",
+                                        messages=[{"role": "user", "content": _ds_prompt}],
+                                        temperature=0.0,
+                                        max_tokens=600,
+                                    )
+                                    _ds_text = _ds_resp.choices[0].message.content.strip()
+                                    # Strip markdown fences if present
+                                    if _ds_text.startswith("```"):
+                                        _ds_text = _ds_text.split("```")[1]
+                                        if _ds_text.startswith("json"):
+                                            _ds_text = _ds_text[4:]
+                                    _ds_results = json.loads(_ds_text)
+                                    if not isinstance(_ds_results, list):
+                                        _ds_results = []
+                                except Exception as _ds_err:
+                                    print(f"[sent] {ticker}: DeepSeek error: {_ds_err}")
+                                    _ds_results = []
+
+                                # ── Step 3: Validate output + count negatives ─────────
+                                _sent_negatives = []
+                                for _i, _item in enumerate(_ds_results):
+                                    if not isinstance(_item, dict):
+                                        continue
+                                    try:
+                                        _sc  = float(_item.get("score", 0))
+                                        _snt = str(_item.get("sentiment", "")).lower().strip()
+                                        _rsn = str(_item.get("reasoning", "")).strip()
+                                    except (TypeError, ValueError):
+                                        continue
+                                    # Both conditions required — score range guard + label guard
+                                    if not (-1.0 <= _sc <= 1.0):
+                                        continue  # reject out-of-range hallucination
+                                    if _snt != "negative" or _sc >= -0.3:
+                                        continue  # not genuinely negative
+                                    # Cross-reference: headline must exist
+                                    if _i >= len(_sent_headlines):
+                                        continue
+                                    _sent_negatives.append({
+                                        "score":     _sc,
+                                        "headline":  _sent_headlines[_i],
+                                        "reasoning": _rsn,
+                                    })
+
+                                if len(_sent_negatives) < 3:
+                                    print(f"[sent] {ticker}: only {len(_sent_negatives)} validated negatives — threshold not met")
+                                else:
+                                    # ── Step 4: Dedup check (max 1 alert per hour) ────
+                                    _sent_dedup = (
+                                        f"sent_alert:{_sent_uid}:{ticker.upper()}:"
+                                        f"{_sent_now.strftime('%Y-%m-%d-%H')}"
+                                    )
+                                    _sent_seen = False
+                                    try:
+                                        if _redis_client:
+                                            _sent_seen = bool(_redis_client.get(_sent_dedup))
+                                    except Exception:
+                                        pass
+
+                                    if _sent_seen:
+                                        print(f"[sent] {ticker}: alert already sent this hour — skipping")
+                                    else:
+                                        # ── Step 5: Build plain-English Telegram message ──
+                                        # Sort by score ascending — worst first
+                                        _sent_negatives.sort(key=lambda x: x["score"])
+                                        _worst = _sent_negatives[0]
+
+                                        # Compute dollar amount if position data available
+                                        _sent_dollar_str = ""
+                                        try:
+                                            with mt5_state_lock:
+                                                _sent_state = (mt5_state.get(_sent_uid)
+                                                               or mt5_state.get("default", {}))
+                                            _sent_sym_mt5 = _mt5_symbol(ticker, asset_type)
+                                            for _sp in _sent_state.get("positions", []):
+                                                _sp_sym = (_sp.get("symbol") or "").upper()
+                                                if _sp_sym != _sent_sym_mt5.upper():
+                                                    continue
+                                                _sp_profit = _sp.get("profit") or _sp.get("pnl") or 0
+                                                _sp_vol    = _sp.get("volume") or _sp.get("lots") or 0
+                                                if float(_sp_profit) > 0:
+                                                    # 25% close locks in ~25% of current profit
+                                                    _lock_amt = round(float(_sp_profit) * 0.25, 2)
+                                                    _sent_dollar_str = (
+                                                        f"Your position is currently up ${float(_sp_profit):.2f}. "
+                                                        f"Tapping 'Protect 25% now' closes a quarter of your position "
+                                                        f"and locks in roughly ${_lock_amt:.2f} of what you've made. "
+                                                        f"The rest stays open."
+                                                    )
+                                                elif float(_sp_profit) <= 0:
+                                                    _sent_dollar_str = (
+                                                        f"Your position is currently at a loss. "
+                                                        f"Tapping 'Protect 25% now' reduces your exposure by a quarter — "
+                                                        f"limiting further damage if the news drives price lower."
+                                                    )
+                                                break
+                                        except Exception:
+                                            _sent_dollar_str = (
+                                                "Tapping 'Protect 25% now' closes a quarter of your position. "
+                                                "The rest stays open."
+                                            )
+
+                                        if not _sent_dollar_str:
+                                            _sent_dollar_str = (
+                                                "Tapping 'Protect 25% now' closes a quarter of your position. "
+                                                "The rest stays open."
+                                            )
+
+                                        _sent_msg = (
+                                            f"DotVerse spotted concerning news for {ticker.upper()}\n\n"
+                                            f"{len(_sent_negatives)} news stories in the last 2 hours "
+                                            f"are pointing negative. The most worrying:\n"
+                                            f"\"{_worst['headline']}\"\n\n"
+                                            f"Why this matters: {_worst['reasoning']}\n\n"
+                                            f"{_sent_dollar_str}\n\n"
+                                            f"Tapping 'Keep everything open' does nothing — "
+                                            f"you stay fully in the trade and manage it yourself."
+                                        )
+                                        _sent_kb = [[
+                                            {"text": "Protect 25% now",
+                                             "callback_data": f"sent_close|{ticker}|{asset_type}|25"},
+                                            {"text": "Keep everything open",
+                                             "callback_data": f"sent_ignore|{ticker}|{asset_type}|0"},
+                                        ]]
+                                        try:
+                                            send_telegram_keyboard(_sent_msg, _sent_kb)
+                                            if _redis_client:
+                                                _redis_client.setex(_sent_dedup, 3600, "1")
+                                            print(f"[sent] {ticker}: alert sent — "
+                                                  f"{len(_sent_negatives)} negatives, "
+                                                  f"worst score {_worst['score']:.2f}")
+                                        except Exception as _sent_tg_err:
+                                            print(f"[sent] {ticker}: Telegram error: {_sent_tg_err}")
+                except Exception as _sent_outer:
+                    print(f"[sent] outer error for {ticker}: {_sent_outer}")
+
             # ── Phase 5: Signal Invalidation + ATR Expansion Detection ──────────────
             # Per-trade: gated on watch.inval_on (set by Optimise + trader confirm).
             # If inval_on is False for this watch, skip the entire block.
