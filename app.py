@@ -6698,6 +6698,13 @@ def recommend_automations():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/vix", methods=["GET"])
+@login_required
+def vix_status():
+    """Return current VIX zone/score/message. Redis-cached 15 min via _get_vix_score()."""
+    return jsonify(_get_vix_score())
+
+
 # ─── USER SETTINGS (per-user preferences for the 8 Settings sub-panels) ─────
 
 def _user_settings_to_dict(s):
