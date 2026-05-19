@@ -6121,7 +6121,17 @@ def _recommend_automations_from_signal(data):
       rsi:              RSI value
     """
     trade_type  = (data.get("trade_type")       or "day").lower().strip()
-    confidence  = (data.get("confidence")       or "MEDIUM").upper().strip()
+    # confidence may arrive as a numeric score (e.g. 82) from the frontend's sig.conf field.
+    # Convert numeric scores to HIGH/MEDIUM/LOW so string comparisons in the logic below work.
+    _raw_conf = data.get("confidence")
+    if _raw_conf is None or _raw_conf == "":
+        confidence = "MEDIUM"
+    else:
+        try:
+            _conf_num  = float(_raw_conf)
+            confidence = "HIGH" if _conf_num >= 80 else ("MEDIUM" if _conf_num >= 65 else "LOW")
+        except (TypeError, ValueError):
+            confidence = str(_raw_conf).upper().strip() or "MEDIUM"
     conf_label  = (data.get("confidence_label") or "LIKELY").upper().strip()
     signal      = (data.get("signal")           or "HOLD").upper().strip()
     bull_count  = int(data.get("bull_count")    or 0)
