@@ -6494,12 +6494,12 @@ def _get_vix_score():
         }
 
     # Score + zone computation
-    if   vix < 12:  score, zone = 95, "FULL";     msg = f"Markets are very calm (VIX {vix:.1f}). Excellent conditions for trading."
-    elif vix < 15:  score, zone = 80, "FULL";     msg = f"Markets are calm (VIX {vix:.1f}). Good conditions for trading."
-    elif vix < 20:  score, zone = 60, "REDUCED";  msg = f"Moderate uncertainty (VIX {vix:.1f}). DotVerse has raised the confidence threshold to protect you."
-    elif vix < 25:  score, zone = 40, "REDUCED";  msg = f"Elevated market fear (VIX {vix:.1f}). Only high-confidence signals will be shown."
-    elif vix < 30:  score, zone = 20, "NO_TRADE"; msg = f"High market fear (VIX {vix:.1f}). Signals suppressed — technical analysis is less reliable in panicked markets. Wait for VIX to fall below 25."
-    else:           score, zone =  5, "NO_TRADE"; msg = f"Extreme market fear (VIX {vix:.1f}). All signals suppressed. Wait for conditions to stabilise before trading."
+    if   vix < 12:  score, zone = 95, "FULL";     msg = f"Markets are very calm right now (VIX {vix:.1f}). This is one of the best conditions to trade — indicators are reliable and prices are behaving predictably. Trade at your normal size."
+    elif vix < 15:  score, zone = 80, "FULL";     msg = f"Markets are calm (VIX {vix:.1f}). Good conditions to trade today — your signals are reliable. Trade at your normal size."
+    elif vix < 20:  score, zone = 60, "REDUCED";  msg = f"Markets are more nervous than usual (VIX {vix:.1f}). DotVerse is being extra picky — only showing signals where many indicators strongly agree. If a BUY or SELL signal appears, it has passed a stricter test than normal. Consider using a smaller position size than usual."
+    elif vix < 25:  score, zone = 40, "REDUCED";  msg = f"Markets are fearful right now (VIX {vix:.1f}). Prices are moving erratically and signals are less reliable. DotVerse has tightened its filter significantly. If you trade, use a smaller position size than normal and be prepared for sharp reversals."
+    elif vix < 30:  score, zone = 20, "NO_TRADE"; msg = f"Markets are in panic mode (VIX {vix:.1f}). DotVerse has suppressed all signals — when fear is this high, prices are driven by emotion, not by the technical patterns your indicators read. Sit on your hands. Wait for VIX to drop below 25 before trading."
+    else:           score, zone =  5, "NO_TRADE"; msg = f"Extreme fear in markets — this is a crash or crisis level (VIX {vix:.1f}). All signals are suppressed. Do not trade. Sitting in cash is the right move right now. Wait for conditions to stabilise before returning."
 
     result = {"vix": round(vix, 2), "score": score, "zone": zone, "message": msg}
 
