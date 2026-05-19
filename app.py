@@ -6515,6 +6515,18 @@ def _recommend_automations_from_signal(data):
     weak_signal     = conf_label in ("HYPOTHESIS", "LIKELY")
     low_conviction  = directional_pct < 70
 
+    # B1: RSI zone and ATR magnitude — modulate BE and TRAIL recommendations
+    # rsi_zone: determines whether momentum is extended (may stall before 1 ATR move)
+    rsi_zone    = "oversold" if rsi < 33 else ("overbought" if rsi > 67 else "neutral")
+    # high_vol: ATR >2% of price = wide-ranging / volatile market
+    # BE relies on price moving exactly 1 ATR without reversing — in high vol, stops get hit early.
+    # TRAIL on fixed-exit rows (TP3) gets whipsawed in high vol — trail fires too soon.
+    atr_pct     = (atr / entry * 100) if entry > 0 else 0.0
+    high_vol    = atr_pct > 2.0
+    # rsi_adverse: signal direction conflicts with RSI extreme
+    # BUY when overbought or SELL when oversold — momentum may stall before 1 ATR move
+    rsi_adverse = (is_long and rsi_zone == "overbought") or (not is_long and rsi_zone == "oversold")
+
     reasons = []
 
     # ── Target-aware automation logic ────────────────────────────────────────
@@ -6541,7 +6553,7 @@ def _recommend_automations_from_signal(data):
         # and needs the fullest protection suite. Trail is optional: in very strong trends
         # price can overshoot TP3, so trailing can capture additional gains beyond the target.
         be    = True                              # Always protect the runner — BE is non-negotiable
-        trail = (is_swing or is_position) or htf_aligned  # Trail viable when trend is confirmed
+        trail = ((is_swing or is_position) or htf_aligned) and not high_vol  # high vol → trail whipsawed
         macro = True                              # TP3 rows are held the longest before exit
         inval = True                              # Open to more candles = more reversal risk
         sent  = True                              # Most news exposure before target is reached
@@ -6553,7 +6565,7 @@ def _recommend_automations_from_signal(data):
     elif target == "tp2":
         # TP2 rows hold past TP1 — moderate exposure. Needs BE and macro protection.
         # Trail is OFF — this row has a fixed exit at TP2; trailing would bypass it.
-        be    = not is_scalp and confidence in ("HIGH", "MEDIUM")
+        be    = not is_scalp and confidence in ("HIGH", "MEDIUM") and not high_vol
         trail = False        # Fixed exit at TP2 — trailing would let price overshoot target
         macro = (is_swing or is_position) or (is_day and confidence == "HIGH")
         inval = weak_signal or htf_mixed or is_swing or is_position
@@ -6568,7 +6580,7 @@ def _recommend_automations_from_signal(data):
         # TP1 exits quickly — the goal is speed and probability, not running the winner.
         # Trail is never appropriate (it would delay the quick exit that TP1 is designed for).
         # BE is still valuable — even a quick gain deserves stop protection once in profit.
-        be    = not is_scalp and confidence in ("HIGH", "MEDIUM")
+        be    = not is_scalp and confidence in ("HIGH", "MEDIUM") and not high_vol
         trail = False        # TP1 exits at the first target — trailing conflicts with quick-exit intent
         macro = (is_swing or is_position)         # Only if the signal type holds long enough for news
         inval = weak_signal or htf_mixed           # Weak/mixed signals need early exit protection
@@ -6578,6 +6590,19 @@ def _recommend_automations_from_signal(data):
         if macro: reasons.append("Macro Guard active — trade type means this row may cross a news event.")
         if inval: reasons.append("Technical Invalidation: exits early if the signal structure breaks.")
         if sent:  reasons.append("Sentiment Watch: low directional conviction makes headline risk real.")
+
+    # ── B1: RSI and ATR modifiers — plain-English warnings appended to reasons ──
+    if high_vol:
+        reasons.append(
+            f"High volatility detected — ATR is {atr_pct:.1f}% of price. "
+            "In fast-moving markets, break even and trailing stops can fire prematurely. "
+            "DotVerse tightened automation recommendations to reduce whipsaw risk."
+        )
+    if rsi_adverse:
+        reasons.append(
+            f"RSI is at an extreme ({rsi:.0f}) against this trade direction. "
+            "Momentum may stall before reaching the first target — watch for a pullback."
+        )
 
     # ── Build explanation ────────────────────────────────────────────────────
     trade_desc = {
