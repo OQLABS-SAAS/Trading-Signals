@@ -8474,6 +8474,7 @@ def scan_list():
                         "rr1_raw":        analysis.get("rr1_raw"),
                         "trade_type":     analysis.get("trade_type","day"),
                         "htf_bias":       analysis.get("htf_bias","NEUTRAL"),
+                        "timeframe":      timeframe,
                     }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
