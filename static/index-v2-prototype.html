@@ -18509,6 +18509,735 @@ function actSelectOrderType(type, el){
   if(hints[type]){ box.innerHTML = hints[type]; box.style.display = 'block'; }
   else { box.style.display = 'none'; }
 }
+
+// ─── E1: Plain-English Guidance Layer ────────────────────────────────────────
+// window._dvGuide — keyed by data-guide attribute value.
+// Each entry: { title: string, body: string, example?: string }
+// Used by dvGuideInit() (E2) to attach tooltips to every [data-guide] element.
+// ─────────────────────────────────────────────────────────────────────────────
+window._dvGuide = {
+
+  // ── SIGNAL DIRECTION ──────────────────────────────────────────────────────
+  'signal-buy': {
+    title: 'BUY Signal',
+    body: 'DotVerse has detected that market conditions favour a price rise. At least 65% of its indicators are pointing upward and the higher timeframe agrees. You would enter a long position at the entry price shown, with your stop loss below.',
+    example: 'Entry $68,200 · Stop $65,800 · Target $74,000 — you risk $2,400 to potentially gain $5,800.'
+  },
+  'signal-sell': {
+    title: 'SELL Signal',
+    body: 'DotVerse has detected that market conditions favour a price fall. At least 65% of its indicators are pointing downward. You would enter a short position at the entry price shown, with your stop loss above.',
+    example: 'Entry $68,200 · Stop $70,600 · Target $62,000 — you risk $2,400 to potentially gain $6,200.'
+  },
+  'signal-hold': {
+    title: 'HOLD — No Trade',
+    body: 'Conditions are not clear enough to take a trade right now. Either fewer than 65% of indicators agree, or the higher timeframe is pointing against the trade direction. Waiting is a valid trading decision — a bad trade costs money, a missed trade costs nothing.',
+    example: 'Try a different timeframe (e.g. 4H instead of 1H) or wait for the next candle to close.'
+  },
+
+  // ── CONFIDENCE ───────────────────────────────────────────────────────────
+  'confidence-ring': {
+    title: 'Confidence Score',
+    body: 'How many of DotVerse\'s indicators agree on this signal direction, expressed as a percentage. The minimum to fire a signal is 65%. At 85%+ nearly all indicators agree — that is a high-conviction setup. Below 65% DotVerse shows HOLD.',
+    example: '82% confidence = roughly 6 out of 8 checks pointing the same way.'
+  },
+  'confidence-confirmed': {
+    title: 'CONFIRMED — Highest Reliability',
+    body: 'TradingView\'s data and DotVerse\'s own indicator engine both independently agree on the direction. Two separate systems reached the same conclusion. This is the most reliable signal type.',
+    example: 'TradingView: Strong Buy · DotVerse confluence: 84% → both say BUY → CONFIRMED.'
+  },
+  'confidence-likely': {
+    title: 'LIKELY — Good Signal',
+    body: 'DotVerse\'s own indicators show strong agreement (typically 5+ of 8 pointing the same way). TradingView data was not available or shows a different reading, but the technical case is solid.',
+    example: 'DotVerse: 78% confluence, RSI neutral, volume above average → LIKELY.'
+  },
+  'confidence-hypothesis': {
+    title: 'HYPOTHESIS — Weaker Signal',
+    body: 'Fewer than two-thirds of indicators agree, or there is conflicting data. The signal has just passed the minimum 65% threshold. Consider using a smaller position size or waiting for the next candle to close and confirm.',
+    example: 'DotVerse: 67% confluence, RSI overbought, volume low → HYPOTHESIS — proceed with caution.'
+  },
+
+  // ── TRADE TYPE ───────────────────────────────────────────────────────────
+  'trade-type-scalp': {
+    title: 'Scalp Trade',
+    body: 'Hold time: minutes to 2 hours. You are capturing a small, fast move. Requires active monitoring — you need to watch the screen. Stops are tight. Miss the exit and the trade can quickly reverse. Best for experienced traders who can react quickly.',
+    example: '15M chart BUY → hold 30–90 minutes → exit at TP1 → done.'
+  },
+  'trade-type-day': {
+    title: 'Day Trade',
+    body: 'Hold time: a few hours, closed before end of day. No overnight risk — your position is flat when you sleep. Moderate monitoring required. Check the chart every hour or so.',
+    example: '1H chart BUY at 9am → monitor during the day → exit by 5pm.'
+  },
+  'trade-type-swing': {
+    title: 'Swing Trade',
+    body: 'Hold time: 1 to 5 days. You are riding a wave of price momentum over several sessions. Set your alerts and check the chart morning and evening — you do not need to watch every candle.',
+    example: '4H chart BUY → hold 2–3 days → price reaches TP2 → exit.'
+  },
+  'trade-type-position': {
+    title: 'Position Trade',
+    body: 'Hold time: days to weeks. You are following a major trend. Widest stops needed to survive normal market fluctuations. Highest patience required — you may see the trade go against you temporarily before it moves in your favour.',
+    example: '1D chart BUY → hold 1–3 weeks → price slowly climbs to TP3 → exit.'
+  },
+
+  // ── TRADE LEVELS ─────────────────────────────────────────────────────────
+  'entry-price': {
+    title: 'Entry Price',
+    body: 'The price level where DotVerse recommends opening the trade. Wait for price to reach this level before entering — do not chase if price has already moved significantly past it. If your broker fills at a slightly different price (slippage), update the field so your risk calculation stays accurate.',
+    example: 'Signal entry: $68,200. If you fill at $68,350 instead, update to $68,350 so the stop distance and position size are correct.'
+  },
+  'stop-loss': {
+    title: 'Stop Loss',
+    body: 'If price hits this level, your trade thesis is wrong and DotVerse automatically exits the position via your MT5 EA. This is your maximum possible loss on this trade. Never move your stop loss further away from entry — that is called "widening the stop" and it destroys your risk management.',
+    example: 'Entry $68,200 · Stop $65,800 → if BTC drops to $65,800, the trade closes. You lose a maximum of $2,400 on a $10,000 account with 1% risk.'
+  },
+  'tp1': {
+    title: 'TP1 — First Take Profit',
+    body: 'The highest-probability target. Price is most likely to reach this level before reversing. The professional approach: close 50% of your position here and move your stop loss to breakeven (entry price). This guarantees you cannot lose on the remaining position.',
+    example: 'Take 50% profit at TP1. Move stop to entry. Let the remaining 50% run to TP2.'
+  },
+  'tp2': {
+    title: 'TP2 — Second Take Profit',
+    body: 'Moderate probability target. You stay in the trade past TP1 hoping the momentum continues. Risk: price may reverse between TP1 and TP2 before you exit, eating into your TP1 gains. Only hold to TP2 if the trend is strong and your stop is already at breakeven.',
+    example: 'After taking 50% at TP1 and moving stop to entry → take another 30% at TP2.'
+  },
+  'tp3': {
+    title: 'TP3 — Best Case Target',
+    body: 'The most ambitious target. Only realistic in strong trending markets with clear open space above (BUY) or below (SELL). Lowest probability of all three targets. If you reach TP3, consider it a bonus. Hold your last 20% of the position here.',
+    example: 'After TP1 (50%) and TP2 (30%), hold the final 20% to TP3. If the trend reverses before TP3, your stop will protect the remaining gains.'
+  },
+  'rr-ratio': {
+    title: 'Risk:Reward Ratio',
+    body: 'For every $1 you risk on this trade, how much could you gain. A ratio of 1:2 means risk $1, potentially gain $2. Professional minimum is 1:1.5. Below 1:1 the trade is not worth taking — you are risking more than you can gain.',
+    example: 'Risk $200 (stop distance) · Reward $600 (to TP1) = 1:3 ratio. Even with only 40% win rate, this trade is profitable long-term.'
+  },
+
+  // ── INDICATORS ───────────────────────────────────────────────────────────
+  'bull-pct': {
+    title: 'Bull % — Upward Pressure',
+    body: 'The percentage of DotVerse\'s 8 indicator checks pointing upward for this asset right now. Higher bull % = stronger case for a BUY trade.',
+    example: 'Bull 75% / Bear 25% → 6 of 8 indicators bullish → strong BUY case.'
+  },
+  'bear-pct': {
+    title: 'Bear % — Downward Pressure',
+    body: 'The percentage of DotVerse\'s 8 indicator checks pointing downward for this asset right now. Higher bear % = stronger case for a SELL trade.',
+    example: 'Bear 75% / Bull 25% → 6 of 8 indicators bearish → strong SELL case.'
+  },
+  'atr-value': {
+    title: 'ATR — Average True Range',
+    body: 'How much this asset typically moves per candle on this timeframe. DotVerse uses ATR to set your stop loss (must be wide enough to survive normal noise) and your take profit targets (must be reachable within normal movement). Higher ATR = more volatile asset = wider stops needed.',
+    example: 'ATR $1,800 on BTC 4H means BTC typically moves $1,800 in a 4-hour candle. A stop tighter than $1,800 would get hit by normal noise even when you\'re right.'
+  },
+  'rsi-value': {
+    title: 'RSI — Momentum Gauge',
+    body: 'Measures how fast and how hard price has been moving. Above 70 = overbought (price has risen too fast, may pull back). Below 30 = oversold (price has fallen too fast, may bounce). Between 30–70 = neutral momentum, room to move in either direction.',
+    example: 'RSI 72 on a BUY signal → price is stretched upward already → wait for RSI to cool below 65 before entering for better risk:reward.'
+  },
+
+  // ── INDICATOR CONFLUENCE (Understand tab) ─────────────────────────────────
+  'ind-trend-direction': {
+    title: 'Trend Direction (EMAs)',
+    body: 'Checks whether the fast EMA (9-period) is above the slow EMA (21-period). When fast > slow, the short-term trend is upward. When fast < slow, the short-term trend is downward. This is the most basic trend filter.',
+    example: 'EMA 9 = $68,400 · EMA 21 = $67,200 → fast above slow → bullish trend direction.'
+  },
+  'ind-momentum-gauge': {
+    title: 'Momentum Gauge (RSI)',
+    body: 'RSI measures buying/selling momentum. For a BUY signal this check passes when RSI is between 30–70 (room to rise) or below 30 (oversold bounce). For a SELL signal it passes when RSI is above 70 (overbought) or between 30–70 (room to fall).',
+    example: 'RSI 55 on a BUY signal → neutral momentum, plenty of room to rise → this check passes.'
+  },
+  'ind-price-momentum': {
+    title: 'Price Momentum (MACD)',
+    body: 'MACD measures whether short-term momentum is accelerating or decelerating. A positive MACD histogram bar means upward momentum is increasing. A negative bar means downward momentum is increasing.',
+    example: 'MACD histogram +0.0012 → upward momentum is building → this check passes for BUY.'
+  },
+  'ind-market-activity': {
+    title: 'Market Activity (Volume)',
+    body: 'Compares current trading volume to the 20-bar average. Volume above 1.1× average means more participants are active — moves backed by volume are more reliable. Volume below average = fewer participants = less conviction.',
+    example: 'Volume 1.8× average → unusually high activity → strong confirmation of the signal direction.'
+  },
+  'ind-price-range': {
+    title: 'Price Range Position (Bollinger Bands)',
+    body: 'Shows where price sits within its recent trading range. Near the upper band = price is extended upward. Near the lower band = price is extended downward. For a BUY, DotVerse checks that price is not already at the upper band (stretched).',
+    example: 'Price at 35% of Bollinger range → not stretched → room to move upward → BUY check passes.'
+  },
+  'ind-price-swing': {
+    title: 'Price Swing Size (ATR Volatility)',
+    body: 'Measures current volatility relative to normal. High ATR means big candles and wider swings — which means wider stops are needed. This check always passes (it is informational) — it adjusts your stop loss size, not the signal direction.',
+    example: 'ATR 2.3% of price → moderate volatility → normal stop loss width applies.'
+  },
+  'ind-htf-trend': {
+    title: 'Big-Picture Trend (Daily Chart)',
+    body: 'Checks the 1-day timeframe for overall trend direction. If the daily chart agrees with your trade direction, the wind is at your back. If it disagrees, you are fighting the bigger trend — lower probability.',
+    example: '4H BUY signal + 1D chart bullish → both timeframes agree → higher-conviction setup.'
+  },
+  'ind-signal-agreement': {
+    title: 'Signal Agreement (Confluence Score)',
+    body: 'The overall count: how many of the 8 DotVerse checks agree with the signal direction. Minimum required: 65% (at least 6 of 8 for most setups, 5 of 8 on some edge cases). The higher this number, the more confident the signal.',
+    example: '7 of 8 checks agree → 87.5% confluence → CONFIRMED signal with high conviction.'
+  },
+
+  // ── ORDER FLOW (Understand tab) ───────────────────────────────────────────
+  'order-flow-cvd': {
+    title: 'CVD Trend — Cumulative Volume Delta',
+    body: 'CVD tracks whether more volume is going through at the ask (buyers lifting) versus the bid (sellers hitting). Rising CVD = net buying pressure over time. Falling CVD = net selling pressure. It reveals whether the price move is backed by real institutional order flow.',
+    example: 'Price rising + CVD rising → genuine buyers driving the move. Price rising + CVD falling → price is being pushed up with fewer buyers → potential fake-out.'
+  },
+  'order-flow-buy-pressure': {
+    title: 'Buy Pressure %',
+    body: 'The percentage of the last period\'s volume that came from buyers (orders executed at the ask price). Above 55% means buyers dominated. This is estimated from OHLCV data — it approximates real order flow.',
+    example: 'Buy pressure 68% → more than two-thirds of volume was buying → strong upward momentum.'
+  },
+  'order-flow-sell-pressure': {
+    title: 'Sell Pressure %',
+    body: 'The percentage of the last period\'s volume that came from sellers (orders executed at the bid price). Above 55% means sellers dominated. When sell pressure spikes on a BUY signal, the move may be losing momentum.',
+    example: 'Sell pressure 71% on a rally → sellers are absorbing the buying → caution, momentum is fading.'
+  },
+  'order-flow-real-buyer': {
+    title: 'Real Buyer',
+    body: 'Volume confirmed by EMA alignment — price moved up AND the short-term EMA agrees the trend is up. This is buying pressure with technical confirmation. "Real" means the buying is supported by market structure, not just random noise.',
+    example: 'Real buyer 62% → genuine upward pressure confirmed by trend structure.'
+  },
+  'order-flow-poser-buyer': {
+    title: 'Poser Buyer',
+    body: 'Volume that appears bullish but is NOT confirmed by EMA alignment. Price ticked up but the trend structure did not follow through. These are weak buyers who may panic and sell at the first pullback.',
+    example: 'Poser buyer 38% → some buying but without conviction — those buyers will exit quickly on any dip.'
+  },
+  'order-flow-real-seller': {
+    title: 'Real Seller',
+    body: 'Selling pressure confirmed by EMA alignment — price moved down AND the short-term EMA agrees the trend is down. Genuine institutional or professional selling with structural confirmation.',
+    example: 'Real seller 55% → confirmed downward pressure → a SELL signal here has structural backing.'
+  },
+  'order-flow-poser-seller': {
+    title: 'Poser Seller',
+    body: 'Selling volume that is NOT confirmed by EMA structure. Price dipped but the trend did not break. These sellers are likely to cover (buy back) quickly, potentially causing a sharp bounce.',
+    example: 'Poser seller 45% → selling without structural confirmation → bounce likely as weak sellers cover.'
+  },
+  'candle-footprint': {
+    title: 'Candle Footprint — Delta Buy−Sell',
+    body: 'Each bar in this chart shows the net difference between buying and selling volume for that candle (buy volume minus sell volume). Green bars = net buying. Red bars = net selling. The pattern reveals whether the most recent candles were driven by buyers or sellers — giving you a picture of momentum behind the price move.',
+    example: 'Three green bars growing taller → buying pressure is increasing each candle → momentum is building upward.'
+  },
+
+  // ── MTF ALIGNMENT ─────────────────────────────────────────────────────────
+  'mtf-row': {
+    title: 'Multi-Timeframe Alignment',
+    body: 'Shows whether the signal direction holds across 6 timeframes: 15M, 1H, 4H, 1D, 1W, 1M. When multiple timeframes all show the same direction, the setup has much higher probability — larger players on the bigger timeframes are moving in the same direction as your trade.',
+    example: 'BUY signal on 1H + 4H BUY + 1D BUY + 1W BUY → 4 timeframes aligned → very high conviction. BUY on 1H but SELL on 4H → fighting the bigger trend → lower probability.'
+  },
+  'mtf-alignment': {
+    title: 'Multi-Timeframe Alignment',
+    body: 'Each cell shows the trend direction for that timeframe. Click any cell to analyse that timeframe directly. — means real data was unavailable for that period — DotVerse only shows honest signals, never estimates. The more cells matching your signal direction, the stronger the setup.',
+    example: '5 of 6 timeframes showing BUY → strong alignment → the signal is confirmed across all major timeframes.'
+  },
+
+  // ── SIGNAL REASONING ──────────────────────────────────────────────────────
+  'signal-reasoning': {
+    title: 'Signal Reasoning',
+    body: 'A plain-English summary of why DotVerse fired this signal. It states which indicators agreed, what the momentum picture looks like, and what the higher timeframe trend says. Read this before trading — it tells you exactly what market conditions produced this signal.',
+    example: '"RSI at 58 (neutral, room to rise), MACD histogram positive, EMA 9 above EMA 21, 1D trend bullish, volume 1.4× average — 6 of 8 checks agree BUY."'
+  },
+
+  // ── RSI GAUGE ─────────────────────────────────────────────────────────────
+  'rsi-gauge': {
+    title: 'RSI Gauge',
+    body: 'A visual representation of momentum. The needle points toward OVERSOLD (left, red zone, RSI < 30), NEUTRAL (center, grey zone, RSI 30–70), or OVERBOUGHT (right, green zone, RSI > 70). Neutral zone = the most reliable zone for taking new trades in either direction.',
+    example: 'Needle pointing to 65 (upper neutral) on a BUY signal → momentum is healthy and not stretched → safe to enter.'
+  },
+
+  // ── MACRO / VIX ───────────────────────────────────────────────────────────
+  'macro-context': {
+    title: 'Market Fear Level (VIX)',
+    body: 'VIX is the Wall Street "fear gauge" — it measures how much uncertainty exists in global markets. When VIX is high, markets are panicking and technical signals become less reliable because fear overrides chart patterns. DotVerse uses VIX to protect you automatically: in calm markets it trades normally, in nervous markets it tightens its signal threshold, in panicking markets it suppresses signals entirely.',
+    example: 'VIX 12 (calm) → GOOD TO TRADE. VIX 22 (nervous) → EXTRA CAUTION, threshold raised. VIX 28 (panic) → SIGNALS OFF, wait for calm.'
+  },
+  'macro-full': {
+    title: 'Markets Calm — Good to Trade',
+    body: 'VIX is below 20. Market conditions are stable and technical patterns are behaving normally. DotVerse is operating at full confidence — signals are fired at the standard 65% confluence threshold.',
+    example: 'VIX 13 → calm → all signals fire normally.'
+  },
+  'macro-reduced': {
+    title: 'Markets Nervous — Extra Caution',
+    body: 'VIX is between 20–25. There is elevated uncertainty in global markets. Price moves can be more erratic. DotVerse has raised the confidence threshold to 75% — only the strongest signals fire. Consider reducing position size by 25–50%.',
+    example: 'VIX 23 → nervous → DotVerse only fires signals with 75%+ confluence. On a $100 account, consider trading $50 size instead of normal.'
+  },
+  'macro-notrade': {
+    title: 'Markets in Panic — Signals Off',
+    body: 'VIX is above 25. Markets are in fear or panic mode. Technical signals break down — price moves are driven by emotion, not chart patterns. DotVerse has suppressed this signal to protect you. Wait for VIX to drop below 25 before trading.',
+    example: 'VIX 31 (panic) → DotVerse overrides signal to HOLD. On a $100 account that could mean DotVerse just saved you $10–30 by keeping you out of a chaotic move.'
+  },
+
+  // ── WHAT TO DO NEXT (Understand tab) ─────────────────────────────────────
+  'what-to-do-next': {
+    title: 'What To Do Next',
+    body: 'DotVerse\'s 6-step trading flow. Each step must be completed before moving to the next. Step 1: Discover a signal. Step 2: Read the signal card. Step 3: Understand it (you are here). Step 4: Calculate your position size. Step 5: Execute the trade. The flow exists so beginners never skip a step and trade with incomplete information.',
+    example: 'Never jump from Step 2 (reading the signal) directly to Step 5 (executing). Understanding the signal and sizing the trade are mandatory — they define how much you risk.'
+  },
+
+  // ── ACCOUNT & RISK (Size tab) ─────────────────────────────────────────────
+  'calc-account': {
+    title: 'Account Size ($)',
+    body: 'Your total trading capital — the amount you have available to trade. DotVerse uses this to calculate how much you risk per trade as a fixed dollar amount. Enter your real account value. If you have $10,000 in your trading account, enter 10000.',
+    example: '$10,000 account at 1% risk = $100 maximum loss per trade. At 2% = $200 maximum loss.'
+  },
+  'calc-risk-pct': {
+    title: 'Risk % Per Trade',
+    body: 'The percentage of your account you are willing to lose if this trade hits the stop loss. This is your most important decision. 1% (CONSERVATIVE) is recommended for beginners — it means you can lose 100 trades in a row and still have 37% of your account left. At 5% risk you can only absorb 14 consecutive losses before losing half your capital.',
+    example: '$10,000 account · 1% risk = $100 at risk · at 2% = $200 at risk · at 5% = $500 at risk.'
+  },
+  'risk-preset-conservative': {
+    title: 'CONSERVATIVE — 1% Risk',
+    body: '1% of your account per trade. At this level you can survive over 100 consecutive losses before losing more than half your account. The mathematically proven safe starting point for new traders. Your goal is longevity in the market — not one big win.',
+    example: '$10,000 account · 1% = $100 per trade. Lose 20 trades in a row → still have $8,179 left (82%).'
+  },
+  'risk-preset-standard': {
+    title: 'STANDARD — 2% Risk',
+    body: '2% of your account per trade. The industry standard for experienced traders with a proven strategy. At this level 20 consecutive losses would reduce a $10,000 account to approximately $6,676 (67%). Use this only after testing your strategy in demo for at least 3 months.',
+    example: '$10,000 account · 2% = $200 per trade. After 10 losses → $8,171 remaining.'
+  },
+  'risk-preset-aggressive': {
+    title: 'AGGRESSIVE — 3% Risk',
+    body: '3% of your account per trade. High-risk sizing used by professional traders who have statistical edge proven over hundreds of trades. At this level 10 consecutive losses reduce a $10,000 account to approximately $7,374 (74%). Not recommended until you have 6+ months of profitable trading history.',
+    example: '$10,000 account · 3% = $300 per trade. After 5 losses → $8,587 remaining.'
+  },
+  'risk-teach-panel': {
+    title: 'Risk Teaching',
+    body: 'This panel updates as you change the risk % input. It shows you exactly what the chosen % means in real dollar terms for your account size, and gives you survival math — how many losses in a row you could absorb before your account drops below 50%. Use this to choose a level you are genuinely comfortable with.',
+    example: 'Type 2.5% → panel shows "$250 at risk on $10k account · can absorb 37 losses before 50% drawdown."'
+  },
+  'calc-leverage': {
+    title: 'Leverage',
+    body: 'Multiplies your buying power. 10× leverage means $100 of your capital controls $1,000 of position value. Leverage amplifies both gains AND losses equally. Beginners: use maximum 2–5× leverage. Never use leverage above 10× until you fully understand position sizing.',
+    example: '$100 at 10× leverage = $1,000 position. If price drops 5%, you lose $50 (50% of your $100) — not just $5.'
+  },
+  'trade-size-field': {
+    title: 'Trade Size ($)',
+    body: 'How much of your own capital you want to put into this trade (before leverage). This auto-fills from Account Size × Risk % and is the most reliable way to size. You can override it manually but the risk % system is more mathematically sound for beginners.',
+    example: '$10,000 account · 1% risk = $100 trade size. With 10× leverage that controls $1,000 worth of the asset.'
+  },
+  'asset-type': {
+    title: 'Asset Type',
+    body: 'What you are trading. Each asset type has different position sizing rules. Crypto and Forex use units/lots. Stocks use shares. The position size formula changes significantly — this is why selecting the right asset type is critical for accurate sizing.',
+    example: 'Crypto BTC: position in units (0.0015 BTC). Forex EURUSD: position in lots (0.10 standard lot). Stocks AAPL: position in shares (12 shares).'
+  },
+  'contract-size': {
+    title: 'Contract Size (Forex)',
+    body: 'For forex trades, the contract size determines how many currency units one "lot" represents. Standard = 100,000 units (1 full lot), Mini = 10,000 units (0.1 lot), Micro = 1,000 units (0.01 lot). Beginners should start with Micro lots to limit exposure.',
+    example: 'Standard lot EURUSD: each pip = $10. Micro lot: each pip = $0.10. Beginners use Micro until they are consistently profitable.'
+  },
+
+  // ── SIZING RESULTS (Size tab) ──────────────────────────────────────────────
+  'calc-position-size': {
+    title: 'Lots / Units — Position Size',
+    body: 'How many lots (forex), units (crypto), or shares (stocks) to buy or sell. Enter this exact number into your MT5 platform. Getting this wrong is the most common beginner mistake — either entering too large a position (wipes your account on a single loss) or too small (your gains are meaningless).',
+    example: 'DotVerse says 0.05 lots on EURUSD → type 0.05 in the MT5 order volume field.'
+  },
+  'calc-money-at-risk': {
+    title: 'Money at Risk',
+    body: 'The exact dollar amount you will lose if price hits your stop loss. This is calculated as Account Size × Risk % and it is the most important number in trading. Every single trade, this number must be the same — it is your protection against a string of losses wiping you out.',
+    example: '$10,000 account · 1% risk = $100 at risk. Lose 10 trades in a row → $1,000 lost → still have 90% of your account.'
+  },
+  'calc-margin': {
+    title: 'Margin Required',
+    body: 'The capital your broker holds as security for your leveraged position. This money is temporarily frozen (not lost) while the trade is open. It is returned when you close the trade. Margin is NOT your maximum loss — your stop loss controls that.',
+    example: '0.10 lot EURUSD at 100:1 leverage → margin required = $100 (the broker holds $100 but you control $10,000 of currency).'
+  },
+  'calc-effective-rr': {
+    title: 'R:R — Risk:Reward Ratio',
+    body: 'How much you can gain versus how much you risk. Calculated from your entry, stop loss, and take profit levels. A ratio of 1:2 means for every $1 you risk, you can gain $2. Professional traders require at least 1:1.5 before taking a trade — below that the odds are not in your favour even with a good win rate.',
+    example: 'Risk $100 (SL distance) · Reward $250 (TP1 distance) = 1:2.5 ratio. Even with a 40% win rate this is profitable over many trades.'
+  },
+
+  // ── FLOW-SCALE / KELLY (Size tab) ─────────────────────────────────────────
+  'flow-scale': {
+    title: 'Flow-Scaled Sizing',
+    body: 'DotVerse has calculated an adjusted risk % for this specific trade based on its quality. It looks at three factors: (1) Confluence — how many indicators agree. (2) Risk:Reward — how favourable the entry vs target levels are. (3) Volume — whether buying/selling pressure confirms the signal. Strong on all three = scale up slightly. Weak on any = scale down.',
+    example: 'Default risk 2% · Confluence 84% · R:R 1:2.8 · Volume 1.6× → multiplier 1.2× → suggested risk 2.4%.'
+  },
+  'confluence-score': {
+    title: 'Confluence — Indicator Agreement',
+    body: 'How many of DotVerse\'s 7 indicators (RSI, EMAs, MACD, Bollinger, Supertrend, Volume, MTF Trend) point the same direction as the signal. Higher agreement = higher conviction = Flow-Scaling sizes up slightly. This is the single most important factor in the sizing engine.',
+    example: 'Confluence 87% → 7 of 8 indicators agree → strong signal → multiplier increases slightly above 1.0×.'
+  },
+  'kelly-badge': {
+    title: 'Kelly Criterion Sizing',
+    body: 'When DotVerse has backtest data for this specific asset and timeframe, it uses the Kelly Criterion — a mathematical formula that calculates the theoretically optimal position size based on your proven win rate and average win/loss ratio. Half-Kelly is used (half the theoretical optimal) to reduce volatility and protect against bad runs.',
+    example: 'Backtest: 58% win rate · avg win 2R · avg loss 1R → Full Kelly 16% → Half Kelly 8% → capped at 2.5% for safety.'
+  },
+
+  // ── RISK vs REWARD BAR (Size tab) ─────────────────────────────────────────
+  'rr-worst-case': {
+    title: 'Worst Case — If Stop Loss Hit',
+    body: 'The exact dollar amount you lose if price hits your stop loss. This is a fixed number determined by your account size and risk % — not by the market. By controlling this number, you control your survival in trading. Click to see a plain-English explanation of what this means for this specific trade.',
+    example: '$100 worst case on a $10,000 account = 1% loss. You would need 100 consecutive losses to lose your entire account.'
+  },
+  'rr-tp1': {
+    title: 'TP1 — First Target Profit',
+    body: 'The dollar gain if price reaches the first take profit level. Close 50% of your position here, move stop to breakeven, let the rest run. This is the highest-probability outcome — your trade has the best chance of reaching this level.',
+    example: 'Worst case −$100 · TP1 +$220 = 1:2.2 R:R. Even if you win only 40% of trades at this ratio, you are profitable.'
+  },
+  'rr-tp2': {
+    title: 'TP2 — Second Target Profit',
+    body: 'The dollar gain if price reaches the second take profit level. After taking 50% at TP1, hold the remaining 50% to TP2 with stop at breakeven. You cannot lose on this portion — the worst case is breakeven (stop at entry). Only realistic in trending market conditions.',
+    example: 'After TP1 exit (50%) → remaining position rides with zero risk to TP2 target.'
+  },
+  'rr-tp3': {
+    title: 'TP3 — Best Case Profit',
+    body: 'The maximum profit if price reaches the final target. After TP1 (50%) and TP2 (30%), the remaining 20% targets TP3. This only happens in strong trending markets. If price stalls before TP3, your trailing stop will close the position and lock in some additional gains above TP2.',
+    example: 'Risk $100 · TP3 $580 = 1:5.8 R:R at maximum. Rare but it happens in strong trends — one TP3 hit can cover 5 stop loss hits.'
+  },
+
+  // ── TP TABLE (Size tab) ───────────────────────────────────────────────────
+  'spread-cost': {
+    title: 'Spread Cost',
+    body: 'The broker\'s transaction fee, built into the bid/ask spread. Every trade costs this amount just to open. DotVerse deducts the spread from your effective take profit levels to show you real net profit, not theoretical profit. High spread on a tight R:R trade can make a "good" setup unprofitable.',
+    example: 'Forex spread 1.2 pips EURUSD = $12 per standard lot. On a 20-pip target, the spread takes 6% of your potential gain.'
+  },
+
+  // ── RISK OF RUIN (Size tab) ───────────────────────────────────────────────
+  'risk-of-ruin': {
+    title: 'Risk of Ruin',
+    body: 'The mathematical probability of losing your entire trading account at this risk % and win rate, over thousands of trades. At 1% risk with 50% win rate, risk of ruin is effectively zero. At 5% risk with 50% win rate, risk of ruin rises dramatically. This is why professional traders use small risk % — to make ruin mathematically impossible.',
+    example: '1% risk · 50% win rate → Risk of Ruin ~0%. 5% risk · 50% win rate → Risk of Ruin ~13%. 10% risk · 50% win rate → Risk of Ruin ~45%.'
+  },
+
+  // ── TRADE DURATION (Size tab) ─────────────────────────────────────────────
+  'trade-duration-card': {
+    title: 'Trade Duration Estimate',
+    body: 'How long this trade is expected to take to resolve, based on the timeframe of the signal. A 4H signal typically plays out over 1–3 days. A 15M scalp resolves in under 2 hours. This helps you plan your monitoring schedule and avoid entering a trade you cannot watch for its required duration.',
+    example: '4H chart signal → estimated 1–3 days to reach TP1 → you can check morning and evening rather than watching the screen all day.'
+  },
+  'trade-session': {
+    title: 'Trading Session',
+    body: 'The active market session when this trade was analysed (London, New York, Asian, or overlap). Trading during high-volume sessions (London open, NY open) produces more reliable signals. Avoid entering trades in the final 30 minutes of a session when liquidity drops and spreads widen.',
+    example: 'London session (07:00–11:00 UTC) → highest forex liquidity → signals are most reliable during this window.'
+  },
+
+  // ── MULTI-TRADE LADDER (Size tab) ─────────────────────────────────────────
+  'ladder-row': {
+    title: 'Multi-Trade Ladder Row',
+    body: 'One simulated entry at a different risk % for the same signal. The ladder lets you plan a scaled entry — entering a small position now and adding more if price confirms the direction. Each row shows the exact lots/units, money at risk, and potential profit at each take profit level.',
+    example: 'Row 1: 0.5% risk, small entry to test the trade. Row 2: 1% risk, add if price holds. Row 3: 2% risk, full position once confirmed.'
+  },
+  'ladder-preset-conservative': {
+    title: 'Conservative Ladder (0.5% × 5)',
+    body: 'Five entries all at 0.5% risk. Total combined exposure: 2.5% of account. This is the safest way to scale into a trade — maximum 5 entries but each one is tiny. If the trade immediately goes against you, total loss is minimal.',
+    example: '$10,000 account · 5 × 0.5% = $50 each entry · total worst case = $250 loss if all 5 hit stop.'
+  },
+  'ladder-preset-balanced': {
+    title: 'Balanced Ladder (1/1.5/2/2.5/3%)',
+    body: 'Five entries at increasing risk %. Entry 1 is cautious, Entry 5 is aggressive. You commit more capital as the trade confirms. If price hits stop on the first entry without confirming, you lose only 1%.',
+    example: '$10,000 account · Entries: $100 / $150 / $200 / $250 / $300 · Total worst case all stop: $1,000.'
+  },
+  'ladder-preset-aggressive': {
+    title: 'Aggressive Ladder (1/2/3/4/5%)',
+    body: 'Five entries at high and rapidly increasing risk. Total worst case exposure is 15% of account — only use this if you have a very strong signal (CONFIRMED, 85%+ confluence, all MTF aligned) and a proven track record. Not suitable for beginners.',
+    example: '$10,000 account · Entries: $100/$200/$300/$400/$500 · Total worst case: $1,500 (15% of account).'
+  },
+
+  // ── AUTOMATION TOGGLES (Size tab + Automations tab) ───────────────────────
+  'auto-be': {
+    title: 'Break Even',
+    body: 'When price moves 1 ATR (one average candle-size) in your favour, DotVerse automatically moves your stop loss from its original position to your exact entry price. Once this fires, you literally cannot lose money on this trade — the worst outcome is you break even. The trade is now risk-free.',
+    example: 'Entry $68,200 · ATR $1,800 → price reaches $70,000 (moved 1 ATR) → stop auto-moves to $68,200 → you cannot lose regardless of what happens next.'
+  },
+  'auto-trail': {
+    title: 'Trailing Stop',
+    body: 'DotVerse moves your stop loss upward (for BUY) or downward (for SELL) as price continues in your favour. It locks in progressively more profit as the trade runs. The trailing stop never moves backward — only in the direction of the trade. When price reverses and hits the trailing stop, the position closes automatically.',
+    example: 'BUY entry $68,200 · price rises to $72,000 → trailing stop now at $70,200 · price rises to $75,000 → trailing stop at $73,000 · price reverses to $73,000 → trade closes, profit locked in.'
+  },
+  'auto-macro': {
+    title: 'Macro Event Guard',
+    body: 'Before high-impact economic news events (NFP, CPI, Federal Reserve interest rate decisions, GDP releases) within 2 hours, DotVerse checks your position\'s current profit and responds intelligently: small profit → close to protect capital, medium profit → move stop to breakeven, large profit → tighten trailing stop. Economic events can cause sudden price spikes that ignore technical levels.',
+    example: 'NFP in 90 minutes · trade has 0.8R profit → DotVerse moves stop to breakeven. NFP in 90 minutes · trade has 2.1R profit → DotVerse tightens trailing stop to lock in most gains.'
+  },
+  'auto-inval': {
+    title: 'Technical Invalidation',
+    body: 'If the EMA (trend indicator) or Supertrend (direction indicator) reverses against your trade direction on a CLOSED candle, DotVerse checks the higher timeframe for confirmation before acting. If both timeframes show the structure breaking down, it tightens your stop or closes the trade. Your original entry thesis is no longer valid.',
+    example: '4H BUY trade · EMA crosses bearish on a closed 4H candle AND 1D trend also flips bearish → trade thesis broken → DotVerse tightens stop to lock in remaining profit or closes if losing.'
+  },
+  'auto-sent': {
+    title: 'Sentiment Watch',
+    body: 'DotVerse monitors real-time financial news for this asset using Finnhub\'s news feed. It uses AI (DeepSeek) to classify each headline as positive, neutral, or negative. If 3 or more negative headlines appear within 2 hours, it partially closes your position to lock in gains before sentiment drives the price lower.',
+    example: '3 negative headlines: "SEC investigates exchange", "Whale wallet moves $500M to exchange", "Regulatory crackdown" → DotVerse closes 25% of position to protect profit before news impact hits price.'
+  },
+  'auto-recommended': {
+    title: 'DotVerse Recommendation',
+    body: 'Based on this signal\'s trade type, confidence score, volatility, and market conditions, DotVerse has pre-selected the automations most likely to protect this specific trade. These are not random defaults — they are computed from the signal data. You can override any toggle, but the recommendations represent DotVerse\'s best assessment of what this trade needs.',
+    example: 'Swing trade, 82% confidence, high volatility → DotVerse recommends: TRAIL ON (ride the trend), MACRO ON (hold through news), INVAL ON (close if structure breaks). BE skipped (high vol = price may not reach 1 ATR before reversing).'
+  },
+
+  // ── AGENT SIZING CARD (Size tab) ──────────────────────────────────────────
+  'agent-sizing-card': {
+    title: 'Agent Sizing Assessment',
+    body: 'After a Verdict analysis, DotVerse\'s AI agents review the signal specifically for sizing decisions. They consider: is this the right time to take this trade? Is the entry level reasonable? Is the risk:reward attractive? Their combined assessment appears here as a final checkpoint before you commit capital.',
+    example: 'Agent consensus: "Entry is near a key support level with strong confluence. R:R of 1:2.4 is favourable. Recommend full position size per your risk parameters."'
+  },
+
+  // ── VERDICT AGENT CARDS (Size tab + Verdict tab) ──────────────────────────
+  'verdict-agent-card': {
+    title: 'Verdict Agent',
+    body: 'One of DotVerse\'s specialised AI agents analysing this trade from a specific perspective: technical analysis, macro environment, risk management, sentiment, or strategy alignment. Each agent casts an independent vote (BUY/SELL/HOLD) with its reasoning. The consensus determines the final Verdict.',
+    example: 'Technical Agent: BUY — "EMA structure bullish, RSI neutral, MACD histogram positive." Macro Agent: HOLD — "VIX elevated, NFP in 3 hours." Consensus: 6 of 8 agents BUY → Verdict BUY with caution note.'
+  },
+
+  // ── MARKET TAB ─────────────────────────────────────────────────────────────
+  'fear-greed': {
+    title: 'Fear & Greed Index',
+    body: 'A composite score from 0 (Extreme Fear) to 100 (Extreme Greed) that measures the overall emotional state of the crypto/stock market. Extreme Fear = markets are oversold and may bounce (potential BUY opportunity). Extreme Greed = markets are overbought and may correct (potential SELL opportunity). Best used as a contrarian indicator.',
+    example: 'Fear & Greed 18 (Extreme Fear) → historically this has been a good time to look for BUY setups. Fear & Greed 88 (Extreme Greed) → markets are euphoric, consider taking profits.'
+  },
+  'market-conditions': {
+    title: 'Market Conditions',
+    body: 'DotVerse\'s assessment of the overall market environment right now. TRENDING = clear directional movement, technical signals are reliable. MIXED = cross-currents, signals have lower conviction. RISK-OFF = defensive market, most assets falling, avoid new BUY trades.',
+    example: 'TRENDING green → good conditions for following signals. MIXED amber → use smaller sizes, be selective. RISK-OFF red → wait for conditions to improve before entering new trades.'
+  },
+
+  // ── SCANNER ────────────────────────────────────────────────────────────────
+  'scanner-table': {
+    title: 'Market Scanner',
+    body: 'DotVerse scans multiple assets and timeframes simultaneously using its full indicator engine. Every result shown has already passed through the same 65% confluence gate as the main signal. Click a result to load it onto the Signal tab for full analysis.',
+    example: 'Scanner shows BTC 4H BUY 82% confidence → click to load → view full signal card with entry/SL/TP levels.'
+  },
+  'scanner-tf-cell': {
+    title: 'Timeframe Cell',
+    body: 'Each cell shows the DotVerse signal for that asset on that specific timeframe. Click the cell to run a full analysis on that exact combination. The signal shown is a real DotVerse verdict — the same algorithm as the main signal tab, not a simplified pre-screen.',
+    example: 'ETH 1H: SELL · ETH 4H: BUY — conflicting timeframes. Click 4H BUY to see full analysis and decide which timeframe to trade.'
+  },
+
+  // ── MARKET TAB — additional ────────────────────────────────────────────────
+  'market-top-opportunities': {
+    title: 'Top Opportunities',
+    body: 'Assets where DotVerse has detected a high-confidence signal right now across all asset classes it monitors. Sorted by signal strength — highest confidence first. Tap any row to jump straight to that signal on the Signal tab.',
+    example: 'BTC-USD BUY 88% — ETH-USD BUY 79% — EURUSD SELL 71% · click BTC row → Signal tab loads BTC BUY signal instantly.'
+  },
+  'market-latest-news': {
+    title: 'Latest News',
+    body: 'Real-time financial headlines fetched from Finnhub\'s news feed. DotVerse uses AI to scan these headlines for sentiment that may move the assets you are watching. A spike in negative headlines for an asset you hold is an early warning sign — the Sentiment automation acts on this data automatically.',
+    example: 'Headline: "Fed signals rate hold" — neutral for equities. Headline: "Exchange hack reported" — negative for crypto. 3 or more negative headlines in 2 hours triggers the Sentiment automation.'
+  },
+
+  // ── UNDERSTAND TAB — advanced indicator rows ───────────────────────────────
+  'ind-adv-rsi': {
+    title: 'RSI — Relative Strength Index',
+    body: 'Measures momentum. Above 70 = overbought (price has risen sharply — may pull back). Below 30 = oversold (price has fallen sharply — may bounce). Between 30–70 = neutral momentum. DotVerse uses RSI 14 for most assets and RSI 10 for crypto, which is more sensitive to fast crypto moves.',
+    example: 'RSI 74 on a BUY signal → momentum is high but approaching overbought. Valid trade but size smaller — less room to run before a pullback.'
+  },
+  'ind-adv-ema': {
+    title: 'EMA — Exponential Moving Averages',
+    body: 'Two moving averages track the trend direction. The fast EMA reacts quickly to price changes. The slow EMA shows the bigger trend. Fast above slow = uptrend. Fast crosses below slow = downtrend starting. DotVerse uses 9/21 for forex and stocks, 7/14 for crypto.',
+    example: 'Fast EMA $67,200 · Slow EMA $65,800 → fast above slow → uptrend confirmed. A BUY signal with both EMAs stacked correctly has a higher success rate than a BUY against the trend.'
+  },
+  'ind-adv-macd': {
+    title: 'MACD — Moving Average Convergence Divergence',
+    body: 'Shows momentum and trend direction together. MACD line above the signal line with positive histogram bars = bullish momentum building. MACD crosses below signal line = momentum shifting bearish. DotVerse uses MACD as one of 7 votes in the confluence calculation.',
+    example: 'MACD histogram turning positive on a BUY signal → momentum confirming the direction. Histogram turning negative while still in a trade → momentum may be fading — watch closely.'
+  },
+  'ind-adv-volume': {
+    title: 'Volume',
+    body: 'The number of units traded in the current period compared to the recent average. High volume confirms a price move has real participation — not just a few large orders in a thin market. Low-volume signals carry higher reversal risk.',
+    example: 'Volume 2.4× average on a breakout BUY = strong confirmation — institutions are participating. Volume 0.6× average on a BUY = weak — the move is happening on thin air.'
+  },
+  'ind-adv-bollinger': {
+    title: 'Bollinger Bands',
+    body: 'Three bands drawn around price: a middle band (20-period average) and upper/lower bands 2 standard deviations away. Price near the upper band = extended upside. Price near the lower band = extended downside. Price breaking outside the bands with volume = strong continuation. Price inside narrow bands = breakout building.',
+    example: 'Price touching upper band on a BUY signal → strong momentum but close to overextension. TP1 is the safer target here rather than going for TP3.'
+  },
+  'ind-adv-atr-volatility': {
+    title: 'ATR Volatility',
+    body: 'Compares the current ATR against its own 50-period average. Above 130% = high volatility regime — prices are moving unusually fast, wider stops needed. Below 70% = low volatility regime — price is consolidating, breakout may be building. DotVerse uses this to adjust your stop loss distance automatically.',
+    example: 'ATR at 180% of average → high volatility → DotVerse widens the stop loss to avoid being stopped out by normal noise. ATR at 50% of average → tight market, expecting a squeeze breakout.'
+  },
+  'ind-adv-htf-trend': {
+    title: 'Higher Timeframe Trend',
+    body: 'The direction of the trend on the next timeframe up (e.g. if you are on 1H, this shows the 4H trend). Trading with the higher timeframe = higher probability. Trading against it = counter-trend setup — valid but requires more confirmation and tighter risk management.',
+    example: '1H signal BUY · 4H trend BULLISH → aligned → strong setup. 1H signal BUY · 4H trend BEARISH → counter-trend → reduce size, tighten stop, target only TP1.'
+  },
+  'ind-adv-confluence': {
+    title: 'Confluence Score',
+    body: 'The percentage of all DotVerse\'s indicator votes pointing in the same direction. The minimum to fire a BUY signal is 65%. At 80%+ this is a high-conviction trade. Below 65% = HOLD. This single number summarises the entire technical picture into one actionable metric.',
+    example: 'Confluence 82% BUY → 6–7 of 8 indicators agree → high conviction. Confluence 66% BUY → bare minimum threshold → small size, conservative target (TP1 only).'
+  },
+
+  // ── ORDER FLOW — additional ───────────────────────────────────────────────
+  'order-flow-volume-vs-avg': {
+    title: 'Volume vs Average',
+    body: 'Compares current period volume to the 20-period rolling average. Above 100% = more activity than usual — the market is paying attention to this move. Below 100% = the move is happening on weak participation. A signal firing on high relative volume has more conviction.',
+    example: 'Volume 165% of average on a breakout candle → strong participation. Volume 45% of average → price moved but barely anyone traded — thin move, higher reversal risk.'
+  },
+  'order-flow-volatility': {
+    title: 'Volatility (ATR)',
+    body: 'How much the asset is moving per candle right now, as a percentage of price. Higher = bigger candles, wider swings. This directly affects your stop loss — in high volatility your stop must be wider to survive normal price noise. DotVerse calibrates stops using ATR automatically.',
+    example: 'Volatility 3.2% on BTC → each candle moves roughly $2,200 on a $68,000 BTC. A 0.5% stop would be wiped out instantly by normal price noise regardless of trade direction.'
+  },
+
+  // ── MTF — individual timeframe cell ──────────────────────────────────────
+  'mtf-cell': {
+    title: 'Timeframe Signal',
+    body: 'The DotVerse signal computed independently for this specific timeframe. Green = BUY · Red = SELL · Grey = HOLD/NEUTRAL. When multiple timeframes show the same direction, the trade has high alignment. One timeframe against the others is a warning — that timeframe\'s trend may pull back against your trade.',
+    example: '15M BUY · 1H BUY · 4H BUY → all aligned → maximum conviction. 15M BUY · 1H HOLD · 4H SELL → only short-term momentum is up, bigger picture is against you → risky trade.'
+  },
+
+  // ── WATCHLIST ─────────────────────────────────────────────────────────────
+  'watchlist-row': {
+    title: 'Watchlist Asset',
+    body: 'An asset you have added to your personal watchlist for monitoring. DotVerse\'s automatic scanner sweeps watchlist assets every 15 minutes. If a high-confidence signal fires, you receive a Telegram notification immediately without needing to keep the app open.',
+    example: 'Add BTC-USD to watchlist → scanner checks BTC every 15 min → BTC hits 85% BUY confluence → Telegram notification sent to your phone with entry, stop, and target levels.'
+  },
+  'watchlist-toggle': {
+    title: 'Watch / Unwatch',
+    body: 'Add or remove this asset from your watchlist. When watching, DotVerse\'s automated scanner monitors this asset and sends Telegram alerts for high-confidence signals. You do not need to keep the app open — alerts come to your phone.',
+    example: 'Click watch on EURUSD → DotVerse adds it to your monitored list → any high-confidence EURUSD signal triggers a Telegram message with full signal details.'
+  },
+
+  // ── JOURNEY STEPS — individual ───────────────────────────────────────────
+  'journey-step-discover': {
+    title: 'Step 1 — Discover',
+    body: 'Your first step is finding a signal. Use the Market tab to see overall conditions, then use the Scanner to find assets with high-confidence signals right now, or go directly to the Signal tab and analyse a specific asset.',
+    example: 'Open Market tab → Fear & Greed 45 (Neutral) → VIX green FULL TRADE → open Scanner → find ETH 4H BUY 79% → proceed to Step 2 Read Signal.'
+  },
+  'journey-step-read': {
+    title: 'Step 2 — Read Signal',
+    body: 'Read the full signal card. Check: What is the direction? What is the confidence? What trade type is this? What are entry, stop loss, and target levels? What is the R:R ratio? Is the macro badge green? Only proceed if all of these make sense to you.',
+    example: 'BUY · 82% CONFIRMED · Day Trade · Entry $3,200 · SL $3,050 · TP1 $3,450 · R:R 1:1.67 · VIX green → all conditions met → proceed to Understand.'
+  },
+  'journey-step-understand': {
+    title: 'Step 3 — Understand (You Are Here)',
+    body: 'This tab explains WHY DotVerse generated this signal. Read the indicator confluence (how many checks agree), the order flow (what buyers and sellers are actually doing), and the multi-timeframe alignment (are higher timeframes confirming the direction?). Do not proceed to sizing until the thesis is clear to you.',
+    example: 'Confluence 82% BUY · Order flow real buyers dominating · 4H and 1D both bullish → thesis confirmed → move to Size tab.'
+  },
+  'journey-step-size': {
+    title: 'Step 4 — Size Your Trade',
+    body: 'The Size tab calculates exactly how many lots or units to buy, how much money you are risking, and what you stand to gain at each take profit. Enter your account size and risk percentage — DotVerse does the rest. Never skip this step. Trading without correct position sizing is gambling.',
+    example: 'Account $5,000 · Risk 1% → DotVerse calculates: risk $50, position 0.03 lots, margin $152, TP1 profit $83. You know the exact numbers before you touch your broker.'
+  },
+  'journey-step-execute': {
+    title: 'Step 5 — Execute',
+    body: 'Open MT5 and enter the trade using the exact numbers DotVerse calculated: entry price, stop loss, lot size, take profit targets. Or use the automation engine — set your watch and DotVerse will monitor and manage the trade for you after entry.',
+    example: 'MT5: New Order → Buy Limit 3200 → SL 3050 → TP 3450 → Lots 0.03 → Place. Or: click "Set Watch" in DotVerse → enable TRAIL and BE → DotVerse manages from here.'
+  },
+
+  // ── SIZE TAB — additional ────────────────────────────────────────────────
+  'size-live-price-bar': {
+    title: 'Live Price',
+    body: 'The current market price, updated in real time. Shows drift (how far price has moved from the signal\'s entry level) and status (ENTRY ZONE = price is near entry and valid to trade, IN PROFIT = if you had entered you would be winning, AWAY FROM ENTRY = price has drifted, reconsider timing).',
+    example: 'Signal entry $68,200 · Live price $68,450 → drift +$250 → slight premium above entry. Consider waiting for a pullback toward $68,200 before entering to preserve the original R:R.'
+  },
+  'size-direction-long': {
+    title: 'LONG (Buy)',
+    body: 'You are buying, expecting the price to rise. You profit when price moves above your entry. Stop loss is below entry — if price falls to that level the trade closes with a controlled loss. Matches a BUY signal from the Signal tab.',
+    example: 'Long BTC at $68,200 · SL $65,800 · TP1 $72,000 → if price rises to $72,000 you gain $3,800. If price falls to $65,800 you lose $2,400 — your controlled maximum loss.'
+  },
+  'size-direction-short': {
+    title: 'SHORT (Sell)',
+    body: 'You are selling, expecting the price to fall. You profit when price moves below your entry. Stop loss is above entry — if price rises to that level the trade closes. Matches a SELL signal. Shorting is more advanced — price can rise indefinitely but can only fall to zero.',
+    example: 'Short EURUSD at 1.0850 · SL 1.0920 · TP1 1.0720 → price falls to 1.0720 you gain 130 pips. Price rises to 1.0920 you lose 70 pips — controlled maximum loss.'
+  },
+  'size-current-price': {
+    title: 'Current Price',
+    body: 'The live market price at the moment you are viewing the Size tab. If current price has moved significantly past the signal\'s entry, the original R:R has changed. Always check whether the entry is still valid before placing the trade.',
+    example: 'Signal entry $68,200 · Current price $71,500 → price already moved $3,300 beyond entry → original R:R no longer applies → wait for a new signal rather than chasing.'
+  },
+  'size-summary-box': {
+    title: 'Trade Summary',
+    body: 'Your complete trade parameters in one place: account balance, risk percentage, exact dollar amount at risk, number of lots or units to trade, margin your broker will hold, and R:R at TP1. These are the numbers you enter into your MT5 platform to place the trade.',
+    example: 'Balance $10,000 · Risk 1% · At Risk $100 · Lots 0.05 · Margin $320 · R:R 1:2.1 → enter these numbers into MT5 exactly as shown.'
+  },
+  'size-trade-scenario': {
+    title: 'Trade Scenarios',
+    body: 'Four possible outcomes for this trade: (1) SL hit — your controlled loss. (2) TP1 hit — your gain at the first target. (3) TP2 hit — your gain if you hold longer. (4) TP3 hit — your maximum gain if the full trend plays out. Knowing all four outcomes before placing the trade is a professional discipline.',
+    example: 'If SL: −$100 · If TP1: +$167 · If TP2: +$290 · If TP3: +$440 → you know your worst and best case before you commit a single dollar.'
+  },
+  'size-submit-mt5': {
+    title: 'Submit All to MT5',
+    body: 'Sends all ladder rows to your connected MT5 Expert Advisor simultaneously. Each row becomes a separate pending order with its own entry, stop loss, lot size, and take profit. The EA places all orders within seconds. Requires the DotVerse EA running on your MT5 terminal.',
+    example: '3-row ladder → click Submit All → EA places 3 pending orders: 0.02 lots at entry, 0.03 lots at entry, 0.01 lots at entry — all with individual SL and TP levels defined.'
+  },
+  'size-ladder-target': {
+    title: 'Target Selector',
+    body: 'Choose which take profit target this ladder row aims for: TP1 (most conservative, highest probability), TP2 (medium target), or TP3 (most ambitious). Each row in a multi-trade ladder can target a different level, letting you automatically scale out — close part of your position at each target as price rises.',
+    example: 'Row 1: 0.03 lots → TP1 (exits first, secures profit fast). Row 2: 0.02 lots → TP2 (held longer). Row 3: 0.01 lots → TP3 (the runner). All three together = automatic scaling-out strategy.'
+  },
+
+  // ── AUTOMATIONS TAB — execution parameters ───────────────────────────────
+  'auto-atr-multiplier': {
+    title: 'ATR Trailing Multiplier',
+    body: 'Controls how close the trailing stop follows price. 1.0× ATR = tight trail, locks in profit quickly but may close the trade during normal fluctuations. 2.0× ATR = wider trail, gives more breathing room but locks in less profit. DotVerse default is 1.0×.',
+    example: 'ATR $1,800 · Multiplier 1.0× → trail sits $1,800 below price. Price rises from $72,000 to $74,000 → trail moves from $70,200 to $72,200. Price drops to $72,200 → trade closes with that profit locked.'
+  },
+  'auto-macro-hours': {
+    title: 'Macro Event Threshold',
+    body: 'How many hours before a high-impact economic event DotVerse evaluates your open positions. At that window, DotVerse checks each position\'s profit and responds: small profit → close to protect capital, medium profit → move to breakeven, large profit → tighten trail.',
+    example: 'Set to 2 hours. NFP at 13:30 UTC. At 11:30 UTC DotVerse checks open positions → 2R profit → tightens trail to lock in gains. 0.3R profit → moves stop to breakeven.'
+  },
+  'auto-max-trades': {
+    title: 'Max Trades Per Day',
+    body: 'The maximum number of new positions DotVerse will allow in a single trading day. Prevents overtrading — one of the most common ways beginners compound losses. When the limit is reached, no new watches execute until the next trading day.',
+    example: 'Max 3 trades/day. You open 3 positions by 10:00 AM. New signal fires at 2:00 PM → DotVerse blocks execution → Telegram: "Daily trade limit reached — no new positions today."'
+  },
+  'auto-weekend-close': {
+    title: 'Weekend Close',
+    body: 'When enabled, DotVerse closes all open positions before markets close on Friday. This protects against weekend gap risk — price can jump significantly when markets reopen Monday due to weekend news. Recommended for forex and index positions. Less critical for crypto which trades 24/7.',
+    example: 'Friday 21:00 UTC (forex close) → weekend close enabled → DotVerse sends MT5 close commands for all open forex positions → no gap risk over the weekend.'
+  },
+  'auto-drawdown-pause': {
+    title: 'Drawdown Pause',
+    body: 'When your account equity falls by the specified percentage from its recent peak, DotVerse pauses all new trade execution. This prevents a losing streak from becoming catastrophic. The pause does not close existing positions — only stops new ones opening until you manually review and resume.',
+    example: 'Pause at 5%. Account peak $10,000. Equity drops to $9,500 → DotVerse pauses all automations → Telegram: "Drawdown limit reached. Review positions before resuming." You decide when to continue.'
+  },
+  'auto-watch-dashboard': {
+    title: 'Active Watch Dashboard',
+    body: 'Every position currently being monitored by the automation engine. Each row shows the asset, entry price, ATR at signal time, and which automation features are active for that specific trade. Amber chip = that automation is running. Grey chip = off for this trade.',
+    example: 'BTC-USD: entry $68,200 · ATR $1,800 · BE amber (active) · TRAIL amber (active) · MACRO grey (off) · SENT grey (off) → break even and trailing are protecting this trade automatically.'
+  },
+  'auto-watch-flag-chip': {
+    title: 'Automation Flag',
+    body: 'Whether a specific automation is enabled or disabled for this individual trade. Amber = active, running in the background and will fire when conditions are met. Grey = off for this trade. Settings here were saved when the watch was created from the Size tab.',
+    example: 'TRAIL amber, BE grey → trailing stop is adjusting automatically as price moves. Break even automation is not active — this trade was set up without it.'
+  },
+
+  // ── VERDICT TAB ───────────────────────────────────────────────────────────
+  'verdict-consensus': {
+    title: 'Consensus Action',
+    body: 'The combined verdict from all 8 of DotVerse\'s AI agents after independently analysing this trade. Each agent votes BUY, SELL, or HOLD from a different perspective (technical, macro, sentiment, risk, strategy). The consensus is the majority vote. Split votes signal uncertainty in one or more dimensions.',
+    example: '6 agents BUY · 1 HOLD · 1 SELL → consensus BUY with moderate confidence. All 8 agents BUY → near-unanimous consensus → highest conviction Verdict DotVerse can produce.'
+  },
+  'verdict-confidence-grade': {
+    title: 'Verdict Confidence Grade',
+    body: 'A letter grade summarising how strongly all 8 agents agree. Grade A = near-unanimous agreement across technical, macro, sentiment, and risk perspectives. Grade C or D = significant disagreement — technically valid trade but facing real headwinds from macro or sentiment.',
+    example: 'Grade A: all agents bullish → highest conviction. Grade C: technical agents bullish, macro agent bearish → technically valid but macro risk is present → reduce size or wait for macro clarity.'
+  },
+  'verdict-signal-review': {
+    title: 'DotVerse Signal Review',
+    body: 'A narrative summary combining the DotVerse technical signal with all 8 Verdict agents\' assessments. Explains in plain English: what the indicators are saying, what the macro environment looks like, what sentiment is doing, and whether the R:R is attractive right now. The most detailed explanation DotVerse provides for any single trade.',
+    example: '"BTC showing strong momentum, 82% confluence on 4H. HTF trend bullish. VIX calm. Sentiment neutral. R:R 1:2.4 is attractive. Recommended: standard size with BE automation enabled."'
+  },
+
+  // ── PORTFOLIO TAB ─────────────────────────────────────────────────────────
+  'portfolio-position-table': {
+    title: 'Position Table',
+    body: 'All open positions you have logged in DotVerse. Add a position when you open a trade in MT5 so DotVerse can track your total exposure, calculate portfolio-level risk, and include it in VaR and stress test calculations. Remove it when you close the trade.',
+    example: 'Add: BTC-USD · BUY · 0.05 BTC · Entry $68,200 → position included in VaR. Add AAPL long → both positions now in correlation and stress test calculations.'
+  },
+  'portfolio-var': {
+    title: 'Value at Risk (VaR)',
+    body: 'The maximum loss your portfolio is likely to experience on a normal trading day, expressed in dollars and as a percentage of your account. Calculated using 252 days of historical price volatility at 95% confidence — meaning 95 out of 100 days, your total loss across all positions will not exceed this number.',
+    example: 'VaR $340 (3.4% of $10,000) at 95% confidence → on a normal volatile day you are unlikely to lose more than $340 across all open positions. The other 5 days (extreme events) could exceed this.'
+  },
+  'portfolio-stress-test': {
+    title: 'Stress Test',
+    body: 'Simulates how much your portfolio loses if every asset suffers a severe simultaneous price shock. DotVerse applies asset-class shocks: crypto −30%, stocks −20%, forex −5%, indices −15%. The result shows your total loss in dollars under a market crisis. Use this to decide whether a crash would be survivable for your account.',
+    example: 'Positions: BTC 0.05 · AAPL 10 shares → stress test: BTC −30%, AAPL −20% → total crisis loss −$1,240 (12.4% of account). Too high? Reduce position sizes before a crisis hits.'
+  },
+  'portfolio-correlation': {
+    title: 'Correlation Heatmap',
+    body: 'Shows how closely your portfolio assets move together. +1.0 = always move together. −1.0 = always move in opposite directions. 0 = no relationship. Highly correlated assets (e.g. BTC and ETH) give less diversification than they appear — they fall together in a crash.',
+    example: 'BTC vs ETH: +0.87 → very high correlation → holding both is nearly double BTC exposure. BTC vs Gold: +0.12 → low correlation → gold provides real portfolio diversification.'
+  },
+  'portfolio-optimisation': {
+    title: 'Parameter Optimisation',
+    body: 'DotVerse runs a grid search to find the indicator settings (RSI period, ATR multiplier, EMA periods) that produced the best Sharpe ratio for each asset class over historical data. Results are updated periodically by the background optimisation worker and applied automatically when you analyse that asset class.',
+    example: 'Crypto optimal: RSI 10 · ATR 2× · EMA 7/14 · Sharpe 2.3. Forex optimal: RSI 14 · ATR 1.5× · EMA 9/21 · Sharpe 1.8. These settings are active whenever you run a crypto or forex analysis.'
+  }
+};
+// ─────────────────────────────────────────────────────────────────────────────
 </script>
 
 <!-- ══════════ ADMIN PANEL OVERLAY ══════════ -->
