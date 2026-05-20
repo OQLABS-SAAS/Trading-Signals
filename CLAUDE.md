@@ -34,6 +34,15 @@ Beginners rely on DotVerse not just to identify a trade, but to **educate them a
 ---
 ## CORE OPERATING PRINCIPLES (apply every session, every fix)
 
+### 0. COMPREHENSIVE PLAN FIRST — NON-NEGOTIABLE (added 2026-05-19)
+**Omar's explicit directive: fragmented work is prohibited.**
+
+- **Before starting ANY work**, read the master build plan (`CLAUDE.md` → COMPLETE MASTER BUILD PLAN section). Find where the requested task fits. If it is already there, execute it in plan order. If it is not there, add it to the correct phase position BEFORE writing a single line of code.
+- **One step at a time, in plan order.** Never skip ahead, never work on two phases simultaneously, never introduce commits that belong to a later phase.
+- **When Omar introduces a new task mid-session**: STOP current work. Consult the plan. Insert the new task at the correct position. Confirm with Omar where it fits. Then resume.
+- **Every commit maps to exactly one plan item.** The commit message must reference the plan label (e.g. `A1`, `C2`, `F3`). If you cannot name the plan label, the commit is not ready.
+- **The plan is the single source of truth.** Chat fragments, session notes, and inline ideas are NOT the plan until they are written into it.
+
 ### 1. PLan Node Default
 •⁠  ⁠﻿﻿Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 •⁠  ⁠﻿﻿If something goes sideways, STOP
@@ -242,35 +251,151 @@ Every recommendation, warning, calculation output, and automation action must be
 
 ---
 
-### WHERE WE ARE IN THE BUILD — 2026-05-19
+### WHERE WE ARE IN THE BUILD — 2026-05-19 (updated this session — HONEST STATE)
 
 **Source of truth: "DotVerse — What We're Building & In What Order" (10 steps)**
 
 | Step | Description | Status |
 |---|---|---|
-| IMMEDIATE | Fix .upper() crash + clear git lock | `.upper()` DONE (406e984). Git lock: user must run rm command. |
-| STEP 1 | Fix signal data pipeline (scanner trade_type/htf_bias, RSI/ATR dead code, server-side derivation) | S1b+S1c+S1f WRITTEN — pending commit. S1d+S1e (wire RSI/ATR) NOT YET DONE. |
-| STEP 2 | VIX Market Fear Gate (fetch, 3 zones, Telegram alert, badge) | NOT STARTED |
-| STEP 3 | Fix 3 small bugs: trailing default, flow-scaled loop, refresh flicker | **ALL DONE** — trailing=1.0 confirmed, flow-scaled fixed, flicker fixed |
-| STEP 4 | Plain-English guidance on every element (`window._dvGuide`, `dvGuideInit()`, `data-guide` attrs) | NOT STARTED — zero code |
-| STEP 5 | Full automation execution engine (MACRO/INVAL/SENT/BE/TRAIL in `run_watch_job`) | NOT STARTED |
-| STEP 6 | Signal quality: regime detection, session filter, signal expiry, spread modelling | NOT STARTED |
-| STEP 7 | Portfolio intelligence: win rate, correlation risk, drawdown, Telegram, auto-scanner | NOT STARTED |
-| STEP 8 | SMC: FVG, liquidity grab, displacement candle, CHOCH | NOT STARTED |
-| STEP 9 | Validation: cost review, Monte Carlo, sensitivity analysis, walk-forward testing | NOT STARTED |
-| STEP 10 | Long-term: tab cleanup, exit tracking, MT5/Telegram settings, tier gating, live news | NOT STARTED |
+| IMMEDIATE | Fix .upper() crash + clear git lock | ✅ DONE — `406e984` |
+| STEP 1 | Fix signal data pipeline | ✅ COMPLETE — S1a+S1b+S1c+S1f+B1+S1x all done and live verified. |
+| STEP 2 | VIX Market Fear Gate | ✅ COMPLETE — C1+C2+C3 live verified 2026-05-20. C3 badge improved 2026-05-20: collapsible onclick, plain-English money terms ($100/$50 examples), no truncation, async fallback for scanner path (C3b). |
+| STEP 3 | Fix 3 small bugs: trailing default, flow-scaled loop, refresh flicker | ✅ DONE — all three committed and verified |
+| STEP 4 | Plain-English guidance layer (Block G1) | ❌ NOT STARTED — zero code |
+| STEP 5 | Full automation execution engine | ⚠️ PARTIAL — A1/A2/A3/A4/D1/F1/F5 ✅ DONE (code-verified 2026-05-19). F2/F3/F4 ⚠️ Telegram keyboard only, not automatic. F6 ❌ not started. Resumes after B1→C1-C3→E1-E5. |
+| STEP 6 | Signal quality (N1–N4) | ❌ NOT STARTED |
+| STEP 7 | Portfolio intelligence (D5, N5, N6, D3, D6) | ❌ NOT STARTED |
+| STEP 8 | SMC structures (D7) | ❌ NOT STARTED |
+| STEP 9 | Validation (V1–V4) | ❌ NOT STARTED |
+| STEP 10 | Long-term phases (D–G) | ❌ NOT STARTED |
 
-**Current position: at the STEP 1 → STEP 2 boundary.**
-Next action: user clears git lock → commit pending changes (S1b+S1c+S1f+Optimise Reset) → complete S1d+S1e → STEP 2.
+---
 
-**🔒 IMMEDIATE BLOCKER — git lock files.** Two files blocking all commits. User must run from Terminal:
-```
-rm /Users/oq/Documents/trading-signals-saas/.git/index.lock
-rm /Users/oq/Documents/trading-signals-saas/.git/HEAD.lock
-```
-Bash sandbox cannot remove them (EPERM — owned by Mac host filesystem).
+### IMMEDIATE NEXT WORK — PHASE A → D (inserted 2026-05-19)
 
-**Last live-verified feature:** C1 — automation sub-rows rendering in Size tab ladder. Verified in browser 2026-05-17.
+These are the next 9 commits in strict execution order. Each one is unblocked and ready to implement. No bundling. One commit per line.
+
+**PHASE A — Complete the per-trade automation pipeline (Step 5 unblock)**
+
+| Label | File(s) | What | Verify |
+|---|---|---|---|
+| **A1** | `app.py` | `ALTER TABLE watches ADD COLUMN be_on/trail_on/macro_on/inval_on/sent_on BOOLEAN DEFAULT FALSE` in `_init_db` with `IF NOT EXISTS` | `/api/watches` response includes all 5 boolean fields |
+| **A2** | `app.py` + `index-v2-prototype.html` | `dvSetWatch()` sends `be_on/trail_on/macro_on/inval_on/sent_on` from `window._szLadderAuto[rowIdx]`. `POST /api/watches` saves them to DB. `list_watches()` returns them. | Set TRAIL ON for a row → execute watch → `/api/watches` shows `trail_on: true` |
+| **A3** | `app.py` | `run_watch_job` reads `watch["trail_on"]` (not global cfg) for trailing. `watch["sent_on"]` for SENT. `watch["macro_on"]` for macro. `watch["inval_on"]` for inval. `watch["be_on"]` for BE. All fall back to `False` if null. | Railway logs: per-watch flag respected (trail fires for watch with trail_on=true, not others) |
+| **A4** | `index-v2-prototype.html` | `avLoadWatchDash()` reads real `be_on/trail_on/macro_on/inval_on/sent_on` from `/api/watches` response. Active flags shown highlighted (amber), inactive greyed out. | Automations tab chips reflect actual DB state — TRAIL ON chip is amber for that watch |
+
+**PHASE B — Complete signal data wiring (Step 1 remainder)**
+
+| Label | File(s) | What | Verify |
+|---|---|---|---|
+| **B1** | `app.py` | Wire RSI zone (`oversold`/`neutral`/`overbought`) and ATR magnitude (`high_vol = atr_pct > 2%`) into `_recommend_automations_from_signal` conditionals. Currently extracted but dead code. | Click Optimise on high-RSI signal → BE recommendation changes. Click on high-volatility signal → TRAIL recommendation changes. |
+
+**PHASE C — VIX Market Fear Gate (Step 2)**
+
+| Label | File(s) | What | Verify |
+|---|---|---|---|
+| **C1** | `app.py` | `_get_vix_score()` fetches `^VIX` via yfinance. Redis-cached 15 min (`vix_score` key). Returns `{vix: float, score: int, zone: "FULL"/"REDUCED"/"NO_TRADE", message: str}`. Zones: VIX<12→FULL(95), 12–15→FULL(80), 15–20→REDUCED(60), 20–25→REDUCED(40), 25–30→NO_TRADE(20), >30→NO_TRADE(5). | Python sandbox: call `_get_vix_score()` → returns dict with correct zone for current VIX level |
+| **C2** | `app.py` | Dynamic confidence gate in `get_analysis()`. After `_get_vix_score()` call (cached — no latency): REDUCED zone → raise confluence gate to 75%. NO_TRADE zone → override signal to HOLD, add `macro_override: True` + plain-English message in response: "DotVerse has suppressed this signal — market fear (VIX X) is too high." | Analyze in NO_TRADE zone → response shows HOLD + macro_override = True |
+| **C3** | `app.py` + `index-v2-prototype.html` | `get_analysis()` returns `macro_context: {vix, score, zone, message}`. Signal card shows VIX badge: green (FULL), amber (REDUCED), red (NO_TRADE). Hover tooltip explains VIX in plain English. | Signal card shows correct colour badge matching current VIX zone |
+
+**PHASE D — Automatic BE execution (Step 5 completion)**
+
+| Label | File(s) | What | Verify |
+|---|---|---|---|
+| **D1** | `app.py` | In `run_watch_job`: if `watch["be_on"]` AND `abs(live_price - entry) >= atr` AND SL not already at/past entry → write `MT5Order(MODIFY, sl=entry)` + update DB + send Telegram plain-English message: "Break even activated on {ticker}. Stop loss moved to your entry at {entry}. You cannot lose on this trade now." Never fires twice (SL-at-entry check prevents it). | Sandbox: construct watch dict with be_on=True, price=entry+1.5×ATR → function writes MT5Order. Watch with be_on=False → no order written. |
+
+---
+
+### STEP 5 — AUTOMATION ENGINE: TRUE STATE (as of 2026-05-19 end of session)
+
+**What is actually done:**
+- `_szDefaultAuto()` returns all 5 flags OFF — `01b55a3` ✅
+- Automations tab: BE/TRAIL toggles removed from global tab, Section 6 renamed to "Execution Parameters" (2 sliders), Section 7 (live watch dashboard) added — `60ad65c` ✅
+- SENT block added to `run_watch_job` — `c6a2c13` ✅
+
+**What is HALF-BUILT (code written but broken end-to-end — does nothing in production):**
+- Per-trade flag state (`be_on/trail_on/macro_on/inval_on/sent_on`) exists in `window._szLadderAuto` on the Size tab BUT:
+  1. ❌ `watches` DB table is missing the 5 boolean columns — `ALTER TABLE` never run
+  2. ❌ `dvSetWatch()` does not send flag state — only sends `{ticker, asset_type, timeframe}`
+  3. ❌ `run_watch_job` reads `w.get("sent_on", False)` → always False → SENT never fires
+  4. ❌ Watch dashboard shows chips but they are permanently False — display only
+
+**What needs to happen to complete Step 5 (in order, one commit each):**
+
+| Sub-step | File | What | Verify |
+|---|---|---|---|
+| 5a | `app.py` | `ALTER TABLE watches ADD COLUMN be_on/trail_on/macro_on/inval_on/sent_on BOOLEAN DEFAULT FALSE` in `_init_db` with IF NOT EXISTS | `/api/watches` response includes 5 fields |
+| 5b | `app.py` + `index-v2-prototype.html` | `dvSetWatch()` sends per-row flag state → `POST /api/watches` saves to DB → `list_watches()` returns them | Size tab: watch with TRAIL ON → response shows `trail_on: true` |
+| 5c | `app.py` | `run_watch_job` reads `watch["trail_on"]` (not global cfg) for trailing. `watch["sent_on"]` for SENT. `watch["macro_on"]` for macro. `watch["inval_on"]` for inval. `watch["be_on"]` for BE. | Railway logs: per-watch flags respected |
+| 5d | `app.py` | Automatic BE logic: if `watch["be_on"]` AND price ≥ entry + 1 ATR AND SL not already at entry → MT5Order(MODIFY, sl=entry) + Telegram | Log confirms MT5Order written when condition met |
+| 5e | `index-v2-prototype.html` | Watch dashboard shows real flag state — active chips highlighted vs greyed out | Automations tab chips reflect actual DB state |
+| 5f | `app.py` | `PATCH /api/watches/{id}/automations` endpoint — lets trader toggle flags on existing watches without re-creating | Chip click on watch dashboard updates DB |
+
+**Next step to execute: 5a (DB migration)**
+
+---
+
+**Last live-verified commit:** `c6a2c13` — active on Railway, Deployment successful.
+
+---
+
+### ⚠️ AUTOMATION TRUTH MAP — CODE-VERIFIED 2026-05-19
+
+**FULLY AUTOMATIC (no user tap needed → fires → MT5 executes):**
+- ATR Trailing: `run_watch_job` checks `cfg.get("trailing_on")` from global DB settings → writes `MT5Order(TRAILING)` → EA executes within 5s. **100% REAL.**
+
+**ONE-TAP VIA TELEGRAM → MT5 (detection real, execution requires phone tap):**
+- Break Even: detection fires (confluence drop / EMA cross / ST flip) → Telegram keyboard sent → user taps "Move to Breakeven" → `MT5Order(MODIFY, sl=open_price)` written → EA executes. **Real but NOT automatic.**
+- Tighten SL: same path. **Real but NOT automatic.**
+- Close position: same path. **Real but NOT automatic.**
+- Partial close: same path. **Real but NOT automatic.**
+- Signal invalidation (confluence < 50%): detection real, Telegram sent, tap required.
+- EMA cross: detection real, Telegram sent, tap required.
+- Supertrend flip: detection real, Telegram sent, tap required.
+- Macro event proximity (GAP 2): detection real, Telegram keyboard sent, tap required.
+
+**NOT BUILT — zero code in run_watch_job:**
+- Automatic BE at 1 ATR move (no Telegram, fires itself): **DOES NOT EXIST**
+- SENT (Finnhub + DeepSeek sentiment loop): **DOES NOT EXIST**
+
+**DISPLAY ONLY — frontend state never reaches execution engine:**
+- Per-row Size tab automation toggles (BE/TRAIL/MACRO/INVAL/SENT): `dvSetWatch()` sends only `{ticker, asset_type, timeframe}` — toggle state NEVER saved with watch. Execution engine ignores per-row state entirely.
+- Per-row Optimise recommendations: real backend compute, stored in `window._szLadderAuto[rowIdx]` in-session only. Lost on page reload. Never persisted.
+
+**ROOT CAUSE OF CONFUSION:** "wired" was claimed when detection + notification was built. Detection ≠ automatic execution. This pattern repeated every session.
+
+---
+
+### ⚠️ NEW AUTOMATION ARCHITECTURE — DESIGNED 2026-05-19
+
+**Principle: Per-trade automation state must travel from Size tab → watch DB record → run_watch_job.**
+
+**Three-layer model:**
+1. **Per-trade toggles (Size tab):** Each ladder row has master ON/OFF + individual BE/TRAIL/MACRO/INVAL/SENT toggles. Default ALL OFF. Optimise sets them via backend compute. Trader overrides individually.
+2. **Watch record (DB):** `watches` table gets 5 new boolean columns: `be_on`, `trail_on`, `macro_on`, `inval_on`, `sent_on`. When trader executes a watch, per-row toggle state is saved with the watch.
+3. **Execution engine (run_watch_job):** Reads `watch.be_on`, `watch.trail_on` etc. per-watch. Falls back to False if null. Does NOT read global `_autoSettings` for per-trade on/off decisions.
+
+**Global Automations tab — TRANSFORMED (not deleted):**
+- REMOVE: BE/TRAIL/MACRO/INVAL/SENT on/off toggles (these move to per-trade)
+- KEEP: execution parameters (ATR multiplier, macro hours threshold, daily loss limit %, max trades, weekend close, drawdown pause, news filter, min confidence, Telegram alert prefs)
+- BECOMES: "Account Risk Controls + Execution Parameters" — the HOW, not the WHETHER
+- ADD: live dashboard view showing all active watches and their per-trade automation state
+
+**Automatic BE (new — currently missing):**
+Add to `run_watch_job`: if `watch.be_on` AND price has moved >= 1 ATR from entry AND SL not already at entry → automatically write `MT5Order(MODIFY, sl=open_price)` without Telegram tap.
+
+**SENT (new — currently missing):**
+Add to `run_watch_job`: if `watch.sent_on` → Finnhub news fetch → DeepSeek batch sentiment → if 3+ negative headlines → partial close via `MT5Order`.
+
+**Implementation order:**
+1. Add `be_on/trail_on/macro_on/inval_on/sent_on` columns to `watches` table
+2. Update `dvSetWatch()` to send per-row toggle state
+3. Update `run_watch_job` ATR trailing to read `watch.trail_on`
+4. Add automatic BE logic to `run_watch_job`
+5. Update INVAL/EMA/ST detection to check `watch.inval_on` before alerting
+6. Update MACRO detection to check `watch.macro_on` before alerting
+7. Build SENT loop (Finnhub + DeepSeek) gated on `watch.sent_on`
+8. Transform Global Automations tab to parameters-only + live watch dashboard
 
 ---
 
@@ -902,67 +1027,177 @@ elif watch.direction == 'SELL':
 
 ---
 
-### ABSOLUTE EXECUTION ORDER
+### COMPLETE MASTER BUILD PLAN — ALL PHASES (source of truth, 2026-05-19)
 
-Every item in this sequence must be runtime-verified in a live browser before the next begins. No bundling. One commit per change.
+**Rule: Every commit references its plan label (e.g. `A1`, `C2`). Work executes strictly in plan order. No skipping. No bundling. One commit per label.**
+**Status key: ✅ DONE (runtime verified) | ⚠️ PARTIAL | ❌ TODO**
+
+---
+
+#### STEP 0 — Foundation (ALL COMPLETE)
+
+| Label | Status | What | Commit |
+|---|---|---|---|
+| 0.1 | ✅ | Signal cards, scanner, chart, indicators, MTF alignment | — |
+| 0.2 | ✅ | Calculator: position sizing, risk coaching, RR display | — |
+| 0.3 | ✅ | Size tab: per-trade automation toggles (frontend display only) | — |
+| 0.4 | ✅ | Hover tooltips on TP1/TP2/TP3 | — |
+| 0.5 | ✅ | Portfolio: positions, VaR, stress test, correlation, parameter optimisation | — |
+| 0.6 | ✅ | Fix `.upper()` crash on numeric confidence | `406e984` |
+| 0.7 | ✅ | Clear git lock file | — |
+| 0.8 | ✅ | Fix 3 small bugs: trailing default 2×→1×, flow-scaled loop, refresh flicker | — |
+| 0.9 | ✅ | Automations tab: BE/TRAIL removed from global, Section 6 Execution Parameters, Section 7 Watch Dashboard | `60ad65c` |
+| 0.10 | ✅ | SENT pipeline structure added to `run_watch_job` | `c6a2c13` |
+| 0.11 | ✅ | Signal pipeline: scanner forwards `trade_type`/`htf_bias`, trade_type normalisation, Optimise reset | `e662226` |
+
+---
+
+#### STEP 1 — Fix Signal Data Pipeline (✅ COMPLETE — all items done, live verified 2026-05-20)
+
+| Label | Status | File(s) | What | Verify |
+|---|---|---|---|---|
+| S1a | ✅ | `app.py` | Numeric confidence fix — float/string safe | PATH A sandbox 9/9 pass |
+| S1b | ✅ | `app.py` | `/api/scan-list` response includes `trade_type` + `htf_bias` | Scanner response has both fields |
+| S1c | ✅ | `index-v2-prototype.html` | `loadScannerSignal()` maps `trade_type` + `htf_bias` into `_activeSignal` | Scanner → Optimise gets real trade type |
+| S1f | ✅ | `app.py` | `trade_type` normalisation: `"Day Trade"` → `"day"` before recommend engine | Recommend engine gets short-form token |
+| **B1** | ✅ | `app.py` | Wire RSI zone (`oversold`/`neutral`/`overbought`) AND ATR magnitude (`high_vol = atr_pct > 2%`) into `_recommend_automations_from_signal` BE and TRAIL conditionals. | Live verified 2026-05-19: high-vol (ATR 3%) → BE=false. RSI extreme adds plain-English warning to explanation. Commit: `fix(signal): B1` |
+| **S1x** | ✅ | `app.py` | `scan_list()` response dict missing `"timeframe": timeframe` field. Fixed: added `"timeframe": timeframe` to `_scan_one()` result dict. Live verified 2026-05-20: mixed 1H/4H labels confirmed in scanner feed. Commit: `fix(signal): S1x` | ✅ Signal feed shows mixed 1H / 4H / 1D labels matching actual scan TF |
+
+---
+
+#### STEP 2 — VIX Market Fear Gate (✅ COMPLETE — C1+C2+C3 live verified 2026-05-20)
+
+| Label | Status | File(s) | What | Verify |
+|---|---|---|---|---|
+| **C1** | ✅ | `app.py` | `_get_vix_score()`: fetches `^VIX` via yfinance, Redis-cached 15 min. Returns `{vix, score, zone, message}`. `/api/vix` endpoint added. | Live verified 2026-05-20: VIX badge renders amber "ELEVATED FEAR — THRESHOLD TIGHTENED" in signal card DOM. Commit: `feat(vix): C1` |
+| **C2** | ✅ | `app.py` | `get_analysis()` calls `_get_vix_score()` (cached — no latency). REDUCED→raise confluence gate 65→75%. NO_TRADE→override signal to HOLD + `macro_override: True` + plain-English message. | Live verified 2026-05-19: `/api/analyze` BTC-USD returns `macro_context:{vix:18.06,zone:"REDUCED"}` + `macro_override:false`. Both keys present. |
+| **C3** | ✅ | `app.py` + `index-v2-prototype.html` | `get_analysis()` returns `macro_context: {vix, score, zone, message}`. Signal card VIX badge: green (FULL), amber (REDUCED), red (NO_TRADE). | Initial: `feat(vix): C3`. Badge improvements 2026-05-20 (`fix(C3): VIX badge collapsible, plain-English money terms, no truncation`): (1) collapsible onclick toggle — compact header row + hidden message, click to expand. (2) Zone labels plain English: "MARKETS CALM — GOOD TO TRADE" / "MARKETS NERVOUS — EXTRA CAUTION" / "MARKETS IN PANIC — SIGNALS OFF". (3) All zone messages rewritten with $100/$50 money examples, no jargon. (4) C3b async fallback: when `macro_context` null (scanner path), fetches `/api/vix` async, stores in `_activeSignal.macro_context`, re-renders badge. |
+
+---
+
+#### STEP 3 — Fix 3 Small Bugs (✅ ALL COMPLETE)
+
+| Label | Status | What |
+|---|---|---|
+| 3.1 | ✅ | ATR trailing default 2×→1× |
+| 3.2 | ✅ | Flow-scaled sizing feedback loop fixed |
+| 3.3 | ✅ | Refresh-login flicker fixed |
+
+---
+
+#### STEP 4 — Plain-English Guidance Layer (❌ NOT STARTED)
+
+| Label | Status | File(s) | What | Verify |
+|---|---|---|---|---|
+| **E1** | ❌ | `index-v2-prototype.html` | `window._dvGuide` object — all tooltip content keyed by `data-guide`. Keys: `signal-buy/sell/hold`, `confidence-ring`, `confidence-confirmed/likely/hypothesis`, `trade-type-scalp/day/swing/position`, `entry-price`, `stop-loss`, `tp1/tp2/tp3`, `rr-ratio`, `bull-pct`, `bear-pct`, `atr-value`, `rsi-value`, `mtf-row`, `macro-context`, all calculator keys, all automation toggle keys. | `window._dvGuide['signal-buy']` returns `{title, body}` |
+| **E2** | ❌ | `index-v2-prototype.html` | `dvGuideInit()`: attaches mouseenter/mouseleave (desktop) + tap-toggle (mobile) to every `[data-guide]` element. Called after `szLadderRender()`, `renderSignal()`, `recalc()`, and every tab-show. | Hover over BUY badge → plain-English tooltip appears |
+| **E3** | ❌ | `index-v2-prototype.html` | `data-guide` attributes on all signal card elements | Every signal card field shows tooltip |
+| **E4** | ❌ | `index-v2-prototype.html` | `data-guide` attributes on all calculator elements | Every calculator field shows tooltip |
+| **E5** | ❌ | `index-v2-prototype.html` | `data-guide` attributes on all automation toggle elements | Every toggle shows tooltip explaining what it does |
+
+---
+
+#### STEP 5 — Full Automation Execution Engine (⚠️ PARTIAL — A1–A4 IMMEDIATE NEXT)
+
+**What is done:**
+- Size tab per-trade toggles render on frontend — `0.3` ✅
+- Automations tab transformed (global toggles removed, execution params + watch dashboard added) — `0.9` ✅
+- SENT block structure added to `run_watch_job` — `0.10` ✅
+
+**What is half-built (does nothing in production until A1–A4 run):**
+- `watches` DB table missing 5 boolean columns → `dvSetWatch()` sends no flags → `run_watch_job` always reads False → automation chips are display-only
+
+**Sub-steps in strict order:**
+
+| Label | Status | File(s) | What | Verify |
+|---|---|---|---|---|
+| **A1** | ✅ | `app.py` | DB columns + ALTER TABLE IF NOT EXISTS migrations in `_init_db`. `_load_watches_from_db()` loads flags into watch_registry. | Code-verified 2026-05-19 |
+| **A2** | ✅ | `app.py` + `index-v2-prototype.html` | `dvSetWatch()` sends `automations:{be,trail,macro,inval,sent}` + `entry_price` + `entry_atr`. `POST /api/watch` reads them, saves to watch_registry AND DB via `_save_watch_to_db()`. | Code-verified 2026-05-19 |
+| **A3** | ✅ | `app.py` | `run_watch_job` reads `w.get("trail_on")`, `w.get("be_on")`, `w.get("sent_on")`, `w.get("inval_on")`, `w.get("macro_on")` per-watch. All fall back to False. | Code-verified 2026-05-19 |
+| **A4** | ✅ | `index-v2-prototype.html` | `avLoadWatchDash()` reads real flag state from `/api/watches`. Active flags coloured, inactive greyed. `entry_price`/`entry_atr` shown. | Code-verified 2026-05-19 |
+| **D1** | ✅ | `app.py` | Automatic BE: `w.get("be_on")` AND price ≥ entry+ATR AND SL not at entry → MT5Order(MODIFY) + Telegram + Redis dedup (7-day). | Code-verified 2026-05-19 |
+| **F1** | ✅ | `app.py` | `auto_macro_response`, `auto_invalidation_act`, `auto_sentiment_watch`, `macro_hours_threshold`, `auto_close_pct` in AutomationSettings model. | Code-verified 2026-05-19 |
+| **F2** | ⚠️ | `app.py` | MACRO: `macro_on` gated, `_get_macro_context_inline` called, Telegram keyboard sent. **NOT YET:** automatic P&L-aware CLOSE/MOVE_BE/TIGHTEN_TRAIL without human tap. | Resumes after B1→C1-C3→E1-E5 |
+| **F3** | ⚠️ | `app.py` | INVAL: `inval_on` gated, EMA cross + ST flip + confluence drop detection, Telegram keyboard. **NOT YET:** automatic tighten/close based on HTF check. | Resumes after B1→C1-C3→E1-E5 |
+| **F4** | ⚠️ | `app.py` | SENT: `sent_on` gated, Finnhub+DeepSeek pipeline, Telegram keyboard ("Protect 25% now"). **NOT YET:** automatic partial close without human tap. | Resumes after B1→C1-C3→E1-E5 |
+| **F5** | ✅ | `app.py` | TRAIL: `trail_on` gated, TRAILING MT5Order queued to EA (10% ATR change gate), EA handles ratchet and close. | Code-verified 2026-05-19 |
+| **F6** | ❌ | `app.py` | `_global_automation_job()`: RQ-scheduled every 5 min. Fetches VIX + economic calendar. Per open watch: VIX NO_TRADE → Telegram. High-impact event <2h → `macro_alert=True`. | Not started |
+
+---
+
+#### STEP 6 — Signal Quality (❌ NOT STARTED)
+
+| Label | Status | File(s) | What | Verify |
+|---|---|---|---|---|
+| **G1** | ❌ | `app.py` | Market regime: `atr_regime` = current ATR vs 50-period mean. <70%→RANGING, >130%→TRENDING. `get_analysis()` returns `market_regime`. Signal card regime badge. Warning when breakout fires in RANGING. | RANGING → amber "Choppy market" badge on signal card |
+| **G2** | ❌ | `app.py` + `index-v2-prototype.html` | Session filter: London 07:00–16:00 UTC, NY 12:00–21:00 UTC, Crypto 24/7 (flag 00:00–06:00 UTC), Stocks exchange hours only. Off-hours warning: "Spreads wider outside primary session." | Forex at 23:00 UTC → amber off-hours warning |
+| **G3** | ❌ | `app.py` + `index-v2-prototype.html` | Signal expiry: `signal_history.expires_at`. scalp=4h, day=24h, swing=72h, position=7d. `run_watch_job` checks expiry → Telegram if expired without entry. Expired signals greyed in history. | Scalp signal 5h old → greyed with "Expired" label |
+| **G4** | ❌ | `index-v2-prototype.html` | Spread modelling: `effectiveRR` in `recalc()`. forex majors 1–2 pips, minors 3–5 pips, crypto 0.1%, stocks 0.05%. effectiveRR < 1.5 → amber warning. | Forex trade with 3-pip spread → effective R:R shown below theoretical |
+
+---
+
+#### STEP 7 — Portfolio Intelligence (❌ NOT STARTED)
+
+| Label | Status | File(s) | What | Verify |
+|---|---|---|---|---|
+| **H1** | ❌ | `app.py` + `index-v2-prototype.html` | Win rate + expectancy: `signal_history` gains `outcome`, `actual_exit_price`, `actual_pnl_r`. `/api/signals/stats` returns stats. Gate: no display until 30 trades — show "Building track record — X/30." | 30 trades logged → stats appear. Below 30 → building message shown. |
+| **H2** | ❌ | `app.py` + `index-v2-prototype.html` | Correlation risk: flag combined directional exposure on single currency > 3% account risk. Plain-English banner on Portfolio tab. | 3 USD-long positions → "Combined USD exposure 4.2% — exceeds 3% limit" |
+| **H3** | ❌ | `app.py` + `index-v2-prototype.html` | Drawdown tracking: `equity_snapshots` table. Auto-scale: >5%→suggest 0.5% risk, >10%→0.25% + alert. Drawdown gauge on portfolio tab. | Equity drops 6% → recommended risk shows 0.5% with plain-English explanation |
+| **H4** | ❌ | `app.py` | Telegram alerts for all events: new signal, expiry, automation fires, drawdown breach, correlation warning. Every alert explains WHY in plain English. | Automation fires → Telegram message within 30s |
+| **H5** | ❌ | `app.py` | Auto-scanner: RQ job every 15 min. HIGH-confidence only. Max 5 alerts/hour — consolidate into digest if exceeded. | 7 alerts fire → 5 individual + 1 "2 more signals" digest |
+
+---
+
+#### STEP 8 — Smart Money Concepts (❌ NOT STARTED)
+
+| Label | Status | File(s) | What | Verify |
+|---|---|---|---|---|
+| **I1** | ❌ | `app.py` | Fair Value Gap: candle 3 does not overlap candle 1 wick. Added to `smc_structures[]` in `get_analysis()`. | FVG on BTC 1H → signal card "Fair Value Gap detected" |
+| **I2** | ❌ | `app.py` | Liquidity grab: equal highs/lows within 0.1% swept and rejected same/next candle. | Liquidity grab → plain-English explanation on signal card |
+| **I3** | ❌ | `app.py` | Displacement candle: body > 2× ATR. | Displacement → "Strong order flow candle — institutions moved the market" |
+| **I4** | ❌ | `app.py` | CHOCH: first swing high broken after downtrend, or first swing low broken after uptrend. | CHOCH → "Change of character — trend may be reversing" |
+| **I5** | ❌ | `index-v2-prototype.html` | `smc_structures[]` rendered on signal card with plain-English explanation. Collapsed by default, expand to see all. | Signal card shows SMC section |
+
+---
+
+#### STEP 9 — Validation (❌ NOT STARTED)
+
+| Label | Status | File(s) | What | Verify |
+|---|---|---|---|---|
+| **J1** | ❌ | `app.py` + `index-v2-prototype.html` | Cost review: `signal_history.estimated_cost_r`. `/api/signals/cost-analysis`: fee drag per trade. If > 0.1R → amber warning: "Your broker costs are reducing your edge." | 20 closed trades → cost-analysis returns fee_drag_per_trade |
+| **J2** | ❌ | `app.py` | Monte Carlo: 1,000 permutations of historical R-multiples. 5th/95th-percentile drawdown, median equity, probability 20%+ drawdown. Plain-English explanation. | `/api/validate/montecarlo` returns correct percentile drawdowns |
+| **J3** | ❌ | `app.py` | Sensitivity analysis: vary each parameter ±20%. >30% Sharpe drop from ±10% change → "fragile." Stable → "robust." Report in validation dashboard. | `/api/validate/sensitivity` returns fragile/robust flags |
+| **J4** | ❌ | `app.py` | Walk-forward testing: rolling 80/20 windows (min 5). Optimise on in-sample, validate on out-of-sample. Out-of-sample Sharpe < 0.5 → "potentially curve-fitted." | `/api/validate/walk-forward` returns per-window Sharpe |
+
+---
+
+#### STEP 10 — Long-Term (❌ NOT STARTED)
+
+| Label | Status | File(s) | What |
+|---|---|---|---|
+| **K1** | ❌ | `index-v2-prototype.html` | Fold Context tab into Market + Signal tabs |
+| **K2** | ❌ | `app.py` + `index-v2-prototype.html` | Target vs actual exit tracking |
+| **K3** | ❌ | `app.py` + `index-v2-prototype.html` | Per-user MT5 + Telegram credentials in Settings. EA outage escalation. |
+| **K4** | ❌ | `app.py` | Tier gating: Free / Pro ($39/mo) / Elite ($99/mo) |
+| **K5** | ❌ | `app.py` + `index-v2-prototype.html` | Live news feed + trending tickers |
+
+---
+
+### STRICT EXECUTION ORDER (every label in sequence — no skipping, no bundling)
 
 ```
-0a  → user removes git lock file from Terminal
-0b  → commit numeric confidence fix (PATH A verified)
-0c  → commit C1a (hover tooltips)
-0d  → implement + commit C1c (backend recommend-automations with full compute)
-
-BLOCK 1:
-1   → ITEM 8 (ATR trailing default fix)
-2   → ITEM 9 (flow-scaled feedback loop)
-3   → ITEM 10 (refresh-logout flicker)
-
-BLOCK S1 (signal foundation — all before any automation wiring):
-S1b → scanner path: add trade_type + htf_bias to /api/scan-list response
-S1c → frontend: loadScannerSignal maps trade_type + htf_bias
-S1d → wire RSI zone into recommend function
-S1e → wire ATR magnitude into recommend function
-S1f → server-side trade_type derivation helper
-S1g → _get_vix_score() + Redis cache
-S1h → _global_automation_job() RQ scheduler
-S1i → dynamic confidence gate tightening in get_analysis()
-S1j → macro_context in response + frontend badge
-
-BLOCK G1:
-G1  → full guidance layer: _dvGuide, dvGuideInit(), all data-guide attributes
-
-BLOCK 2 (automation execution — requires Block S1 complete):
-11  → DB schema: 5 new automation_settings cols + Act tab toggles
-12  → MACRO execution compute in run_watch_job
-13  → INVAL execution compute in run_watch_job
-14  → SENT execution compute in run_watch_job
-BE  → BE execution compute (if not already wired)
-TRL → TRAIL execution compute (if not already wired)
-
-BLOCK 3:
-N1  → regime detection
-N2  → session filter
-N3  → signal expiry
-N4  → spread + slippage
-
-BLOCK 4:
-D5  → win rate + expectancy
-N5  → portfolio correlation
-N6  → drawdown tracking
-D3  → Telegram alerts (requires Railway env vars from user)
-D6  → watchlist auto-scan
-
-BLOCK 5:
-D7  → SMC structures (FVG, liquidity grab, displacement, CHOCH)
-
-BLOCK V:
-V4  → live cost review (lowest risk, ships with Block 4)
-V2  → Monte Carlo simulation
-V3  → sensitivity analysis
-V1  → walk-forward testing (highest complexity — last)
-
-BLOCK 6: long-term phases
+STEP 1:            ALL DONE ✅
+STEP 2:            C1 → C2 → C3  (ALL DONE ✅)
+STEP 4:            E1 → E2 → E3 → E4 → E5
+STEP 5:            A1 → A2 → A3 → A4 → D1 → F1 → F2 → F3 → F4 → F5 → F6
+STEP 6:            G1 → G2 → G3 → G4
+STEP 7:            H1 → H2 → H3 → H4 → H5
+STEP 8:            I1 → I2 → I3 → I4 → I5
+STEP 9:            J1 → J2 → J3 → J4
+STEP 10:           K1 → K2 → K3 → K4 → K5
 ```
+
+**CURRENT POSITION: E1 is the next item.** *(S1x live verified 2026-05-20. Steps 1+2+3 all complete. Next: STEP 4 — Plain-English Guidance Layer: E1 → E2 → E3 → E4 → E5.)*
 
 ---
 
@@ -1593,12 +1828,16 @@ Claude must never wait for the user to ask "how sure are you?" before reassessin
 **NO NOISE AFTER COMMIT:**
 - After committing: state the commit hash and one line summary. Stop. Do not add deploy instructions, feature checklists, or next steps unless asked.
 
-**POST-PUSH VERIFICATION — MANDATORY, NON-NEGOTIABLE:**
-After every push, Claude must:
-1. Go to Railway and wait until the deployment shows "Deployment successful" (do not proceed until confirmed active)
-2. Go to DotVerse on Chrome and verify the specific feature that was just deployed works correctly in the live app
-3. Only after 100% live verification, return to the user and confirm it is done
-Claude must never return to the user after a push without completing both steps above. "Push successful" is not verification. Railway active is not verification. Only confirmed working behaviour in the live browser counts.
+**POST-PUSH VERIFICATION — MANDATORY, NON-NEGOTIABLE (updated 2026-05-19):**
+After every push, Claude must execute these steps IN ORDER — no skipping, no reordering:
+1. **Railway first** — navigate to the Railway deployment dashboard and wait for "Deployment successful". Do not proceed until this is confirmed. Ask Omar to confirm if the Chrome extension cannot access railway.com.
+2. **Chrome MCP UI verification second** — use the Chrome MCP (`mcp__Claude_in_Chrome__*`) to open DotVerse in the browser and verify the specific feature just deployed works at the UI level. This means: interact with the feature (click buttons, call API endpoints via JS, check rendered output). Visual/functional confirmation in the live app, not code reading.
+3. **Code verification is secondary** — only after Railway + UI both pass, any code-level checks (grep, sandbox logic) may supplement but never replace steps 1 and 2.
+4. **Only after all three pass** — mark the plan step ✅ DONE in CLAUDE.md and move to the next plan label in strict order.
+
+Claude must never return to the user after a push without completing steps 1 and 2 above. "Push successful" is not verification. Railway active is not verification. Code looks correct is not verification. Only confirmed working behaviour in the live browser counts.
+
+**This rule applies to every single commit, no exceptions.** If Railway or Chrome MCP are inaccessible, stop and tell Omar explicitly — do not skip to the next step.
 
 **Next session:** No pending bugs. Run Six Stop Gates before starting any new work.
 
@@ -2035,7 +2274,7 @@ RESIDUAL RISK:        [specific risk + browser test that catches it]
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Trading-Signals** (711260 symbols, 1933430 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Trading-Signals** (712749 symbols, 1858239 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -2073,5 +2312,25 @@ This project is indexed by GitNexus as **Trading-Signals** (711260 symbols, 1933
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+| Work in the V4 area (13846 symbols) | `.claude/skills/generated/v4/SKILL.md` |
+| Work in the Pro area (11821 symbols) | `.claude/skills/generated/pro/SKILL.md` |
+| Work in the Ccxt area (5129 symbols) | `.claude/skills/generated/ccxt/SKILL.md` |
+| Work in the Async_support area (3285 symbols) | `.claude/skills/generated/async-support/SKILL.md` |
+| Work in the Browser area (2909 symbols) | `.claude/skills/generated/browser/SKILL.md` |
+| Work in the Base area (2724 symbols) | `.claude/skills/generated/base/SKILL.md` |
+| Work in the Async area (2589 symbols) | `.claude/skills/generated/async/SKILL.md` |
+| Work in the Php area (2493 symbols) | `.claude/skills/generated/php/SKILL.md` |
+| Work in the Exchanges area (2233 symbols) | `.claude/skills/generated/exchanges/SKILL.md` |
+| Work in the Omni_files area (1367 symbols) | `.claude/skills/generated/omni-files/SKILL.md` |
+| Work in the Securities area (1328 symbols) | `.claude/skills/generated/securities/SKILL.md` |
+| Work in the Tests area (1186 symbols) | `.claude/skills/generated/tests/SKILL.md` |
+| Work in the _nuxt area (1167 symbols) | `.claude/skills/generated/nuxt/SKILL.md` |
+| Work in the Abstract area (1153 symbols) | `.claude/skills/generated/abstract/SKILL.md` |
+| Work in the Indicators area (961 symbols) | `.claude/skills/generated/indicators/SKILL.md` |
+| Work in the Algorithm area (958 symbols) | `.claude/skills/generated/algorithm/SKILL.md` |
+| Work in the Algorithm.CSharp area (870 symbols) | `.claude/skills/generated/algorithm-csharp/SKILL.md` |
+| Work in the DataFeeds area (748 symbols) | `.claude/skills/generated/datafeeds/SKILL.md` |
+| Work in the Timeseries area (690 symbols) | `.claude/skills/generated/timeseries/SKILL.md` |
+| Work in the Data area (679 symbols) | `.claude/skills/generated/data/SKILL.md` |
 
 <!-- gitnexus:end -->
