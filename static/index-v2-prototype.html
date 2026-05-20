@@ -7472,7 +7472,7 @@ function updateFlowBadge() {
     +   '</ul>'
     + '</div>'
     // Apply button — SVG icon, no emoji
-    + '<button id="kellyApplyBtn" onclick="applyKellyRisk(this)" style="width:100%;padding:11px;border-radius:7px;border:1px solid ' + btnBdr + ';background:' + btnBg + ';color:' + btnCol + ';font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.8px;cursor:pointer;transition:all .18s;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:7px;" onmouseover="this.style.background=\'' + btnHover + '\'" onmouseout="this.style.background=\'' + btnBg + '\'">'
+    + '<button id="kellyApplyBtn" data-guide="kelly-badge" onclick="applyKellyRisk(this)" style="width:100%;padding:11px;border-radius:7px;border:1px solid ' + btnBdr + ';background:' + btnBg + ';color:' + btnCol + ';font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.8px;cursor:pointer;transition:all .18s;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:7px;" onmouseover="this.style.background=\'' + btnHover + '\'" onmouseout="this.style.background=\'' + btnBg + '\'">'
     + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
     + 'APPLY ' + sugRisk.toFixed(1) + '% RISK'
     + '</button>';
@@ -8797,7 +8797,7 @@ function _sfRender(){
         <button class="sc-tf"    onclick="scTFFilter('4h',this)">4H</button>
         <button class="sc-tf"    onclick="scTFFilter('1d',this)">1D</button>
       </div>
-      <table class="sc-table">
+      <table class="sc-table" data-guide="scanner-table">
         <thead><tr>
           <th>Instrument</th><th>15M</th><th>1H</th><th>4H</th><th>1D</th>
           <th>Bull %</th><th>Levels</th><th>R:R</th><th></th>
@@ -8925,10 +8925,10 @@ function _scRenderLive(results,tf){
       bullCount:bs,bearCount:be}).replace(/"/g,'&quot;');
     return `<tr class="sc-row" data-rr="${rr}" data-conf="${bp}" data-s15="${sig}" data-s1h="${sig}" data-s4h="${sig}" data-s1d="${sig}" onclick="loadScannerSignal(JSON.parse(this.dataset.payload))" data-payload="${pl}">
       <td class="sc-sym-cell"><span class="sc-sym">${r.ticker}</span><span class="sc-cls">${r.asset_type||''}</span></td>
-      <td>${tfl==='15M'?sp(sig):dash}</td>
-      <td>${tfl==='1H'?sp(sig):dash}</td>
-      <td>${sp(sig)}</td>
-      <td>${tfl==='1D'?sp(sig):dash}</td>
+      <td data-guide="scanner-tf-cell">${tfl==='15M'?sp(sig):dash}</td>
+      <td data-guide="scanner-tf-cell">${tfl==='1H'?sp(sig):dash}</td>
+      <td data-guide="scanner-tf-cell">${sp(sig)}</td>
+      <td data-guide="scanner-tf-cell">${tfl==='1D'?sp(sig):dash}</td>
       <td><div class="sc-bull-wrap"><div class="sc-bull-track"><div class="sc-bull-fill" style="width:${bp}%"></div></div><span class="sc-bull-pct">${bp}%</span></div></td>
       <td class="sc-entry-cell"><div class="sc-price">${fmt(r.entry)}</div><div class="sc-sltp"><span class="red">SL ${fmt(r.stop_loss)}</span> · <span class="grn">TP ${fmt(r.tp1)}</span></div></td>
       <td class="sc-rr-cell">${rr!=='–'?`<span class="sc-rr-badge">1:${rr}</span>`:dash}</td>
@@ -9387,7 +9387,7 @@ function showMarket(){
       ${commodities.map(m=>mkRow(m)).join('')}
       <!-- Fear & Greed -->
       <div style="border-top:1px solid rgba(237,232,216,.06);">
-        <div class="mkt-fear-gauge">
+        <div class="mkt-fear-gauge" data-guide="fear-greed">
           <div class="mkt-fear-val" id="mktFearGreedVal" style="color:rgba(237,232,216,.82);">—</div>
           <div class="mkt-fear-lbl" id="mktFearGreedLbl">Fear &amp; Greed Index</div>
           <div class="mkt-fear-bar">
@@ -9427,7 +9427,7 @@ function showMarket(){
         <span id="mktSigBadge" class="mkt-sc-badge" style="background:rgba(93,232,160,.12);color:#5de8a0;border-color:rgba(93,232,160,.3);">scanning…</span>
       </div>
       <!-- Live signal rows injected by _mktFetchTopSignals() -->
-      <div id="mktSigList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;min-height:80px;">
+      <div id="mktSigList" data-guide="market-top-opportunities" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;min-height:80px;">
         <div style="display:flex;align-items:center;gap:10px;padding:10px 0 4px;">
           <div id="mktBtBar" style="flex:1;height:3px;border-radius:2px;background:rgba(237,232,216,.1);overflow:hidden;">
             <div id="mktBtFill" style="height:100%;width:0%;background:linear-gradient(90deg,#d4870a,#f0b952);border-radius:2px;transition:width .28s ease-out;"></div>
@@ -9440,7 +9440,7 @@ function showMarket(){
         View All Signals → SIGNAL
       </button>
     </div>
-    <div class="mkt-section-card">
+    <div class="mkt-section-card" data-guide="market-latest-news">
       <div class="mkt-sc-head">
         <span class="mkt-sc-title">Economic Calendar</span>
         <span class="mkt-sc-sub">High-impact events</span>
@@ -9524,7 +9524,7 @@ function _mktRenderCockpit(){
     modeGrid.innerHTML = modes.map(m=>{
       const active = curMode===m.id;
       const v = m.verdict;
-      return `<div onclick="mktSetMode('${m.id}',this)"
+      return `<div data-guide="market-conditions" onclick="mktSetMode('${m.id}',this)"
         style="padding:14px;border-radius:8px;cursor:pointer;
                background:${active?vBg[v]:'rgba(237,232,216,.03)'};
                border:1px solid ${active?vBd[v]:'rgba(237,232,216,.07)'};
@@ -10193,7 +10193,7 @@ async function showPortfolio(){
     })()}
     <div class="pf-body"><div class="pf-pos-card">
       <div class="pf-pos-head"><span class="pf-pos-title">Open Positions</span></div>
-      <div style="overflow-x:auto;"><table class="pf-pos-table">
+      <div style="overflow-x:auto;"><table class="pf-pos-table" data-guide="portfolio-position-table">
         <thead><tr><th>Symbol</th><th>Type</th><th>Dir</th><th>Entry</th><th>Size</th><th>Opened</th><th></th></tr></thead>
         <tbody>${posRows}</tbody>
       </table></div>
@@ -10486,7 +10486,7 @@ function showRisk(){
   </div>
 
   <!-- SECTION: VaR -->
-  <div class="rm-panel" style="margin-bottom:16px;">
+  <div class="rm-panel" data-guide="portfolio-var" style="margin-bottom:16px;">
     <div class="rm-panel-head">
       <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:14px;font-weight:700;color:var(--crys);">Parametric Value-at-Risk (VaR)</span>
@@ -10517,7 +10517,7 @@ function showRisk(){
   </div>
 
   <!-- SECTION: Stress Test -->
-  <div class="rm-panel" style="margin-bottom:16px;">
+  <div class="rm-panel" data-guide="portfolio-stress-test" style="margin-bottom:16px;">
     <div class="rm-panel-head">
       <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:14px;font-weight:700;color:var(--crys);">Stress Test</span>
@@ -10548,7 +10548,7 @@ function showRisk(){
   </div>
 
   <!-- SECTION: Cross-Asset Correlation -->
-  <div class="rm-panel" style="margin-bottom:16px;">
+  <div class="rm-panel" data-guide="portfolio-correlation" style="margin-bottom:16px;">
     <div class="rm-panel-head">
       <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:14px;font-weight:700;color:var(--crys);">Cross-Asset Correlation</span>
@@ -10597,7 +10597,7 @@ function showRisk(){
   </div>
 
   <!-- SECTION: Parameter Optimisation -->
-  <div class="rm-panel" style="margin-bottom:16px;">
+  <div class="rm-panel" data-guide="portfolio-optimisation" style="margin-bottom:16px;">
     <div class="rm-panel-head">
       <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:14px;font-weight:700;color:var(--crys);">Parameter Optimisation</span>
@@ -11642,7 +11642,7 @@ function showUnderstand(){
           <div style="height:100%;width:${Math.round(agreedCount/indicators.length*100)}%;background:${isBuy?'rgba(93,232,160,.7)':'rgba(232,112,110,.7)'};border-radius:3px;transition:width .5s ease;"></div>
         </div>
         ${indicators.map((i,idx)=>`
-          <div class="beg-ind-row">
+          <div class="beg-ind-row" data-guide="${['ind-trend-direction','ind-momentum-gauge','ind-price-momentum','ind-market-activity','ind-price-range','ind-price-swing','ind-htf-trend','ind-signal-agreement'][idx]}">
             <div class="beg-dot" style="background:${i.ok?'rgba(93,232,160,.85)':'rgba(232,112,110,.65)'};box-shadow:0 0 5px ${i.ok?'rgba(93,232,160,.3)':'rgba(232,112,110,.25)'}"></div>
             <div style="flex:1">
               <div style="font-size:11px;font-weight:500;color:rgba(237,232,216,.85);margin-bottom:1px;">${_begNames[idx]}</div>
@@ -11652,8 +11652,8 @@ function showUnderstand(){
       </div>
     </div>`;
   // ── ADVANCED indicator grid ──────────────────────────────────────────────
-  const indHtml = `<div data-tier="trader">${indicators.map(i=>`
-    <div class="und-ind">
+  const indHtml = `<div data-tier="trader">${indicators.map((i,idx)=>`
+    <div class="und-ind" data-guide="${['ind-adv-ema','ind-adv-rsi','ind-adv-macd','ind-adv-volume','ind-adv-bollinger','ind-adv-atr-volatility','ind-adv-htf-trend','ind-adv-confluence'][idx]}">
       <div class="und-ind-dot" style="background:${i.ok?'rgba(93,232,160,.8)':'rgba(232,112,110,.6)'}; box-shadow:0 0 6px ${i.ok?'rgba(93,232,160,.3)':'rgba(232,112,110,.25)'}"></div>
       <div class="und-ind-body">
         <div class="und-ind-name">${i.n}</div>
@@ -11675,7 +11675,7 @@ function showUnderstand(){
     {tf:'1M', sig:_mtfSig('1M') ||_mtfSig('1mo')||'—',rsi:_mtfRsi('1M')},
   ];
   const mtfHtml = mtf.map(m=>`
-    <div class="und-mtf-cell" style="cursor:pointer" onclick="dvSetTFByLabel('${m.tf}')" title="Switch to ${m.tf}">
+    <div class="und-mtf-cell" data-guide="mtf-cell" style="cursor:pointer" onclick="dvSetTFByLabel('${m.tf}')" title="Switch to ${m.tf}">
       <div class="und-mtf-tf">${m.tf}</div>
       <div class="und-mtf-sig" style="color:${m.sig==='BUY'?'#5de8a0':m.sig==='SELL'?'#e8706e':'rgba(237,232,216,.55)'}">${m.sig}</div>
       ${m.rsi?`<div style="font-size:9px;color:rgba(237,232,216,.4);margin-top:2px">RSI ${m.rsi}</div>`:''}
@@ -11713,10 +11713,10 @@ function showUnderstand(){
     const _suppressBadge = sig.macro_override
       ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(224,85,85,.15);border:1px solid rgba(224,85,85,.35);color:#e8706e;flex-shrink:0;">SIGNAL SUPPRESSED</span>'
       : '';
-    vixBadgeHtml = '<div onclick="var m=this.querySelector(\'.vix-msg\');var a=this.querySelector(\'.vix-arrow\');if(m.style.display===\'none\'){m.style.display=\'block\';a.style.transform=\'rotate(180deg)\'}else{m.style.display=\'none\';a.style.transform=\'rotate(0deg)\'}" style="cursor:pointer;display:flex;flex-direction:column;gap:0;padding:10px 14px;margin-bottom:12px;background:'+_vbg+';border:1px solid '+_vbd+';border-radius:8px;user-select:none;">'
+    vixBadgeHtml = '<div data-guide="macro-context" onclick="var m=this.querySelector(\'.vix-msg\');var a=this.querySelector(\'.vix-arrow\');if(m.style.display===\'none\'){m.style.display=\'block\';a.style.transform=\'rotate(180deg)\'}else{m.style.display=\'none\';a.style.transform=\'rotate(0deg)\'}" style="cursor:pointer;display:flex;flex-direction:column;gap:0;padding:10px 14px;margin-bottom:12px;background:'+_vbg+';border:1px solid '+_vbd+';border-radius:8px;user-select:none;">'
       + '<div style="display:flex;align-items:center;gap:8px;">'
       + '<span style="width:7px;height:7px;border-radius:50%;background:'+_vc+';flex-shrink:0;"></span>'
-      + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:'+_vc+';">VIX '+_mc.vix.toFixed(1)+' · '+_vLabel+'</span>'
+      + '<span data-guide="macro-'+(_vz==='NO_TRADE'?'notrade':_vz.toLowerCase())+'" style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:'+_vc+';">VIX '+_mc.vix.toFixed(1)+' · '+_vLabel+'</span>'
       + _suppressBadge
       + '<span class="vix-arrow" style="margin-left:auto;font-size:10px;color:'+_vc+';transition:transform .2s;flex-shrink:0;">▾</span>'
       + '</div>'
@@ -11835,15 +11835,15 @@ function showUnderstand(){
       <div class="dv-ic-lbl">Spread</div>
       <div class="dv-ic-val" style="color:rgba(237,232,216,.65);font-size:10px;">${sig.spreadPips!=null?sig.spreadPips+'pip':('~$'+sig.spreadCost.toFixed(sig.spreadCost<0.1?4:2))}${sig.spreadSource==='live'?' <span style="color:#3dbe6c;font-size:9px;">live</span>':' <span style="color:rgba(237,232,216,.4);font-size:9px;">est.</span>'}</div>
     </div>`:''}
-    <div class="dv-ic" id="dvStat_volatility" onclick="dvStatExpand('volatility',this)">
+    <div class="dv-ic" id="dvStat_volatility" data-guide="atr-value" onclick="dvStatExpand('volatility',this)">
       <div class="dv-ic-lbl">Volatility</div>
       <div class="dv-ic-val">${sig.atr!=null?(sig.atr>0.05?'High':sig.atr>0.02?'Moderate':'Low'):'–'}</div>
     </div>
-    <div class="dv-ic" id="dvStat_volume" onclick="dvStatExpand('volume',this)">
+    <div class="dv-ic" id="dvStat_volume" data-guide="ind-adv-volume" onclick="dvStatExpand('volume',this)">
       <div class="dv-ic-lbl">Volume</div>
       <div class="dv-ic-val" style="color:${sig.volRatio!=null&&sig.volRatio>=1.2?'#5de8a0':'inherit'}">${sig.volRatio!=null?sig.volRatio.toFixed(1)+'×':'–'}</div>
     </div>
-    <div class="dv-ic" id="dvStat_rsi" onclick="dvStatExpand('rsi',this)">
+    <div class="dv-ic" id="dvStat_rsi" data-guide="rsi-value" onclick="dvStatExpand('rsi',this)">
       <div class="dv-ic-lbl">RSI</div>
       <div class="dv-ic-val" style="color:${sig.rsi!=null&&sig.rsi<30?'#5de8a0':sig.rsi!=null&&sig.rsi>70?'#e8706e':'inherit'}">${sig.rsi!=null?sig.rsi.toFixed(1):'–'}</div>
     </div>
@@ -11945,13 +11945,13 @@ function showUnderstand(){
             <div class="und-sig-sym">${sig.sym}</div>
             <div class="und-sig-tf">${sig.tf} · ${sig.asset}</div>
           </div>
-          <span class="opp-badge ${(sig.sig||'hold').toLowerCase()}" style="font-size:11px;padding:5px 14px;">${sig.sig||'—'}</span>
+          <span class="opp-badge ${(sig.sig||'hold').toLowerCase()}" data-guide="signal-${(sig.sig||'hold').toLowerCase()}" style="font-size:11px;padding:5px 14px;">${sig.sig||'—'}</span>
         </div>
         <div class="und-sig-levels">
-          <div class="und-sig-level entry"><span class="und-sig-lbl">ENTRY</span><span class="und-sig-price">${sig.entry}</span></div>
-          <div class="und-sig-level sl"><span class="und-sig-lbl">STOP LOSS</span><span class="und-sig-price" style="color:var(--red)">${sig.sl}</span></div>
-          <div class="und-sig-level tp"><span class="und-sig-lbl">TAKE PROFIT</span><span class="und-sig-price" style="color:var(--grn)">${sig.tp}</span></div>
-          <div class="und-sig-level rr"><span class="und-sig-lbl">RISK/REWARD</span><span class="und-sig-price" style="color:rgba(237,232,216,.88)">1:${sig.rr}</span></div>
+          <div class="und-sig-level entry" data-guide="entry-price"><span class="und-sig-lbl">ENTRY</span><span class="und-sig-price">${sig.entry}</span></div>
+          <div class="und-sig-level sl" data-guide="stop-loss"><span class="und-sig-lbl">STOP LOSS</span><span class="und-sig-price" style="color:var(--red)">${sig.sl}</span></div>
+          <div class="und-sig-level tp" data-guide="tp1"><span class="und-sig-lbl">TAKE PROFIT</span><span class="und-sig-price" style="color:var(--grn)">${sig.tp}</span></div>
+          <div class="und-sig-level rr" data-guide="rr-ratio"><span class="und-sig-lbl">RISK/REWARD</span><span class="und-sig-price" style="color:rgba(237,232,216,.88)">1:${sig.rr}</span></div>
         </div>
 
         <!-- Spread cost block — shown only for live BUY/SELL signals -->
@@ -11987,13 +11987,13 @@ function showUnderstand(){
         </div>`:''}`:``}
 
         <!-- A3: Trade duration estimator -->
-        ${(()=>{const d=_undDurInfo(sig.tf);return `<div class="und-duration-strip">
+        ${(()=>{const d=_undDurInfo(sig.tf);return `<div class="und-duration-strip" data-guide="trade-type-${(sig.trade_type||'day').toLowerCase()}">
           <div class="und-dur-cell"><span class="und-dur-lbl">Hold Time</span><span class="und-dur-val">${d.hold}</span><span class="und-dur-sub">Estimated duration</span></div>
           <div class="und-dur-cell"><span class="und-dur-lbl">Target Date</span><span class="und-dur-val">${d.target}</span><span class="und-dur-sub">If entered today</span></div>
           <div class="und-dur-cell"><span class="und-dur-lbl">Active Session</span><span class="und-dur-val">${d.session}</span><span class="und-dur-sub">Current market hours</span></div>
         </div>`;})()}
         <!-- Confidence ring -->
-        <div class="und-conf-row">
+        <div class="und-conf-row" data-guide="confidence-ring">
           <svg width="56" height="56" viewBox="0 0 56 56">
             <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(237,232,216,.08)" stroke-width="3"/>
             <circle cx="28" cy="28" r="22" fill="none" stroke="${sigCol}" stroke-width="3"
@@ -12003,7 +12003,7 @@ function showUnderstand(){
             <text x="28" y="34" text-anchor="middle" fill="${sigCol}" font-family="IBM Plex Mono" font-size="13" font-weight="400">${sig.conf||88}</text>
           </svg>
           <div>
-            <div style="font-size:13px;font-weight:500;color:${sigCol}">${sig.confLbl||'CONFIRMED'}</div>
+            <div style="font-size:13px;font-weight:500;color:${sigCol}" data-guide="confidence-${(sig.confLbl||'confirmed').toLowerCase()}">${sig.confLbl||'CONFIRMED'}</div>
             <div style="font-size:10.5px;color:var(--t3);margin-top:2px;">Confluence = indicator agreement, not win rate</div>
           </div>
         </div>
@@ -12087,7 +12087,7 @@ function showUnderstand(){
       </div>
 
       <!-- Indicators grid -->
-      <div class="und-card" style="margin-top:12px;">
+      <div class="und-card" data-guide="confluence-score" style="margin-top:12px;">
         <div class="und-card-title">Indicator Confluence</div>
         ${begIndHtml}
         <div class="und-ind-grid">${indHtml}</div>
@@ -12103,25 +12103,25 @@ function showUnderstand(){
           <span style="font-size:10px;color:rgba(237,232,216,.4);font-family:var(--mono);letter-spacing:.4px;">Volume pressure</span>
         </div>
         <!-- CVD Trend -->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(237,232,216,.07);">
+        <div data-guide="order-flow-cvd" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(237,232,216,.07);">
           <span style="font-size:11px;color:rgba(237,232,216,.5);font-family:var(--mono);letter-spacing:.5px;">CVD TREND</span>
           <span id="ofCvd" style="font-family:var(--mono);font-size:13px;font-weight:600;color:rgba(237,232,216,.8);">—</span>
         </div>
         <!-- Buy pressure bar -->
-        <div style="margin-bottom:8px;">
+        <div data-guide="order-flow-buy-pressure" style="margin-bottom:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
             <span style="font-size:11px;color:rgba(61,190,108,.7);font-family:var(--mono);">BUY</span>
-            <span id="ofBuyPct" style="font-family:var(--mono);font-size:11px;color:rgba(61,190,108,.8);">—</span>
+            <span id="ofBuyPct" data-guide="bull-pct" style="font-family:var(--mono);font-size:11px;color:rgba(61,190,108,.8);">—</span>
           </div>
           <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;">
             <div id="ofBuyBar" style="height:100%;width:0%;background:rgba(61,190,108,.7);border-radius:3px;transition:width .4s ease;"></div>
           </div>
         </div>
         <!-- Sell pressure bar -->
-        <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(237,232,216,.07);">
+        <div data-guide="order-flow-sell-pressure" style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(237,232,216,.07);">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
             <span style="font-size:11px;color:rgba(224,85,85,.7);font-family:var(--mono);">SELL</span>
-            <span id="ofSellPct" style="font-family:var(--mono);font-size:11px;color:rgba(224,85,85,.8);">—</span>
+            <span id="ofSellPct" data-guide="bear-pct" style="font-family:var(--mono);font-size:11px;color:rgba(224,85,85,.8);">—</span>
           </div>
           <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;">
             <div id="ofSellBar" style="height:100%;width:0%;background:rgba(224,85,85,.7);border-radius:3px;transition:width .4s ease;"></div>
@@ -12140,11 +12140,11 @@ function showUnderstand(){
         </div>
         <!-- Volume + ATR row — ADVANCED raw numbers -->
         <div data-tier="trader" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(237,232,216,.07);">
-          <div>
+          <div data-guide="order-flow-volume-vs-avg">
             <div style="font-size:9px;color:rgba(237,232,216,.4);font-family:var(--mono);letter-spacing:.6px;margin-bottom:3px;">VOLUME VS AVG</div>
             <span id="ofVol" style="font-family:var(--mono);font-size:13px;font-weight:600;color:rgba(237,232,216,.8);">—</span>
           </div>
-          <div>
+          <div data-guide="order-flow-volatility">
             <div style="font-size:9px;color:rgba(237,232,216,.4);font-family:var(--mono);letter-spacing:.6px;margin-bottom:3px;">VOLATILITY ATR</div>
             <span id="ofAtr" style="font-family:var(--mono);font-size:13px;font-weight:600;color:rgba(237,232,216,.8);">—</span>
           </div>
@@ -12154,22 +12154,22 @@ function showUnderstand(){
         <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(237,232,216,.07);">
           <div style="font-size:9px;color:rgba(237,232,216,.4);font-family:var(--mono);letter-spacing:.6px;margin-bottom:8px;">REAL vs POSER</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-            <div id="ofRealBuyer" style="background:rgba(61,190,108,.06);border:1px solid rgba(61,190,108,.15);border-radius:4px;padding:7px 9px;">
+            <div id="ofRealBuyer" data-guide="order-flow-real-buyer" style="background:rgba(61,190,108,.06);border:1px solid rgba(61,190,108,.15);border-radius:4px;padding:7px 9px;">
               <div style="font-size:9px;color:rgba(61,190,108,.6);font-family:var(--mono);letter-spacing:.5px;margin-bottom:3px;">REAL BUYER</div>
               <div id="ofRealBuyerPct" style="font-family:var(--mono);font-size:14px;font-weight:600;color:rgba(61,190,108,.9);">—</div>
               <div id="ofRealBuyerLbl" style="font-size:9px;color:rgba(237,232,216,.4);margin-top:2px;">vol+ema confirmed</div>
             </div>
-            <div id="ofPoserBuyer" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:7px 9px;">
+            <div id="ofPoserBuyer" data-guide="order-flow-poser-buyer" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:7px 9px;">
               <div style="font-size:9px;color:rgba(237,232,216,.5);font-family:var(--mono);letter-spacing:.5px;margin-bottom:3px;">POSER BUYER</div>
               <div id="ofPoserBuyerPct" style="font-family:var(--mono);font-size:14px;font-weight:600;color:rgba(237,232,216,.7);">—</div>
               <div id="ofPoserBuyerLbl" style="font-size:9px;color:rgba(237,232,216,.4);margin-top:2px;">no vol follow-through</div>
             </div>
-            <div id="ofRealSeller" style="background:rgba(224,85,85,.06);border:1px solid rgba(224,85,85,.15);border-radius:4px;padding:7px 9px;">
+            <div id="ofRealSeller" data-guide="order-flow-real-seller" style="background:rgba(224,85,85,.06);border:1px solid rgba(224,85,85,.15);border-radius:4px;padding:7px 9px;">
               <div style="font-size:9px;color:rgba(224,85,85,.6);font-family:var(--mono);letter-spacing:.5px;margin-bottom:3px;">REAL SELLER</div>
               <div id="ofRealSellerPct" style="font-family:var(--mono);font-size:14px;font-weight:600;color:rgba(224,85,85,.9);">—</div>
               <div id="ofRealSellerLbl" style="font-size:9px;color:rgba(237,232,216,.4);margin-top:2px;">vol+ema confirmed</div>
             </div>
-            <div id="ofPoserSeller" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:7px 9px;">
+            <div id="ofPoserSeller" data-guide="order-flow-poser-seller" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:7px 9px;">
               <div style="font-size:9px;color:rgba(237,232,216,.5);font-family:var(--mono);letter-spacing:.5px;margin-bottom:3px;">POSER SELLER</div>
               <div id="ofPoserSellerPct" style="font-family:var(--mono);font-size:14px;font-weight:600;color:rgba(237,232,216,.7);">—</div>
               <div id="ofPoserSellerLbl" style="font-size:9px;color:rgba(237,232,216,.4);margin-top:2px;">no vol follow-through</div>
@@ -12178,7 +12178,7 @@ function showUnderstand(){
         </div>
 
         <!-- Candle Footprint -->
-        <div>
+        <div data-guide="candle-footprint">
           <div style="font-size:9px;color:rgba(237,232,216,.4);font-family:var(--mono);letter-spacing:.6px;margin-bottom:6px;">CANDLE FOOTPRINT · delta buy−sell</div>
           <canvas id="ofFootprintCanvas" height="72" style="width:100%;display:block;border-radius:3px;"></canvas>
         </div>
@@ -12187,9 +12187,9 @@ function showUnderstand(){
 
     <!-- RIGHT: MTF + reason -->
     <div class="und-right">
-      <div class="und-card">
+      <div class="und-card" data-guide="mtf-row">
         <div class="und-card-title">Multi-Timeframe Alignment</div>
-        <div class="und-mtf-row">${mtfHtml}</div>
+        <div class="und-mtf-row" data-guide="mtf-alignment">${mtfHtml}</div>
         <div style="font-size:10.5px;color:var(--t3);margin-top:10px;padding:0 2px;">
           ${_mtfSummary}
         </div>
@@ -12197,9 +12197,9 @@ function showUnderstand(){
       </div>
       <div class="und-card" style="margin-top:12px;">
         <div class="und-card-title">Signal Reasoning</div>
-        <div class="und-reason-body">${sig.reason||'Multi-indicator confluence detected.'}</div>
+        <div class="und-reason-body" data-guide="signal-reasoning">${sig.reason||'Multi-indicator confluence detected.'}</div>
       </div>
-      <div style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:12px;padding:16px 18px;margin-top:12px;">
+      <div data-guide="rsi-gauge" style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:12px;padding:16px 18px;margin-top:12px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <div style="display:flex;align-items:center;gap:7px;">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.75)" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
@@ -12237,45 +12237,45 @@ function showUnderstand(){
           </div>
         </div>
       </div>
-      <div class="und-card" style="margin-top:12px;">
+      <div class="und-card" data-guide="watchlist-row" style="margin-top:12px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <span class="und-card-title" style="margin:0">Watchlist</span>
-          <button style="background:rgba(237,232,216,.08);border:1px solid rgba(237,232,216,.18);border-radius:5px;color:rgba(237,232,216,.7);font-size:10px;padding:3px 9px;cursor:pointer;font-family:var(--mono)" onclick="wlAdd(window._activeSignal&&window._activeSignal.sym)">+ Watch</button>
+          <button data-guide="watchlist-toggle" style="background:rgba(237,232,216,.08);border:1px solid rgba(237,232,216,.18);border-radius:5px;color:rgba(237,232,216,.7);font-size:10px;padding:3px 9px;cursor:pointer;font-family:var(--mono)" onclick="wlAdd(window._activeSignal&&window._activeSignal.sym)">+ Watch</button>
         </div>
         <div id="wlRows"></div>
       </div>
-      <div class="und-card" style="margin-top:12px;">
+      <div class="und-card" data-guide="what-to-do-next" style="margin-top:12px;">
         <div class="und-card-title">What To Do Next</div>
         <div class="und-steps">
-          <div class="und-step done">
+          <div class="und-step done" data-guide="journey-step-discover">
             <div class="und-step-num">1</div>
             <div class="und-step-body">
               <div class="und-step-title">Discover & select</div>
               <div class="und-step-sub">Chosen from market scanner</div>
             </div>
           </div>
-          <div class="und-step done">
+          <div class="und-step done" data-guide="journey-step-read">
             <div class="und-step-num">2</div>
             <div class="und-step-body">
               <div class="und-step-title">Read this signal</div>
               <div class="und-step-sub">${sig.sig} · ${buildConfRing(sig.conf||88)}<span style="vertical-align:middle;font-size:12px">${(sig.conf&&sig.conf>0)?sig.conf+'% confidence':(sig.confLbl||'—')}</span></div>
             </div>
           </div>
-          <div class="und-step active">
+          <div class="und-step active" data-guide="journey-step-understand">
             <div class="und-step-num">3</div>
             <div class="und-step-body">
               <div class="und-step-title">Understand it ← You are here</div>
               <div class="und-step-sub">Read the reasoning above</div>
             </div>
           </div>
-          <div class="und-step" onclick="setNav('size');showSize()">
+          <div class="und-step" data-guide="journey-step-size" onclick="setNav('size');showSize()">
             <div class="und-step-num">4</div>
             <div class="und-step-body">
               <div class="und-step-title">Size the trade →</div>
               <div class="und-step-sub">Calculate position & risk</div>
             </div>
           </div>
-          <div class="und-step" onclick="setNav('act');showAct()">
+          <div class="und-step" data-guide="journey-step-execute" onclick="setNav('act');showAct()">
             <div class="und-step-num">5</div>
             <div class="und-step-body">
               <div class="und-step-title">Execute →</div>
@@ -13541,7 +13541,7 @@ function _vRenderLive(sig, verdict, structured){
     var agCol = agVote === 'BUY' ? '#5de8a0' : agVote === 'SELL' ? '#e8706e' : '#c9a84c';
     var agBg  = agVote === 'BUY' ? 'rgba(93,232,160,.04)' : agVote === 'SELL' ? 'rgba(232,112,110,.04)' : 'rgba(201,168,76,.04)';
     var agBd  = agVote === 'BUY' ? 'rgba(93,232,160,.18)' : agVote === 'SELL' ? 'rgba(232,112,110,.18)' : 'rgba(201,168,76,.18)';
-    cardItems += '<div style="background:'+agBg+';border:1px solid '+agBd+';border-radius:8px;padding:12px 14px;min-width:0">'
+    cardItems += '<div data-guide="verdict-agent-card" style="background:'+agBg+';border:1px solid '+agBd+';border-radius:8px;padding:12px 14px;min-width:0">'
       + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
       + '<span style="font-size:10px;font-weight:700;color:var(--t1);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">'+ag.name+'</span>'
       + '<span style="padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;font-family:var(--mono);background:'+agCol+'22;color:'+agCol+'">'+agVote+'</span>'
@@ -13555,7 +13555,7 @@ function _vRenderLive(sig, verdict, structured){
     + '</div>';
 
   // Build automations review — AI-powered, fires after render via _vAutoReviewAI()
-  var autoReviewHtml = '<div style="margin-bottom:14px;border-radius:8px;border:1px solid rgba(201,168,76,.18);background:rgba(201,168,76,.04);padding:14px 16px">'
+  var autoReviewHtml = '<div data-guide="verdict-signal-review" style="margin-bottom:14px;border-radius:8px;border:1px solid rgba(201,168,76,.18);background:rgba(201,168,76,.04);padding:14px 16px">'
     + '<div style="font-size:9px;font-weight:700;color:var(--amb);letter-spacing:.07em;text-transform:uppercase;margin-bottom:10px">Automations Review</div>'
     + '<div id="verdictAutoReviewContent" style="min-height:28px;display:flex;align-items:center">'
     + '<span style="font-size:9px;color:rgba(237,232,216,.4)">Agents are reviewing your settings…</span>'
@@ -13587,8 +13587,8 @@ function _vRenderLive(sig, verdict, structured){
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
     + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="'+actionColor+'" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
     + '<span style="font-family:var(--syne);font-size:15px;color:var(--t1)">Analysis Complete</span>'
-    + '<span style="margin-left:auto;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;background:'+actionColor+'22;color:'+actionColor+';font-family:var(--mono)">'+action+'</span>'
-    + (s.confidence ? '<span style="padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;background:'+confColor+'18;color:'+confColor+';font-family:var(--mono)">'+s.confidence+'</span>' : '')
+    + '<span data-guide="verdict-consensus" style="margin-left:auto;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;background:'+actionColor+'22;color:'+actionColor+';font-family:var(--mono)">'+action+'</span>'
+    + (s.confidence ? '<span data-guide="verdict-confidence-grade" style="padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;background:'+confColor+'18;color:'+confColor+';font-family:var(--mono)">'+s.confidence+'</span>' : '')
     + '</div>'
     // Summary — plain English if structured, raw text fallback
     + '<div style="font-size:13px;color:rgba(237,232,216,.82);line-height:1.75;margin-bottom:14px">'
@@ -14073,7 +14073,7 @@ function showSize(){
   </div>`:'<div class="sz-no-signal">No signal loaded — enter your trade prices manually below or pick a signal from <span style="color:var(--crys);cursor:pointer;" onclick="setNav(\'signals\');showSignalFeed()">SIGNAL</span>.</div>'}
 
   ${(sig.sym && sig.entry) ? `
-  <div id="szLiveBar" style="margin:0 0 12px 0;border-radius:8px;border:1px solid rgba(201,168,76,.25);background:rgba(201,168,76,.06);padding:12px 14px;transition:background .35s ease,border-color .35s ease;">
+  <div id="szLiveBar" data-guide="size-live-price-bar" style="margin:0 0 12px 0;border-radius:8px;border:1px solid rgba(201,168,76,.25);background:rgba(201,168,76,.06);padding:12px 14px;transition:background .35s ease,border-color .35s ease;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
       <div style="display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px;flex-wrap:wrap;">
         <span style="color:var(--mut);letter-spacing:.06em;font-size:9px;">ENTRY</span>
@@ -14115,8 +14115,8 @@ function showSize(){
 
       <!-- Direction -->
       <div class="sz-dir-row">
-        <button class="sz-dir-btn long active" id="szDirBuy" onclick="szSetDir('long',this)">▲ LONG / BUY</button>
-        <button class="sz-dir-btn short" id="szDirSell" onclick="szSetDir('short',this)">▼ SHORT / SELL</button>
+        <button class="sz-dir-btn long active" data-guide="size-direction-long" id="szDirBuy" onclick="szSetDir('long',this)">▲ LONG / BUY</button>
+        <button class="sz-dir-btn short" data-guide="size-direction-short" id="szDirSell" onclick="szSetDir('short',this)">▼ SHORT / SELL</button>
       </div>
 
       <div class="sz-card-title">Trade Levels</div>
@@ -14161,24 +14161,24 @@ function showSize(){
       <div class="sz-card-title" style="margin-top:16px;">Account & Risk</div>
       <div class="sz-fields">
         <!-- Account -->
-        <div class="sz-field">
+        <div class="sz-field" data-guide="calc-account">
           <label class="sz-lbl">Account Size ($)</label>
           <input class="sz-inp" id="szAcct" type="number" placeholder="10000" value="10000" oninput="window._szTradeSizeManual=false;szCalc()">
         </div>
         <!-- Risk % — beginner-first preset selector with plain-English teaching -->
-        <div class="sz-field">
+        <div class="sz-field" data-guide="calc-risk-pct">
           <label class="sz-lbl">Risk % <span style="font-size:9px;color:var(--mut);font-weight:400;">— how much of your account you risk per trade</span></label>
           <!-- Preset chip row -->
           <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
-            <button type="button" id="szRP1" onclick="szSetRiskPreset(1,this)"
+            <button type="button" data-guide="risk-preset-conservative" id="szRP1" onclick="szSetRiskPreset(1,this)"
               style="flex:1;min-width:0;padding:7px 4px;border-radius:5px;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.3);color:#5de8a0;font-family:var(--mono);font-size:9.5px;font-weight:700;cursor:pointer;text-align:center;line-height:1.35;transition:all .15s;">
               <div style="letter-spacing:.04em;">CONSERVATIVE</div><div style="font-size:11.5px;margin-top:2px;">1%</div>
             </button>
-            <button type="button" id="szRP2" onclick="szSetRiskPreset(2,this)"
+            <button type="button" data-guide="risk-preset-standard" id="szRP2" onclick="szSetRiskPreset(2,this)"
               style="flex:1;min-width:0;padding:7px 4px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.18);color:var(--t2);font-family:var(--mono);font-size:9.5px;font-weight:700;cursor:pointer;text-align:center;line-height:1.35;transition:all .15s;">
               <div style="letter-spacing:.04em;">STANDARD</div><div style="font-size:11.5px;margin-top:2px;">2%</div>
             </button>
-            <button type="button" id="szRP3" onclick="szSetRiskPreset(3,this)"
+            <button type="button" data-guide="risk-preset-aggressive" id="szRP3" onclick="szSetRiskPreset(3,this)"
               style="flex:1;min-width:0;padding:7px 4px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.18);color:var(--t2);font-family:var(--mono);font-size:9.5px;font-weight:700;cursor:pointer;text-align:center;line-height:1.35;transition:all .15s;">
               <div style="letter-spacing:.04em;">AGGRESSIVE</div><div style="font-size:11.5px;margin-top:2px;">3%</div>
             </button>
@@ -14189,19 +14189,19 @@ function showSize(){
           </div>
           <input class="sz-inp" id="szRisk" type="number" placeholder="1" value="1" step="0.5" min="0.1" max="50" oninput="window._szTradeSizeManual=false;szRiskOnInput();szCalc()">
           <!-- Plain-English teaching panel — updates as the user changes the value -->
-          <div id="szRiskTeach" style="margin-top:7px;padding:9px 11px;border-radius:5px;background:rgba(255,248,230,.04);border:1px solid rgba(201,168,76,.18);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.6;"></div>
+          <div id="szRiskTeach" data-guide="risk-teach-panel" style="margin-top:7px;padding:9px 11px;border-radius:5px;background:rgba(255,248,230,.04);border:1px solid rgba(201,168,76,.18);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.6;"></div>
           <div class="sz-hint" id="szRiskHint" style="color:var(--crys);"></div>
           <!-- Portfolio risk context panel — updates live as risk % changes -->
           <div id="szPortfolioCtx" style="display:none;margin-top:8px;padding:10px 12px;border-radius:6px;border:1px solid rgba(201,168,76,.2);background:rgba(201,168,76,.04);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.7;"></div>
         </div>
         <!-- Trade Size -->
-        <div class="sz-field full">
+        <div class="sz-field full" data-guide="trade-size-field">
           <label class="sz-lbl">Trade Size ($) <span style="font-size:9px;color:var(--mut);font-weight:400;">— how much you want to put in</span></label>
           <input class="sz-inp" id="szTradeSize" type="number" placeholder="auto-filled from account × risk%" oninput="window._szTradeSizeManual=true;szCalc()">
           <div class="sz-hint" id="szTradeSizePct" style="display:none;color:var(--gold);font-family:var(--mono);font-size:9px;"></div>
         </div>
         <!-- Asset Type + Leverage -->
-        <div class="sz-field">
+        <div class="sz-field" data-guide="asset-type">
           <label class="sz-lbl">Asset Type</label>
           <select class="sz-inp" id="szType" onchange="szTypeChange();szCalc()">
             <option value="crypto">Crypto</option>
@@ -14211,9 +14211,9 @@ function showSize(){
             <option value="commodity">Commodity</option>
           </select>
         </div>
-        <div class="sz-field" id="szLevField">
+        <div class="sz-field" data-guide="calc-leverage" id="szLevField">
           <label class="sz-lbl" id="szLevLabel">Leverage</label>
-          <select class="sz-inp" id="szLev" onchange="szCalc()">
+          <select class="sz-inp" id="szLev" data-guide="contract-size" onchange="szCalc()">
             <option value="100000">Standard (100,000)</option>
             <option value="10000">Mini (10,000)</option>
             <option value="1000">Micro (1,000)</option>
@@ -14233,20 +14233,20 @@ function showSize(){
       </div>
 
       <!-- Summary box (always visible when account set) -->
-      <div class="sz-sonar-box" id="szSonarBox">
+      <div class="sz-sonar-box" data-guide="size-summary-box" id="szSonarBox">
         <div class="sz-sonar-hdr">
           <span class="sz-sonar-sym" id="szSym">—</span>
-          <span class="sz-sonar-price" id="szCurrPrice">—</span>
+          <span class="sz-sonar-price" data-guide="size-current-price" id="szCurrPrice">—</span>
         </div>
         <div class="sz-sonar-grid">
           <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Balance</div><div class="sz-sonar-val sm" id="szBalance">—</div></div>
           <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Risk %</div><div class="sz-sonar-val sm" id="szRiskDisp">—</div></div>
-          <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Money at Risk</div><div class="sz-sonar-val amber" id="szMoneyAtRisk">—</div></div>
+          <div class="sz-sonar-cell" data-guide="calc-money-at-risk"><div class="sz-sonar-lbl">Money at Risk</div><div class="sz-sonar-val amber" id="szMoneyAtRisk">—</div></div>
         </div>
         <div class="sz-sonar-grid">
-          <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Lots / Units</div><div class="sz-sonar-val grn" id="szSonarSize">—</div></div>
-          <div class="sz-sonar-cell"><div class="sz-sonar-lbl">Margin Req.</div><div class="sz-sonar-val sm" id="szSonarMargin">—</div></div>
-          <div class="sz-sonar-cell"><div class="sz-sonar-lbl">R:R (TP1)</div><div class="sz-sonar-val" id="szSonarRR">—</div></div>
+          <div class="sz-sonar-cell" data-guide="calc-position-size"><div class="sz-sonar-lbl">Lots / Units</div><div class="sz-sonar-val grn" id="szSonarSize">—</div></div>
+          <div class="sz-sonar-cell" data-guide="calc-margin"><div class="sz-sonar-lbl">Margin Req.</div><div class="sz-sonar-val sm" id="szSonarMargin">—</div></div>
+          <div class="sz-sonar-cell" data-guide="calc-effective-rr"><div class="sz-sonar-lbl">R:R (TP1)</div><div class="sz-sonar-val" id="szSonarRR">—</div></div>
         </div>
         <!-- Trade Size row — shown when szTradeSize filled -->
         <div id="szTradeSizeRow" style="display:none;border-top:1px solid rgba(237,232,216,.12);background:rgba(237,232,216,.04);">
@@ -14265,31 +14265,31 @@ function showSize(){
       <div style="font-family:var(--mono);font-size:8px;color:var(--mut);letter-spacing:.8px;text-align:center;padding:6px 0;opacity:.5;">RESULTS UPDATE AS YOU TYPE</div>
 
       <!-- Kelly Optimal Risk button — populated dynamically by updateFlowBadge() -->
-      <div id="szFlowBadge" style="display:none;margin-bottom:10px;background:rgba(12,15,22,.9);border:1px solid rgba(237,232,216,.12);border-radius:10px;padding:14px 16px;"></div>
+      <div id="szFlowBadge" data-guide="flow-scale" style="display:none;margin-bottom:10px;background:rgba(12,15,22,.9);border:1px solid rgba(237,232,216,.12);border-radius:10px;padding:14px 16px;"></div>
 
       <!-- Risk vs Reward bar -->
       <div id="szRRBar" style="display:none;margin-top:8px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);">
         <div style="padding:6px 12px;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mut);font-weight:700;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.06);">Your Risk vs Your Reward — tap any box</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;">
-          <div id="szRRBoxSL" class="sz-rr-box sl" onclick="szRRToggle('SL')">
+          <div id="szRRBoxSL" class="sz-rr-box sl" data-guide="rr-worst-case" onclick="szRRToggle('SL')">
             <div class="sz-rr-box-lbl">Worst Case</div>
             <div class="sz-rr-box-val red" id="szRRRisk">—</div>
             <div class="sz-rr-box-sub" id="szRRRiskLbl">if SL hit</div>
             <div class="sz-rr-box-hint">▼ details</div>
           </div>
-          <div id="szRRBoxTP1" class="sz-rr-box tp" onclick="szRRToggle('TP1')">
+          <div id="szRRBoxTP1" class="sz-rr-box tp" data-guide="rr-tp1" onclick="szRRToggle('TP1')">
             <div class="sz-rr-box-lbl">TP 1</div>
             <div class="sz-rr-box-val grn" id="szRRTP1">—</div>
             <div class="sz-rr-box-sub" id="szRRTP1RR">—</div>
             <div class="sz-rr-box-hint">▼ how to trade</div>
           </div>
-          <div id="szRRBoxTP2" class="sz-rr-box tp" onclick="szRRToggle('TP2')">
+          <div id="szRRBoxTP2" class="sz-rr-box tp" data-guide="rr-tp2" onclick="szRRToggle('TP2')">
             <div class="sz-rr-box-lbl">TP 2</div>
             <div class="sz-rr-box-val grn" id="szRRTP2">—</div>
             <div class="sz-rr-box-sub" id="szRRTP2RR">—</div>
             <div class="sz-rr-box-hint">▼ how to trade</div>
           </div>
-          <div id="szRRBoxTP3" class="sz-rr-box tp best" onclick="szRRToggle('TP3')">
+          <div id="szRRBoxTP3" class="sz-rr-box tp best" data-guide="rr-tp3" onclick="szRRToggle('TP3')">
             <div class="sz-rr-box-lbl">Best Case</div>
             <div class="sz-rr-box-val grn" id="szRRTP3">—</div>
             <div class="sz-rr-box-sub" id="szRRTP3RR">—</div>
@@ -14300,7 +14300,7 @@ function showSize(){
       </div>
 
       <!-- Spread cost notice (populated by szCalc when spread data is present) -->
-      <div id="szSpreadRow" style="display:none;margin-top:8px;border-radius:8px;border:1px solid rgba(201,168,76,.2);background:rgba(201,168,76,.05);padding:10px 14px;"></div>
+      <div id="szSpreadRow" data-guide="spread-cost" style="display:none;margin-top:8px;border-radius:8px;border:1px solid rgba(201,168,76,.2);background:rgba(201,168,76,.05);padding:10px 14px;"></div>
 
       <!-- TP expandable rows -->
       <div id="szTPTable" style="display:none;margin-top:8px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.07);">
@@ -14318,7 +14318,7 @@ function showSize(){
             <div class="sz-tp-drow"><span class="sz-tp-dlbl">Account gain %</span><span class="sz-tp-dval" id="szTP1Acct">—</span></div>
           </div>
         </div>
-        <div class="sz-tp-row" id="szTPRow2" onclick="this.classList.toggle('open')">
+        <div class="sz-tp-row" id="szTPRow2" data-guide="tp2" onclick="this.classList.toggle('open')">
           <div class="sz-tp-main">
             <div><div class="sz-tp-name">TP 2</div><div class="sz-tp-price" id="szTP2Price">—</div><div class="sz-tp-raw-price" id="szTP2RawPrice" style="display:none;"></div></div>
             <div class="sz-tp-mid"><div class="sz-tp-rr" id="szTP2RR">—</div><div class="sz-tp-hint">Extended target</div></div>
@@ -14331,7 +14331,7 @@ function showSize(){
             <div class="sz-tp-drow"><span class="sz-tp-dlbl">Account gain %</span><span class="sz-tp-dval" id="szTP2Acct">—</span></div>
           </div>
         </div>
-        <div class="sz-tp-row" id="szTPRow3" onclick="this.classList.toggle('open')">
+        <div class="sz-tp-row" id="szTPRow3" data-guide="tp3" onclick="this.classList.toggle('open')">
           <div class="sz-tp-main">
             <div><div class="sz-tp-name">TP 3</div><div class="sz-tp-price" id="szTP3Price">—</div><div class="sz-tp-raw-price" id="szTP3RawPrice" style="display:none;"></div></div>
             <div class="sz-tp-mid"><div class="sz-tp-rr" id="szTP3RR">—</div><div class="sz-tp-hint">Maximum target</div></div>
@@ -14372,19 +14372,19 @@ function showSize(){
       </div>
 
       <!-- D2: Risk of Ruin panel -->
-      <div id="szRoRPanel" style="display:none;margin-top:8px;border-radius:8px;border:1px solid rgba(93,232,160,.2);padding:12px 14px;transition:background .3s,border-color .3s;"></div>
+      <div id="szRoRPanel" data-guide="risk-of-ruin" style="display:none;margin-top:8px;border-radius:8px;border:1px solid rgba(93,232,160,.2);padding:12px 14px;transition:background .3s,border-color .3s;"></div>
 
     </div><!-- /sz-right -->
   </div><!-- /sz-layout -->
 
   <!-- Trade Duration -->
-  <div class="sz-card" style="margin-top:12px;">
+  <div class="sz-card" data-guide="trade-duration-card" style="margin-top:12px;">
     <div class="sz-card-title">Trade Duration Estimate</div>
     <div class="sz-dur-grid">
       <div class="sz-dur-cell"><div class="sz-dur-lbl">Timeframe</div><div class="sz-dur-val" id="szDurTF">${sig.tf||'4H'}</div></div>
       <div class="sz-dur-cell"><div class="sz-dur-lbl">Est. Duration</div><div class="sz-dur-val" id="szDurTime">—</div></div>
       <div class="sz-dur-cell"><div class="sz-dur-lbl">Target Date</div><div class="sz-dur-val" id="szDurDate">—</div></div>
-      <div class="sz-dur-cell"><div class="sz-dur-lbl">Session</div><div class="sz-dur-val" id="szDurSession">—</div></div>
+      <div class="sz-dur-cell" data-guide="trade-session"><div class="sz-dur-lbl">Session</div><div class="sz-dur-val" id="szDurSession">—</div></div>
     </div>
   </div>
 
@@ -14396,17 +14396,17 @@ function showSize(){
     <div id="szLadderRows" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;"></div>
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
       <button onclick="szLadderAdd()" id="szLadderAddBtn" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.2);color:rgba(237,232,216,.85);border-radius:5px;cursor:pointer;">+ Add Row</button>
-      <button onclick="szLadderPreset('conservative')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(93,232,160,.07);border:1px solid rgba(93,232,160,.25);color:rgba(93,232,160,.85);border-radius:5px;cursor:pointer;">Conservative (0.5×5)</button>
-      <button onclick="szLadderPreset('balanced')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);border-radius:5px;cursor:pointer;">Balanced (1/1.5/2/2.5/3)</button>
-      <button onclick="szLadderPreset('aggressive')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(232,112,110,.07);border:1px solid rgba(232,112,110,.25);color:rgba(232,112,110,.85);border-radius:5px;cursor:pointer;">Aggressive (1/2/3/4/5)</button>
+      <button data-guide="ladder-preset-conservative" onclick="szLadderPreset('conservative')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(93,232,160,.07);border:1px solid rgba(93,232,160,.25);color:rgba(93,232,160,.85);border-radius:5px;cursor:pointer;">Conservative (0.5×5)</button>
+      <button data-guide="ladder-preset-balanced" onclick="szLadderPreset('balanced')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);border-radius:5px;cursor:pointer;">Balanced (1/1.5/2/2.5/3)</button>
+      <button data-guide="ladder-preset-aggressive" onclick="szLadderPreset('aggressive')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(232,112,110,.07);border:1px solid rgba(232,112,110,.25);color:rgba(232,112,110,.85);border-radius:5px;cursor:pointer;">Aggressive (1/2/3/4/5)</button>
       <div style="flex:1"></div>
-      <button onclick="szLadderSubmitAll()" id="szLadderSubmitBtn" style="padding:8px 18px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--crys);color:#07080c;border:none;border-radius:5px;cursor:pointer;letter-spacing:.04em;">Submit All to MT5</button>
+      <button data-guide="size-submit-mt5" onclick="szLadderSubmitAll()" id="szLadderSubmitBtn" style="padding:8px 18px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--crys);color:#07080c;border:none;border-radius:5px;cursor:pointer;letter-spacing:.04em;">Submit All to MT5</button>
     </div>
     <div id="szLadderStatus" style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);min-height:14px;"></div>
   </div>
 
   <!-- Agent Sizing Assessment card — populated by szRenderAgentSizingCard() after flow badge updates -->
-  <div id="szAgentSizingCard" style="margin-top:12px;display:none;"></div>
+  <div id="szAgentSizingCard" data-guide="agent-sizing-card" style="margin-top:12px;display:none;"></div>
 
   ${(function(){
     // Verdict agent cards section — show if a verdict has been run for this signal.
@@ -14907,7 +14907,7 @@ function szLadderRender() {
       : (_rowRec && _rowRec.error)
       ? '<div style="font-family:var(--mono);font-size:8px;color:rgba(232,112,110,.65);max-width:280px;">'+_rowRec.error+'</div>'
       : '';
-    return `<div style="margin-bottom:5px;">
+    return `<div data-guide="ladder-row" style="margin-bottom:5px;">
       <div style="display:grid;grid-template-columns:32px 110px 120px 100px 62px 62px 62px 160px 24px;gap:6px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-radius:5px 5px 0 0;">
         <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
         <div style="display:flex;align-items:center;gap:6px;">
@@ -14924,7 +14924,7 @@ function szLadderRender() {
         ${tpCell(p1, 'TP1')}
         ${tpCell(p2, 'TP2')}
         ${tpCell(p3, 'TP3')}
-        <div>
+        <div data-guide="size-ladder-target">
           <div style="font-size:8px;color:rgba(237,232,216,.35);letter-spacing:.3px;margin-bottom:4px;font-family:var(--mono);">TARGET</div>
           <div style="display:flex;gap:3px;flex-wrap:wrap;">
             ${['tp1','tp2','tp3','trail'].map(v => {
@@ -14985,7 +14985,7 @@ function szLadderRender() {
       bestCaseAllTp3   += units * (tp3Dist || tp2Dist || tp1Dist);
     });
     const netRR = totalRisk > 0 ? (combinedScaleOut / totalRisk) : 0;
-    return `<div style="margin-top:8px;padding:11px 14px;background:linear-gradient(90deg, rgba(93,232,160,.08), rgba(201,168,76,.05));border:1px solid rgba(93,232,160,.28);border-radius:7px;">
+    return `<div data-guide="size-trade-scenario" style="margin-top:8px;padding:11px 14px;background:linear-gradient(90deg, rgba(93,232,160,.08), rgba(201,168,76,.05));border:1px solid rgba(93,232,160,.28);border-radius:7px;">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;">
         <div>
           <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);letter-spacing:.6px;text-transform:uppercase;margin-bottom:3px;">Combined potential profit</div>
@@ -18124,7 +18124,9 @@ async function showAutomations() {
         + '<div style="font-family:var(--mono);font-size:10px;color:rgba(224,85,85,.85);line-height:1.65;">' + guide.risk_if_off + '</div></div>'
         + '</div></details>'
       : '';
-    return '<div style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
+    var _dvGKMap={'autoTP1':'auto-tp1-scale','autoTP2':'auto-tp2-scale','autoTP3':'auto-tp3-scale','weekendClose':'auto-weekend-close','dailyLossLimit':'auto-daily-loss','drawdownPause':'auto-drawdown-pause','newsFilter':'auto-news-filter','autoScan':'auto-scan-entry','aiReanalyze':'auto-ai-reanalyze','alertSignal':'auto-alert-signal','alertTP':'auto-alert-tp','alertSL':'auto-alert-sl','alertDailySummary':'auto-alert-summary'};
+    var _dgKey=_dvGKMap[key]||('auto-'+key);
+    return '<div data-guide="'+_dgKey+'" style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
       + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
       +   '<div style="flex:1;">'
       +     '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);">' + label + recBadge + levelBadge + '</div>'
@@ -18198,7 +18200,7 @@ async function showAutomations() {
       +   '</div>'
       + '</div>'
       + '</div>'
-      + '<div style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
+      + '<div data-guide="auto-atr-multiplier" style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
       +   '<div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);margin-bottom:3px;">ATR Trailing Multiplier <span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(61,190,108,.1);border:1px solid rgba(61,190,108,.2);color:#3dbe6c;margin-left:5px;">EXECUTION PARAM</span></div>'
       +   '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5;">Controls how far the trailing stop sits from the current price. 1× ATR = tight trail (locks gains faster, may close early on pullbacks). 2× ATR = looser trail (survives pullbacks, gives back more profit before closing).</div>'
       +   sliderSub('trailingAtrMult', s.trailingAtrMult || 1.0, 0.5, 5.0, '× ATR distance (recalculated live)', 'Trail distance')
@@ -18226,7 +18228,7 @@ async function showAutomations() {
           'When the scanner finds a signal matching your rules, DotVerse places the trade in MT5 without you needing to click.',
           s.autoScan, false,
           sliderSub('minConfidence', s.minConfidence, 65, 95, '%  minimum signal confidence', 'Min confidence'))
-      + '<div style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
+      + '<div data-guide="auto-max-trades" style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
       +   '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px;">'
       +     '<div>'
       +       '<div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t2);">Max simultaneous trades</div>'
@@ -18309,7 +18311,7 @@ async function showAutomations() {
       'Execution Parameters',
       'These settings control HOW automations execute — not whether they fire. Per-trade on/off is set in the Size tab.',
       // Macro hours threshold
-      '<div style="padding:12px 0;border-bottom:1px solid var(--bd);">'
+      '<div data-guide="auto-macro-hours" style="padding:12px 0;border-bottom:1px solid var(--bd);">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
       + '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--t1);">Macro guard window</span>'
       + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">EXECUTION PARAM</span>'
@@ -18325,7 +18327,7 @@ async function showAutomations() {
       + '</div>'
       + '</div>'
       // Auto close %
-      + '<div style="padding:12px 0;">'
+      + '<div data-guide="auto-sentiment-close" style="padding:12px 0;">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
       + '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--t1);">Sentiment partial-close %</span>'
       + '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);">EXECUTION PARAM</span>'
@@ -18347,7 +18349,7 @@ async function showAutomations() {
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amb)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
       'Active Watches & Automation State',
       'Each active watch shows which automations are armed for that specific trade. Per-trade on/off is set in the Size tab when you place the watch.',
-      '<div id="av_watchDash" style="margin-top:4px;">'
+      '<div id="av_watchDash" data-guide="auto-watch-dashboard" style="margin-top:4px;">'
       + '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);text-align:center;padding:16px 0;">Loading watches...</div>'
       + '</div>'
       + '<div style="margin-top:10px;text-align:right;">'
@@ -18388,7 +18390,7 @@ async function avLoadWatchDash(){
     var rows = watches.map(function(w){
       var flags = FLAG_CFG.map(function(f){
         var on = !!w[f.key];
-        return '<span title="' + f.title + ': ' + (on ? 'ARMED' : 'OFF') + '" style="'
+        return '<span data-guide="auto-watch-flag-chip" title="' + f.title + ': ' + (on ? 'ARMED' : 'OFF') + '" style="'
           + 'display:inline-flex;align-items:center;justify-content:center;'
           + 'font-family:var(--mono);font-size:9px;font-weight:700;'
           + 'padding:2px 5px;border-radius:3px;cursor:default;'
@@ -19182,6 +19184,67 @@ window._dvGuide = {
     body: 'When your account equity falls by the specified percentage from its recent peak, DotVerse pauses all new trade execution. This prevents a losing streak from becoming catastrophic. The pause does not close existing positions — only stops new ones opening until you manually review and resume.',
     example: 'Pause at 5%. Account peak $10,000. Equity drops to $9,500 → DotVerse pauses all automations → Telegram: "Drawdown limit reached. Review positions before resuming." You decide when to continue.'
   },
+  'auto-tp1-scale': {
+    title: 'Auto-Take 50% Profit at TP1',
+    body: 'When price reaches the first take profit target, DotVerse automatically closes 50% of your position via the MT5 EA. The remaining 50% continues to TP2 with the stop loss already moved to breakeven — so you cannot lose on the remainder.',
+    example: 'Position: 0.10 lots BUY · TP1 hit → EA automatically closes 0.05 lots and locks in that profit. The other 0.05 lots runs on to TP2 risk-free.'
+  },
+  'auto-tp2-scale': {
+    title: 'Auto-Take 30% Profit at TP2',
+    body: 'After TP1 has closed 50%, enabling this auto-closes another 30% of the original position when price reaches TP2. The final 20% continues to TP3. Recommended when the trend is strong and you want to let a portion of the trade run for maximum gains.',
+    example: 'Original 0.10 lots → TP1 closed 0.05 → TP2 auto-closes 0.03 → 0.02 lots remains for the TP3 run.'
+  },
+  'auto-tp3-scale': {
+    title: 'Auto-Close at TP3',
+    body: 'Closes the remaining position (approximately 20% of original size) when price reaches the third and final take profit target. The most ambitious exit. Only reaches TP3 in strongly trending markets — this automation ensures you capture the full move if it happens without having to watch the screen.',
+    example: 'After TP1 (50%) and TP2 (30%), the final 20% runs to TP3. Price reaches TP3 → EA closes the last position → full trade complete automatically.'
+  },
+  'auto-daily-loss': {
+    title: 'Daily Loss Limit',
+    body: 'A circuit breaker that pauses ALL automated trading if your account drops by the set percentage in a single day. Once triggered, no new automated trades open until tomorrow. This prevents a bad trading day from becoming a catastrophic one. You can still trade manually.',
+    example: 'Daily loss limit 3%. Account $10,000. Automated trades lose $300 in one day → DotVerse pauses all further automation → Telegram: "Daily loss limit hit — automation paused until tomorrow."'
+  },
+  'auto-news-filter': {
+    title: 'News Event Protection',
+    body: 'Pauses all new automated entries 30 minutes before and after HIGH-impact economic events (Non-Farm Payrolls, CPI, Federal Reserve rate decisions). These events cause unpredictable price spikes that can blow through stop losses instantly. Active positions are not closed — only new entries are blocked during the window.',
+    example: 'NFP release at 13:30 UTC → news filter blocks all new automated entries 13:00–14:00 UTC. Existing open trades continue with their stops in place.'
+  },
+  'auto-scan-entry': {
+    title: 'Auto-Open Trades from Scanner',
+    body: 'When the automatic scanner finds a signal that meets the minimum confidence threshold, DotVerse opens the trade in MT5 without any manual tap needed. This is a fully automated entry engine. Only use this after you have tested DotVerse signals in demo mode and are confident in the results.',
+    example: 'Scanner finds ETH-USD BUY 83% confidence at 3:00 AM while you sleep → auto-entry fires → 0.05 lots placed in MT5 with correct SL and TP levels → BE and TRAIL automations take over.'
+  },
+  'auto-ai-reanalyze': {
+    title: 'AI Re-Analysis Timer',
+    body: 'DotVerse re-runs its indicator engine on each open trade at the interval you set. After re-analysis, the AI agents produce a plain-English health report: "Hold — still trending", "Take partial profit — momentum fading", or "Exit — structure breaking down". The report is sent via Telegram so you know the status of every trade without watching the screen.',
+    example: 'Interval set to 15 minutes. NVDA swing trade open → 15 min check: "RSI 61, EMA still bullish, hold to TP1." → 30 min check: "RSI 74, approaching overbought — consider partial exit." → You decide whether to act.'
+  },
+  'auto-alert-signal': {
+    title: 'New Signal Alert',
+    body: 'Sends a Telegram notification to your phone the moment a new BUY or SELL signal fires on any asset you are watching. The message includes: ticker, timeframe, direction, confidence percentage, entry price, stop loss, and TP1 target. You can choose to act on it or ignore it.',
+    example: 'DotVerse fires BTC-USD BUY 81% on 4H → Telegram: "🔔 BTC-USD BUY (81% Confirmed) · Entry $68,200 · SL $65,800 · TP1 $72,000 · R:R 1:1.78"'
+  },
+  'auto-alert-tp': {
+    title: 'Target Hit Alert',
+    body: 'Sends a Telegram notification the moment a trade reaches Target 1, 2, or 3. Useful when you are not watching the screen — you know the trade has reached a milestone and may need your attention for the next decision.',
+    example: 'BTC trade hits TP1 at $72,000 → Telegram: "✅ BTC-USD TP1 hit at $72,000. Position partially closed. Consider moving stop to entry."'
+  },
+  'auto-alert-sl': {
+    title: 'Stop Loss Alert',
+    body: 'Sends a Telegram notification when a stop loss is triggered and a position is closed at a loss. The message explains the loss in dollar terms and how much of your daily and account risk has been used. Helps you track performance without being in front of the screen.',
+    example: 'BTC trade stopped out at $65,800 → Telegram: "⚠️ BTC-USD stop triggered at $65,800. Loss: $100 (1.0% of account). Daily loss used: 1.0% of 3% limit."'
+  },
+  'auto-alert-summary': {
+    title: 'Daily P&L Summary',
+    body: 'Sends a daily summary message at the time you choose. The summary includes: all trades opened and closed that day, total profit/loss in dollars and R-multiples, open positions and their current status, and how much of the daily loss limit has been used. Gives you a clean picture of each trading day.',
+    example: 'Daily summary at 21:00: "3 trades today. 2 wins (TP1 on BTC, TP2 on EURUSD) · 1 loss (NVDA stopped out) · Net: +$215 (+2.15R). 2 positions still open."'
+  },
+  'auto-sentiment-close': {
+    title: 'Sentiment Partial-Close %',
+    body: 'When the Sentiment guard detects 3 or more negative news headlines for an asset you hold, it partially closes your position by this percentage. The actual amount adjusts based on how much profit you are sitting on — large profit closes less, small profit closes more. This is the baseline percentage.',
+    example: 'Baseline 50%. You are up 2R on a BTC trade. 3 negative headlines appear → P&L-adjusted: DotVerse closes 15% of the position (reduced from 50% because profit is large). Up 0.3R → DotVerse closes 50% to lock in the small gain.'
+  },
+
   'auto-watch-dashboard': {
     title: 'Active Watch Dashboard',
     body: 'Every position currently being monitored by the automation engine. Each row shows the asset, entry price, ATR at signal time, and which automation features are active for that specific trade. Amber chip = that automation is running. Grey chip = off for this trade.',
@@ -19238,6 +19301,93 @@ window._dvGuide = {
   }
 };
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─── E2: Plain-English Guidance Tooltip Engine ───────────────────────────────
+// Single event-delegation listener on document (capture phase) — survives ALL
+// innerHTML re-renders on tab switches. Called once on boot. Zero per-element
+// listeners needed. data-guide attribute is the lookup key into _dvGuide.
+// ─────────────────────────────────────────────────────────────────────────────
+function dvGuideInit() {
+  if (window._dvGuideInited) return;
+  window._dvGuideInited = true;
+
+  // Inject one floating tooltip div into the body — never recreated
+  var tip = document.createElement('div');
+  tip.id = 'dv-guide-tip';
+  tip.style.cssText =
+    'position:fixed;z-index:99999;max-width:320px;' +
+    'background:rgba(12,10,8,.97);border:1px solid rgba(212,135,10,.35);' +
+    'border-radius:8px;padding:14px 16px;pointer-events:none;' +
+    'opacity:0;transition:opacity .12s ease;' +
+    'box-shadow:0 8px 32px rgba(0,0,0,.65);display:none;' +
+    'font-family:var(--mono);';
+  document.body.appendChild(tip);
+
+  var _tipTarget = null;
+  var _tipTimer  = null;
+
+  function _show(key, el) {
+    var cfg = (window._dvGuide || {})[key];
+    if (!cfg) return;
+    tip.innerHTML =
+      '<div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;' +
+        'color:rgba(212,135,10,.95);margin-bottom:6px;font-weight:700;">' +
+        cfg.title + '</div>' +
+      '<div style="font-size:11px;line-height:1.6;color:rgba(237,232,216,.82);">' +
+        cfg.body + '</div>' +
+      (cfg.example
+        ? '<div style="font-size:10px;line-height:1.5;color:rgba(237,232,216,.42);' +
+            'margin-top:8px;border-top:1px solid rgba(255,220,160,.1);padding-top:8px;">' +
+            cfg.example + '</div>'
+        : '');
+    tip.style.display = 'block';
+    // Smart position: below element, flip horizontal/vertical if near viewport edge
+    var r  = el.getBoundingClientRect();
+    var tw = 320, th = 180;
+    var lx = r.left;
+    var ty = r.bottom + 8;
+    if (lx + tw > window.innerWidth  - 8) lx = Math.max(8, window.innerWidth  - tw - 8);
+    if (lx < 8) lx = 8;
+    if (ty + th > window.innerHeight - 8) ty = r.top - th - 8;
+    if (ty < 8) ty = r.bottom + 8;
+    tip.style.left = lx + 'px';
+    tip.style.top  = ty + 'px';
+    tip.style.opacity = '1';
+  }
+
+  function _hide() {
+    tip.style.opacity = '0';
+    clearTimeout(_tipTimer);
+    _tipTimer = setTimeout(function () { tip.style.display = 'none'; }, 130);
+  }
+
+  // Desktop — mouseover / mouseout via capture phase (fires before re-renders)
+  document.addEventListener('mouseover', function (e) {
+    var el = e.target && e.target.closest && e.target.closest('[data-guide]');
+    if (!el) return;
+    if (el === _tipTarget) return;
+    _tipTarget = el;
+    _show(el.getAttribute('data-guide'), el);
+  }, true);
+
+  document.addEventListener('mouseout', function (e) {
+    var el = e.target && e.target.closest && e.target.closest('[data-guide]');
+    if (!el) return;
+    // Still inside the same element — don't hide
+    if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+    _tipTarget = null;
+    _hide();
+  }, true);
+
+  // Mobile — tap to toggle
+  document.addEventListener('click', function (e) {
+    var el = e.target && e.target.closest && e.target.closest('[data-guide]');
+    if (!el) return;
+    if (_tipTarget === el) { _tipTarget = null; _hide(); }
+    else { _tipTarget = el; _show(el.getAttribute('data-guide'), el); }
+  }, false);
+}
+dvGuideInit();
 </script>
 
 <!-- ══════════ ADMIN PANEL OVERLAY ══════════ -->

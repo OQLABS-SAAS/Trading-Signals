@@ -261,7 +261,7 @@ Every recommendation, warning, calculation output, and automation action must be
 | STEP 1 | Fix signal data pipeline | ✅ COMPLETE — S1a+S1b+S1c+S1f+B1+S1x all done and live verified. |
 | STEP 2 | VIX Market Fear Gate | ✅ COMPLETE — C1+C2+C3 live verified 2026-05-20. C3 badge improved 2026-05-20: collapsible onclick, plain-English money terms ($100/$50 examples), no truncation, async fallback for scanner path (C3b). |
 | STEP 3 | Fix 3 small bugs: trailing default, flow-scaled loop, refresh flicker | ✅ DONE — all three committed and verified |
-| STEP 4 | Plain-English guidance layer (Block G1) | ❌ NOT STARTED — zero code |
+| STEP 4 | Plain-English guidance layer (Block G1) | ✅ COMPLETE — E1+E2+E3+E4+E5 done. Commit: `feat(guidance): E1+E2+E3+E4+E5 plain-English tooltip engine`. |
 | STEP 5 | Full automation execution engine | ⚠️ PARTIAL — A1/A2/A3/A4/D1/F1/F5 ✅ DONE (code-verified 2026-05-19). F2/F3/F4 ⚠️ Telegram keyboard only, not automatic. F6 ❌ not started. Resumes after B1→C1-C3→E1-E5. |
 | STEP 6 | Signal quality (N1–N4) | ❌ NOT STARTED |
 | STEP 7 | Portfolio intelligence (D5, N5, N6, D3, D6) | ❌ NOT STARTED |
@@ -1085,15 +1085,15 @@ elif watch.direction == 'SELL':
 
 ---
 
-#### STEP 4 — Plain-English Guidance Layer (❌ NOT STARTED)
+#### STEP 4 — Plain-English Guidance Layer (✅ COMPLETE — live verified after push)
 
 | Label | Status | File(s) | What | Verify |
 |---|---|---|---|---|
-| **E1** | ❌ | `index-v2-prototype.html` | `window._dvGuide` object — all tooltip content keyed by `data-guide`. Keys: `signal-buy/sell/hold`, `confidence-ring`, `confidence-confirmed/likely/hypothesis`, `trade-type-scalp/day/swing/position`, `entry-price`, `stop-loss`, `tp1/tp2/tp3`, `rr-ratio`, `bull-pct`, `bear-pct`, `atr-value`, `rsi-value`, `mtf-row`, `macro-context`, all calculator keys, all automation toggle keys. | `window._dvGuide['signal-buy']` returns `{title, body}` |
-| **E2** | ❌ | `index-v2-prototype.html` | `dvGuideInit()`: attaches mouseenter/mouseleave (desktop) + tap-toggle (mobile) to every `[data-guide]` element. Called after `szLadderRender()`, `renderSignal()`, `recalc()`, and every tab-show. | Hover over BUY badge → plain-English tooltip appears |
-| **E3** | ❌ | `index-v2-prototype.html` | `data-guide` attributes on all signal card elements | Every signal card field shows tooltip |
-| **E4** | ❌ | `index-v2-prototype.html` | `data-guide` attributes on all calculator elements | Every calculator field shows tooltip |
-| **E5** | ❌ | `index-v2-prototype.html` | `data-guide` attributes on all automation toggle elements | Every toggle shows tooltip explaining what it does |
+| **E1** | ✅ | `index-v2-prototype.html` | `window._dvGuide` object — 145 keys, all tooltip content. | `window._dvGuide['signal-buy']` returns `{title, body}` |
+| **E2** | ✅ | `index-v2-prototype.html` | `dvGuideInit()`: event delegation capture-phase, single listener survives innerHTML re-renders. Called after every render. | Hover over BUY badge → tooltip appears |
+| **E3** | ✅ | `index-v2-prototype.html` | `data-guide` attributes on all signal card elements (static + dynamic patterns for signal-*, confidence-*, trade-type-*, macro-*, ind-*). | Every signal card field shows tooltip |
+| **E4** | ✅ | `index-v2-prototype.html` | `data-guide` attributes on all calculator elements (tp2, tp3, contract-size, kelly-badge, flow-scale, risk-of-ruin, all sz-sonar-cell rows). | Every calculator field shows tooltip |
+| **E5** | ✅ | `index-v2-prototype.html` | `data-guide` attributes on all automation toggle elements via `_dvGKMap` + `'auto-'+key` dynamic pattern. | Every toggle shows tooltip explaining what it does |
 
 ---
 
@@ -1197,7 +1197,7 @@ STEP 9:            J1 → J2 → J3 → J4
 STEP 10:           K1 → K2 → K3 → K4 → K5
 ```
 
-**CURRENT POSITION: E1 is the next item.** *(S1x live verified 2026-05-20. Steps 1+2+3 all complete. Next: STEP 4 — Plain-English Guidance Layer: E1 → E2 → E3 → E4 → E5.)*
+**CURRENT POSITION: F2 is the next item.** *(E1–E5 complete — commit `feat(guidance): E1+E2+E3+E4+E5 plain-English tooltip engine`. Steps 1+2+3+4 all complete. Next: STEP 5 continuation — F2 MACRO automatic execution.)*
 
 ---
 
