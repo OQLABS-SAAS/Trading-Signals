@@ -7142,7 +7142,6 @@ async function dvRunAnalyze(){
       chartPrices:data.chart_prices||[],
       chartVolumes:data.chart_volumes||[],
       // Engine context fields (commits 1-7 today — surface in UI)
-      regime: data.regime,
       adx: data.adx,
       historical_wr_pct: data.historical_wr_pct,
       historical_wr_n:   data.historical_wr_n,
@@ -7161,6 +7160,9 @@ async function dvRunAnalyze(){
       // ── C3: VIX Macro Gate context ──
       macro_context:       data.macro_context   || null,
       macro_override:      data.macro_override  === true,
+      // ── G1: Market Regime ──
+      regime:              data.regime          || 'NORMAL',
+      regime_warning:      data.regime_warning  || '',
       // ── News sentiment (GAP 5 — Finnhub headlines) ──
       newsSentiment:       data.news_sentiment || null,
       // ── Spread-aware R:R (spread build Steps A/B/D) ──
@@ -11824,6 +11826,24 @@ function showUnderstand(){
 
   ${vixBadgeHtml}
 
+  ${sig.regime_warning ? (()=>{
+    const _rz = sig.regime || 'NORMAL';
+    const _rbg = _rz === 'RANGING' ? 'rgba(201,168,76,.06)' : 'rgba(147,112,219,.06)';
+    const _rbd = _rz === 'RANGING' ? 'rgba(201,168,76,.28)' : 'rgba(147,112,219,.28)';
+    const _rc  = _rz === 'RANGING' ? 'rgba(201,168,76,.9)'  : 'rgba(147,112,219,.9)';
+    const _rlabel = _rz === 'RANGING' ? 'CHOPPY MARKET' : 'COUNTER-TREND SIGNAL';
+    return '<div data-guide="regime-warning" onclick="var m=this.querySelector(\'.reg-msg\');var a=this.querySelector(\'.reg-arrow\');if(m.style.display===\'none\'){m.style.display=\'block\';a.style.transform=\'rotate(180deg)\'}else{m.style.display=\'none\';a.style.transform=\'rotate(0deg)\'}" style="cursor:pointer;display:flex;flex-direction:column;gap:0;padding:10px 14px;margin-bottom:12px;background:'+_rbg+';border:1px solid '+_rbd+';border-radius:8px;user-select:none;">'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      + '<span style="width:7px;height:7px;border-radius:50%;background:'+_rc+';flex-shrink:0;"></span>'
+      + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:'+_rc+';flex:1;">REGIME · '+_rlabel+'</span>'
+      + '<span class="reg-arrow" style="font-size:9px;color:'+_rc+';transition:transform .2s;">▼</span>'
+      + '</div>'
+      + '<div class="reg-msg" style="display:none;margin-top:8px;font-family:var(--ui);font-size:10.5px;color:rgba(237,232,216,.75);line-height:1.55;">'
+      + sig.regime_warning
+      + '</div>'
+      + '</div>';
+  })() : ''}
+
   <!-- Info strip — real values from API -->
   <div class="dv-info-strip">
     <div class="dv-ic" id="dvStat_change" onclick="dvStatExpand('change',this)">
@@ -12016,9 +12036,9 @@ function showUnderstand(){
           const badges = [];
           const _bChip = (color, text, title) =>
             `<span title="${title||''}" style="font-size:9.5px;font-family:var(--mono);letter-spacing:.04em;padding:3px 8px;border-radius:4px;background:rgba(237,232,216,.04);border:1px solid ${color}55;color:${color};white-space:nowrap;">${text}</span>`;
-          if (sig.regime && sig.regime !== 'UNKNOWN') {
+          if (sig.regime && sig.regime !== 'UNKNOWN' && sig.regime !== 'NORMAL') {
             const c = sig.regime === 'TRENDING' ? '#5de8a0' : sig.regime === 'RANGING' ? '#d4b87a' : '#9aa0a8';
-            badges.push(_bChip(c, `REGIME · ${sig.regime}${sig.adx!=null?` (ADX ${Math.round(sig.adx)})`:''}`, 'Market regime from ADX'));
+            badges.push(_bChip(c, `REGIME · ${sig.regime}`, 'Market regime from ATR volatility vs 50-period mean. RANGING = choppy sideways market. TRENDING = expanding momentum.'));
           }
           if (sig.tv_signal_used) {
             badges.push(_bChip('#9aa0a8', 'TV · primary signal', 'TradingView 26-indicator score used as authoritative signal'));
@@ -18816,6 +18836,13 @@ window._dvGuide = {
     title: 'Markets in Panic — Signals Off',
     body: 'VIX is above 25. Markets are in fear or panic mode. Technical signals break down — price moves are driven by emotion, not chart patterns. DotVerse has suppressed this signal to protect you. Wait for VIX to drop below 25 before trading.',
     example: 'VIX 31 (panic) → DotVerse overrides signal to HOLD. On a $100 account that could mean DotVerse just saved you $10–30 by keeping you out of a chaotic move.'
+  },
+
+  // ── G1: MARKET REGIME ─────────────────────────────────────────────────────
+  'regime-warning': {
+    title: 'Market Regime Warning',
+    body: 'DotVerse detected that the current market conditions reduce this signal\'s reliability. A RANGING market means price is moving sideways — signals have higher false-positive rates because there is no clear trend to follow. A counter-trend signal in a TRENDING market means you are trading against strong momentum — the existing force can push back against your position. This warning does not cancel the signal — it tells you to trade with smaller size and tighter risk until conditions improve.',
+    example: 'RANGING market BUY → price may give a brief move then reverse. Use 50% of your normal position size and exit at TP1 only. Counter-trend BUY in bearish trend → only trade if you see a clear reversal pattern (e.g. higher low) and set a tighter stop.'
   },
 
   // ── WHAT TO DO NEXT (Understand tab) ─────────────────────────────────────

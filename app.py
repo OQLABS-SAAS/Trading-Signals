@@ -855,6 +855,20 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
     atr_smooth = atr_raw.rolling(100, min_periods=14).mean()
     atr        = float(atr_smooth.iloc[-1])
 
+    # G1: Market regime — current ATR14 vs its own 50-period rolling mean.
+    # Ratio < 0.70 → RANGING  (ATR significantly below its average = choppy, low-volatility sideways market)
+    # Ratio > 1.30 → TRENDING (ATR significantly above its average = expanding momentum, directional move)
+    # Between      → NORMAL   (ATR near its mean = no clear regime signal)
+    # Guard: if < 14 bars or ATR mean is NaN/zero, default to NORMAL so no spurious warnings show.
+    _atr50_mean = atr_raw.rolling(50, min_periods=14).mean().iloc[-1]
+    if pd.isna(_atr50_mean) or _atr50_mean <= 0:
+        atr_regime = "NORMAL"
+    else:
+        _regime_ratio = float(atr_raw.iloc[-1]) / float(_atr50_mean)
+        if   _regime_ratio < 0.70: atr_regime = "RANGING"
+        elif _regime_ratio > 1.30: atr_regime = "TRENDING"
+        else:                       atr_regime = "NORMAL"
+
     vol_avg   = float(vol.rolling(20).mean().iloc[-1])
     # Use previous bar if the last bar has no volume (incomplete candle edge case)
     last_vol  = float(vol.iloc[-1])
@@ -1006,6 +1020,7 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
         "bb_pos":       round(bb_pos, 3),
         "bb_width":     round(bb_width, 3),
         "atr":          round(atr, 4),
+        "atr_regime":   atr_regime,   # G1: "RANGING" | "NORMAL" | "TRENDING"
         "vol_ratio":    vol_ratio,
         "vol_raw":      int(last_vol),
         "vol_avg":      int(vol_avg),
@@ -2578,6 +2593,9 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     bb_pos = ind.get("bb_pos", 0.5) or 0.5
     atr = ind.get("atr", price * 0.01) or (price * 0.01)  # Default to 1% of price if ATR is 0
     vol_ratio = ind.get("vol_ratio", 1.0) or 1.0
+    # G1: read market regime from calculate_indicators(). Defaults to NORMAL when
+    # build_ind_from_tv() path is used (TV dict never includes atr_regime).
+    atr_regime = ind.get("atr_regime", "NORMAL") or "NORMAL"
     supertrend = ind.get("supertrend", "neutral") or "neutral"
     support = ind.get("support", price * 0.98)
     resistance = ind.get("resistance", price * 1.02)
@@ -3045,6 +3063,31 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         summary = f"{gate_note} {summary}"
         narrative = f"{gate_note}\n\n{narrative}"
 
+    # G1: Plain-English regime warning — computed after all signal gates so signal is final.
+    # Uses _emat (already computed above) for trend direction check.
+    _ema_up   = "BULL" in _emat   # True only when EMA is explicitly BULLISH
+    _ema_down = "BEAR" in _emat   # True only when EMA is explicitly BEARISH
+    # NEUTRAL EMA is NOT counter-trend — it means no confirmed direction yet (early breakout possible).
+    if atr_regime == "RANGING" and signal in ("BUY", "SELL"):
+        _regime_warning = (
+            "This asset is in a sideways, choppy market right now — average price movement is "
+            "below normal. Signals in ranging markets have lower reliability because price can "
+            "whipsaw before following through. Consider waiting for a clear breakout with rising "
+            "volume, or use a smaller position size."
+        )
+    elif atr_regime == "TRENDING" and signal in ("BUY", "SELL"):
+        if (signal == "BUY" and _ema_down) or (signal == "SELL" and _ema_up):
+            _regime_warning = (
+                "This asset is in a strongly trending market, but this signal goes against the "
+                "current trend. Counter-trend trades in momentum conditions carry a higher failure "
+                "rate — the existing trend has enough force to push back against you. Only take "
+                "this trade if you have a clear reversal pattern and accept a tighter stop."
+            )
+        else:
+            _regime_warning = ""  # Trending + trading with the trend = ideal conditions, no warning
+    else:
+        _regime_warning = ""
+
     result = {
         "signal": signal,
         "confidence": confidence,
@@ -3101,6 +3144,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # macro_override: True only when NO_TRADE zone forced a HOLD.
         "macro_context":  _vix_ctx,
         "macro_override": _macro_override,
+        # ── G1: Market Regime ─────────────────────────────────────────────────
+        # regime: ATR-based regime classification for this asset.
+        # "RANGING" (ATR <70% of 50-period mean), "TRENDING" (ATR >130%), "NORMAL".
+        # regime_warning: plain-English explanation of signal risk given the regime.
+        # Empty string when conditions are favourable (normal or trending with trend).
+        "regime":         atr_regime,
+        "regime_warning": _regime_warning,
         # ── 3d: Confidence label (restored TV-aware vocabulary 2026-04-29) ────
         # CONFIRMED  — TV scanner data used (26-indicator score) OR very strong net (>=5)
         # LIKELY     — TV BUY/SELL with medium conviction OR net >= 3 from local stack
@@ -8189,14 +8239,16 @@ def analyze():
         try:
             _adx_val = (tv or {}).get("tv_adx") if isinstance(tv, dict) else None
             if _adx_val is None:
-                analysis["regime"] = "UNKNOWN"
+                analysis["adx_regime"] = "UNKNOWN"
             elif _adx_val > 25:
-                analysis["regime"] = "TRENDING"
+                analysis["adx_regime"] = "TRENDING"
             elif _adx_val < 20:
-                analysis["regime"] = "RANGING"
+                analysis["adx_regime"] = "RANGING"
             else:
-                analysis["regime"] = "TRANSITION"
+                analysis["adx_regime"] = "TRANSITION"
             analysis["adx"] = _adx_val
+            # G1: analysis["regime"] is owned by get_analysis() ATR-based computation.
+            # ADX regime is supplementary — stored as adx_regime, never overwrites regime.
         except Exception as _re:
             print(f"[regime] error: {_re}")
 
@@ -8841,6 +8893,9 @@ def scan_list():
                         "trade_type":     analysis.get("trade_type","day"),
                         "htf_bias":       analysis.get("htf_bias","NEUTRAL"),
                         "timeframe":      timeframe,
+                        # G1: Market regime — so scanner-loaded signals show regime chip + warning
+                        "regime":         analysis.get("regime","NORMAL"),
+                        "regime_warning": analysis.get("regime_warning",""),
                     }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
