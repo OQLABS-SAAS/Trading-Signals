@@ -6719,8 +6719,8 @@ def _get_vix_score():
     """
     cache_key = "vix_score"
     try:
-        if _redis:
-            cached = _redis.get(cache_key)
+        if _redis_client:
+            cached = _redis_client.get(cache_key)
             if cached:
                 return json.loads(cached)
     except Exception:
@@ -6749,12 +6749,99 @@ def _get_vix_score():
     result = {"vix": round(vix, 2), "score": score, "zone": zone, "message": msg}
 
     try:
-        if _redis:
-            _redis.setex(cache_key, 900, json.dumps(result))  # 15-min TTL
+        if _redis_client:
+            _redis_client.setex(cache_key, 900, json.dumps(result))  # 15-min TTL
     except Exception:
         pass
 
     return result
+
+
+def _global_automation_job():
+    """Global automation monitor — runs every 5 minutes via apscheduler.
+
+    Checks VIX market fear level. If markets enter REDUCED or NO_TRADE zone,
+    broadcasts a plain-English Telegram alert to the trader.
+
+    Does NOT auto-close any position — purely informational.
+    Dedup: max one alert per zone per 6 hours (Redis key TTL=21600s).
+    Skips entirely if no watches are active (nothing to protect).
+    """
+    try:
+        with watch_lock:
+            n_watches = len(watch_registry)
+        if n_watches == 0:
+            return  # no active watches — nothing to protect, nothing to alert
+
+        vix_data = _get_vix_score()
+        vix_zone = vix_data.get("zone", "FULL")
+        vix_val  = vix_data.get("vix")
+
+        if vix_zone not in ("REDUCED", "NO_TRADE") or vix_val is None:
+            return  # markets calm — no broadcast needed
+
+        today    = datetime.utcnow().strftime("%Y-%m-%d")
+        vix_band = int(vix_val / 5) * 5  # group e.g. VIX 26,27,28 all → band 25
+        dedup_key = f"global_vix_alert:{vix_zone}:{today}:{vix_band}"
+
+        seen = False
+        try:
+            if _redis_client:
+                seen = bool(_redis_client.get(dedup_key))
+        except Exception:
+            seen = True  # Redis down → skip to avoid potential spam
+
+        if seen:
+            return
+
+        watch_word = "watches" if n_watches != 1 else "watch"
+
+        if vix_zone == "NO_TRADE":
+            tg_msg = (
+                f"⚠️ DotVerse Market Alert — Extreme Fear (VIX {vix_val:.1f})\n\n"
+                f"Markets are in panic mode. DotVerse has suppressed all new signals.\n\n"
+                f"Prices are being driven by emotion right now, not by technical patterns. "
+                f"New trade signals are unreliable in these conditions.\n\n"
+                f"For your {n_watches} active {watch_word}:\n"
+                f"• Make sure your stop losses are in place\n"
+                f"• No new entries until VIX drops below 25\n"
+                f"• DotVerse will alert you when conditions calm down"
+            )
+        else:  # REDUCED
+            tg_msg = (
+                f"⚡ DotVerse Market Alert — Elevated Caution (VIX {vix_val:.1f})\n\n"
+                f"Markets are more nervous than usual. DotVerse has tightened its signal filter — "
+                f"only showing signals where indicators strongly agree.\n\n"
+                f"For any new trades today: use half your normal position size. "
+                f"Your {n_watches} active {watch_word} are unaffected — "
+                f"continue managing them as normal."
+            )
+
+        try:
+            send_telegram(tg_msg)
+        except Exception as _tg_err:
+            print(f"[global_auto] Telegram send error: {_tg_err}")
+            return  # don't set dedup if send failed — try again next cycle
+
+        try:
+            if _redis_client:
+                _redis_client.setex(dedup_key, 21600, "1")  # 6h TTL
+        except Exception:
+            pass
+
+        print(f"[global_auto] VIX {vix_zone} broadcast sent — "
+              f"{n_watches} {watch_word}, VIX {vix_val:.1f}, band {vix_band}")
+
+    except Exception as _outer:
+        print(f"[global_auto] outer error: {_outer}")
+
+
+# F6 — register global VIX job after function is defined (scheduler already running)
+try:
+    scheduler.add_job(_global_automation_job, "interval", minutes=5,
+                      id="global_auto_job", max_instances=1, coalesce=True)
+except Exception as _f6_sched_err:
+    print(f"[global_auto] scheduler registration failed: {_f6_sched_err}")
 
 
 # ─── AUTOMATION INTELLIGENCE — signal-aware recommendation engine ─────────────
