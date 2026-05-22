@@ -13476,9 +13476,10 @@ function _vBuildAutoReview(s) {
   } else {
     lines.push({ok:false, text:'Move-to-breakeven is OFF — consider enabling it to remove downside risk once in profit.'});
   }
-  // TP ladder
-  var tpActive = [auto.autoTP1, auto.autoTP2, auto.autoTP3].filter(Boolean).length;
-  var recTp = s.positions || 3;
+  // TP ladder — read from per-trade chips (global autoTP1/2/3 no longer used)
+  var _pt0 = (window._szLadderAuto && window._szLadderAuto[0]) || {};
+  var tpActive = [_pt0.tp1, _pt0.tp2].filter(Boolean).length;
+  var recTp = 2;
   if (tpActive >= recTp) {
     lines.push({ok:true,  text:'TP ladder: '+tpActive+' of '+recTp+' take-profit levels active — plan to scale out as recommended.'});
   } else {
@@ -13648,11 +13649,12 @@ function _vAutoReviewAI(s) {
   }
   var ticker = (sig.sym || '').replace('/', '').replace('-', '');
   var action = ((s && s.action) || sig.sig || 'HOLD').toUpperCase();
-  var tpCount = [auto.autoTP1, auto.autoTP2, auto.autoTP3].filter(Boolean).length;
+  var _pt0c = (window._szLadderAuto && window._szLadderAuto[0]) || {};
+  var tpCount = [_pt0c.tp1, _pt0c.tp2].filter(Boolean).length;
   var settingsSummary = [
     'trailing stop: ' + (auto.trailing   ? 'ON' : 'OFF'),
     'move-to-breakeven: ' + (auto.breakeven ? 'ON' : 'OFF'),
-    'TP levels active: ' + tpCount + ' of 3',
+    'TP levels active: ' + tpCount + ' of 2',
     auto.dailyLossLimit ? 'daily loss cap: ' + (auto.dailyLossMax || 3) + '%' : 'daily loss cap: OFF'
   ].join(', ');
   // Include actual trade levels so DeepSeek can reason about specific prices,
@@ -18265,15 +18267,11 @@ async function showAutomations() {
       +   '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5;">Controls how far the trailing stop sits from the current price. 1× ATR = tight trail (locks gains faster, may close early on pullbacks). 2× ATR = looser trail (survives pullbacks, gives back more profit before closing).</div>'
       +   sliderSub('trailingAtrMult', s.trailingAtrMult || 1.0, 0.5, 5.0, '× ATR distance (recalculated live)', 'Trail distance')
       + '</div>'
-      + row('autoTP1', 'Auto-take 50% profit at Target 1',
-          'When Target 1 is hit, DotVerse automatically closes half your position and lets the rest run to Target 2.',
-          s.autoTP1, true, '')
-      + row('autoTP2', 'Auto-take 30% profit at Target 2',
-          'When Target 2 is hit, DotVerse closes another 30% of your position.',
-          s.autoTP2, false, '')
-      + row('autoTP3', 'Auto-take remaining position at Target 3',
-          'When Target 3 is hit, DotVerse closes the final 20% of your position and exits the trade completely.',
-          s.autoTP3, false, '')
+      + '<div style="padding:10px 14px;border-bottom:1px solid var(--bd);background:rgba(212,135,10,.06);">'
+      +   '<div style="font-family:var(--mono);font-size:10px;color:rgba(212,135,10,.9);line-height:1.6;">'
+      +     '<strong>TP exits are now per-trade.</strong> Use the TP1 and TP2 chips on each trade row in the Size tab — DotVerse will send a Telegram alert when that target is hit, and you tap to confirm.'
+      +   '</div>'
+      + '</div>'
       + '<div style="padding:10px 14px;border-bottom:1px solid var(--bd);background:rgba(61,190,108,.04);">'
       +   '<div style="font-family:var(--mono);font-size:10px;color:rgba(61,190,108,.8);line-height:1.6;">'
       +     '<strong>Weekend close is now per-trade.</strong> When you set up a watch on the Size tab, enable the WEEKEND chip. DotVerse will send you a Telegram alert on Friday asking whether to close before the weekend.'
