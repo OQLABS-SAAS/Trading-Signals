@@ -7807,18 +7807,21 @@ async function dvSetWatch(rowIdx){
   // Per-trade automation flags — use the specified ladder row's Optimise result,
   // or row 0 (primary row) if no rowIdx provided. All false if Optimise not yet run.
   var idx = (typeof rowIdx === 'number') ? rowIdx : 0;
-  var autoState = (window._szLadderAuto && window._szLadderAuto[idx]) || {be:false,trail:false,macro:false,inval:false,sent:false};
+  var autoState = (window._szLadderAuto && window._szLadderAuto[idx]) || _szDefaultAuto();
   const data=await dvFetch('/api/watch',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       ticker:      sig.sym,
       asset_type:  sig.asset||'auto',
       timeframe:   sig.tf||'4H',
       automations: {
-        be:    !!autoState.be,
-        trail: !!autoState.trail,
-        macro: !!autoState.macro,
-        inval: !!autoState.inval,
-        sent:  !!autoState.sent
+        be:      !!autoState.be,
+        trail:   !!autoState.trail,
+        macro:   !!autoState.macro,
+        inval:   !!autoState.inval,
+        sent:    !!autoState.sent,
+        tp1:     !!autoState.tp1,
+        tp2:     !!autoState.tp2,
+        weekend: !!autoState.weekend
       },
       entry_price: sig.entry || null,
       entry_atr:   sig.atr   || null
@@ -14388,13 +14391,17 @@ function showSize(){
     </div>
   </div>
 
-  <!-- ── Multi-Trade Ladder — fire up to 10 sims of the same signal at different risk % ── -->
+  <!-- ── Position Sizing — single trade or scale-out ladder ── -->
   <div class="und-card" style="margin-top:16px;">
-    <div class="und-card-title">Multi-Trade Ladder
-      <span style="font-size:10px;color:rgba(237,232,216,.5);font-weight:400;margin-left:6px;">Fire up to 10 simultaneous trades at different risk % to ladder your exposure.</span>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+      <div class="und-card-title" style="margin-bottom:0;">Position Sizing</div>
+      <div id="szModeToggle" style="display:flex;border:1px solid rgba(237,232,216,.15);border-radius:5px;overflow:hidden;">
+        <button id="szModeBtnSingle" onclick="szSetMode('single')" style="padding:4px 14px;font-family:var(--mono);font-size:10px;font-weight:700;background:rgba(93,232,160,.18);border:none;border-right:1px solid rgba(237,232,216,.15);color:rgba(93,232,160,.95);cursor:pointer;letter-spacing:.03em;">Single Trade</button>
+        <button id="szModeBtnMulti"  onclick="szSetMode('multi')"  style="padding:4px 14px;font-family:var(--mono);font-size:10px;font-weight:600;background:transparent;border:none;color:rgba(237,232,216,.4);cursor:pointer;letter-spacing:.03em;">Scale-Out Ladder</button>
+      </div>
     </div>
-    <div id="szLadderRows" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;"></div>
-    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+    <div id="szLadderRows" style="display:flex;flex-direction:column;gap:6px;margin-top:4px;"></div>
+    <div id="szLadderBtnsBar" style="display:none;gap:8px;margin-top:10px;flex-wrap:wrap;">
       <button onclick="szLadderAdd()" id="szLadderAddBtn" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.2);color:rgba(237,232,216,.85);border-radius:5px;cursor:pointer;">+ Add Row</button>
       <button data-guide="ladder-preset-conservative" onclick="szLadderPreset('conservative')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(93,232,160,.07);border:1px solid rgba(93,232,160,.25);color:rgba(93,232,160,.85);border-radius:5px;cursor:pointer;">Conservative (0.5×5)</button>
       <button data-guide="ladder-preset-balanced" onclick="szLadderPreset('balanced')" style="padding:6px 12px;font-family:var(--mono);font-size:10px;background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);border-radius:5px;cursor:pointer;">Balanced (1/1.5/2/2.5/3)</button>
@@ -14710,6 +14717,9 @@ function szSetDir(dir, btn){
   szCalc();
 }
 
+// ── Position Sizing Mode: 'single' (default, row 0 only) | 'multi' (full ladder) ──
+window._szMode = window._szMode || 'single';
+
 // ── Multi-Trade Ladder — up to 10 simultaneous trades at varying risk % ──
 window._szLadder = window._szLadder || [1.0, 1.5, 2.0, 2.5, 3.0];
 // Per-row TP target: 'tp1' | 'tp2' | 'tp3' | 'trail'
@@ -14728,7 +14738,7 @@ function _szDefaultTarget(i) {
 // and asset_type. Trader can override any individual toggle after Optimise runs.
 // Reset returns to this clean state.
 function _szDefaultAuto() {
-  return { be: false, trail: false, macro: false, inval: false, sent: false };
+  return { be: false, trail: false, macro: false, inval: false, sent: false, tp1: true, tp2: false, weekend: false };
 }
 window._szLadderAuto = window._szLadderAuto || (window._szLadder||[1.0,1.5,2.0,2.5,3.0]).map(function(){ return _szDefaultAuto(); });
 function szLadderTargetUpdate(i, val) {
@@ -14778,6 +14788,34 @@ function szApplyRecommendation() {
   window._szTargetsUserModified = false;
   szLadderRender();
 }
+// Switch between Single Trade and Scale-Out Ladder modes.
+// Single: renders only row 0 and hides the Add/Preset/Submit buttons bar.
+// Multi:  renders all rows and shows the full buttons bar.
+function szSetMode(mode) {
+  window._szMode = mode;
+  // Update toggle button styles
+  var btnS = document.getElementById('szModeBtnSingle');
+  var btnM = document.getElementById('szModeBtnMulti');
+  if (btnS && btnM) {
+    if (mode === 'single') {
+      btnS.style.background = 'rgba(93,232,160,.18)';
+      btnS.style.color      = 'rgba(93,232,160,.95)';
+      btnS.style.fontWeight = '700';
+      btnM.style.background = 'transparent';
+      btnM.style.color      = 'rgba(237,232,216,.4)';
+      btnM.style.fontWeight = '600';
+    } else {
+      btnM.style.background = 'rgba(201,168,76,.18)';
+      btnM.style.color      = 'rgba(201,168,76,.95)';
+      btnM.style.fontWeight = '700';
+      btnS.style.background = 'transparent';
+      btnS.style.color      = 'rgba(237,232,216,.4)';
+      btnS.style.fontWeight = '600';
+    }
+  }
+  szLadderRender();
+}
+
 function szLadderRender() {
   const wrap = document.getElementById('szLadderRows');
   if (!wrap) return;
@@ -14827,7 +14865,14 @@ function szLadderRender() {
     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(93,175,232,.65)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     <span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);letter-spacing:.02em;">Click <strong style="color:rgba(93,175,232,.65);font-weight:700;">Optimise</strong> on any trade row — DotVerse computes which live automation engines to activate for that row's exit strategy.</span>
   </div>`;
-  wrap.innerHTML = _recBanner + _autoRecSection + (window._szLadder||[]).map((risk, i) => {
+  // In Single mode show only row 0; in Multi mode show all rows.
+  const _isSingle = (window._szMode || 'single') === 'single';
+  const _rowsToRender = _isSingle ? (window._szLadder||[]).slice(0, 1) : (window._szLadder||[]);
+  // Show / hide the Add Row + preset + Submit buttons bar based on mode
+  const _ladderBtnsBar = document.getElementById('szLadderBtnsBar');
+  if (_ladderBtnsBar) _ladderBtnsBar.style.display = _isSingle ? 'none' : 'flex';
+
+  wrap.innerHTML = _recBanner + _autoRecSection + _rowsToRender.map((risk, i) => {
     const moneyAtRisk = acct * (risk/100);
     const units       = moneyAtRisk / slDist;
     const lotsStr     = units.toFixed(4);
@@ -14854,11 +14899,14 @@ function szLadderRender() {
     const auto = (window._szLadderAuto && window._szLadderAuto[i]) || _szDefaultAuto();
     // Build automation sub-row pills
     const _autoPillDefs = [
-      {key:'be',    label:'BE',    short:'Lock in risk-free', desc:'Moves your stop loss to your entry price once TP1 is hit — your maximum loss on this trade becomes zero.'},
-      {key:'trail', label:'TRAIL', short:'Run the winner',    desc:'An ATR-based trailing stop that follows price upward as it moves in your favour — locks in profit automatically.'},
-      {key:'macro', label:'MACRO', short:'Major news shield', desc:'Automatically pauses or tightens this trade if a major scheduled economic event fires while the trade is live.'},
-      {key:'inval', label:'INVAL', short:'Key break guard',   desc:'Tightens your stop the moment price breaks a key structure level that invalidates the reason you entered this trade.'},
-      {key:'sent',  label:'SENT',  short:'Mood shield',       desc:'Reduces position size or exits if real-time market sentiment turns strongly against your trade direction.'}
+      {key:'be',      label:'BE',      short:'Lock in risk-free', desc:'Moves your stop loss to your entry price once TP1 is hit — your maximum loss on this trade becomes zero.'},
+      {key:'trail',   label:'TRAIL',   short:'Run the winner',    desc:'An ATR-based trailing stop that follows price upward as it moves in your favour — locks in profit automatically.'},
+      {key:'macro',   label:'MACRO',   short:'Major news shield', desc:'Automatically pauses or tightens this trade if a major scheduled economic event fires while the trade is live.'},
+      {key:'inval',   label:'INVAL',   short:'Key break guard',   desc:'Tightens your stop the moment price breaks a key structure level that invalidates the reason you entered this trade.'},
+      {key:'sent',    label:'SENT',    short:'Mood shield',       desc:'Reduces position size or exits if real-time market sentiment turns strongly against your trade direction.'},
+      {key:'tp1',     label:'TP1',     short:'First target alert',desc:'Sends a Telegram message the moment price touches TP1 — your first profit level. Prompts you to take partial profits.'},
+      {key:'tp2',     label:'TP2',     short:'Second target alert',desc:'Sends a Telegram message the moment price touches TP2 — your second profit level. For swing and position trades only.'},
+      {key:'weekend', label:'WKND',    short:'Weekend check',     desc:'On Friday evening DotVerse asks if you want to close before the weekend or hold through it — protects you from gap risk.'}
     ];
     const _autoPillsHtml = _autoPillDefs.map(p => {
       const on = auto[p.key];
@@ -14956,7 +15004,7 @@ function szLadderRender() {
   // Totals row — sums across all ladder rows
   `<div style="display:grid;grid-template-columns:38px 120px 130px 110px 70px 70px 70px 140px 24px;gap:7px;align-items:center;padding:9px 9px;margin-top:4px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.22);border-radius:6px;">
     <div style="font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);font-weight:700;letter-spacing:.5px;">SUM</div>
-    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">${(window._szLadder||[]).length} trade(s)</div>
+    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">${_rowsToRender.length} trade(s)</div>
     <div style="font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.95);font-weight:700;">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:2})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total at risk</div></div>
     <div></div>
     <div style="font-family:var(--mono);font-size:11px;color:${tp1Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp1Dist?('+$'+totalTp1.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP1</div></div>
@@ -14978,7 +15026,7 @@ function szLadderRender() {
     // Per-row scale-out profit then summed
     let combinedScaleOut = 0;
     let bestCaseAllTp3   = 0;
-    (window._szLadder||[]).forEach((risk) => {
+    _rowsToRender.forEach((risk) => {
       const moneyAtRisk = acct * (risk/100);
       const units       = moneyAtRisk / slDist;
       combinedScaleOut += units * (0.5 * useTp1 + 0.3 * useTp2 + 0.2 * useTp3);
@@ -14989,7 +15037,7 @@ function szLadderRender() {
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;">
         <div>
           <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);letter-spacing:.6px;text-transform:uppercase;margin-bottom:3px;">Combined potential profit</div>
-          <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.45);">Standard scale-out: 50% TP1 + 30% TP2 + 20% TP3 across all ${(window._szLadder||[]).length} trade(s)</div>
+          <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.45);">Standard scale-out: 50% TP1 + 30% TP2 + 20% TP3 across all ${_rowsToRender.length} trade(s)</div>
         </div>
         <div style="text-align:right;">
           <div style="font-family:var(--mono);font-size:22px;font-weight:700;color:rgba(93,232,160,.95);line-height:1;">+$${combinedScaleOut.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
@@ -15082,7 +15130,10 @@ function szAutoRecommend(rowIdx) {
         window._szLadderAuto.push(_szDefaultAuto());
       }
       window._szLadderAuto[rowIdx] = Object.assign({}, window._szLadderAuto[rowIdx], {
-        be: rec.be, trail: rec.trail, macro: rec.macro, inval: rec.inval, sent: rec.sent
+        be: rec.be, trail: rec.trail, macro: rec.macro, inval: rec.inval, sent: rec.sent,
+        tp1: (rec.tp1 !== undefined) ? rec.tp1 : true, // tp1 alert always on by default
+        tp2: (rec.tp2 !== undefined) ? rec.tp2 : false,
+        weekend: (rec.weekend !== undefined) ? rec.weekend : false
       });
     }
     szLadderRender();
@@ -15900,7 +15951,7 @@ function showAct(){
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--crys)" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/></svg>
     <div style="flex:1;">
       <div style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--t2);">Automations active</div>
-      <div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px;" id="actAutoSummary">DotVerse is protecting your trades · Breakeven ON · Trailing ON</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px;" id="actAutoSummary">Loading watch status…</div>
     </div>
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
   </div>
@@ -17912,15 +17963,24 @@ function _autoToggleSettings(key, val, elId) {
   _autoPersist();
 }
 
-function _autoUpdateActBanner() {
+function _autoUpdateActBanner(watches) {
+  // X1b: reads real per-watch flag state, not global _autoSettings
   var el = document.getElementById('actAutoSummary');
   if (!el) return;
-  var parts = [];
-  if (_autoSettings.breakeven) parts.push('Breakeven ON');
-  if (_autoSettings.trailing)  parts.push('Trailing ON');
-  if (_autoSettings.autoScan)  parts.push('Auto-scan ON');
-  if (_autoSettings.weekendClose) parts.push('Weekend close ON');
-  el.textContent = 'DotVerse is protecting your trades · ' + (parts.join(' · ') || 'No automations active');
+  var ws = watches || window._avLastWatches || [];
+  if (!ws.length) {
+    el.textContent = 'No active watches — go to Size tab to set up a trade watch';
+    return;
+  }
+  // Collect which automation types are armed across all watches
+  var armed = {};
+  var flagMap = {be_on:'Breakeven', trail_on:'Trailing', macro_on:'Macro', inval_on:'Invalidation', sent_on:'Sentiment'};
+  ws.forEach(function(w) {
+    Object.keys(flagMap).forEach(function(k) { if (w[k]) armed[k] = true; });
+  });
+  var parts = Object.keys(armed).map(function(k){ return flagMap[k] + ' ON'; });
+  var watchWord = ws.length === 1 ? '1 trade watched' : ws.length + ' trades watched';
+  el.textContent = watchWord + ' · ' + (parts.length ? parts.join(' · ') : 'No automations armed');
 }
 
 // Max trades stepper helpers — wired to _autoSettings.maxTrades + _autoPersist()
@@ -18214,9 +18274,11 @@ async function showAutomations() {
       + row('autoTP3', 'Auto-take remaining position at Target 3',
           'When Target 3 is hit, DotVerse closes the final 20% of your position and exits the trade completely.',
           s.autoTP3, false, '')
-      + row('weekendClose', 'Close all trades before weekend',
-          'Markets can gap dramatically over the weekend. DotVerse closes all open positions before Friday close.',
-          s.weekendClose, true, '')
+      + '<div style="padding:10px 14px;border-bottom:1px solid var(--bd);background:rgba(61,190,108,.04);">'
+      +   '<div style="font-family:var(--mono);font-size:10px;color:rgba(61,190,108,.8);line-height:1.6;">'
+      +     '<strong>Weekend close is now per-trade.</strong> When you set up a watch on the Size tab, enable the WEEKEND chip. DotVerse will send you a Telegram alert on Friday asking whether to close before the weekend.'
+      +   '</div>'
+      + '</div>'
     )
 
   // ── Section 2: Auto-Entry
@@ -18260,29 +18322,16 @@ async function showAutomations() {
           'If your account falls this much from its peak, all automated trading pauses until you manually resume.',
           s.drawdownPause, true,
           sliderSub('drawdownMax', s.drawdownMax, 5, 30, '% drawdown', 'Pause at'))
-      + row('newsFilter', 'News event protection',
-          'DotVerse pauses automated entries 30 minutes before and after high-impact economic news (NFP, CPI, interest rates).',
-          s.newsFilter, true, '')
     )
 
-  // ── Section 4: AI Trade Assistant
-  + section(
-      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--crys)" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>',
-      'AI Trade Assistant',
-      'Plain-English health updates on your open trades',
-      row('aiReanalyze', 'Re-analyze open trades automatically',
-          'DotVerse checks each open trade on a timer and tells you in plain English whether to hold, take profits early, or exit.',
-          s.aiReanalyze, true,
-          sliderSub('aiInterval', s.aiInterval, 5, 60, 'min interval', 'Check every'))
-      + '<div style="padding:11px 14px;background:var(--crys2);border-top:1px solid var(--crys-bord);">'
-      +   '<div style="font-family:var(--mono);font-size:10px;color:var(--crys);margin-bottom:4px;">Example trade insights</div>'
-      +   '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);line-height:1.7;">'
-      +     '· "NVDA still trending up — RSI 58, room to run. Hold to Target 1."<br>'
-      +     '· "EURUSD showing early weakness — RSI dropping. Consider partial exit."<br>'
-      +     '· "XAUUSD at 85% of the way to Target 1. Breakeven stop now active."'
-      +   '</div>'
-      + '</div>'
-    )
+  // ── Section 4: Coming Soon (Y1: news_filter + ai_reanalyze removed — not yet wired)
+  + '<div style="margin:0;padding:12px 14px;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:rgba(237,232,216,.02);">'
+  +   '<div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--t2);margin-bottom:8px;letter-spacing:.08em;">COMING SOON</div>'
+  +   '<div style="font-family:var(--mono);font-size:10px;color:var(--t3);line-height:1.8;">'
+  +     '<div style="opacity:.6;margin-bottom:3px;">· News event filter — pause entries 30 min before NFP, CPI, rate decisions</div>'
+  +     '<div style="opacity:.6;margin-bottom:3px;">· AI Trade Assistant — re-analyzes open trades every X min, plain-English coaching</div>'
+  +   '</div>'
+  + '</div>'
 
   // ── Section 5: Telegram Alerts
   + section(
@@ -18380,11 +18429,14 @@ async function avLoadWatchDash(){
     }
 
     var FLAG_CFG = [
-      { key:'be_on',    label:'BE',    title:'Break Even',    color:'#5de8a0' },
-      { key:'trail_on', label:'TRAIL', title:'Trailing Stop', color:'#60a5fa' },
-      { key:'macro_on', label:'MACRO', title:'Macro Guard',   color:'#d4870a' },
-      { key:'inval_on', label:'INVAL', title:'Invalidation',  color:'#c9a84c' },
-      { key:'sent_on',  label:'SENT',  title:'Sentiment',     color:'#a78bfa' },
+      { key:'be_on',      label:'BE',   title:'Break Even',       color:'#5de8a0' },
+      { key:'trail_on',   label:'TRAIL',title:'Trailing Stop',    color:'#60a5fa' },
+      { key:'macro_on',   label:'MACRO',title:'Macro Guard',      color:'#d4870a' },
+      { key:'inval_on',   label:'INVAL',title:'Invalidation',     color:'#c9a84c' },
+      { key:'sent_on',    label:'SENT', title:'Sentiment',        color:'#a78bfa' },
+      { key:'tp1_on',     label:'TP1',  title:'TP1 Target Alert', color:'#5de8a0' },
+      { key:'tp2_on',     label:'TP2',  title:'TP2 Target Alert', color:'#c9a84c' },
+      { key:'weekend_on', label:'WKND', title:'Weekend Check',    color:'#f59e0b' },
     ];
 
     var rows = watches.map(function(w){
@@ -18419,6 +18471,8 @@ async function avLoadWatchDash(){
     }).join('');
 
     el.innerHTML = rows;
+    window._avLastWatches = watches;  // X1b: store for banner
+    _autoUpdateActBanner(watches);
   }catch(e){
     if(el) el.innerHTML = '<div style="font-family:var(--mono);font-size:10px;color:#f07070;padding:12px 0;">Failed to load watches. Check your connection.</div>';
   }

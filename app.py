@@ -3630,6 +3630,91 @@ def run_watch_job():
                 else:
                     _curr_st_bull = None  # NEUTRAL — skip store and check
 
+            # ── Z1/Z2: Account-level circuit breakers (daily loss + drawdown) ─────
+            # These run before any automation. If an account-level limit is breached,
+            # the entire watch iteration is skipped for this tick.
+            _z_uid     = w.get("user_id", "default")
+            _z_cfg     = _get_automation_settings(_z_uid)
+            _z_today   = now.strftime("%Y-%m-%d")
+            with mt5_state_lock:
+                _z_state = mt5_state.get(str(_z_uid)) or mt5_state.get("default", {})
+            _z_acct    = _z_state.get("account") or {}
+            _z_balance = float(_z_acct.get("balance") or 0)
+            _z_positions = _z_state.get("positions") or []
+            _z_total_pnl = sum(float(p.get("profit") or 0) for p in _z_positions)
+            _z_equity    = _z_balance + _z_total_pnl
+
+            # Z1 — Daily loss limit: total open P&L < -X% of balance
+            _z_skip = False
+            if _z_cfg.get("daily_loss_limit") and _z_balance > 0 and _z_total_pnl < 0:
+                _z_loss_pct = abs(_z_total_pnl) / _z_balance * 100
+                _z_max_pct  = float(_z_cfg.get("daily_loss_max", 3.0))
+                if _z_loss_pct >= _z_max_pct:
+                    _z_skip = True
+                    _z_dedup = f"daily_loss_limit:{_z_uid}:{_z_today}"
+                    _z_seen  = False
+                    try:
+                        if _redis_client: _z_seen = bool(_redis_client.get(_z_dedup))
+                    except Exception: pass
+                    if not _z_seen:
+                        _z_msg = (
+                            f"DotVerse Daily Safety: Your account is down ${abs(_z_total_pnl):.2f} today "
+                            f"({_z_loss_pct:.1f}% of your ${_z_balance:,.0f} account). "
+                            f"This equals your {_z_max_pct:.1f}% daily limit. "
+                            f"DotVerse has paused trade monitoring. "
+                            f"This protects you from revenge trading — losses that happen when you try to recover too quickly. "
+                            f"Monitoring resumes tomorrow at midnight UTC."
+                        )
+                        try: send_telegram_keyboard(_z_msg, [])
+                        except Exception: pass
+                        _push_notification(_z_uid, "daily_loss_limit",
+                            "Daily Loss Limit — Monitoring Paused", _z_msg, data={})
+                        try:
+                            if _redis_client: _redis_client.setex(_z_dedup, 86400, "1")
+                        except Exception: pass
+                        print(f"[daily_loss] {_z_uid}: {_z_loss_pct:.1f}% loss >= {_z_max_pct}% limit — watch skipped")
+
+            # Z2 — Drawdown pause: equity < peak * (1 - drawdown_max%)
+            if not _z_skip and _z_cfg.get("drawdown_pause") and _z_equity > 0 and _redis_client:
+                try:
+                    _z_peak_key = f"peak_equity:{_z_uid}"
+                    _z_stored_peak = _redis_client.get(_z_peak_key)
+                    _z_peak = float(_z_stored_peak) if _z_stored_peak else _z_equity
+                    # Update peak if equity improved
+                    if _z_equity > _z_peak:
+                        _z_peak = _z_equity
+                        _redis_client.set(_z_peak_key, str(_z_peak))
+                    _z_dd_pct  = (_z_peak - _z_equity) / _z_peak * 100 if _z_peak > 0 else 0
+                    _z_dd_max  = float(_z_cfg.get("drawdown_max", 10.0))
+                    if _z_dd_pct >= _z_dd_max:
+                        _z_skip = True
+                        _z_dd_dedup = f"drawdown_pause:{_z_uid}:{_z_today}"
+                        _z_dd_seen  = False
+                        try: _z_dd_seen = bool(_redis_client.get(_z_dd_dedup))
+                        except Exception: pass
+                        if not _z_dd_seen:
+                            _z_dd_msg = (
+                                f"DotVerse Drawdown Alert: Your account equity is ${_z_equity:,.0f}, "
+                                f"which is {_z_dd_pct:.1f}% below your peak of ${_z_peak:,.0f}. "
+                                f"This equals your {_z_dd_max:.0f}% drawdown limit. "
+                                f"DotVerse has paused all trade monitoring. "
+                                f"This is the same discipline professional traders use — when the market is "
+                                f"taking your money consistently, the answer is less exposure, not more. "
+                                f"Review your open positions, close what is losing, then resume manually."
+                            )
+                            try: send_telegram_keyboard(_z_dd_msg, [])
+                            except Exception: pass
+                            _push_notification(_z_uid, "drawdown_pause",
+                                "Drawdown Limit — Monitoring Paused", _z_dd_msg, data={})
+                            try: _redis_client.setex(_z_dd_dedup, 86400, "1")
+                            except Exception: pass
+                            print(f"[drawdown] {_z_uid}: {_z_dd_pct:.1f}% drawdown >= {_z_dd_max}% limit — watch skipped")
+                except Exception as _z_dd_err:
+                    print(f"[drawdown] check error: {_z_dd_err}")
+
+            if _z_skip:
+                continue  # skip all automations for this watch tick
+
             # ── ATR-Dynamic Trailing: update any open MT5 positions in this symbol ──
             # PDF spec (Chapter 8): queue a trailing modify only when ATR trail
             # distance changes by >10% from the previously-queued value.
@@ -3805,6 +3890,116 @@ def run_watch_job():
                                         _be_db.close()
                 except Exception as _be_outer:
                     print(f"[be] outer error for {ticker}: {_be_outer}")
+
+            # ── Phase 4c: TP1 / TP2 Target Alerts ────────────────────────────────────
+            # Per-trade: gated on watch.tp1_on / watch.tp2_on.
+            # Condition: live price reached or passed the TP level computed from
+            # entry_price + tp_mult * entry_atr (same formula as the signal engine).
+            # Action: Telegram keyboard — trader decides to take profit or hold on.
+            # NO automatic execution — architecture constraint: no auto-closes.
+            # Dedup: Redis key per level per direction per watch — fires only once.
+            _tp_entry = w.get("entry_price") or None
+            _tp_atr   = w.get("entry_atr")   or None
+            if _tp_entry and _tp_atr and float(_tp_atr) > 0:
+                _tp_uid       = str(w.get("user_id", "default"))
+                _tp_direction = (w.get("last_signal") or "").upper()
+                _tp_is_buy    = "BUY" in _tp_direction
+                _tp_is_sell   = "SELL" in _tp_direction
+                if _tp_is_buy or _tp_is_sell:
+                    _tp_live  = float(ind.get("price") or 0)
+                    _tp_e     = float(_tp_entry)
+                    _tp_a     = float(_tp_atr)
+                    _tp_prof  = _atr_profile_for_tf(timeframe)
+                    _tp1_lvl  = _tp_e + (_tp_prof["tp1_mult"] * _tp_a) if _tp_is_buy else _tp_e - (_tp_prof["tp1_mult"] * _tp_a)
+                    _tp2_lvl  = _tp_e + (_tp_prof["tp2_mult"] * _tp_a) if _tp_is_buy else _tp_e - (_tp_prof["tp2_mult"] * _tp_a)
+
+                    def _tp_check(on_flag, level, level_name, dedup_suffix):
+                        if not w.get(on_flag, False) or _tp_live <= 0:
+                            return
+                        hit = (_tp_is_buy  and _tp_live >= level) or \
+                              (_tp_is_sell and _tp_live <= level)
+                        if not hit:
+                            return
+                        _ded = f"tp_alert:{_tp_uid}:{ticker}:{timeframe}:{dedup_suffix}"
+                        try:
+                            if _redis_client and _redis_client.get(_ded):
+                                return  # Already alerted for this level on this watch
+                        except Exception:
+                            pass
+                        _dir_word = "BUY" if _tp_is_buy else "SELL"
+                        _profit_pct = round(abs(_tp_live - _tp_e) / _tp_e * 100, 2)
+                        _tp_msg = (
+                            f"🎯 {ticker} — {level_name} Reached\n\n"
+                            f"Your {_dir_word} trade has reached the {level_name} target at {level:.5g}.\n"
+                            f"Current price: {_tp_live:.5g} (+{_profit_pct}% from entry {_tp_e:.5g}).\n\n"
+                            f"This is your pre-set profit target. DotVerse recommends reviewing your position now."
+                        )
+                        _buttons = [[
+                            {"text": f"✅ Take Profit at {level_name}",  "callback_data": f"tp_take|{ticker}|{timeframe}|{level_name.lower()}"},
+                            {"text": "⏳ Hold — Let it Run", "callback_data": f"tp_hold|{ticker}|{timeframe}|{level_name.lower()}"}
+                        ]]
+                        try:
+                            send_telegram_keyboard(_tp_msg, _buttons)
+                        except Exception as _tp_tg_err:
+                            print(f"[tp_alert] Telegram error for {ticker} {level_name}: {_tp_tg_err}")
+                        try:
+                            if _redis_client:
+                                _redis_client.setex(_ded, 86400, "1")  # 24h dedup
+                        except Exception:
+                            pass
+                        print(f"[tp_alert] {ticker} {level_name} hit: live={_tp_live:.5g} level={level:.5g}")
+
+                    _tp_check("tp1_on", _tp1_lvl, "TP1", "tp1")
+                    _tp_check("tp2_on", _tp2_lvl, "TP2", "tp2")
+
+            # ── Phase 4d: Weekend Close Prompt (WKND) ─────────────────────────────────
+            # Per-trade: gated on watch.weekend_on.
+            # Condition: Friday 20:00–22:00 UTC — fires once per watch per calendar week.
+            # Action: Telegram keyboard — trader decides to close or hold through weekend.
+            # NO automatic execution — architecture constraint: no auto-closes ever.
+            # Dedup: Redis key per uid/ticker/timeframe/ISO-week — fires once per week.
+            if w.get("weekend_on", False):
+                try:
+                    _wknd_now = datetime.utcnow()
+                    _is_friday_window = (_wknd_now.weekday() == 4 and 20 <= _wknd_now.hour < 22)
+                    if _is_friday_window:
+                        _wknd_uid      = str(w.get("user_id", "default"))
+                        _iso_week      = _wknd_now.strftime("%Y-W%W")
+                        _wknd_ded      = f"weekend_alert:{_wknd_uid}:{ticker}:{timeframe}:{_iso_week}"
+                        _wknd_already  = False
+                        try:
+                            if _redis_client and _redis_client.get(_wknd_ded):
+                                _wknd_already = True
+                        except Exception:
+                            pass
+                        if not _wknd_already:
+                            _wknd_sig   = (w.get("last_signal") or "").upper()
+                            _wknd_dir   = "BUY" if "BUY" in _wknd_sig else ("SELL" if "SELL" in _wknd_sig else "TRADE")
+                            _wknd_entry = w.get("entry_price")
+                            _wknd_epstr = f" (entry {float(_wknd_entry):.5g})" if _wknd_entry else ""
+                            _wknd_msg = (
+                                f"📅 {ticker} — Weekend Approaching\n\n"
+                                f"You have an open {_wknd_dir} position on {ticker}{_wknd_epstr}.\n\n"
+                                f"Markets close for the weekend. Prices can gap significantly on Monday open "
+                                f"due to news over the weekend — your stop loss may not protect you from a gap.\n\n"
+                                f"DotVerse recommends reviewing your position before markets close."
+                            )
+                            _wknd_buttons = [[
+                                {"text": "✅ Close Before Weekend",  "callback_data": f"wknd_close|{ticker}|{timeframe}"},
+                                {"text": "📌 Hold — I'll Monitor",   "callback_data": f"wknd_hold|{ticker}|{timeframe}"}
+                            ]]
+                            try:
+                                send_telegram_keyboard(_wknd_msg, _wknd_buttons)
+                            except Exception as _wknd_tg_err:
+                                print(f"[wknd_alert] Telegram error for {ticker}: {_wknd_tg_err}")
+                            try:
+                                if _redis_client:
+                                    _redis_client.setex(_wknd_ded, 7 * 86400, "1")  # 7-day dedup (one week)
+                            except Exception:
+                                pass
+                            print(f"[wknd_alert] {ticker} weekend prompt sent — week {_iso_week}")
+                except Exception as _wknd_err:
+                    print(f"[wknd_alert] {ticker}: error — {_wknd_err}")
 
             # ── Phase 4b: Sentiment Watch (SENT) ─────────────────────────────────────
             # Per-trade: gated on watch.sent_on (set by Optimise + trader confirm).
@@ -4742,13 +4937,13 @@ def _get_automation_settings(user_id):
     in the UI — not the auto-created defaults row.
     """
     if not _DBSession:
-        return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
+        return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": False,  # X1a: default False
                 "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 1.0,
                 "market_alerts_on": True,
                 "auto_macro_response": False, "auto_invalidation_act": False,
                 "auto_sentiment_watch": False, "macro_hours_threshold": 4.0,
                 "auto_close_pct": 50.0,
-                "auto_tp1": True, "auto_tp2": False, "auto_tp3": False, "weekend_close": True,
+                "auto_tp1": True, "auto_tp2": False, "auto_tp3": False, "weekend_close": False,
                 "min_confidence": 75, "max_trades": 3,
                 "daily_loss_limit": True, "daily_loss_max": 3.0,
                 "drawdown_pause": True, "drawdown_max": 10.0,
@@ -4804,14 +4999,14 @@ def _get_automation_settings(user_id):
         db.close()
         return result
     except Exception:
-        return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": True,
+        return {"scan_enabled": True, "scan_risk_pct": 1.0, "breakeven_on": False,  # X1a: default False
                 "trailing_on": False, "trailing_pips": 50.0, "trailing_atr_mult": 1.0,
                 "market_alerts_on": True,
                 "auto_macro_response": False, "auto_invalidation_act": False,
                 "auto_sentiment_watch": False, "macro_hours_threshold": 4.0,
                 "auto_close_pct": 50.0,
                 "auto_tp1": True, "auto_tp2": False, "auto_tp3": False,
-                "weekend_close": True, "min_confidence": 75, "max_trades": 3,
+                "weekend_close": False, "min_confidence": 75, "max_trades": 3,
                 "daily_loss_limit": True, "daily_loss_max": 3.0,
                 "drawdown_pause": True, "drawdown_max": 10.0,
                 "news_filter": True, "ai_reanalyze": True, "ai_interval": 15,
@@ -6049,7 +6244,7 @@ def mt5_level_alert():
 
     if level in ("TP1", "TP2", "TP3") and _DBSession:
         try:
-            if auto_cfg.get("breakeven_on"):
+            if False:  # X1a: global breakeven_on removed — BE is per-watch only (run_watch_job be_on flag)
                 new_sl       = None
                 ladder_label = None
                 db_lookup    = _DBSession()
@@ -6619,6 +6814,7 @@ def _recommend_automations_from_signal(data):
     if signal == "HOLD":
         return {
             "be": False, "trail": False, "macro": False, "inval": False, "sent": False,
+            "tp1": False, "tp2": False, "weekend": False,
             "explanation": (
                 "No active trade signal — automations are not applicable. "
                 "Wait for a BUY or SELL signal before setting up automations."
@@ -6661,57 +6857,73 @@ def _recommend_automations_from_signal(data):
     if target == "trail":
         # This row has no fixed exit — the trailing stop runs until momentum turns.
         # It holds the longest and carries the most exposure of any ladder row.
-        be    = False        # Trail manages the stop — BE would conflict with trail logic
-        trail = True         # Trail IS the exit mechanism for this row
-        macro = True         # No fixed exit = crosses every news event
-        inval = True         # Critical — without a fixed exit, structure breaks must be caught
-        sent  = True         # Longest exposure to news sentiment of any row
+        be      = False        # Trail manages the stop — BE would conflict with trail logic
+        trail   = True         # Trail IS the exit mechanism for this row
+        macro   = True         # No fixed exit = crosses every news event
+        inval   = True         # Critical — without a fixed exit, structure breaks must be caught
+        sent    = True         # Longest exposure to news sentiment of any row
+        tp1     = True         # Alert at TP1 — useful milestone for partial take decisions
+        tp2     = True         # Alert at TP2 — another milestone on the runner
+        weekend = is_swing or is_position  # Trail rows on swing/position cross weekends
         reasons.append("Trail row: trailing stop IS the exit for this position — no fixed target.")
         reasons.append("Macro Guard and Technical Invalidation protect the open-ended hold.")
         reasons.append("Sentiment Watch guards against overnight news reversals.")
+        if weekend: reasons.append("Weekend Alert ON — this trail row may hold through the weekend.")
 
     elif target == "tp3":
         # TP3 is the most ambitious target — the 'runner'. It holds longer than TP1/TP2
         # and needs the fullest protection suite. Trail is optional: in very strong trends
         # price can overshoot TP3, so trailing can capture additional gains beyond the target.
-        be    = True                              # Always protect the runner — BE is non-negotiable
-        trail = ((is_swing or is_position) or htf_aligned) and not high_vol  # high vol → trail whipsawed
-        macro = True                              # TP3 rows are held the longest before exit
-        inval = True                              # Open to more candles = more reversal risk
-        sent  = True                              # Most news exposure before target is reached
+        be      = True                              # Always protect the runner — BE is non-negotiable
+        trail   = ((is_swing or is_position) or htf_aligned) and not high_vol  # high vol → trail whipsawed
+        macro   = True                              # TP3 rows are held the longest before exit
+        inval   = True                              # Open to more candles = more reversal risk
+        sent    = True                              # Most news exposure before target is reached
+        tp1     = True                              # Always alert at TP1 — first milestone
+        tp2     = True                              # Always alert at TP2 — second milestone
+        weekend = is_swing or is_position           # TP3 swing/position trades hold through weekends
         reasons.append("TP3 runner: Break Even activates immediately to protect this ambitious target.")
         if trail:
             reasons.append("Trailing Stop ON — strong trend confirmed; price may overshoot TP3.")
         reasons.append("Macro Guard, Invalidation, and Sentiment Watch active — longest hold of fixed-exit rows.")
+        if weekend: reasons.append("Weekend Alert ON — TP3 swing/position trades cross weekends.")
 
     elif target == "tp2":
         # TP2 rows hold past TP1 — moderate exposure. Needs BE and macro protection.
         # Trail is OFF — this row has a fixed exit at TP2; trailing would bypass it.
-        be    = not is_scalp and confidence in ("HIGH", "MEDIUM") and not high_vol
-        trail = False        # Fixed exit at TP2 — trailing would let price overshoot target
-        macro = (is_swing or is_position) or (is_day and confidence == "HIGH")
-        inval = weak_signal or htf_mixed or is_swing or is_position
-        sent  = (is_swing or is_position) or low_conviction
+        be      = not is_scalp and confidence in ("HIGH", "MEDIUM") and not high_vol
+        trail   = False        # Fixed exit at TP2 — trailing would let price overshoot target
+        macro   = (is_swing or is_position) or (is_day and confidence == "HIGH")
+        inval   = weak_signal or htf_mixed or is_swing or is_position
+        sent    = (is_swing or is_position) or low_conviction
+        tp1     = True         # Always alert at TP1 — you're past your safest exit, good to know
+        tp2     = True         # This IS the target — always alert when TP2 is hit
+        weekend = is_swing or is_position           # Swing/position TP2 rows cross weekends
         if be:    reasons.append("Break Even: stop moves to entry once price moves 1 ATR in your favour.")
         reasons.append("No Trailing Stop — this row exits at the fixed TP2 price.")
         if macro: reasons.append("Macro Guard: this row stays open long enough to cross news events.")
         if inval: reasons.append("Technical Invalidation: watches for EMA/Supertrend reversal on closed candles.")
         if sent:  reasons.append("Sentiment Watch: monitors headlines while this row is held past TP1.")
+        if weekend: reasons.append("Weekend Alert ON — this TP2 row may hold through the weekend.")
 
     else:  # tp1 — safest and quickest exit
         # TP1 exits quickly — the goal is speed and probability, not running the winner.
         # Trail is never appropriate (it would delay the quick exit that TP1 is designed for).
         # BE is still valuable — even a quick gain deserves stop protection once in profit.
-        be    = not is_scalp and confidence in ("HIGH", "MEDIUM") and not high_vol
-        trail = False        # TP1 exits at the first target — trailing conflicts with quick-exit intent
-        macro = (is_swing or is_position)         # Only if the signal type holds long enough for news
-        inval = weak_signal or htf_mixed           # Weak/mixed signals need early exit protection
-        sent  = low_conviction and confidence != "HIGH"  # Only when conviction is genuinely low
+        be      = not is_scalp and confidence in ("HIGH", "MEDIUM") and not high_vol
+        trail   = False        # TP1 exits at the first target — trailing conflicts with quick-exit intent
+        macro   = (is_swing or is_position)         # Only if the signal type holds long enough for news
+        inval   = weak_signal or htf_mixed           # Weak/mixed signals need early exit protection
+        sent    = low_conviction and confidence != "HIGH"  # Only when conviction is genuinely low
+        tp1     = True         # This IS the exit — always alert when TP1 is hit
+        tp2     = False        # TP1 row does not hold to TP2
+        weekend = is_swing or is_position           # Swing/position TP1 rows can still span weekends
         if be:    reasons.append("Break Even: stop moves to entry once 1 ATR profit is reached — zero loss possible.")
         reasons.append("No Trailing Stop — TP1 row is a quick, high-probability exit. Trailing delays it.")
         if macro: reasons.append("Macro Guard active — trade type means this row may cross a news event.")
         if inval: reasons.append("Technical Invalidation: exits early if the signal structure breaks.")
         if sent:  reasons.append("Sentiment Watch: low directional conviction makes headline risk real.")
+        if weekend: reasons.append("Weekend Alert ON — this swing/position TP1 row may still hold through the weekend.")
 
     # ── B1: RSI and ATR modifiers — plain-English warnings appended to reasons ──
     if high_vol:
@@ -6747,7 +6959,10 @@ def _recommend_automations_from_signal(data):
         )
     else:
         on_list = ", ".join(
-            k.upper() for k, v in [("be", be), ("trail", trail), ("macro", macro), ("inval", inval), ("sent", sent)] if v
+            k.upper() for k, v in [
+                ("be", be), ("trail", trail), ("macro", macro), ("inval", inval), ("sent", sent),
+                ("tp1", tp1), ("tp2", tp2), ("wknd", weekend)
+            ] if v
         )
         explanation = (
             f"This {trade_desc} ({conf_desc}). "
@@ -6756,6 +6971,7 @@ def _recommend_automations_from_signal(data):
         )
 
     return {"be": be, "trail": trail, "macro": macro, "inval": inval, "sent": sent,
+            "tp1": tp1, "tp2": tp2, "weekend": weekend,
             "explanation": explanation}
 
 
@@ -8171,11 +8387,14 @@ def add_watch():
         # Per-trade automation flags — sent from frontend _szLadderAuto[rowIdx] after Optimise runs.
         # All default False — backend compute (Optimise) must explicitly enable each one.
         auto_flags = body.get("automations") or {}
-        be_on      = bool(auto_flags.get("be",    False))
-        trail_on   = bool(auto_flags.get("trail", False))
-        macro_on   = bool(auto_flags.get("macro", False))
-        inval_on   = bool(auto_flags.get("inval", False))
-        sent_on    = bool(auto_flags.get("sent",  False))
+        be_on      = bool(auto_flags.get("be",      False))
+        trail_on   = bool(auto_flags.get("trail",   False))
+        macro_on   = bool(auto_flags.get("macro",   False))
+        inval_on   = bool(auto_flags.get("inval",   False))
+        sent_on    = bool(auto_flags.get("sent",    False))
+        tp1_on     = bool(auto_flags.get("tp1",     False))
+        tp2_on     = bool(auto_flags.get("tp2",     False))
+        weekend_on = bool(auto_flags.get("weekend", False))
         # Signal levels at time of watch — used by BE and TRAIL compute in run_watch_job
         try: entry_price = float(body.get("entry_price")) if body.get("entry_price") is not None else None
         except (TypeError, ValueError): entry_price = None
@@ -8190,11 +8409,14 @@ def add_watch():
             if key in watch_registry:
                 watch_registry[key]["alert_channels"] = alert_channels
                 # Update in-memory automation state too
-                watch_registry[key]["be_on"]    = be_on
-                watch_registry[key]["trail_on"] = trail_on
-                watch_registry[key]["macro_on"] = macro_on
-                watch_registry[key]["inval_on"] = inval_on
-                watch_registry[key]["sent_on"]  = sent_on
+                watch_registry[key]["be_on"]      = be_on
+                watch_registry[key]["trail_on"]   = trail_on
+                watch_registry[key]["macro_on"]   = macro_on
+                watch_registry[key]["inval_on"]   = inval_on
+                watch_registry[key]["sent_on"]    = sent_on
+                watch_registry[key]["tp1_on"]     = tp1_on
+                watch_registry[key]["tp2_on"]     = tp2_on
+                watch_registry[key]["weekend_on"] = weekend_on
                 _is_update = True
             else:
                 watch_registry[key] = {
@@ -8208,16 +8430,20 @@ def add_watch():
                     "last_reason":    "Not checked yet",
                     "last_price":     None,
                     "added_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-                    "be_on":    be_on,
-                    "trail_on": trail_on,
-                    "macro_on": macro_on,
-                    "inval_on": inval_on,
-                    "sent_on":  sent_on,
+                    "be_on":      be_on,
+                    "trail_on":   trail_on,
+                    "macro_on":   macro_on,
+                    "inval_on":   inval_on,
+                    "sent_on":    sent_on,
+                    "tp1_on":     tp1_on,
+                    "tp2_on":     tp2_on,
+                    "weekend_on": weekend_on,
                 }
 
         _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id,
                           be_on=be_on, trail_on=trail_on, macro_on=macro_on,
                           inval_on=inval_on, sent_on=sent_on,
+                          tp1_on=tp1_on, tp2_on=tp2_on, weekend_on=weekend_on,
                           entry_price=entry_price, entry_atr=entry_atr)
 
         if _is_update:
@@ -8290,11 +8516,14 @@ def list_watches():
                     "interval_min":    ALERT_INTERVALS.get(r.timeframe, 300) // 60,
                     "live_commentary": mem.get("live_commentary"),
                     # Per-trade automation state
-                    "be_on":           getattr(r, "be_on",    False) or False,
-                    "trail_on":        getattr(r, "trail_on", False) or False,
-                    "macro_on":        getattr(r, "macro_on", False) or False,
-                    "inval_on":        getattr(r, "inval_on", False) or False,
-                    "sent_on":         getattr(r, "sent_on",  False) or False,
+                    "be_on":           getattr(r, "be_on",      False) or False,
+                    "trail_on":        getattr(r, "trail_on",   False) or False,
+                    "macro_on":        getattr(r, "macro_on",   False) or False,
+                    "inval_on":        getattr(r, "inval_on",   False) or False,
+                    "sent_on":         getattr(r, "sent_on",    False) or False,
+                    "tp1_on":          getattr(r, "tp1_on",     False) or False,
+                    "tp2_on":          getattr(r, "tp2_on",     False) or False,
+                    "weekend_on":      getattr(r, "weekend_on", False) or False,
                     "entry_price":     getattr(r, "entry_price", None),
                     "entry_atr":       getattr(r, "entry_atr",   None),
                     "watch_id":        r.id,
@@ -10109,6 +10338,9 @@ class Watch(_Base):
     macro_on       = Column(Boolean,     nullable=False, default=False)  # High-impact news guard
     inval_on       = Column(Boolean,     nullable=False, default=False)  # EMA/Supertrend invalidation
     sent_on        = Column(Boolean,     nullable=False, default=False)  # Sentiment watch (Finnhub)
+    tp1_on         = Column(Boolean,     nullable=False, default=False)  # Alert when price hits TP1
+    tp2_on         = Column(Boolean,     nullable=False, default=False)  # Alert when price hits TP2
+    weekend_on     = Column(Boolean,     nullable=False, default=False)  # Weekend hold/close prompt (Fri 20:00 UTC)
     entry_price    = Column(Float,       nullable=True)                  # Signal entry at time of watch
     entry_atr      = Column(Float,       nullable=True)                  # ATR at time of watch (for BE compute)
     created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
@@ -10132,7 +10364,7 @@ class AutomationSettings(_Base):
     user_id          = Column(String(64), unique=True, nullable=False)
     scan_enabled     = Column(Boolean, default=True)
     scan_risk_pct    = Column(Float,   default=1.0)
-    breakeven_on     = Column(Boolean, default=True)
+    breakeven_on     = Column(Boolean, default=False)   # X1a: default False — BE is per-watch (be_on in watches table)
     trailing_on      = Column(Boolean, default=False)
     trailing_pips    = Column(Float,   default=50.0)
     trailing_atr_mult= Column(Float,   default=1.0)   # ATR multiplier — overrides fixed pips when > 0. PDF spec Ch8: 1.0x ATR.
@@ -10236,6 +10468,7 @@ class ScanAlert(_Base):
 
 def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="legacy",
                       be_on=False, trail_on=False, macro_on=False, inval_on=False, sent_on=False,
+                      tp1_on=False, tp2_on=False, weekend_on=False,
                       entry_price=None, entry_atr=None):
     """Upsert a watch into the database, including per-trade automation flags."""
     if not _DBSession: return
@@ -10250,6 +10483,9 @@ def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="le
             existing.macro_on    = macro_on
             existing.inval_on    = inval_on
             existing.sent_on     = sent_on
+            existing.tp1_on      = tp1_on
+            existing.tp2_on      = tp2_on
+            existing.weekend_on  = weekend_on
             if entry_price is not None: existing.entry_price = entry_price
             if entry_atr   is not None: existing.entry_atr   = entry_atr
         else:
@@ -10257,6 +10493,7 @@ def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="le
                          alert_channels=json.dumps(alert_channels),
                          be_on=be_on, trail_on=trail_on, macro_on=macro_on,
                          inval_on=inval_on, sent_on=sent_on,
+                         tp1_on=tp1_on, tp2_on=tp2_on, weekend_on=weekend_on,
                          entry_price=entry_price, entry_atr=entry_atr))
         db.commit()
     except Exception as _e:
@@ -10309,11 +10546,14 @@ def _load_watches_from_db():
                         "added_at":       r.created_at.strftime("%Y-%m-%d %H:%M UTC"),
                         # Per-trade automation flags — loaded from DB so run_watch_job
                         # reads per-watch values, not global settings.
-                        "be_on":    getattr(r, "be_on",    False) or False,
-                        "trail_on": getattr(r, "trail_on", False) or False,
-                        "macro_on": getattr(r, "macro_on", False) or False,
-                        "inval_on": getattr(r, "inval_on", False) or False,
-                        "sent_on":  getattr(r, "sent_on",  False) or False,
+                        "be_on":      getattr(r, "be_on",      False) or False,
+                        "trail_on":   getattr(r, "trail_on",   False) or False,
+                        "macro_on":   getattr(r, "macro_on",   False) or False,
+                        "inval_on":   getattr(r, "inval_on",   False) or False,
+                        "sent_on":    getattr(r, "sent_on",    False) or False,
+                        "tp1_on":     getattr(r, "tp1_on",     False) or False,
+                        "tp2_on":     getattr(r, "tp2_on",     False) or False,
+                        "weekend_on": getattr(r, "weekend_on", False) or False,
                     }
                     loaded += 1
         print(f"[watch] Loaded {loaded} watches from DB")
@@ -10373,6 +10613,8 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS alert_sl BOOLEAN DEFAULT TRUE"))
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS alert_daily_summary BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS alert_time VARCHAR(5) DEFAULT '08:00'"))
+                # X1a: ensure no existing rows have breakeven_on=TRUE from the old default
+                _conn.execute(text("UPDATE automation_settings SET breakeven_on = FALSE WHERE breakeven_on = TRUE"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS entry_confluence FLOAT"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS entry_atr FLOAT"))
                 # fill_price and mt5_ticket introduced in Stage 2 commit — missing from earlier migration
@@ -10398,7 +10640,7 @@ def _init_db():
                         user_id VARCHAR(64) UNIQUE NOT NULL,
                         scan_enabled BOOLEAN DEFAULT TRUE,
                         scan_risk_pct FLOAT DEFAULT 1.0,
-                        breakeven_on BOOLEAN DEFAULT TRUE,
+                        breakeven_on BOOLEAN DEFAULT FALSE,
                         trailing_on BOOLEAN DEFAULT FALSE,
                         trailing_pips FLOAT DEFAULT 50.0,
                         market_alerts_on BOOLEAN DEFAULT TRUE,
@@ -10431,6 +10673,9 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS macro_on BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS inval_on BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS sent_on BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS tp1_on BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS tp2_on BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS weekend_on BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS entry_price FLOAT"))
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS entry_atr FLOAT"))
                 _conn.commit()
