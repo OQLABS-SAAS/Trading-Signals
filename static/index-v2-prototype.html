@@ -7163,6 +7163,8 @@ async function dvRunAnalyze(){
       // ── G1: Market Regime ──
       regime:              data.regime          || 'NORMAL',
       regime_warning:      data.regime_warning  || '',
+      // ── G2: Session Context ──
+      session_context:     data.session_context || null,
       // ── News sentiment (GAP 5 — Finnhub headlines) ──
       newsSentiment:       data.news_sentiment || null,
       // ── Spread-aware R:R (spread build Steps A/B/D) ──
@@ -8927,7 +8929,10 @@ function _scRenderLive(results,tf){
       rr,bull:bp,reason:r.reason||'',rsi:r.rsi,emaTrend:r.ema_trend,
       conf:bp,confLbl:r.confidence_label||'HYPOTHESIS',
       winRate:r.win_rate,price:r.price,volRatio:r.vol_ratio,atr:r.atr,
-      bullCount:bs,bearCount:be}).replace(/"/g,'&quot;');
+      bullCount:bs,bearCount:be,
+      trade_type:r.trade_type||'day',htf_bias:r.htf_bias||'NEUTRAL',
+      regime:r.regime||'NORMAL',regime_warning:r.regime_warning||'',
+      session_context:r.session_context||null}).replace(/"/g,'&quot;');
     return `<tr class="sc-row" data-rr="${rr}" data-conf="${bp}" data-s15="${sig}" data-s1h="${sig}" data-s4h="${sig}" data-s1d="${sig}" onclick="loadScannerSignal(JSON.parse(this.dataset.payload))" data-payload="${pl}">
       <td class="sc-sym-cell"><span class="sc-sym">${r.ticker}</span><span class="sc-cls">${r.asset_type||''}</span></td>
       <td data-guide="scanner-tf-cell">${tfl==='15M'?sp(sig):dash}</td>
@@ -9057,6 +9062,11 @@ function loadScannerSignal(a){
     bearCount:a.bearCount||Math.round((100-(a.bull||50))*0.08),
     trade_type:a.trade_type||_dvDeriveTradeType(a.tf||'1h'),
     htf_bias:a.htf_bias||'NEUTRAL',
+    // G1: regime from scanner response
+    regime:       a.regime        || 'NORMAL',
+    regime_warning: a.regime_warning || '',
+    // G2: session context from scanner response
+    session_context: a.session_context || null,
   };
   window._calcPrefill={entry:a.entry,sl:a.sl||a.stop_loss,tp:a.tp||a.tp1,tp2:a.tp2,tp3:a.tp3,sym:a.sym};
   window._lastBt = null;   // reset stale backtest from previous signal
@@ -11844,6 +11854,26 @@ function showUnderstand(){
       + '</div>';
   })() : ''}
 
+  ${(()=>{
+    // G2: Session off-hours warning card — only shown when off_hours=true
+    const _sc = sig.session_context;
+    if (!_sc || !_sc.off_hours || !_sc.message) return '';
+    const _sbg = _sc.warning_level === 'high' ? 'rgba(232,112,110,.06)' : 'rgba(201,168,76,.06)';
+    const _sbd = _sc.warning_level === 'high' ? 'rgba(232,112,110,.28)' : 'rgba(201,168,76,.28)';
+    const _src = _sc.warning_level === 'high' ? 'rgba(232,112,110,.9)'  : 'rgba(201,168,76,.9)';
+    const _slabel = _sc.warning_level === 'high' ? 'MARKET CLOSED' : 'OFF-HOURS';
+    return '<div data-guide="session-offhours" onclick="var m=this.querySelector(\'.ses-msg\');var a=this.querySelector(\'.ses-arrow\');if(m.style.display===\'none\'){m.style.display=\'block\';a.style.transform=\'rotate(180deg)\'}else{m.style.display=\'none\';a.style.transform=\'rotate(0deg)\'}" style="cursor:pointer;display:flex;flex-direction:column;gap:0;padding:10px 14px;margin-bottom:12px;background:'+_sbg+';border:1px solid '+_sbd+';border-radius:8px;user-select:none;">'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      + '<span style="width:7px;height:7px;border-radius:50%;background:'+_src+';flex-shrink:0;"></span>'
+      + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:'+_src+';flex:1;">SESSION · '+_slabel+' · '+(_sc.session||'')+'</span>'
+      + '<span class="ses-arrow" style="font-size:9px;color:'+_src+';transition:transform .2s;">▼</span>'
+      + '</div>'
+      + '<div class="ses-msg" style="display:none;margin-top:8px;font-family:var(--ui);font-size:10.5px;color:rgba(237,232,216,.75);line-height:1.55;">'
+      + (_sc.message || '')
+      + '</div>'
+      + '</div>';
+  })()}
+
   <!-- Info strip — real values from API -->
   <div class="dv-info-strip">
     <div class="dv-ic" id="dvStat_change" onclick="dvStatExpand('change',this)">
@@ -12039,6 +12069,17 @@ function showUnderstand(){
           if (sig.regime && sig.regime !== 'UNKNOWN' && sig.regime !== 'NORMAL') {
             const c = sig.regime === 'TRENDING' ? '#5de8a0' : sig.regime === 'RANGING' ? '#d4b87a' : '#9aa0a8';
             badges.push(_bChip(c, `REGIME · ${sig.regime}`, 'Market regime from ATR volatility vs 50-period mean. RANGING = choppy sideways market. TRENDING = expanding momentum.'));
+          }
+          // G2: SESSION chip — green when active, amber when off-hours low, red when off-hours high
+          if (sig.session_context && sig.session_context.session && sig.session_context.session !== '—') {
+            const _sc = sig.session_context;
+            const _sc_color = _sc.off_hours
+              ? (_sc.warning_level === 'high' ? '#e8706e' : '#d4b87a')
+              : '#5de8a0';
+            const _sc_title = _sc.off_hours
+              ? (_sc.message || 'Outside primary liquidity window — spreads may be wider.')
+              : 'Primary trading session is active — good liquidity conditions.';
+            badges.push(_bChip(_sc_color, `SESSION · ${_sc.session}`, _sc_title));
           }
           if (sig.tv_signal_used) {
             badges.push(_bChip('#9aa0a8', 'TV · primary signal', 'TradingView 26-indicator score used as authoritative signal'));
@@ -18843,6 +18884,13 @@ window._dvGuide = {
     title: 'Market Regime Warning',
     body: 'DotVerse detected that the current market conditions reduce this signal\'s reliability. A RANGING market means price is moving sideways — signals have higher false-positive rates because there is no clear trend to follow. A counter-trend signal in a TRENDING market means you are trading against strong momentum — the existing force can push back against your position. This warning does not cancel the signal — it tells you to trade with smaller size and tighter risk until conditions improve.',
     example: 'RANGING market BUY → price may give a brief move then reverse. Use 50% of your normal position size and exit at TP1 only. Counter-trend BUY in bearish trend → only trade if you see a clear reversal pattern (e.g. higher low) and set a tighter stop.'
+  },
+
+  // ── G2: SESSION FILTER ────────────────────────────────────────────────────
+  'session-offhours': {
+    title: 'Off-Hours Warning',
+    body: 'You are outside the primary trading session for this asset. During off-hours, liquidity is lower — this means fewer buyers and sellers, which leads to wider bid-ask spreads (you pay more to enter and exit) and less reliable price moves. Technical signals generated in low-liquidity windows have higher false-positive rates because thin volume can push price around unpredictably. DotVerse is not suppressing the signal — it is alerting you so you can make an informed decision.',
+    example: 'Forex trade at 02:00 UTC (Asian session, low liquidity for EUR/USD) → spread may be 3× wider than during London hours. The signal is technically valid but entering now costs more and the move may be erratic. Consider waiting for 07:00 UTC (London open) for confirmation.'
   },
 
   // ── WHAT TO DO NEXT (Understand tab) ─────────────────────────────────────

@@ -3151,6 +3151,10 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # Empty string when conditions are favourable (normal or trending with trend).
         "regime":         atr_regime,
         "regime_warning": _regime_warning,
+        # ── G2: Session Context ────────────────────────────────────────────────
+        # session_context: current trading session + off-hours warning for this asset.
+        # off_hours=True → show amber/red warning card on UND tab.
+        "session_context": _get_session_context(asset_type),
         # ── 3d: Confidence label (restored TV-aware vocabulary 2026-04-29) ────
         # CONFIRMED  — TV scanner data used (26-indicator score) OR very strong net (>=5)
         # LIKELY     — TV BUY/SELL with medium conviction OR net >= 3 from local stack
@@ -6807,6 +6811,173 @@ def _get_vix_score():
     return result
 
 
+def _get_session_context(asset_type):
+    """G2: Return current trading session context for the given asset type.
+
+    Uses UTC time to determine whether we are within the primary liquidity window
+    for this instrument. Returns a safe dict — never raises.
+
+    Returns:
+        {
+          "session":       str   — human-readable session name (e.g. "London / NY")
+          "off_hours":     bool  — True when outside the primary liquidity window
+          "warning_level": None | "low" | "high"
+          "message":       str   — plain-English explanation for the signal card
+        }
+    """
+    try:
+        now   = datetime.utcnow()
+        hour  = now.hour + now.minute / 60.0  # fractional UTC hour e.g. 14.5
+        wday  = now.weekday()                  # 0=Monday … 6=Sunday
+        is_weekend = wday >= 5
+
+        at = (asset_type or "").lower()
+
+        # ── CRYPTO ────────────────────────────────────────────────────────────
+        if at == "crypto":
+            # Crypto never truly closes, but 00:00–06:00 UTC is low-liquidity
+            if 0 <= hour < 6:
+                return {
+                    "session":       "Low Liquidity (00:00–06:00 UTC)",
+                    "off_hours":     True,
+                    "warning_level": "low",
+                    "message": (
+                        "It is currently 00:00–06:00 UTC — the quietest period for crypto. "
+                        "Markets are technically open but trading volume is thin. Spreads are "
+                        "wider and price moves can be exaggerated. Consider waiting for "
+                        "London or New York hours (07:00–21:00 UTC) for more reliable signals."
+                    ),
+                }
+            # Name the active session
+            if   6 <= hour < 7:   session = "Pre-London"
+            elif 7 <= hour < 12:  session = "London"
+            elif 12 <= hour < 16: session = "London / NY"
+            elif 16 <= hour < 21: session = "New York"
+            else:                 session = "NY / Asia"
+            return {"session": session, "off_hours": False,
+                    "warning_level": None, "message": ""}
+
+        # ── FOREX ─────────────────────────────────────────────────────────────
+        if at == "forex":
+            if is_weekend:
+                return {
+                    "session":       "Weekend — Forex Closed",
+                    "off_hours":     True,
+                    "warning_level": "high",
+                    "message": (
+                        "Forex markets are closed on weekends. Signals generated now are based "
+                        "on Friday's close data. Wait for Sunday 22:00 UTC (Sydney open) before "
+                        "entering any trade — spreads are very wide at the open."
+                    ),
+                }
+            # Weekday forex sessions
+            if   hour < 7:        session = "Asian"
+            elif hour < 12:       session = "London"
+            elif hour < 16:       session = "London / NY"
+            elif hour < 21:       session = "New York"
+            else:                 session = "NY / Asia Close"
+
+            # Primary liquidity window: 07:00–21:00 UTC (London open → NY close)
+            if not (7 <= hour < 21):
+                return {
+                    "session":       session,
+                    "off_hours":     True,
+                    "warning_level": "low",
+                    "message": (
+                        f"You are outside the primary forex trading window "
+                        f"(07:00–21:00 UTC, current session: {session}). "
+                        "Spreads are wider, liquidity is thinner, and moves are less "
+                        "predictable. The signal is technically valid but best entered "
+                        "when London or New York is active."
+                    ),
+                }
+            return {"session": session, "off_hours": False,
+                    "warning_level": None, "message": ""}
+
+        # ── STOCKS + INDICES ──────────────────────────────────────────────────
+        if at in ("stocks", "indices", "index"):
+            if is_weekend:
+                return {
+                    "session":       "Weekend — Market Closed",
+                    "off_hours":     True,
+                    "warning_level": "high",
+                    "message": (
+                        "Stock and index markets are closed on weekends. This signal is based "
+                        "on Friday's closing data. Set an alert and review it when the market "
+                        "opens Monday morning."
+                    ),
+                }
+            # US market hours: pre-market 09:00–14:30 UTC, RTH 14:30–21:00 UTC,
+            # after-hours 21:00–00:00 UTC
+            if   hour < 9:         session, off, lvl = "Pre-Market (closed)", True,  "high"
+            elif hour < 14.5:      session, off, lvl = "Pre-Market",          True,  "low"
+            elif hour < 21:        session, off, lvl = "Regular Hours (RTH)", False, None
+            else:                  session, off, lvl = "After-Hours",         True,  "low"
+
+            if off:
+                msg = {
+                    "Pre-Market (closed)": (
+                        "US stock markets have not opened yet today. The signal is based on "
+                        "yesterday's data. Wait for the regular session (14:30–21:00 UTC) to enter."
+                    ),
+                    "Pre-Market": (
+                        f"US markets are in pre-market hours (current UTC hour: {int(hour):02d}:xx). "
+                        "Volume is very low and prices can gap at the 14:30 UTC open. "
+                        "Be cautious — spreads are wider and moves may reverse sharply at open."
+                    ),
+                    "After-Hours": (
+                        "US markets have closed (21:00 UTC). After-hours trading has very low "
+                        "volume and wide spreads. The signal reflects today's session data. "
+                        "Wait for the next regular session to enter."
+                    ),
+                }.get(session, "")
+                return {"session": session, "off_hours": True,
+                        "warning_level": lvl, "message": msg}
+
+            return {"session": session, "off_hours": False,
+                    "warning_level": None, "message": ""}
+
+        # ── COMMODITIES ───────────────────────────────────────────────────────
+        if at == "commodity":
+            if is_weekend:
+                return {
+                    "session":       "Weekend — Reduced Liquidity",
+                    "off_hours":     True,
+                    "warning_level": "low",
+                    "message": (
+                        "Commodity markets have reduced liquidity over the weekend. "
+                        "Some futures markets (e.g. crude oil, gold) re-open Sunday evening "
+                        "(22:00 UTC). Signals are based on Friday's data."
+                    ),
+                }
+            if 14.5 <= hour < 21:
+                session = "Primary Session (NYMEX/CME)"
+            elif 7 <= hour < 14.5:
+                session = "European Session"
+            else:
+                session = "Off-Hours"
+            off = (hour < 7 or hour >= 21)
+            if off:
+                return {
+                    "session":       session,
+                    "off_hours":     True,
+                    "warning_level": "low",
+                    "message": (
+                        "You are outside the primary commodity trading window "
+                        f"({session}). Liquidity is lower and spreads are wider. "
+                        "Consider waiting for the NYMEX/CME session (14:30–21:00 UTC)."
+                    ),
+                }
+            return {"session": session, "off_hours": False,
+                    "warning_level": None, "message": ""}
+
+        # ── UNKNOWN / DEFAULT (treat as crypto — always open, safe default) ───
+        return {"session": "—", "off_hours": False, "warning_level": None, "message": ""}
+
+    except Exception:
+        return {"session": "—", "off_hours": False, "warning_level": None, "message": ""}
+
+
 def _global_automation_job():
     """Global automation monitor — runs every 5 minutes via apscheduler.
 
@@ -8896,6 +9067,9 @@ def scan_list():
                         # G1: Market regime — so scanner-loaded signals show regime chip + warning
                         "regime":         analysis.get("regime","NORMAL"),
                         "regime_warning": analysis.get("regime_warning",""),
+                        # G2: Session context — so scanner-loaded signals show off-hours warning
+                        "session_context": analysis.get("session_context",
+                            {"session":"—","off_hours":False,"warning_level":None,"message":""}),
                     }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
