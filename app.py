@@ -4446,39 +4446,87 @@ def run_watch_job():
                                     if not _qev_seen:
                                         _is_buy   = (_stored.order_type == "BUY") if _stored else True
                                         _op_px    = float(_evt_open)
-                                        _prof_d   = (_curr_px - _op_px) if _is_buy else (_op_px - _curr_px)
-                                        _prof_pip = _atr_to_pips(max(_prof_d, 0), asset_type, _curr_px)
-                                        _tp1_px   = _stored.tp if _stored else None
-                                        _pct_tp1  = None
-                                        if _tp1_px and abs(float(_tp1_px) - _op_px) > 0:
-                                            _tp1_d   = abs(float(_tp1_px) - _op_px)
-                                            _pct_tp1 = round(min(abs(_prof_d) / _tp1_d * 100, 999), 0)
+                                        _dir_s    = "BUY" if _is_buy else "SELL"
                                         _ev_ttl   = _qev.get("title", "Macro Event")
                                         _ev_cty   = (_qev.get("country") or "").upper()
                                         _ev_hrs   = f"{_qev.get('hours_away', '?'):.0f}"
-                                        _ev_amp   = _qev.get("avg_move_pips")
-                                        _ev_amp_s = f"{_ev_amp:.0f} pips" if _ev_amp else "significant"
-                                        _dir_s    = "BUY" if _is_buy else "SELL"
-                                        _tg_msg   = (
-                                            f"⚡ LIVE ALERT — {ticker} {_dir_s} · Ticket #{_ticket}\n"
-                                            f"Opened at {_op_px:.5g}. Currently {_curr_px:.5g}"
-                                            + (f" — +{_prof_pip:.0f} pips"
-                                               + (f" (+{_pct_tp1:.0f}% toward TP1)"
-                                                  if _pct_tp1 is not None else "")
-                                               if _prof_pip > 0 else "") + ".\n\n"
-                                            f"{_ev_ttl} ({_ev_cty}) in {_ev_hrs}h — "
-                                            f"{(_qev.get('impact') or '').upper()} IMPACT.\n"
-                                            f"Expected move: {_ev_amp_s}. "
-                                            f"Stop at {_sl_price:.5g} — {_stop_pips:.0f} pips away.\n\n"
-                                            f"Option A: Close 50% + move stop to entry ({_op_px:.5g}).\n"
-                                            f"Option B: Hold full — full risk if event surprises."
+
+                                        # F2: P&L-aware message — compute R and dollar P&L
+                                        _f2_entry_atr = w.get("entry_atr") or float(ind.get("atr") or 0.0001)
+                                        _f2_pnl_d     = (_curr_px - _op_px) if _is_buy else (_op_px - _curr_px)
+                                        _f2_pnl_r     = round(_f2_pnl_d / max(float(_f2_entry_atr), 0.0001), 2)
+
+                                        # Dollar P&L from live MT5 position
+                                        _f2_profit_usd = 0.0
+                                        for _f2p in _inv_positions:
+                                            if (_f2p.get("symbol","") or "").upper() == _inv_sym.upper():
+                                                try:
+                                                    _f2_profit_usd = float(_f2p.get("profit") or _f2p.get("pnl") or 0)
+                                                except (TypeError, ValueError):
+                                                    pass
+                                                break
+                                        if _f2_profit_usd > 0:
+                                            _f2_profit_str = f"up ${_f2_profit_usd:.2f}"
+                                        elif _f2_profit_usd < 0:
+                                            _f2_profit_str = f"down ${abs(_f2_profit_usd):.2f}"
+                                        else:
+                                            _f2_profit_str = "at break even"
+
+                                        # Tightened SL price for "Tighten trail" option
+                                        # (entry + 0.5 ATR for BUY, entry - 0.5 ATR for SELL)
+                                        _f2_tight_sl = round(
+                                            _op_px + float(_f2_entry_atr) * 0.5 if _is_buy
+                                            else _op_px - float(_f2_entry_atr) * 0.5,
+                                            5
                                         )
-                                        _tg_kb = [[
-                                            {"text": "⚡ Close 50% + Move to Breakeven",
-                                             "callback_data": f"partial_close|{_ticket}|{_inv_sym}|event_risk"},
-                                            {"text": "Keep Full Position — I understand the risk",
-                                             "callback_data": f"ignore|{_ticket}|{_inv_sym}|event_risk"},
-                                        ]]
+                                        _f2_tight_profit = abs(_f2_tight_sl - _op_px)
+                                        _f2_tight_pnl_str = "a portion of your profit"
+
+                                        # DotVerse recommendation based on P&L in R
+                                        if _f2_pnl_r < 0.5:
+                                            _f2_rec = "close"
+                                            _f2_rec_body = (
+                                                f"You are {_f2_profit_str} — not enough buffer for a news shock. "
+                                                f"DotVerse recommends closing the trade now to protect your capital."
+                                            )
+                                        elif _f2_pnl_r < 1.5:
+                                            _f2_rec = "be"
+                                            _f2_rec_body = (
+                                                f"You are {_f2_profit_str} ({_f2_pnl_r:.1f}R). "
+                                                f"DotVerse recommends moving your stop loss to your entry price. "
+                                                f"Worst case: news goes against you and you exit at zero loss. "
+                                                f"Best case: news goes your way and you stay in to make more."
+                                            )
+                                        else:
+                                            _f2_rec = "trail"
+                                            _f2_rec_body = (
+                                                f"You are {_f2_profit_str} ({_f2_pnl_r:.1f}R) — a strong position. "
+                                                f"DotVerse recommends tightening your trailing stop to lock in "
+                                                f"most of your profit before the volatility hits."
+                                            )
+
+                                        _tg_msg = (
+                                            f"DotVerse Macro Alert — {ticker}\n\n"
+                                            f"{_ev_ttl} ({_ev_cty}) in {_ev_hrs}h.\n"
+                                            f"This is a high-impact news release. Markets can move sharply in either direction.\n\n"
+                                            f"Your {_dir_s} trade is currently {_f2_profit_str}.\n\n"
+                                            f"DotVerse recommendation:\n{_f2_rec_body}\n\n"
+                                            f"What each option does:\n"
+                                            f"Close trade — exits now, whatever you have is yours.\n"
+                                            f"Move stop to entry — worst case break even, best case ride the news.\n"
+                                            f"Tighten trailing stop — locks in most of your profit, still in the trade.\n"
+                                            f"Do nothing — full exposure to the news event. Your call."
+                                        )
+                                        _tg_kb = [
+                                            [{"text": "Close trade" + (" (Recommended)" if _f2_rec == "close" else ""),
+                                              "callback_data": f"close|{_ticket}|{_inv_sym}|macro"}],
+                                            [{"text": "Move stop to entry" + (" (Recommended)" if _f2_rec == "be" else ""),
+                                              "callback_data": f"breakeven|{_ticket}|{_inv_sym}|macro"},
+                                             {"text": "Tighten trailing stop" + (" (Recommended)" if _f2_rec == "trail" else ""),
+                                              "callback_data": f"tighten|{_ticket}|{_inv_sym}|{_f2_tight_sl:.5g}"}],
+                                            [{"text": "Do nothing",
+                                              "callback_data": f"ignore|{_ticket}|{_inv_sym}|macro"}],
+                                        ]
                                         try:
                                             send_telegram_keyboard(_tg_msg, _tg_kb)
                                         except Exception as _etg_err:
@@ -4486,15 +4534,17 @@ def run_watch_job():
                                         _push_notification(
                                             _uid,
                                             "macro_event",
-                                            f"EVENT RISK — {ticker} {_dir_s} · {_ev_ttl} in {_ev_hrs}h",
+                                            f"Macro Alert — {ticker} {_dir_s} · {_ev_ttl} in {_ev_hrs}h",
                                             (f"{_dir_s} #{_ticket}. {_ev_ttl} ({_ev_cty}) in "
                                              f"{_ev_hrs}h — {(_qev.get('impact') or '').upper()} IMPACT. "
-                                             f"Stop: {_stop_pips:.0f} pips. "
-                                             f"Consider: close 50% + move stop to breakeven."),
+                                             f"Position {_f2_profit_str}. "
+                                             f"DotVerse recommendation: {_f2_rec_body}"),
                                             data={"ticker": ticker, "ticket": _ticket,
                                                   "event": _ev_ttl,
                                                   "hours_away": _qev.get("hours_away"),
-                                                  "impact": _qev.get("impact")}
+                                                  "impact": _qev.get("impact"),
+                                                  "pnl_r": _f2_pnl_r,
+                                                  "recommendation": _f2_rec}
                                         )
                                         try:
                                             _redis_client.setex(_qev_block, 14400, "1")
