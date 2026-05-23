@@ -9027,12 +9027,81 @@ function _scApplyFilters(){
 
 function loadSignalContext(o){
   window._activeSignal = o;
+  // Inject computed context fields missing from signal-feed payload.
+  // Signal feed objects are pre-rendered and don't carry session/regime data.
+  var scKey = 'ses'+'sion_con'+'text';
+  if (!window._activeSignal[scKey]) {
+    window._activeSignal[scKey] = _dvSessionContext(o.asset || 'other');
+  }
+  if (!window._activeSignal.regime) {
+    window._activeSignal.regime = 'NORMAL';
+    window._activeSignal.regime_warning = '';
+  }
+  if (!window._activeSignal.trade_type) {
+    window._activeSignal.trade_type = _dvDeriveTradeType(o.tf || '1h');
+  }
+  if (!window._activeSignal.htf_bias) {
+    window._activeSignal.htf_bias = 'NEUTRAL';
+  }
   window._calcPrefill = { entry: o.entry, sl: o.sl, tp: o.tp, tp2: o.tp2, tp3: o.tp3, sym: o.sym };
   window._lastBt = null;   // reset stale backtest from previous signal
   window._szTargetsUserModified = false; // new signal — let DotVerse re-apply its recommendation
   setTimeout(function(){ undRunBacktest(true); }, 300);
   // Auto-navigate to CONTEXT pre-trade gate
   setNav('understand');showUnderstand();
+}
+
+// Compute session context client-side — mirrors Python _get_session_context().
+// Used when signal-feed path loads a signal that has no session_context in its payload.
+function _dvSessionContext(assetType) {
+  try {
+    var now = new Date();
+    var h = now.getUTCHours() + now.getUTCMinutes() / 60.0;
+    var wday = now.getUTCDay(); // 0=Sun, 6=Sat
+    var isWeekend = (wday === 0 || wday === 6);
+    var at = (assetType || '').toLowerCase();
+
+    if (at === 'crypto') {
+      if (h >= 0 && h < 6) {
+        return { session: 'Low Liquidity (00:00–06:00 UTC)', off_hours: true, warning_level: 'low',
+          message: 'It is currently 00:00–06:00 UTC — the quietest period for crypto. Markets are technically open but trading volume is thin. Spreads are wider and price moves can be exaggerated. Consider waiting for London or New York hours (07:00–21:00 UTC) for more reliable signals.' };
+      }
+      var session = h < 7 ? 'Pre-London' : h < 12 ? 'London' : h < 16 ? 'London / NY' : h < 21 ? 'New York' : 'NY / Asia';
+      return { session: session, off_hours: false, warning_level: null, message: '' };
+    }
+
+    if (at === 'forex') {
+      if (isWeekend) {
+        return { session: 'Weekend — Forex Closed', off_hours: true, warning_level: 'high',
+          message: 'Forex markets are closed on weekends. Signals generated now are based on Friday\'s close data. Wait for Sunday 22:00 UTC (Sydney open) before entering any trade — spreads are very wide at the open.' };
+      }
+      var fs = h < 7 ? 'Asian' : h < 12 ? 'London' : h < 16 ? 'London / NY' : h < 21 ? 'New York' : 'NY / Asia Close';
+      if (!(h >= 7 && h < 21)) {
+        return { session: fs, off_hours: true, warning_level: 'low',
+          message: 'You are outside the primary forex trading window (07:00–21:00 UTC). Spreads are wider and moves are less predictable. The signal is technically valid but best entered when London or New York is active.' };
+      }
+      return { session: fs, off_hours: false, warning_level: null, message: '' };
+    }
+
+    if (at === 'stocks' || at === 'indices' || at === 'index') {
+      if (isWeekend) {
+        return { session: 'Weekend — Market Closed', off_hours: true, warning_level: 'high',
+          message: 'Stock and index markets are closed on weekends. This signal is based on Friday\'s closing data. Set an alert and review it when the market opens Monday morning.' };
+      }
+      if (h < 9)      return { session: 'Pre-Market (closed)', off_hours: true, warning_level: 'high', message: 'US stock markets have not opened yet today. Wait for the regular session (14:30–21:00 UTC) to enter.' };
+      if (h < 14.5)   return { session: 'Pre-Market', off_hours: true, warning_level: 'low', message: 'US markets are in pre-market hours. Volume is very low and prices can gap at the 14:30 UTC open. Be cautious — spreads are wider and moves may reverse sharply at open.' };
+      if (h < 21)     return { session: 'Regular Hours (RTH)', off_hours: false, warning_level: null, message: '' };
+      return { session: 'After-Hours', off_hours: true, warning_level: 'low', message: 'US markets have closed (21:00 UTC). After-hours trading has very low volume and wide spreads. Wait for the next regular session to enter.' };
+    }
+
+    // Default — commodity / other
+    var ds = (h >= 14.5 && h < 21) ? 'Primary Session' : (h >= 7 && h < 14.5) ? 'European Session' : 'Off-Hours';
+    var dOff = (h < 7 || h >= 21);
+    return { session: ds, off_hours: dOff, warning_level: dOff ? 'low' : null,
+      message: dOff ? 'You are outside the primary trading window for this instrument. Spreads may be wider than usual.' : '' };
+  } catch(e) {
+    return { session: 'Unknown', off_hours: false, warning_level: null, message: '' };
+  }
 }
 
 // Derive trade_type from timeframe when backend doesn't supply it.
@@ -11722,8 +11791,8 @@ function showUnderstand(){
   if (_mc && _mc.vix != null) {
     const _vz = _mc.zone || 'FULL';
     const _vc  = _vz === 'NO_TRADE' ? '#e8706e' : _vz === 'REDUCED' ? 'rgba(201,168,76,.9)' : '#5de8a0';
-    const _vbg = _vz === 'NO_TRADE' ? 'rgba(224,85,85,.08)' : _vz === 'REDUCED' ? 'rgba(201,120,32,.08)' : 'rgba(61,190,108,.06)';
-    const _vbd = _vz === 'NO_TRADE' ? 'rgba(224,85,85,.3)'  : _vz === 'REDUCED' ? 'rgba(201,120,32,.35)' : 'rgba(61,190,108,.2)';
+    const _vbg = _vz === 'NO_TRADE' ? 'rgba(224,85,85,.08)' : _vz === 'REDUCED' ? 'rgba(201,168,76,.08)' : 'rgba(61,190,108,.06)';
+    const _vbd = _vz === 'NO_TRADE' ? 'rgba(224,85,85,.3)'  : _vz === 'REDUCED' ? 'rgba(201,168,76,.35)' : 'rgba(61,190,108,.2)';
     const _vLabel = _vz === 'NO_TRADE' ? 'MARKETS IN PANIC — SIGNALS OFF' : _vz === 'REDUCED' ? 'MARKETS NERVOUS — EXTRA CAUTION' : 'MARKETS CALM — GOOD TO TRADE';
     const _suppressBadge = sig.macro_override
       ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(224,85,85,.15);border:1px solid rgba(224,85,85,.35);color:#e8706e;flex-shrink:0;">SIGNAL SUPPRESSED</span>'
@@ -11731,11 +11800,11 @@ function showUnderstand(){
     vixBadgeHtml = '<div data-guide="macro-context" onclick="var m=this.querySelector(\'.vix-msg\');var a=this.querySelector(\'.vix-arrow\');if(m.style.display===\'none\'){m.style.display=\'block\';a.style.transform=\'rotate(180deg)\'}else{m.style.display=\'none\';a.style.transform=\'rotate(0deg)\'}" style="cursor:pointer;display:flex;flex-direction:column;gap:0;padding:10px 14px;margin-bottom:12px;background:'+_vbg+';border:1px solid '+_vbd+';border-radius:8px;user-select:none;">'
       + '<div style="display:flex;align-items:center;gap:8px;">'
       + '<span style="width:7px;height:7px;border-radius:50%;background:'+_vc+';flex-shrink:0;"></span>'
-      + '<span data-guide="macro-'+(_vz==='NO_TRADE'?'notrade':_vz.toLowerCase())+'" style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:'+_vc+';">VIX '+_mc.vix.toFixed(1)+' · '+_vLabel+'</span>'
+      + '<span data-guide="macro-'+(_vz==='NO_TRADE'?'notrade':_vz.toLowerCase())+'" style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:'+_vc+';flex:1;">VIX '+_mc.vix.toFixed(1)+' · '+_vLabel+'</span>'
       + _suppressBadge
-      + '<span class="vix-arrow" style="margin-left:auto;font-size:10px;color:'+_vc+';transition:transform .2s;flex-shrink:0;">▾</span>'
+      + '<span class="vix-arrow" style="font-size:9px;color:'+_vc+';transition:transform .2s;flex-shrink:0;">▼</span>'
       + '</div>'
-      + '<div class="vix-msg" style="display:none;margin-top:8px;font-size:12px;line-height:1.6;color:rgba(237,232,216,.85);padding-left:15px;border-top:1px solid '+_vbd+';padding-top:8px;">'+(_mc.message||'')+'</div>'
+      + '<div class="vix-msg" style="display:none;margin-top:8px;font-family:var(--ui);font-size:10.5px;line-height:1.55;color:rgba(237,232,216,.75);padding-top:8px;">'+(_mc.message||'')+'</div>'
       + '</div>';
   }
 
