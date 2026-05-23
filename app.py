@@ -6971,11 +6971,27 @@ def _get_session_context(asset_type):
             return {"session": session, "off_hours": False,
                     "warning_level": None, "message": ""}
 
-        # ── UNKNOWN / DEFAULT (treat as crypto — always open, safe default) ───
-        return {"session": "—", "off_hours": False, "warning_level": None, "message": ""}
+        # ── UNKNOWN / AUTO / DEFAULT — name the current session window, never block ──
+        if   0 <= hour < 6:   session = "Low Liquidity (00:00–06:00 UTC)"
+        elif 6 <= hour < 7:   session = "Pre-London"
+        elif 7 <= hour < 12:  session = "London"
+        elif 12 <= hour < 16: session = "London / NY"
+        elif 16 <= hour < 21: session = "New York"
+        else:                  session = "NY / Asia"
+        return {"session": session, "off_hours": False, "warning_level": None, "message": ""}
 
     except Exception:
-        return {"session": "—", "off_hours": False, "warning_level": None, "message": ""}
+        try:
+            _h = datetime.utcnow().hour + datetime.utcnow().minute / 60.0
+            if   0 <= _h < 6:   _s = "Low Liquidity (00:00–06:00 UTC)"
+            elif 6 <= _h < 7:   _s = "Pre-London"
+            elif 7 <= _h < 12:  _s = "London"
+            elif 12 <= _h < 16: _s = "London / NY"
+            elif 16 <= _h < 21: _s = "New York"
+            else:                _s = "NY / Asia"
+        except Exception:
+            _s = "—"
+        return {"session": _s, "off_hours": False, "warning_level": None, "message": ""}
 
 
 def _global_automation_job():
