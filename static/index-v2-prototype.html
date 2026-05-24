@@ -11033,9 +11033,16 @@ function rmPresetShock(preset){
 async function showPerformance(){
   const el=document.getElementById('dashContent'); if(!el) return;
   el.innerHTML='<div style="color:var(--t3);font-size:13px;padding:32px;text-align:center;font-family:var(--mono);">Loading signal history…</div>';
-  // Fetch real signal history
-  let data=[];
-  try{ const r=await dvFetch('/api/signals/history?limit=100'); if(r&&Array.isArray(r)) data=r; }catch(e){}
+  // Fetch real signal history AND outcome stats in parallel
+  let data=[], stats={sample_size:0,ready:false,message:'Building track record — 0/30 trades logged.'};
+  try{
+    const [rHist, rStats] = await Promise.all([
+      dvFetch('/api/signals/history?limit=100'),
+      dvFetch('/api/signals/stats')
+    ]);
+    if(rHist && Array.isArray(rHist)) data = rHist;
+    if(rStats && typeof rStats === 'object') stats = rStats;
+  }catch(e){}
 
   // Compute stats from real data
   const total=data.length;
@@ -11063,12 +11070,17 @@ async function showPerformance(){
   // Recent 8 signals as activity log
   const recent=data.slice(0,8);
   const _perfNow=new Date();
+  const _outcomeColors={WIN:'#5de8a0',LOSS:'#e05555',BE:'#c9a84c'};
   const tradeRows=recent.length?recent.map(s=>{
     const isBuy=s.signal==='BUY'; const isHold=s.signal==='HOLD';
     const isExpired=s.expires_at && new Date(s.expires_at) < _perfNow;
     const col=isExpired?'rgba(237,232,216,.3)':isBuy?'var(--grn)':isHold?'var(--crys)':'var(--red)';
     const dt=s.fired_at||'';
     const expBadge=isExpired?`<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);margin-left:6px;">EXPIRED</span>`:'';
+    // H1: outcome badge or Log Result button
+    const outcomeEl = s.outcome
+      ? `<span style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 7px;border-radius:3px;background:${_outcomeColors[s.outcome]||'var(--amb)'}22;color:${_outcomeColors[s.outcome]||'var(--amb)'};">${s.outcome}${s.actual_pnl_r!=null?' '+( s.actual_pnl_r>0?'+':'')+s.actual_pnl_r+'R':''}</span>`
+      : (isHold||isExpired ? '' : `<button onclick="perfLogOutcome(${s.id},'${(s.ticker||'').replace(/'/g,'')}','${s.signal}',${s.entry||0},${s.stop_loss||0})" style="font-family:var(--mono);font-size:9px;padding:2px 8px;border:1px solid rgba(201,168,76,.3);background:rgba(201,168,76,.05);color:rgba(201,168,76,.8);border-radius:3px;cursor:pointer;">Log Result</button>`);
     return`<div class="perf-log-row" style="${isExpired?'opacity:0.4;':''}">
       <span class="perf-log-dir ${isBuy?'long':isHold?'':''}" style="color:${col};">${s.signal}${expBadge}</span>
       <span class="perf-log-sym">${s.ticker}</span>
@@ -11076,6 +11088,7 @@ async function showPerformance(){
       <span style="font-family:var(--mono);font-size:11px;color:var(--amb);">Entry: ${s.entry||'—'}</span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--t3);">${s.confidence||'—'}% conf</span>
       <span class="perf-log-date">${dt}</span>
+      ${outcomeEl}
     </div>`;
   }).join(''):'<div style="color:var(--t3);font-size:12px;padding:12px 0;">No signals yet. Run your first analysis in the UNDERSTAND tab.</div>';
 
@@ -11102,6 +11115,50 @@ async function showPerformance(){
   var _rrStatusCol = (_avgRR == null) ? 'rgba(237,232,216,.5)' : (_avgRR >= _pg.rr ? '#5de8a0' : '#e8706e');
   var _rrStatusLbl = (_avgRR == null) ? 'no data' : (_avgRR >= _pg.rr ? 'on target' : 'below target');
 
+  // H1: pre-compute expectancy card HTML (avoids nested template-literal complexity)
+  const _expCard = (function(){
+    if(!stats.ready){
+      const _pct=Math.min(100,Math.round(stats.sample_size/30*100));
+      return '<div style="padding:14px 0;">'
+        +'<div style="font-family:var(--mono);font-size:14px;color:rgba(237,232,216,.4);">'+stats.sample_size+'/30 results logged</div>'
+        +'<div style="height:4px;background:rgba(237,232,216,.1);border-radius:2px;margin-top:8px;overflow:hidden;">'
+          +'<div style="height:4px;background:#c9a84c;border-radius:2px;width:'+_pct+'%;transition:width .4s;"></div>'
+        +'</div>'
+        +'<div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:10px;line-height:1.7;">Log <strong style="color:rgba(201,168,76,.8);">'+(30-stats.sample_size)+' more trade outcomes</strong> using the Log Result buttons in Recent Signal Activity below. DotVerse will then calculate your real expectancy — the most important number in trading. Positive expectancy means your strategy makes money over time.</div>'
+        +'</div>';
+    }
+    const _ec  = stats.expectancy>=0?'#5de8a0':'#e05555';
+    const _eabs= Math.abs(stats.expectancy||0);
+    const _es  = stats.expectancy>=0.2
+               ? 'Your strategy has a positive mathematical edge. Keep taking high-confidence signals.'
+               : stats.expectancy<0
+               ? 'Your strategy is losing on average. Focus on higher R:R setups or trade CONFIRMED-only signals.'
+               : 'Near breakeven. A small improvement to win rate or average R:R will tip you into profit.';
+    return '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:6px 0;">'
+      +'<div style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">'
+        +'<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">EXPECTANCY</div>'
+        +'<div style="font-family:var(--mono);font-size:22px;color:'+_ec+';margin-top:6px;">'+(stats.expectancy>=0?'+':'')+stats.expectancy+'R</div>'
+        +'<div style="font-size:10px;color:rgba(237,232,216,.5);margin-top:4px;">per trade on average</div>'
+      +'</div>'
+      +'<div style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">'
+        +'<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">AVG WIN</div>'
+        +'<div style="font-family:var(--mono);font-size:22px;color:#5de8a0;margin-top:6px;">+'+(stats.avg_win_r!=null?stats.avg_win_r:'—')+'R</div>'
+        +'<div style="font-size:10px;color:rgba(237,232,216,.5);margin-top:4px;">per winning trade</div>'
+      +'</div>'
+      +'<div style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">'
+        +'<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">AVG LOSS</div>'
+        +'<div style="font-family:var(--mono);font-size:22px;color:#e05555;margin-top:6px;">'+(stats.avg_loss_r!=null?stats.avg_loss_r:'—')+'R</div>'
+        +'<div style="font-size:10px;color:rgba(237,232,216,.5);margin-top:4px;">per losing trade</div>'
+      +'</div>'
+    +'</div>'
+    +'<div style="margin-top:10px;padding:10px 12px;background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:6px;font-size:11px;color:rgba(237,232,216,.7);line-height:1.7;">'
+      +'<strong style="color:var(--amb);">What this means: </strong>'
+      +'For every trade you take, you expect to '+(stats.expectancy>=0?'gain':'lose')+' '+_eabs+'R on average. '
+      +_es
+      +' — '+stats.wins+' wins avg +'+(stats.avg_win_r||0)+'R · '+stats.losses+' losses avg '+(stats.avg_loss_r||0)+'R'
+    +'</div>';
+  })();
+
   el.innerHTML=`
   <div class="pg-hd">
     <div class="pg-hd-left"><div class="pg-hd-title">Performance</div><div class="pg-hd-sub">${total} signals evaluated</div></div>
@@ -11122,9 +11179,14 @@ async function showPerformance(){
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:6px 0;">
       <div id="perfTgtWinrate" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">
-        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">WIN RATE TARGET</div>
-        <div style="font-family:var(--mono);font-size:22px;color:#5de8a0;margin-top:6px;">${_pg.winrate}%</div>
-        <div style="font-size:10.5px;color:rgba(237,232,216,.4);margin-top:4px;">target only — needs closed trades</div>
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">WIN RATE</div>
+        ${stats.ready
+          ? `<div style="font-family:var(--mono);font-size:22px;color:#5de8a0;margin-top:6px;">${stats.win_rate}%</div>
+             <div style="font-size:10.5px;color:${stats.win_rate>=_pg.winrate?'#5de8a0':'#e05555'};margin-top:4px;">${stats.wins}W · ${stats.losses}L · target ${_pg.winrate}%</div>`
+          : `<div style="font-family:var(--mono);font-size:16px;color:rgba(237,232,216,.5);margin-top:8px;">${stats.sample_size}/30</div>
+             <div style="height:4px;background:rgba(237,232,216,.1);border-radius:2px;margin-top:8px;"><div style="height:4px;background:#c9a84c;border-radius:2px;width:${Math.min(100,Math.round(stats.sample_size/30*100))}%;"></div></div>
+             <div style="font-size:10px;color:rgba(237,232,216,.4);margin-top:5px;">Log ${30-stats.sample_size} more trade results below to unlock</div>`
+        }
       </div>
       <div id="perfTgtRr" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">
         <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">AVG R:R TARGET</div>
@@ -11164,6 +11226,14 @@ async function showPerformance(){
       <div class="perf-card-head"><span class="perf-card-title">Monthly Breakdown</span></div>
       <canvas id="perfMonthChart" height="180" style="width:100%;display:block;padding:8px;"></canvas>
     </div>
+  </div>
+  <!-- H1: Trade Expectancy card -->
+  <div class="perf-card" style="margin-top:16px;">
+    <div class="perf-card-head">
+      <span class="perf-card-title">Trade Expectancy</span>
+      <span class="perf-card-sub">${stats.ready?'Based on '+stats.total_closed+' closed trades — your real mathematical edge':'Log trade outcomes in Recent Activity below to unlock'}</span>
+    </div>
+    ${_expCard}
   </div>`;
 
   requestAnimationFrame(()=>{
@@ -11219,6 +11289,99 @@ async function showPerformance(){
       ctx.fillText('Run backtest on the Signals tab to see real equity data',W/2,H/2+12);
     }
   });
+}
+
+// ══════════════════════════════════════════════════════════════
+// H1 — Log Trade Outcome
+// ══════════════════════════════════════════════════════════════
+window._perfSelectedOutcome = null;
+
+function perfLogOutcome(sigId, ticker, signal, entry, sl){
+  const existing = document.getElementById('perfLogModal');
+  if(existing) existing.remove();
+  window._perfSelectedOutcome = null;
+  const isBuy = signal === 'BUY';
+  const modal = document.createElement('div');
+  modal.id = 'perfLogModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  modal.innerHTML =
+    '<div style="background:#1c1c1e;border:1px solid rgba(237,232,216,.15);border-radius:12px;padding:24px;width:100%;max-width:380px;font-family:sans-serif;">'
+      +'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);letter-spacing:.08em;margin-bottom:6px;">LOG TRADE RESULT</div>'
+      +'<div style="font-size:18px;font-weight:600;color:#ede8d8;margin-bottom:16px;">'+ticker+' &middot; <span style="color:'+(isBuy?'var(--grn)':'var(--red)')+'">'+signal+'</span></div>'
+      +'<div style="display:flex;gap:10px;margin-bottom:16px;">'
+        +'<div style="flex:1;background:rgba(237,232,216,.05);border-radius:7px;padding:10px 12px;">'
+          +'<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);letter-spacing:.08em;">ENTRY</div>'
+          +'<div style="font-family:var(--mono);font-size:13px;color:#ede8d8;margin-top:3px;">'+(entry||'—')+'</div>'
+        +'</div>'
+        +'<div style="flex:1;background:rgba(237,232,216,.05);border-radius:7px;padding:10px 12px;">'
+          +'<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);letter-spacing:.08em;">STOP LOSS</div>'
+          +'<div style="font-family:var(--mono);font-size:13px;color:#ede8d8;margin-top:3px;">'+(sl||'—')+'</div>'
+        +'</div>'
+      +'</div>'
+      +'<div style="margin-bottom:16px;">'
+        +'<label style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);display:block;margin-bottom:6px;">EXIT PRICE (optional)</label>'
+        +'<input id="perfExitPriceInput" type="number" step="any" placeholder="Your actual exit price — used to calculate R"'
+          +' style="width:100%;box-sizing:border-box;background:rgba(237,232,216,.08);border:1px solid rgba(237,232,216,.2);border-radius:7px;padding:10px 12px;font-family:var(--mono);font-size:13px;color:#ede8d8;outline:none;">'
+      +'</div>'
+      +'<div style="margin-bottom:20px;">'
+        +'<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);margin-bottom:8px;">WHAT HAPPENED?</div>'
+        +'<div style="display:flex;gap:8px;">'
+          +'<button id="perfOutcomeWIN"  onclick="perfSelectOutcome(\'WIN\')"  style="flex:1;padding:11px 0;border-radius:7px;border:1px solid rgba(93,232,160,.3);background:rgba(93,232,160,.06);color:rgba(93,232,160,.7);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.05em;">WIN</button>'
+          +'<button id="perfOutcomeLOSS" onclick="perfSelectOutcome(\'LOSS\')" style="flex:1;padding:11px 0;border-radius:7px;border:1px solid rgba(224,85,85,.3);background:rgba(224,85,85,.06);color:rgba(224,85,85,.7);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.05em;">LOSS</button>'
+          +'<button id="perfOutcomeBE"   onclick="perfSelectOutcome(\'BE\')"   style="flex:1;padding:11px 0;border-radius:7px;border:1px solid rgba(201,168,76,.3);background:rgba(201,168,76,.06);color:rgba(201,168,76,.7);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.05em;">BE</button>'
+        +'</div>'
+        +'<div style="font-size:10px;color:rgba(237,232,216,.3);margin-top:5px;">BE = Break Even — stopped out at entry price, no profit and no loss</div>'
+      +'</div>'
+      +'<div id="perfLogFeedback" style="display:none;font-size:11px;margin-bottom:12px;padding:8px 10px;border-radius:5px;"></div>'
+      +'<div style="display:flex;gap:10px;">'
+        +'<button onclick="perfSaveOutcome('+sigId+','+( entry||0)+','+(sl||0)+')" style="flex:2;padding:12px 0;border-radius:7px;border:none;background:var(--amb);color:#1a1a1a;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.05em;">SAVE RESULT</button>'
+        +'<button onclick="document.getElementById(\'perfLogModal\').remove()" style="flex:1;padding:12px 0;border-radius:7px;border:1px solid rgba(237,232,216,.15);background:transparent;color:rgba(237,232,216,.5);font-family:var(--mono);font-size:11px;cursor:pointer;">Cancel</button>'
+      +'</div>'
+    +'</div>';
+  document.body.appendChild(modal);
+  modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+}
+
+function perfSelectOutcome(outcome){
+  window._perfSelectedOutcome = outcome;
+  const cfg = {WIN:{bg:'rgba(93,232,160,.2)',border:'#5de8a0',col:'#5de8a0'},LOSS:{bg:'rgba(224,85,85,.2)',border:'#e05555',col:'#e05555'},BE:{bg:'rgba(201,168,76,.2)',border:'#c9a84c',col:'#c9a84c'}};
+  ['WIN','LOSS','BE'].forEach(function(o){
+    const btn = document.getElementById('perfOutcome'+o); if(!btn) return;
+    if(o === outcome){
+      btn.style.opacity = '1';
+      btn.style.background = cfg[o].bg;
+      btn.style.borderColor = cfg[o].border;
+      btn.style.color = cfg[o].col;
+    } else {
+      btn.style.opacity = '0.35';
+      btn.style.background = 'transparent';
+    }
+  });
+}
+
+async function perfSaveOutcome(sigId, entry, sl){
+  const outcome = window._perfSelectedOutcome;
+  const fb = document.getElementById('perfLogFeedback');
+  if(!outcome){
+    if(fb){ fb.style.display=''; fb.style.background='rgba(224,85,85,.1)'; fb.style.color='#e05555'; fb.style.border='1px solid rgba(224,85,85,.2)'; fb.textContent='Please select WIN, LOSS, or BE first.'; }
+    return;
+  }
+  const exitEl = document.getElementById('perfExitPriceInput');
+  const exitPrice = exitEl && exitEl.value ? parseFloat(exitEl.value) : null;
+  if(fb){ fb.style.display=''; fb.style.background='rgba(201,168,76,.08)'; fb.style.color='rgba(237,232,216,.6)'; fb.style.border='1px solid rgba(201,168,76,.2)'; fb.textContent='Saving…'; }
+  const result = await dvFetch('/api/signals/history/'+sigId+'/outcome', {
+    method: 'PATCH',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ outcome: outcome, exit_price: exitPrice })
+  });
+  if(result && result.id){
+    const modal = document.getElementById('perfLogModal');
+    if(modal) modal.remove();
+    window._perfSelectedOutcome = null;
+    showPerformance();
+  } else {
+    if(fb){ fb.style.background='rgba(224,85,85,.1)'; fb.style.color='#e05555'; fb.style.border='1px solid rgba(224,85,85,.2)'; fb.textContent='Save failed — please try again.'; }
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
