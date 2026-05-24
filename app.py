@@ -6895,7 +6895,7 @@ def _get_session_context(asset_type):
                     "warning_level": None, "message": ""}
 
         # ── STOCKS + INDICES ──────────────────────────────────────────────────
-        if at in ("stocks", "indices", "index"):
+        if at in ("stocks", "stock", "indices", "index"):
             if is_weekend:
                 return {
                     "session":       "Weekend — Market Closed",
