@@ -8596,6 +8596,52 @@ def analyze():
         except Exception as _she:
             print(f"[signal_history] save failed (non-fatal): {_she}")
 
+        # H4 — New signal Telegram alert (CONFIRMED/LIKELY only — HYPOTHESIS is too weak to push)
+        # Fire-and-forget. Redis dedup 4h prevents spam if user re-analyses same ticker.
+        try:
+            _h4_sig  = response_data.get("signal", "HOLD")
+            _h4_conf = response_data.get("confidence_label", "HYPOTHESIS")
+            if _h4_sig in ("BUY", "SELL") and _h4_conf in ("CONFIRMED", "LIKELY"):
+                _h4_dedup = (f"new_signal_tg:{ticker}:{timeframe}:{_h4_sig}"
+                             f":{datetime.utcnow().strftime('%Y-%m-%d')}")
+                _h4_sent  = False
+                if _redis_client:
+                    try: _h4_sent = bool(_redis_client.get(_h4_dedup))
+                    except Exception: pass
+                if not _h4_sent:
+                    _h4_tt    = response_data.get("trade_type", "Day Trade")
+                    _h4_hold  = response_data.get("trade_type_hold", "a few hours")
+                    _h4_entry = response_data.get("entry")
+                    _h4_sl    = response_data.get("stop_loss")
+                    _h4_tp1   = response_data.get("tp1")
+                    # Plain-English WHY from assessment fields already computed by get_analysis()
+                    _h4_why_parts = [x for x in [
+                        response_data.get("trend_assessment"),
+                        response_data.get("rsi_assessment"),
+                    ] if x and len(str(x)) > 5]
+                    _h4_why = " ".join(str(p) for p in _h4_why_parts[:2]) if _h4_why_parts else "Multiple indicators are aligned on this signal."
+                    _h4_dir  = "BUY — price expected to rise" if _h4_sig == "BUY" else "SELL — price expected to fall"
+                    _h4_msg  = (
+                        f"DotVerse Signal Alert\n\n"
+                        f"Signal:     {_h4_dir}\n"
+                        f"Asset:      {ticker} ({timeframe.upper()})\n"
+                        f"Confidence: {_h4_conf}\n"
+                        f"Type:       {_h4_tt} — hold {_h4_hold}\n\n"
+                        f"Entry:      {_h4_entry}\n"
+                        f"Stop Loss:  {_h4_sl}\n"
+                        f"TP1:        {_h4_tp1}\n\n"
+                        f"Why: {_h4_why}\n\n"
+                        f"Open DotVerse to review the full analysis before entering."
+                    )
+                    # Thread so Telegram's 15s timeout never blocks the analyze response
+                    threading.Thread(target=send_telegram, args=(_h4_msg,), daemon=True).start()
+                    if _redis_client:
+                        try: _redis_client.setex(_h4_dedup, 14400, "1")  # 4h TTL
+                        except Exception: pass
+                    print(f"[h4_signal_tg] Sent: {_h4_sig} {ticker} {timeframe} ({_h4_conf})")
+        except Exception as _h4e:
+            print(f"[h4_signal_tg] failed (non-fatal): {_h4e}")
+
         # Log key response fields for debugging
         print(f"[analyze] RESPONSE FIELDS: signal={response_data.get('signal')} "
               f"price={response_data.get('price')} rsi={response_data.get('rsi')} "
@@ -11172,6 +11218,56 @@ def positions_add():
         )
         db.add(pos)
         db.commit()
+
+        # H4 — Correlation warning Telegram (danger >5% only — 3-5% amber is noise for beginners)
+        # Fires when a new position creates dangerous single-currency concentration.
+        # Fire-and-forget: never breaks the positions_add response.
+        try:
+            _h4_uid  = str(pos.user_id)
+            _h4_open = db.query(Position).filter(
+                Position.user_id  == _h4_uid,
+                Position.closed_at == None,
+            ).all()
+            _h4_exp = {}
+            for _p in _h4_open:
+                _psz = float(_p.size or 0)
+                if _psz <= 0:
+                    continue
+                _pdir  = (_p.signal or "BUY").upper()
+                _pexps = _extract_currency_exposures(
+                    _p.ticker, _p.asset_type or "stock", _pdir, _psz
+                )
+                for _ccy, _amt in _pexps.items():
+                    _h4_exp[_ccy] = round(_h4_exp.get(_ccy, 0.0) + _amt, 4)
+            _h4_today = datetime.utcnow().strftime("%Y-%m-%d")
+            for _ccy, _net in _h4_exp.items():
+                if abs(_net) > 5.0:
+                    _h4_corr_dedup = f"corr_alert:{_h4_uid}:{_ccy}:{_h4_today}"
+                    _h4_corr_seen  = False
+                    if _redis_client:
+                        try: _h4_corr_seen = bool(_redis_client.get(_h4_corr_dedup))
+                        except Exception: pass
+                    if not _h4_corr_seen:
+                        _dir_word = "buying" if _net > 0 else "selling"
+                        _h4_corr_msg = (
+                            f"DotVerse Position Warning — Concentration Risk\n\n"
+                            f"You now have {abs(_net):.1f}% of your account exposed to {_ccy} "
+                            f"in one direction ({_dir_word}). DotVerse recommends staying below "
+                            f"5% on any single currency.\n\n"
+                            f"Why this matters: if {_ccy} moves sharply — for example on a central "
+                            f"bank announcement or surprise economic data — all your {_ccy} trades "
+                            f"can lose at the same time.\n\n"
+                            f"What to do: consider closing the smallest position or reducing size "
+                            f"before adding more {_ccy} exposure."
+                        )
+                        threading.Thread(target=send_telegram, args=(_h4_corr_msg,), daemon=True).start()
+                        if _redis_client:
+                            try: _redis_client.setex(_h4_corr_dedup, 21600, "1")  # 6h TTL
+                            except Exception: pass
+                        print(f"[h4_corr] Sent danger alert uid={_h4_uid} ccy={_ccy} net={_net:.1f}%")
+        except Exception as _h4_ce:
+            print(f"[h4_corr] failed (non-fatal): {_h4_ce}")
+
         return jsonify({"id": pos.id, "status": "added"}), 201
     except Exception as e:
         db.rollback()
@@ -11227,6 +11323,56 @@ def _write_equity_snapshot(db, uid, pos):
         snap = EquitySnapshot(user_id=uid, equity_index=new_equity)
         db.add(snap)
         db.commit()
+
+        # H4 — Drawdown breach Telegram (5% = amber warning, 10% = red alert)
+        # Fires once per threshold per day — Redis dedup 24h.
+        # Uses same db session — commit already ran so new snap is visible.
+        try:
+            _all_snaps = (db.query(EquitySnapshot)
+                          .filter(EquitySnapshot.user_id == uid)
+                          .order_by(EquitySnapshot.snapshotted_at.asc())
+                          .all())
+            if _all_snaps:
+                _h4_peak = max(s.equity_index for s in _all_snaps)
+                _h4_curr = _all_snaps[-1].equity_index
+                _h4_dd   = (_h4_peak - _h4_curr) / _h4_peak * 100 if _h4_peak > 0 else 0
+                _h4_today = datetime.utcnow().strftime("%Y-%m-%d")
+                # Check thresholds most-severe first; break after first unseen alert fires
+                for _lvl, _thr, _severity in [("10pct", 10.0, "red"), ("5pct", 5.0, "amber")]:
+                    if _h4_dd >= _thr:
+                        _h4_dd_dedup = f"drawdown_alert:{uid}:{_lvl}:{_h4_today}"
+                        _h4_dd_seen  = False
+                        if _redis_client:
+                            try: _h4_dd_seen = bool(_redis_client.get(_h4_dd_dedup))
+                            except Exception: pass
+                        if not _h4_dd_seen:
+                            if _severity == "red":
+                                _h4_dd_msg = (
+                                    f"DotVerse Drawdown Alert — Action Needed\n\n"
+                                    f"Your portfolio equity has dropped {_h4_dd:.1f}% from its peak. "
+                                    f"This is a significant loss. Professional traders pause and reassess "
+                                    f"at this level — continuing when you're down this much often makes "
+                                    f"losses larger, not smaller.\n\n"
+                                    f"What to do: Review every open position. Close the ones that are losing. "
+                                    f"Reduce your risk % to 0.25% per trade until your equity recovers."
+                                )
+                            else:
+                                _h4_dd_msg = (
+                                    f"DotVerse Drawdown Warning\n\n"
+                                    f"Your portfolio equity has dropped {_h4_dd:.1f}% from its peak. "
+                                    f"This is an early warning — not a crisis yet, but worth watching.\n\n"
+                                    f"What to do: Check your open trades. Tighten stops on any that are losing. "
+                                    f"Consider reducing your risk % to 0.5% per trade until equity recovers."
+                                )
+                            threading.Thread(target=send_telegram, args=(_h4_dd_msg,), daemon=True).start()
+                            if _redis_client:
+                                try: _redis_client.setex(_h4_dd_dedup, 86400, "1")  # 24h
+                                except Exception: pass
+                            print(f"[h4_drawdown] Sent {_lvl} alert uid={uid} dd={_h4_dd:.1f}%")
+                        break  # only fire most-severe applicable threshold per run
+        except Exception as _h4_dde:
+            print(f"[h4_drawdown] failed (non-fatal): {_h4_dde}")
+
     except Exception:
         try: db.rollback()
         except Exception: pass
