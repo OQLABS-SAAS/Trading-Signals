@@ -3640,15 +3640,15 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     htf_bias = _htf_trend_bias(mtf, timeframe)
     gate_note = ""
     if signal == "SELL" and htf_bias == "BULLISH":
-        print(f"[gate1] HTF trend BULLISH — blocking SELL on {ticker} {timeframe}")
-        signal = "HOLD"
-        confidence = "LOW"
-        gate_note = "HTF trend is bullish — counter-trend SELL suppressed."
+        print(f"[gate1] HTF trend BULLISH — counter-trend SELL warning on {ticker} {timeframe}")
+        if confidence == "HIGH":
+            confidence = "MEDIUM"
+        gate_note = "Counter-trend caution: the higher timeframe trend is bullish. Use smaller size and a tighter stop loss than usual."
     elif signal == "BUY" and htf_bias == "BEARISH":
-        print(f"[gate1] HTF trend BEARISH — blocking BUY on {ticker} {timeframe}")
-        signal = "HOLD"
-        confidence = "LOW"
-        gate_note = "HTF trend is bearish — counter-trend BUY suppressed."
+        print(f"[gate1] HTF trend BEARISH — counter-trend BUY warning on {ticker} {timeframe}")
+        if confidence == "HIGH":
+            confidence = "MEDIUM"
+        gate_note = "Counter-trend caution: the higher timeframe trend is bearish. Use smaller size and a tighter stop loss than usual."
 
     # ══════════════════════════════════════════════════════════════
     # GATE 2: Candle footprint sanity check (SIG-1 2026-05-24)
@@ -3663,15 +3663,15 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     buyer_pct, seller_pct = _compute_footprint_dominance(ind)
     if buyer_pct is not None:
         if signal == "SELL" and buyer_pct >= 70:
-            print(f"[gate2] footprint shows {buyer_pct}% buyers — blocking SELL on {ticker}")
-            signal = "HOLD"
-            confidence = "LOW"
-            gate_note = f"Footprint shows {buyer_pct}% buyer pressure — SELL contradicts order flow."
+            print(f"[gate2] footprint shows {buyer_pct}% buyers — SELL warning on {ticker}")
+            if confidence == "HIGH":
+                confidence = "MEDIUM"
+            gate_note = gate_note or f"Order flow caution: {buyer_pct}% of recent candles show buying pressure. This SELL is against current flow — use smaller size."
         elif signal == "BUY" and seller_pct >= 70:
-            print(f"[gate2] footprint shows {seller_pct}% sellers — blocking BUY on {ticker}")
-            signal = "HOLD"
-            confidence = "LOW"
-            gate_note = f"Footprint shows {seller_pct}% seller pressure — BUY contradicts order flow."
+            print(f"[gate2] footprint shows {seller_pct}% sellers — BUY warning on {ticker}")
+            if confidence == "HIGH":
+                confidence = "MEDIUM"
+            gate_note = gate_note or f"Order flow caution: {seller_pct}% of recent candles show selling pressure. This BUY is against current flow — use smaller size."
 
     # ══════════════════════════════════════════════════════════════
     # SIG-4 2026-05-24: RSI Divergence confidence penalty
@@ -3827,11 +3827,12 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             rr2 = round(abs(tp2 - entry) / risk_adj, 1)
             rr3 = round(abs(tp3 - entry) / risk_adj, 1)
             # ── Minimum R:R gate — reject trades below 1:2 ──────────────────
-            if rr1 < 2.0:
-                print(f"[rr-gate] {ticker} rr1={rr1} < 2.0 — downgrading {signal} to HOLD")
+            if rr1 < 1.5:
+                print(f"[rr-gate] {ticker} rr1={rr1} < 1.5 — downgrading {signal} to HOLD")
                 gate_note = gate_note or (
-                    f"Risk:reward only 1:{rr1} — below DotVerse's minimum 1:2 floor. "
-                    f"Trade levels exist but the math doesn't favour entry."
+                    f"Risk:reward only 1:{rr1} — below DotVerse's minimum 1:1.5 floor. "
+                    f"Trade levels exist but the math doesn't favour entry right now. "
+                    f"Wait for a wider price move or try a higher timeframe."
                 )
                 signal = "HOLD"
                 entry = stop_loss = tp1 = tp2 = tp3 = None
@@ -3930,16 +3931,14 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     _ema_down = "BEAR" in _emat   # True only when EMA is explicitly BEARISH
     # NEUTRAL EMA is NOT counter-trend — it means no confirmed direction yet (early breakout possible).
     if atr_regime == "RANGING" and signal in ("BUY", "SELL"):
-        # SIG-3 2026-05-24: override signal to HOLD in ranging markets.
-        # A BUY or SELL in a choppy sideways market is not a trade — price
-        # will whipsaw before following through. Suppress the direction,
-        # explain why in plain English so the beginner understands.
-        signal = "HOLD"
+        # SIG-3 updated: warn instead of block — ranging markets are lower quality
+        # but beginners still need actionable signals. Downgrade confidence, show warning.
+        if confidence == "HIGH":
+            confidence = "MEDIUM"
         _regime_warning = (
-            "This asset is moving sideways with no clear trend — price is choppy and "
-            "signals in this condition frequently reverse before hitting their target. "
-            "DotVerse has held back the signal to protect you. Wait for a clean breakout "
-            "with rising volume before entering a trade."
+            "Ranging market caution: price is moving sideways with no strong trend. "
+            "This signal is lower probability than usual — use a smaller position size "
+            "and be ready to exit quickly if price reverses."
         )
     elif atr_regime == "TRENDING" and signal in ("BUY", "SELL"):
         if (signal == "BUY" and _ema_down) or (signal == "SELL" and _ema_up):
