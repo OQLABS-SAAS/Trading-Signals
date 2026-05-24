@@ -7176,6 +7176,8 @@ async function dvRunAnalyze(){
       rr1Raw:        data.rr1_raw,
       rr2Raw:       data.rr2_raw,
       rr3Raw:       data.rr3_raw,
+      // SMC-FE: Smart Money Concepts structures from backend detect_smc_structures()
+      smcStructures: data.smc_structures || null,
     };
     // Clear any stale verdict pre-warm from a previous signal
     window._verdictPrewarmJobId = null;
@@ -12757,6 +12759,76 @@ function showUnderstand(){
           <canvas id="ofFootprintCanvas" height="72" style="width:100%;display:block;border-radius:3px;"></canvas>
         </div>
       </div>
+
+      <!-- SMC-FE: Smart Money Concepts structures card -->
+      ${(()=>{
+        const _smc = sig.smcStructures;
+        // Show card only when backend provided structure data
+        if (!_smc) return '';
+        // Build list of active structures with plain-English descriptions
+        const _smcDefs = [
+          { key: 'fvg_bullish',        label: 'Bullish Fair Value Gap',       col: '#5de8a0',
+            beg: 'A gap where buyers jumped in hard. Price may return to fill this gap before continuing up — a potential entry zone.',
+            adv: 'Bullish FVG in last 10 bars. Candle 3 high does not overlap candle 1 low — institutional demand imbalance.' },
+          { key: 'fvg_bearish',        label: 'Bearish Fair Value Gap',        col: '#e8706e',
+            beg: 'A gap where sellers pushed hard. Price may return to fill this gap before continuing down — a potential short entry zone.',
+            adv: 'Bearish FVG in last 10 bars. Candle 3 low does not overlap candle 1 high — institutional supply imbalance.' },
+          { key: 'liquidity_grab_bull',label: 'Bullish Liquidity Grab',        col: '#5de8a0',
+            beg: 'Price swept below a recent low (triggering stop-losses), then rejected sharply upward. Big players collected cheap positions.',
+            adv: 'Swing-low sweep + bullish rejection within same/next candle. Equal-low stop hunt confirmed.' },
+          { key: 'liquidity_grab_bear',label: 'Bearish Liquidity Grab',        col: '#e8706e',
+            beg: 'Price swept above a recent high (triggering buy-stops), then rejected sharply downward. Big players distributed into retail buyers.',
+            adv: 'Swing-high sweep + bearish rejection within same/next candle. Equal-high stop hunt confirmed.' },
+          { key: 'displacement_bull',  label: 'Bullish Displacement Candle',   col: '#5de8a0',
+            beg: 'An unusually large bullish candle — far bigger than normal. This is institutional order flow, not retail. Signals strong directional intent.',
+            adv: 'Bullish candle body > 2× ATR. Strong institutional momentum candle.' },
+          { key: 'displacement_bear',  label: 'Bearish Displacement Candle',   col: '#e8706e',
+            beg: 'An unusually large bearish candle — far bigger than normal. Institutions sold aggressively. Signals strong downside intent.',
+            adv: 'Bearish candle body > 2× ATR. Strong institutional momentum candle.' },
+          { key: 'choch_bull',         label: 'Change of Character (Bullish)', col: '#5de8a0',
+            beg: 'After a downtrend, price has broken its first swing high. This is the earliest signal that the trend may be reversing upward.',
+            adv: 'First higher swing-high break after a series of lower highs. CHOCH bullish — structure shift.' },
+          { key: 'choch_bear',         label: 'Change of Character (Bearish)', col: '#e8706e',
+            beg: 'After an uptrend, price has broken its first swing low. This is the earliest signal that the trend may be reversing downward.',
+            adv: 'First lower swing-low break after a series of higher lows. CHOCH bearish — structure shift.' },
+        ];
+        const _active = _smcDefs.filter(d => _smc[d.key] === true);
+        if (_active.length === 0) {
+          // Show collapsed "no structures" state — still educational
+          return '<div style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.1);border-radius:12px;padding:14px 18px;margin-top:12px;">'
+            + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">'
+            + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.5)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
+            + '<span class="und-card-title" style="margin:0;">Smart Money Structures</span>'
+            + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.35);margin-left:auto;">NONE DETECTED</span>'
+            + '</div>'
+            + '<div style="font-size:10.5px;color:rgba(237,232,216,.4);line-height:1.55;">No institutional structure patterns detected on the last 10 bars. This is normal in trending or quiet markets — SMC patterns appear at turning points and after liquidity sweeps.</div>'
+            + '</div>';
+        }
+        // Show detected structures
+        const _isBeg = (typeof window._dvTier === 'string' && window._dvTier === 'beginner') || document.querySelector('[data-tier="beginner"]')?.style.display !== 'none';
+        const _rows = _active.map(d => {
+          return '<div data-guide="smc-' + d.key.replace(/_/g,'-') + '" style="display:flex;flex-direction:column;gap:4px;padding:10px 0;border-bottom:1px solid rgba(237,232,216,.07);">'
+            + '<div style="display:flex;align-items:center;gap:8px;">'
+            + '<span style="width:6px;height:6px;border-radius:50%;background:' + d.col + ';flex-shrink:0;"></span>'
+            + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;color:' + d.col + ';">' + d.label + '</span>'
+            + '</div>'
+            + '<div style="font-size:10.5px;color:rgba(237,232,216,.65);line-height:1.55;padding-left:14px;">' + d.beg + '</div>'
+            + '<div style="font-size:9.5px;font-family:var(--mono);color:rgba(237,232,216,.3);line-height:1.45;padding-left:14px;">' + d.adv + '</div>'
+            + '</div>';
+        }).join('');
+        const _alignBadge = _active.some(d => (isBuy && d.col === '#5de8a0') || (!isBuy && d.col === '#e8706e'))
+          ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:' + (isBuy ? 'rgba(93,232,160,.12)' : 'rgba(232,112,110,.12)') + ';color:' + (isBuy ? '#5de8a0' : '#e8706e') + ';margin-left:auto;">ALIGNED</span>'
+          : '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);color:rgba(201,168,76,.8);margin-left:auto;">MIXED</span>';
+        return '<div style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:12px;padding:16px 18px;margin-top:12px;">'
+          + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:12px;">'
+          + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.75)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
+          + '<span class="und-card-title" style="margin:0;">Smart Money Structures</span>'
+          + _alignBadge
+          + '</div>'
+          + _rows.replace(/border-bottom[^;]+;(?=<\/div><\/div>$)/,'')
+          + '<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:10px;line-height:1.5;">Smart Money Concepts: institutional patterns detected in the last 10 bars. These show where large players are accumulating or distributing positions.</div>'
+          + '</div>';
+      })()}
     </div>
 
     <!-- RIGHT: MTF + reason -->
@@ -19450,6 +19522,48 @@ window._dvGuide = {
     title: 'Off-Hours Warning',
     body: 'You are outside the primary trading session for this asset. During off-hours, liquidity is lower — this means fewer buyers and sellers, which leads to wider bid-ask spreads (you pay more to enter and exit) and less reliable price moves. Technical signals generated in low-liquidity windows have higher false-positive rates because thin volume can push price around unpredictably. DotVerse is not suppressing the signal — it is alerting you so you can make an informed decision.',
     example: 'Forex trade at 02:00 UTC (Asian session, low liquidity for EUR/USD) → spread may be 3× wider than during London hours. The signal is technically valid but entering now costs more and the move may be erratic. Consider waiting for 07:00 UTC (London open) for confirmation.'
+  },
+
+  // ── SMC: Smart Money Concepts ─────────────────────────────────────────────
+  'smc-fvg-bullish': {
+    title: 'Bullish Fair Value Gap',
+    body: 'A Fair Value Gap (FVG) is a 3-candle pattern where the middle candle moves so fast that price leaves a gap — an area that was never properly traded. A bullish FVG means buyers moved price up so quickly that they left unfilled orders below. Price often returns to fill these gaps before continuing upward, making them high-probability entry zones for BUY trades.',
+    example: 'BUY signal with bullish FVG: price may pull back to the FVG zone before rising further. This pullback is normal — it is the market filling the gap. Patient traders wait for price to touch the gap and show bullish reaction before entering.'
+  },
+  'smc-fvg-bearish': {
+    title: 'Bearish Fair Value Gap',
+    body: 'A bearish FVG means sellers moved price down so quickly that they left unfilled orders above. Price often returns to fill this gap before continuing downward, making it a high-probability entry zone for SELL trades.',
+    example: 'SELL signal with bearish FVG: price may pull back up to the FVG zone before dropping further. This retest is the market filling the gap — watch for price to show bearish reaction at that level.'
+  },
+  'smc-liquidity-grab-bull': {
+    title: 'Bullish Liquidity Grab',
+    body: 'Large players (institutions, market makers) swept below a recent low to trigger retail stop-losses — collecting cheap positions from panicking sellers — then immediately reversed upward. This is a classic manipulation move. The reversal after the sweep is a strong signal that smart money has loaded long positions.',
+    example: 'Price drops below yesterday\'s low, hitting everyone\'s stop-losses, then aggressively bounces back up. That reversal is where institutions bought. This is a bullish entry signal, not a sign the market is going lower.'
+  },
+  'smc-liquidity-grab-bear': {
+    title: 'Bearish Liquidity Grab',
+    body: 'Large players swept above a recent high to trigger buy-stop orders and lure retail traders into longs — then immediately reversed downward. The reversal after the sweep signals that smart money has distributed (sold) into the retail buy orders.',
+    example: 'Price breaks above last week\'s high, triggering buy-stops, then reverses hard downward. Retail traders who bought the breakout are now trapped. This is a bearish signal — institutions used the breakout to sell into demand.'
+  },
+  'smc-displacement-bull': {
+    title: 'Bullish Displacement Candle',
+    body: 'A displacement candle is a single candle with a body more than twice the Average True Range (ATR). It shows that institutions entered with massive force — not typical retail buying. A bullish displacement candle signals a strong directional move driven by institutional order flow, not just retail momentum.',
+    example: 'Normal candle is $200 high-to-low. Displacement candle is $500+ high-to-low with a bullish close. This is not retail traders — this is a fund or large institution executing a large buy order. The direction of the displacement usually continues.'
+  },
+  'smc-displacement-bear': {
+    title: 'Bearish Displacement Candle',
+    body: 'A large bearish candle (body > 2× ATR) shows institutions sold aggressively in a single candle. This is not normal selling — it is a directional statement. The bearish displacement signals strong downside intent from smart money.',
+    example: 'A candle that drops $500+ with a bearish close when normal candles are $200. Institutions are unloading a large position. The direction usually continues after displacement.'
+  },
+  'smc-choch-bull': {
+    title: 'Change of Character — Bullish',
+    body: 'After a downtrend (sequence of lower highs and lower lows), price has broken the first swing high. This is called a Change of Character (CHOCH) — the market structure has shifted. It does not confirm a full reversal yet, but it signals that selling pressure has weakened and buyers are beginning to take control.',
+    example: 'Price has been making lower highs for 3 weeks. Then it breaks above the last lower high for the first time. This CHOCH bullish signal tells you: the downtrend may be ending. Watch for a higher low to form next — if it does, that confirms the trend reversal.'
+  },
+  'smc-choch-bear': {
+    title: 'Change of Character — Bearish',
+    body: 'After an uptrend, price has broken the first swing low — signaling that buying pressure has weakened. This CHOCH bearish is the earliest structural warning that the uptrend may be reversing.',
+    example: 'Price has been making higher lows for a month. Then it breaks below the last higher low. This CHOCH bearish signal says: the uptrend structure is broken. Watch for a lower high to form — if it does, that confirms the reversal and a potential SELL setup.'
   },
 
   // ── WHAT TO DO NEXT (Understand tab) ─────────────────────────────────────
