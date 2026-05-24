@@ -7917,13 +7917,16 @@ function renderSigHistoryPanel(){
   const wrap=document.getElementById('sfHistPanel'); if(!wrap) return;
   const rows=window._sigHistory.slice(0,20);
   if(!rows.length){wrap.innerHTML='<div style="color:var(--t3);font-size:11px;text-align:center;padding:20px;">No history yet — run your first analysis</div>';return;}
+  const now=new Date();
   wrap.innerHTML=rows.map(r=>{
-    const col=r.signal==='BUY'?'#5de8a0':r.signal==='SELL'?'#e8706e':'rgba(237,232,216,.5)';
-    const dt=r.fired_at?new Date(r.fired_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
-    return `<div class="sfh-row" onclick="dvLoadInst('${r.ticker}','${r.asset_type||'auto'}')">
+    const isExpired = r.expires_at && new Date(r.expires_at) < now;
+    const col=isExpired?'rgba(237,232,216,.25)':r.signal==='BUY'?'#5de8a0':r.signal==='SELL'?'#e8706e':'rgba(237,232,216,.5)';
+    const dt=r.fired_at||'';
+    const expiredBadge=isExpired?`<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.1);border-radius:3px;padding:1px 5px;margin-left:4px;">EXPIRED</span>`:'';
+    return `<div class="sfh-row" style="${isExpired?'opacity:0.45;':''}" onclick="dvLoadInst('${r.ticker}','${r.asset_type||'auto'}')">
       <span class="sfh-sym">${r.ticker}</span>
       <span class="sfh-tf">${r.timeframe||''}</span>
-      <span class="sfh-sig" style="color:${col}">${r.signal}</span>
+      <span class="sfh-sig" style="color:${col}">${r.signal}${expiredBadge}</span>
       <span class="sfh-entry">${r.entry||''}</span>
       <span class="sfh-dt">${dt}</span>
     </div>`;
@@ -8894,8 +8897,25 @@ async function scRunScan(){
   // Show computing backtest progress inside the table
   _scShowBtProgress(tickers.length);
 
-  const data=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({tickers,asset_type:atMap[af]||'auto',timeframe:tf})});
+  var data;
+  if(['all','buy','sell'].includes(af)){
+    // Grouped dispatch: send each asset class separately so normalise_ticker works correctly
+    var _grps=[
+      {tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD'],asset_type:'crypto'},
+      {tickers:['AAPL','NVDA','TSLA','SPY'],         asset_type:'stock'},
+      {tickers:['EURUSD','GBPUSD'],                  asset_type:'forex'},
+      {tickers:['XAUUSD','USOIL'],                   asset_type:'commodity'}
+    ];
+    var _grpRes=await Promise.all(_grps.map(function(g){
+      return dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({tickers:g.tickers,asset_type:g.asset_type,timeframe:tf})});
+    }));
+    var _merged=_grpRes.flatMap(function(d){return(d&&d.results)||[];});
+    data={results:_merged};
+  } else {
+    data=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tickers,asset_type:atMap[af]||'crypto',timeframe:tf})});
+  }
 
   // Complete progress bar then render results after brief pause so user sees 100%
   _scCompleteBtProgress();
@@ -11042,12 +11062,15 @@ async function showPerformance(){
 
   // Recent 8 signals as activity log
   const recent=data.slice(0,8);
+  const _perfNow=new Date();
   const tradeRows=recent.length?recent.map(s=>{
     const isBuy=s.signal==='BUY'; const isHold=s.signal==='HOLD';
-    const col=isBuy?'var(--grn)':isHold?'var(--crys)':'var(--red)';
-    const dt=s.fired_at?new Date(s.fired_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'';
-    return`<div class="perf-log-row">
-      <span class="perf-log-dir ${isBuy?'long':isHold?'':''}" style="color:${col};">${s.signal}</span>
+    const isExpired=s.expires_at && new Date(s.expires_at) < _perfNow;
+    const col=isExpired?'rgba(237,232,216,.3)':isBuy?'var(--grn)':isHold?'var(--crys)':'var(--red)';
+    const dt=s.fired_at||'';
+    const expBadge=isExpired?`<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);margin-left:6px;">EXPIRED</span>`:'';
+    return`<div class="perf-log-row" style="${isExpired?'opacity:0.4;':''}">
+      <span class="perf-log-dir ${isBuy?'long':isHold?'':''}" style="color:${col};">${s.signal}${expBadge}</span>
       <span class="perf-log-sym">${s.ticker}</span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--t3);">${s.timeframe||''}</span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--amb);">Entry: ${s.entry||'—'}</span>
