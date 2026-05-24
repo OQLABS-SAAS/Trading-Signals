@@ -10036,7 +10036,9 @@ async function showPortfolio(){
   const varData   = varResp || {var_1d_usd:0,var_1d_pct:0,portfolio_std:0};
   const corrResp  = await dvFetch('/api/positions/correlation-risk');
   const corrRisk  = (corrResp && Array.isArray(corrResp.warnings)) ? corrResp : {warnings:[],exposure_map:{}};
-  (function([positions,varData,corrRisk]){
+  const ddResp    = await dvFetch('/api/portfolio/drawdown');
+  const ddData    = ddResp || {current_drawdown_pct:0,max_drawdown_pct:0,peak_equity:100,current_equity:100,consecutive_losses:0,snapshots:[]};
+  (function([positions,varData,corrRisk,ddData]){
     const varAmt=(varData.var_1d_usd!=null?varData.var_1d_usd:varData.var_amount)??0;
     const varPct=(varData.var_1d_pct!=null?varData.var_1d_pct:varData.var_pct)??0;
     const varAmtStr=parseFloat(varAmt).toFixed(2);
@@ -10222,6 +10224,90 @@ async function showPortfolio(){
         +'<div style="font-size:10px;color:rgba(237,232,216,.35);margin-top:8px;font-family:var(--mono);">Keep any single currency below 3% combined exposure. Add opposing trades to reduce concentration.</div>'
         +'</div>';
     })();
+    // H3: pre-compute drawdown gauge (avoids nested template-literal complexity)
+    const _ddGauge = (function(){
+      var dd   = parseFloat(ddData.current_drawdown_pct) || 0;
+      var maxDd = parseFloat(ddData.max_drawdown_pct)   || 0;
+      var cons = parseInt(ddData.consecutive_losses)     || 0;
+      var snaps = Array.isArray(ddData.snapshots) ? ddData.snapshots : [];
+      if(!snaps.length && dd === 0 && maxDd === 0){
+        return '<div style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;">'
+          +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.35)" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+          +'<span style="font-size:11px;color:rgba(237,232,216,.35);font-family:var(--mono);">Drawdown tracking starts after your first closed trade.</span>'
+          +'</div>';
+      }
+      // Colour scheme based on drawdown severity
+      var ddCol, ddBg, ddBd;
+      if(dd > 10){ ddCol='#e8706e'; ddBg='rgba(232,112,110,.10)'; ddBd='rgba(232,112,110,.3)'; }
+      else if(dd > 5){ ddCol='rgba(201,168,76,.9)'; ddBg='rgba(201,168,76,.08)'; ddBd='rgba(201,168,76,.3)'; }
+      else { ddCol='#5de8a0'; ddBg='rgba(61,190,108,.08)'; ddBd='rgba(61,190,108,.25)'; }
+      // Gauge bar fill width (cap at 100%)
+      var barW = Math.min(dd / 20 * 100, 100).toFixed(1);
+      var maxBarW = Math.min(maxDd / 20 * 100, 100).toFixed(1);
+      // Mini equity curve SVG (max 40 points for performance)
+      var curveSvg = '';
+      if(snaps.length >= 2){
+        var pts = snaps.slice(-40);
+        var vals = pts.map(function(s){ return parseFloat(s.equity_index)||100; });
+        var minV = Math.min.apply(null,vals), maxV = Math.max.apply(null,vals);
+        var range = maxV - minV || 1;
+        var w=200, h=40;
+        var coords = vals.map(function(v,i){
+          var x = (i/(vals.length-1))*w;
+          var y = h - ((v - minV)/range)*(h-4) - 2;
+          return x.toFixed(1)+','+y.toFixed(1);
+        }).join(' ');
+        var lastV = vals[vals.length-1];
+        var lineCol = lastV >= vals[0] ? '#5de8a0' : '#e8706e';
+        curveSvg = '<div style="margin:8px 0 4px;">'
+          +'<div style="font-size:10px;color:rgba(237,232,216,.35);font-family:var(--mono);margin-bottom:3px;">Equity Curve ('+snaps.length+' trades)</div>'
+          +'<svg viewBox="0 0 200 40" width="100%" height="40" preserveAspectRatio="none" style="border-radius:4px;background:rgba(8,9,14,.6);">'
+          +'<polyline points="'+coords+'" fill="none" stroke="'+lineCol+'" stroke-width="1.5" stroke-linejoin="round"/>'
+          +'</svg></div>';
+      }
+      // Auto-scale recommendation
+      var scaleNote = '';
+      if(dd > 10){
+        scaleNote = '<div style="margin-top:8px;padding:7px 10px;background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.2);border-radius:5px;">'
+          +'<span style="font-size:11px;color:#e8706e;font-weight:600;">Auto-scale: DotVerse recommends reducing risk to 0.25% per trade.</span>'
+          +'<div style="font-size:10px;color:rgba(237,232,216,.5);margin-top:3px;">Your drawdown exceeds 10%. Trading smaller protects your remaining capital while you recover.</div>'
+          +'</div>';
+      } else if(dd > 5){
+        scaleNote = '<div style="margin-top:8px;padding:7px 10px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:5px;">'
+          +'<span style="font-size:11px;color:rgba(201,168,76,.9);font-weight:600;">Auto-scale: DotVerse recommends reducing risk to 0.5% per trade.</span>'
+          +'<div style="font-size:10px;color:rgba(237,232,216,.5);margin-top:3px;">Drawdown above 5%. Smaller size helps you stay in the game while conditions improve.</div>'
+          +'</div>';
+      }
+      return '<div style="background:'+ddBg+';border:1px solid '+ddBd+';border-radius:8px;padding:10px 14px;margin-bottom:14px;">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+          +'<div style="display:flex;align-items:center;gap:8px;">'
+            +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="'+ddCol+'" stroke-width="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+            +'<span style="font-size:12px;color:'+ddCol+';font-weight:600;">Drawdown Tracker</span>'
+          +'</div>'
+          +(cons > 2 ? '<span style="font-size:10px;font-family:var(--mono);color:#e8706e;padding:2px 7px;background:rgba(232,112,110,.12);border-radius:3px;">'+cons+' consecutive losses</span>' : '')
+        +'</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px;">'
+          +'<div>'
+            +'<div style="font-size:10px;color:rgba(237,232,216,.4);font-family:var(--mono);margin-bottom:4px;">CURRENT DRAWDOWN</div>'
+            +'<div style="font-size:18px;color:'+ddCol+';font-family:var(--mono);font-weight:700;">'+dd.toFixed(1)+'%</div>'
+            +'<div style="height:4px;background:rgba(237,232,216,.08);border-radius:2px;margin-top:5px;overflow:hidden;">'
+              +'<div style="height:100%;width:'+barW+'%;background:'+ddCol+';border-radius:2px;transition:width .6s;"></div>'
+            +'</div>'
+            +'<div style="font-size:9px;color:rgba(237,232,216,.3);font-family:var(--mono);margin-top:2px;">0% ─────── 20%</div>'
+          +'</div>'
+          +'<div>'
+            +'<div style="font-size:10px;color:rgba(237,232,216,.4);font-family:var(--mono);margin-bottom:4px;">MAX HISTORICAL</div>'
+            +'<div style="font-size:18px;color:rgba(237,232,216,.7);font-family:var(--mono);font-weight:700;">'+maxDd.toFixed(1)+'%</div>'
+            +'<div style="height:4px;background:rgba(237,232,216,.08);border-radius:2px;margin-top:5px;overflow:hidden;">'
+              +'<div style="height:100%;width:'+maxBarW+'%;background:rgba(237,232,216,.3);border-radius:2px;"></div>'
+            +'</div>'
+            +'<div style="font-size:9px;color:rgba(237,232,216,.3);font-family:var(--mono);margin-top:2px;">Equity peak: '+parseFloat(ddData.peak_equity||100).toFixed(1)+'</div>'
+          +'</div>'
+        +'</div>'
+        +curveSvg
+        +scaleNote
+        +'</div>';
+    })();
     el.innerHTML=`
     <div id="pfHealthBanner" class="pf-health-banner" style="background:rgba(61,190,108,.08);border:1px solid rgba(61,190,108,.2);">
       <div style="display:flex;align-items:center;gap:8px;">
@@ -10241,6 +10327,7 @@ async function showPortfolio(){
       <span style="font-size:12px;color:${hTxt};font-weight:500">${hMsg}</span>
     </div>
     ${_corrBanner}
+    ${_ddGauge}
     <div class="pf-summary">
       <div class="pf-card"><div class="pf-card-lbl">Portfolio Value</div><div class="pf-card-val">${portVal}</div></div>
       <div class="pf-card"><div class="pf-card-lbl">VaR (95%)</div><div class="pf-card-val red">$${varAmtStr}</div><div class="pf-card-sub">${varPctStr}% of portfolio</div></div>
@@ -10344,7 +10431,7 @@ async function showPortfolio(){
     </div>
     ${addForm}`;
     pfUpdateHealth(positions, varData);
-  })([positions, varData, corrRisk]);
+  })([positions, varData, corrRisk, ddData]);
 }
 function pfTogglePos(id, ticker, assetType, entry, dir){
   const row=document.getElementById('pfexp-'+id);

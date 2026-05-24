@@ -10670,6 +10670,16 @@ class SignalHistory(_Base):
     actual_exit_price = Column(Float,       nullable=True)
     actual_pnl_r      = Column(Float,       nullable=True)   # R-multiples: positive=profit, negative=loss
 
+class EquitySnapshot(_Base):
+    """H3 — Equity index snapshot written on every position close.
+    Starts at 100.0. Each closed trade adjusts proportionally by trade P&L %.
+    Relative index — no account dollar amount required."""
+    __tablename__ = "equity_snapshots"
+    id             = Column(Integer,  primary_key=True, autoincrement=True)
+    user_id        = Column(String(64), nullable=False, default="default")
+    equity_index   = Column(Float,      nullable=False, default=100.0)
+    snapshotted_at = Column(DateTime,   nullable=False, default=datetime.utcnow)
+
 class ExchangeKey(_Base):
     """Exchange API keys — Fernet-encrypted, one row per connected exchange per user."""
     __tablename__ = "exchange_keys"
@@ -11190,6 +11200,37 @@ def positions_delete(pos_id):
 
 # ─── D4: Close a position ────────────────────────────────────
 
+def _write_equity_snapshot(db, uid, pos):
+    """H3 helper — compute P&L from a just-closed position and write an equity
+    snapshot.  Fire-and-forget: wrapped in try/except so it NEVER raises and
+    NEVER breaks the calling positions_close response.
+    Uses an equity index starting at 100.0 — relative change, no dollar base needed."""
+    try:
+        entry = float(pos.entry_price or 0)
+        close = float(pos.close_price or 0)
+        size  = float(pos.size or 0)
+        if entry <= 0 or close <= 0 or size <= 0:
+            return   # cannot compute P&L — skip silently
+        direction = (pos.signal or 'BUY').upper()
+        if direction == 'BUY':
+            pct_change = (close - entry) / entry
+        else:   # SELL — profit when price falls
+            pct_change = (entry - close) / entry
+        equity_change = pct_change * (size / 100.0)
+        # Get last equity index for this user (or seed at 100.0 for first close)
+        last_snap = (db.query(EquitySnapshot)
+                     .filter(EquitySnapshot.user_id == uid)
+                     .order_by(EquitySnapshot.snapshotted_at.desc())
+                     .first())
+        last_equity = last_snap.equity_index if last_snap else 100.0
+        new_equity  = round(last_equity * (1.0 + equity_change), 4)
+        snap = EquitySnapshot(user_id=uid, equity_index=new_equity)
+        db.add(snap)
+        db.commit()
+    except Exception:
+        try: db.rollback()
+        except Exception: pass
+
 @app.route("/api/positions/<int:pos_id>/close", methods=["POST"])
 @login_required
 def positions_close(pos_id):
@@ -11221,6 +11262,8 @@ def positions_close(pos_id):
         pos.closed_at   = datetime.utcnow()
         pos.hit_tp      = int(hit_tp) if hit_tp is not None else None
         db.commit()
+        # H3 — write equity snapshot after commit (fire-and-forget, never breaks response)
+        _write_equity_snapshot(db, uid, pos)
 
         return jsonify({
             "id":          pos.id,
@@ -11322,6 +11365,69 @@ def positions_correlation_risk():
     finally:
         db.close()
 
+# ─── H3: Drawdown Tracking ───────────────────────────────────
+
+@app.route("/api/portfolio/drawdown", methods=["GET"])
+@login_required
+def portfolio_drawdown():
+    """H3 — Equity drawdown metrics from equity_snapshots table.
+    Returns current drawdown %, max historical drawdown %, consecutive losses,
+    and snapshot series for the equity curve mini-chart."""
+    if not _DBSession:
+        return jsonify({"current_drawdown_pct": 0.0, "max_drawdown_pct": 0.0,
+                        "peak_equity": 100.0, "current_equity": 100.0,
+                        "consecutive_losses": 0, "snapshots": []})
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        snaps = (db.query(EquitySnapshot)
+                 .filter(EquitySnapshot.user_id == uid)
+                 .order_by(EquitySnapshot.snapshotted_at.asc())
+                 .all())
+        if not snaps:
+            return jsonify({"current_drawdown_pct": 0.0, "max_drawdown_pct": 0.0,
+                            "peak_equity": 100.0, "current_equity": 100.0,
+                            "consecutive_losses": 0, "snapshots": []})
+        equities = [s.equity_index for s in snaps]
+        # Running-peak max drawdown (standard algorithm)
+        peak   = equities[0]
+        max_dd = 0.0
+        for eq in equities:
+            if eq > peak:
+                peak = eq
+            dd = (peak - eq) / peak * 100.0 if peak > 0 else 0.0
+            if dd > max_dd:
+                max_dd = dd
+        current_equity = equities[-1]
+        running_peak   = max(equities)
+        current_dd     = (running_peak - current_equity) / running_peak * 100.0 if running_peak > 0 else 0.0
+        # Consecutive losses from positions table (latest first)
+        closed = (db.query(Position)
+                  .filter(Position.user_id == uid,
+                          Position.closed_at != None,
+                          Position.outcome != None)
+                  .order_by(Position.closed_at.desc())
+                  .limit(20).all())
+        consecutive = 0
+        for p in closed:
+            if (p.outcome or '').upper() == 'LOSS':
+                consecutive += 1
+            else:
+                break
+        return jsonify({
+            "current_drawdown_pct": round(current_dd, 2),
+            "max_drawdown_pct":     round(max_dd, 2),
+            "peak_equity":          round(running_peak, 4),
+            "current_equity":       round(current_equity, 4),
+            "consecutive_losses":   consecutive,
+            "snapshots": [
+                {"equity_index": s.equity_index,
+                 "snapshotted_at": s.snapshotted_at.isoformat()}
+                for s in snaps
+            ]
+        })
+    finally:
+        db.close()
 
 # ─── Signal History ──────────────────────────────────────────
 
