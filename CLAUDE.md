@@ -43,6 +43,30 @@ Beginners rely on DotVerse not just to identify a trade, but to **educate them a
 - **Every commit maps to exactly one plan item.** The commit message must reference the plan label (e.g. `A1`, `C2`, `F3`). If you cannot name the plan label, the commit is not ready.
 - **The plan is the single source of truth.** Chat fragments, session notes, and inline ideas are NOT the plan until they are written into it.
 
+### 0.5. SEARCH GITHUB BEFORE WRITING CODE — NON-NEGOTIABLE (added 2026-05-25)
+**Omar's explicit directive: never write from scratch what already exists.**
+
+Before writing ANY utility function, algorithm, indicator, or data processing logic:
+
+1. **Search GitHub / PyPI first.** If the functionality is a known algorithm (technical indicator, statistical model, data parser, API client, etc.), search for an existing, well-maintained Python library that implements it. Examples:
+   - Technical indicators (RSI, ADX, MACD, Ichimoku, VWAP, Stochastic, Bollinger Bands, ATR) → `pandas-ta` or `ta` library
+   - Backtesting → `backtesting.py`
+   - Statistical analysis → `scipy`, `statsmodels`
+   - Financial data → `yfinance`, `finnhub-python`, `ccxt`
+   - Machine learning → `scikit-learn`, `xgboost`
+
+2. **Use the library — don't reimplement it.** A battle-tested library used by thousands of developers is always more correct and more maintainable than hand-rolled code.
+
+3. **Only write custom code when:** the library doesn't cover the exact logic needed, or the custom logic is DotVerse-specific business logic (e.g. confluence vote weighting, trade type classification, beginner explanations).
+
+4. **Add the library to `requirements.txt`** — check for Railway compatibility (pure Python = safe, C extensions = needs system deps).
+
+5. **Pin versions carefully** — check for known incompatibilities (e.g. `pandas-ta` vs `numpy>=2.0`) and add version constraints before committing.
+
+**This rule was added after Claude wasted a full session writing custom ADX, Ichimoku, VWAP, and Stochastic RSI functions from scratch, when `pandas-ta` already had all of them as one-liners. Do not repeat this mistake.**
+
+---
+
 ### 1. PLan Node Default
 •⁠  ⁠﻿﻿Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 •⁠  ⁠﻿﻿If something goes sideways, STOP
@@ -1142,7 +1166,7 @@ elif watch.direction == 'SELL':
 |---|---|---|---|---|
 | **H1** | ✅ | `app.py` + `index-v2-prototype.html` | Win rate + expectancy: `signal_history` gains `outcome`, `actual_exit_price`, `actual_pnl_r`. `/api/signals/stats` returns stats. Gate: no display until 30 trades — show "Building track record — X/30." | Live verified 2026-05-24. |
 | **H2** | ✅ | `app.py` + `index-v2-prototype.html` | Correlation risk: `_extract_currency_exposures()` helper + `GET /api/positions/correlation-risk` endpoint. Frontend: `_corrBanner` IIFE in `showPortfolio()`, amber/red banner after health banner. 9/9 sandbox cases pass. | Pending live Railway + UI verify. |
-| **H3** | ❌ | `app.py` + `index-v2-prototype.html` | Drawdown tracking: `equity_snapshots` table. Auto-scale: >5%→suggest 0.5% risk, >10%→0.25% + alert. Drawdown gauge on portfolio tab. | Equity drops 6% → recommended risk shows 0.5% with plain-English explanation |
+| **H3** | ✅ | `app.py` + `index-v2-prototype.html` | Drawdown tracking: `equity_snapshots` table. Auto-scale: >5%→suggest 0.5% risk, >10%→0.25% + alert. Drawdown gauge on portfolio tab. | Live verified 2026-05-24: empty state "Drawdown tracking starts after your first closed trade" renders correctly. Gauge + equity curve + auto-scale fires on first close. Commit: `feat(portfolio): H3 drawdown tracking — equity_snapshots table + gauge`. |
 | **H4** | ❌ | `app.py` | Telegram alerts for all events: new signal, expiry, automation fires, drawdown breach, correlation warning. Every alert explains WHY in plain English. | Automation fires → Telegram message within 30s |
 | **H5** | ❌ | `app.py` | Auto-scanner: RQ job every 15 min. HIGH-confidence only. Max 5 alerts/hour — consolidate into digest if exceeded. | 7 alerts fire → 5 individual + 1 "2 more signals" digest |
 
@@ -1197,7 +1221,31 @@ STEP 9:            J1 → J2 → J3 → J4
 STEP 10:           K1 → K2 → K3 → K4 → K5
 ```
 
-**CURRENT POSITION: H3 is the next item.** *(STEP 7 in progress — H1 ✅ done 2026-05-24. H2 ✅ done 2026-05-24, pending Railway + UI verify. Next: H3 — Drawdown tracking: `equity_snapshots` table, auto-scale >5%→0.5% risk, >10%→0.25% + alert, drawdown gauge on portfolio tab.)*
+**CURRENT POSITION: PHASE SIG is the immediate next work.** *(STEP 7 paused — H1 ✅ H2 ✅ H3 ✅ done 2026-05-24. H4.1 [signal alert in analyze()] REMOVED — fires when user is at computer, pointless. H4.2/H4.3 automation+drawdown+correlation Telegram alerts REMAIN but blocked by PHASE SIG. PHASE SIG must complete first — all downstream features depend on signal quality.)*
+
+**Execution order from 2026-05-24:**
+```
+PHASE SIG:  SIG-1 → SIG-2 → SIG-3 → SIG-4 → SIG-5 → SIG-6 → SIG-7
+STEP 7:     H4 (resume, H4.2 + H4.3 only) → H5
+STEP 6:     G3 → G4
+STEP 8–10:  I → J → K (J3/J4/K5 removed — reactive, not user-facing)
+```
+
+---
+
+#### PHASE SIG — Signal Engine Integrity (MUST RUN BEFORE H4 RESUME)
+
+**Why:** Every downstream feature — automation decisions, Telegram alerts, confidence-based sizing, beginners trusting the verdict — depends on signal quality. The audit (2026-05-24) confirmed 7 specific integrity failures in the live engine. Each is atomic. Each has a clear before/after verifiable in the browser.
+
+| Label | Status | File | Lines | What | Current Behaviour | Target Behaviour | Verify |
+|---|---|---|---|---|---|---|---|
+| **SIG-1** | ❌ | `app.py` | 2812, 2834 | Remove `if not tv_signal_used` from Gate 1 (HTF) and Gate 2 (footprint). Both gates must run regardless of signal source. | TV path (~90%) bypasses both gates. A TV BUY fires even when 4H trend is bearish, even when footprint shows 80% sellers. | Gate 1: SELL blocked when HTF BULLISH, BUY blocked when HTF BEARISH — always. Gate 2: SELL blocked when buyer_pct ≥ 70, BUY blocked when seller_pct ≥ 70 — always. | Sandbox PATH A: TV BUY signal + BEARISH HTF → response.signal == "HOLD". TV SELL + BULLISH HTF → "HOLD". TV BUY + seller_pct 75% → "HOLD". |
+| **SIG-2** | ❌ | `app.py` | 3163 | Fix confidence_label. Remove `tv_signal_used` from CONFIRMED condition. | `"CONFIRMED" if (tv_signal_used or abs(net) >= 5)` — any TV response → CONFIRMED regardless of local agreement. A 14 bullish / 12 bearish TV signal = CONFIRMED. | `"CONFIRMED" if abs(net) >= 5` — only. LIKELY if abs(net) >= 3. HYPOTHESIS otherwise (including most TV signals). | Sandbox: TV BUY with net=1 → confidence_label=="HYPOTHESIS". TV STRONG BUY with net=7 → "CONFIRMED". |
+| **SIG-3** | ❌ | `app.py` | 3071–3077 | Fix ranging contradiction. RANGING + BUY/SELL → gate to HOLD. | `_regime_warning` is set but `signal` is unchanged. BUY + ranging warning coexist on same card. | When `atr_regime == "RANGING"` and `signal in ("BUY","SELL")`: override `signal = "HOLD"`. Set `gate_note` with plain-English reason: "Market is ranging — price is moving sideways with no clear trend. Signals in choppy conditions frequently reverse. Wait for a clean breakout." | Sandbox: signal=BUY, atr_regime=RANGING → response.signal=="HOLD", gate_note contains "ranging". |
+| **SIG-4** | ❌ | `app.py` | after line 2844 | Wire RSI divergence into confidence. `ind["rsi_divergence"]` computed but never read in `get_analysis()`. | Divergence shown on chart, has zero effect on verdict or confidence. BUY CONFIRMED with strong bearish divergence. | After Gate 2: read `ind.get("rsi_divergence",{}).get("type")`. If bearish divergence on BUY signal → confidence drops one level (HIGH→MEDIUM, MEDIUM→LOW) + gate_note: "RSI divergence detected — price is making higher highs but momentum is falling. This weakens the BUY signal." Mirror for bullish divergence on SELL. | Sandbox: BUY + bearish divergence in ind → confidence one level lower. BUY + no divergence → unchanged. |
+| **SIG-5** | ❌ | `app.py` | 2640–2651 | Fix EMA vote weight. STRONG BULL/BEAR=+3, BULL/BEAR=+2 → all =+1. | EMA alone can represent 37.5% of all votes. Strong EMA alignment can push past 65% gate with 3 other indicators neutral. | STRONG BULL=+1, BULL=+1, STRONG BEAR=+1, BEAR=+1. One vote per indicator. `STRONG` distinction preserved in `trend_assessment` text only. | Sandbox: STRONG BULL + all else neutral → bull_pct = 1/1 = 100% (still BUY) but total_votes=1 → Gate 3 MIN_VOTES=3 blocks it. Tests: multiple votes required to cross 65% gate. |
+| **SIG-6** | ❌ | `app.py` | ~902–903 | Fix fake S/R. `support=low.rolling(10).min()`, `resistance=high.rolling(10).max()`. | 10-bar rolling window = last 10 hours on 1H. Not structural. Changes every candle. Useless as a reference level. | Swing pivot detection: `resistance` = highest pivot high in last 50 bars (pivot = bar with higher high than N bars each side, N=3). `support` = lowest pivot low in last 50 bars. Fall back to 10-bar rolling if fewer than 2 pivots found. | Sandbox: known pivot in data → support/resistance align with actual swing high/low, not just recent max/min. |
+| **SIG-7** | ❌ | `app.py` | ~1048 | Fix TV path volume. `build_ind_from_tv()` hardcodes `vol_ratio: 1.0`. | Volume logic in `get_analysis()` always reads 1.0 on TV path → volume_assessment always says "weak conviction" and volume never adds a bullish/bearish vote. | In `build_ind_from_tv()`: fetch last 20 bars of volume for the ticker using yfinance `Ticker(ticker).fast_info` or the existing price fetch. Compute `vol_ratio = current_volume / 20bar_avg_volume`. Cache per ticker+TF to avoid latency. | Sandbox: high-volume day → vol_ratio > 1.2. Low-volume → vol_ratio < 0.8. TV path result shows non-1.0 vol_ratio. |
 
 ---
 

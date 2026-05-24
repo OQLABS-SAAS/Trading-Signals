@@ -13,6 +13,10 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
+import ta.trend as _ta_trend
+import ta.momentum as _ta_momentum
+import ta.volume as _ta_volume
+import ta.volatility as _ta_volatility
 import os, json, threading, time, math
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -1077,6 +1081,17 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
         "chart_rsi":          chart_rsi,
         "chart_buy_signals":  chart_buy_signals,
         "chart_sell_signals": chart_sell_signals,
+        # SMC structures — computed here so detect_smc_structures() can access df directly
+        "smc_structures": detect_smc_structures(df),
+        # Volume profile — VPOC and value area computed from full OHLCV history
+        "volume_profile": _compute_volume_profile(df),
+        # Order flow — candle-by-candle delta analysis beyond simple wick geometry
+        "order_flow": _compute_order_flow(df),
+        # ta library indicators — standard, battle-tested implementations
+        "adx":       _compute_adx(df),
+        "ichimoku":  _compute_ichimoku(df),
+        "vwap":      _compute_vwap(df, asset_type=asset_type),
+        "stochrsi":  _compute_stochrsi(df),
     }
 
 # ─── INDICATOR BUILDER FROM TV DATA ──────────────────────────
@@ -1142,6 +1157,12 @@ def build_ind_from_tv(tv):
         "chart_rsi":          [],
         "chart_buy_signals":  [],
         "chart_sell_signals": [],
+        # ta library indicators — neutral defaults for TV path (no OHLCV df available)
+        "adx":      {"adx": None, "trend_strength": "UNKNOWN"},
+        "ichimoku": {"signal": "NEUTRAL", "above_cloud": None, "cloud_bullish": None,
+                     "tenkan_kijun_bull": None, "tenkan": None, "kijun": None},
+        "vwap":     {"vwap": None, "price_vs_vwap": "N/A", "signal": "NEUTRAL"},
+        "stochrsi": {"k": None, "d": None, "zone": "UNKNOWN", "signal": "NEUTRAL"},
     }
 
 def _enrich_chart_indicators(prices_c):
@@ -2610,6 +2631,563 @@ def _get_user_risk_setting(user_id):
         pass
     return ("aggressive", 0.65)
 
+# ─── ta LIBRARY INDICATOR HELPERS ────────────────────────────
+# Uses the `ta` library (pip install ta) for standard indicators.
+# Rule: ta for standard indicators only. DotVerse-specific logic stays custom.
+# VWAP guard: forex volume is always 0 from yfinance — skip VWAP for forex.
+
+def _compute_adx(df):
+    """ADX (Average Directional Index) — trend strength, not direction.
+    Returns: {adx: float, trend_strength: 'STRONG'|'MODERATE'|'WEAK'}
+    ADX > 40 = strong trend (confirms direction),  20-40 = moderate,  <20 = no trend.
+    """
+    try:
+        high = df["High"]; low = df["Low"]; close = df["Close"]
+        adx_ind = _ta_trend.ADXIndicator(high=high, low=low, close=close, window=14)
+        adx_val = float(adx_ind.adx().iloc[-1])
+        if pd.isna(adx_val):
+            return {"adx": None, "trend_strength": "UNKNOWN"}
+        if adx_val >= 40:   strength = "STRONG"
+        elif adx_val >= 20: strength = "MODERATE"
+        else:               strength = "WEAK"
+        return {"adx": round(adx_val, 2), "trend_strength": strength}
+    except Exception:
+        return {"adx": None, "trend_strength": "UNKNOWN"}
+
+
+def _compute_ichimoku(df):
+    """Ichimoku Cloud — comprehensive trend system.
+    Returns: {above_cloud: bool, cloud_bullish: bool, tenkan_kijun_bull: bool,
+              tenkan: float, kijun: float, span_a: float, span_b: float,
+              signal: 'BULLISH'|'BEARISH'|'NEUTRAL'}
+    All 3 conditions bullish = strong buy.  All 3 bearish = strong sell.
+    """
+    try:
+        high = df["High"]; low = df["Low"]; close = df["Close"]
+        ichi = _ta_trend.IchimokuIndicator(high=high, low=low, window1=9, window2=26, window3=52)
+        tenkan = float(ichi.ichimoku_conversion_line().iloc[-1])
+        kijun  = float(ichi.ichimoku_base_line().iloc[-1])
+        span_a = float(ichi.ichimoku_a().iloc[-1])
+        span_b = float(ichi.ichimoku_b().iloc[-1])
+        price  = float(close.iloc[-1])
+
+        if any(pd.isna(v) for v in [tenkan, kijun, span_a, span_b]):
+            return {"signal": "NEUTRAL", "above_cloud": None, "cloud_bullish": None,
+                    "tenkan_kijun_bull": None, "tenkan": None, "kijun": None}
+
+        cloud_top    = max(span_a, span_b)
+        cloud_bottom = min(span_a, span_b)
+        above_cloud       = price > cloud_top
+        below_cloud       = price < cloud_bottom
+        cloud_bullish     = span_a > span_b          # bullish cloud (green)
+        tenkan_kijun_bull = tenkan > kijun            # TK cross bullish
+
+        bull_count = sum([above_cloud, cloud_bullish, tenkan_kijun_bull])
+        bear_count = sum([below_cloud, not cloud_bullish, not tenkan_kijun_bull])
+
+        if bull_count >= 2:   signal = "BULLISH"
+        elif bear_count >= 2: signal = "BEARISH"
+        else:                 signal = "NEUTRAL"
+
+        return {
+            "signal":           signal,
+            "above_cloud":      above_cloud,
+            "below_cloud":      below_cloud,
+            "cloud_bullish":    cloud_bullish,
+            "tenkan_kijun_bull": tenkan_kijun_bull,
+            "tenkan":           round(tenkan, 4),
+            "kijun":            round(kijun, 4),
+            "span_a":           round(span_a, 4),
+            "span_b":           round(span_b, 4),
+        }
+    except Exception:
+        return {"signal": "NEUTRAL", "above_cloud": None, "cloud_bullish": None,
+                "tenkan_kijun_bull": None, "tenkan": None, "kijun": None}
+
+
+def _compute_vwap(df, asset_type="stock"):
+    """VWAP — institutional intraday reference level.
+    Returns: {vwap: float, price_vs_vwap: 'ABOVE'|'BELOW'|'AT', signal: 'BULLISH'|'BEARISH'|'NEUTRAL'}
+    Not applicable to forex (zero volume) — returns NEUTRAL with vwap=None.
+    """
+    try:
+        if asset_type == "forex":
+            return {"vwap": None, "price_vs_vwap": "N/A", "signal": "NEUTRAL"}
+
+        high = df["High"]; low = df["Low"]; close = df["Close"]; vol = df["Volume"]
+
+        # Guard: skip if volume is all zeros
+        if vol.sum() == 0:
+            return {"vwap": None, "price_vs_vwap": "N/A", "signal": "NEUTRAL"}
+
+        # Ensure DatetimeIndex for ta VWAP
+        if not isinstance(df.index, pd.DatetimeIndex):
+            return {"vwap": None, "price_vs_vwap": "N/A", "signal": "NEUTRAL"}
+
+        vwap_series = _ta_volume.VolumeWeightedAveragePrice(
+            high=high, low=low, close=close, volume=vol, window=14
+        ).volume_weighted_average_price()
+        vwap_val = float(vwap_series.iloc[-1])
+        price    = float(close.iloc[-1])
+
+        if pd.isna(vwap_val):
+            return {"vwap": None, "price_vs_vwap": "N/A", "signal": "NEUTRAL"}
+
+        pct_diff = (price - vwap_val) / vwap_val * 100
+        if pct_diff > 0.1:    pos = "ABOVE"; signal = "BULLISH"
+        elif pct_diff < -0.1: pos = "BELOW"; signal = "BEARISH"
+        else:                  pos = "AT";    signal = "NEUTRAL"
+
+        return {"vwap": round(vwap_val, 4), "price_vs_vwap": pos,
+                "pct_from_vwap": round(pct_diff, 3), "signal": signal}
+    except Exception:
+        return {"vwap": None, "price_vs_vwap": "N/A", "signal": "NEUTRAL"}
+
+
+def _compute_stochrsi(df):
+    """Stochastic RSI — faster momentum oscillator, more sensitive than RSI alone.
+    Returns: {k: float, d: float, zone: 'OVERBOUGHT'|'OVERSOLD'|'NEUTRAL',
+              signal: 'BULLISH'|'BEARISH'|'NEUTRAL'}
+    K > 80 = overbought, K < 20 = oversold.
+    Crossover (K crosses above D from oversold) = BUY signal.
+    """
+    try:
+        close = df["Close"]
+        srsi  = _ta_momentum.StochRSIIndicator(close=close, window=14, smooth1=3, smooth2=3)
+        k_val = float(srsi.stochrsi_k().iloc[-1])
+        d_val = float(srsi.stochrsi_d().iloc[-1])
+        k_prev = float(srsi.stochrsi_k().iloc[-2]) if len(close) > 1 else k_val
+        d_prev = float(srsi.stochrsi_d().iloc[-2]) if len(close) > 1 else d_val
+
+        if any(pd.isna(v) for v in [k_val, d_val]):
+            return {"k": None, "d": None, "zone": "UNKNOWN", "signal": "NEUTRAL"}
+
+        if k_val > 0.8:   zone = "OVERBOUGHT"
+        elif k_val < 0.2: zone = "OVERSOLD"
+        else:             zone = "NEUTRAL"
+
+        # Crossover detection
+        k_crossed_above_d = (k_prev <= d_prev) and (k_val > d_val)
+        k_crossed_below_d = (k_prev >= d_prev) and (k_val < d_val)
+
+        if zone == "OVERSOLD" and k_crossed_above_d:   signal = "BULLISH"
+        elif zone == "OVERBOUGHT" and k_crossed_below_d: signal = "BEARISH"
+        elif zone == "OVERSOLD":                         signal = "BULLISH"
+        elif zone == "OVERBOUGHT":                       signal = "BEARISH"
+        else:                                            signal = "NEUTRAL"
+
+        return {"k": round(k_val, 4), "d": round(d_val, 4),
+                "zone": zone, "signal": signal}
+    except Exception:
+        return {"k": None, "d": None, "zone": "UNKNOWN", "signal": "NEUTRAL"}
+
+
+def _compute_volume_profile(df):
+    """
+    Volume Profile: bucket all OHLCV bars into price levels and find:
+      - VPOC  : price level with highest accumulated volume (Point of Control)
+      - VAH   : Value Area High (top of 70% volume range)
+      - VAL   : Value Area Low  (bottom of 70% volume range)
+      - price_vs_vpoc: 'ABOVE' / 'BELOW' / 'AT' (within 0.2% of VPOC)
+      - vol_concentration: 'HIGH' if current price is inside the value area, else 'LOW'
+
+    Uses the full df passed to calculate_indicators (50–200 bars depending on TF).
+    Bins into 50 price levels. Falls back to empty dict on any error or < 20 bars.
+    """
+    empty = {"vpoc": None, "vah": None, "val": None,
+             "price_vs_vpoc": "UNKNOWN", "vol_concentration": "UNKNOWN"}
+    try:
+        import numpy as np
+        if df is None or len(df) < 20:
+            return empty
+
+        hi  = df["High"].values.astype(float)
+        lo  = df["Low"].values.astype(float)
+        cl  = df["Close"].values.astype(float)
+        vol = df["Volume"].values.astype(float)
+
+        price_min = lo.min()
+        price_max = hi.max()
+        if price_max <= price_min:
+            return empty
+
+        n_bins = 50
+        bins   = np.linspace(price_min, price_max, n_bins + 1)
+        bin_vol = np.zeros(n_bins)
+
+        # Distribute each bar's volume proportionally across the price bins it spans
+        for i in range(len(hi)):
+            bar_range = hi[i] - lo[i]
+            if bar_range <= 0:
+                bin_idx = np.searchsorted(bins, cl[i], side='right') - 1
+                bin_idx = int(np.clip(bin_idx, 0, n_bins - 1))
+                bin_vol[bin_idx] += vol[i]
+            else:
+                # Weight volume by how much of the bar overlaps each bin
+                for b in range(n_bins):
+                    overlap = min(hi[i], bins[b+1]) - max(lo[i], bins[b])
+                    if overlap > 0:
+                        bin_vol[b] += vol[i] * (overlap / bar_range)
+
+        # VPOC = bin centre with max volume
+        vpoc_idx  = int(np.argmax(bin_vol))
+        vpoc      = round(float((bins[vpoc_idx] + bins[vpoc_idx+1]) / 2), 4)
+
+        # Value Area: accumulate bins around VPOC until 70% of total volume covered
+        total_vol  = bin_vol.sum()
+        target_vol = total_vol * 0.70
+        va_vol     = bin_vol[vpoc_idx]
+        lo_idx     = vpoc_idx
+        hi_idx     = vpoc_idx
+        while va_vol < target_vol and (lo_idx > 0 or hi_idx < n_bins - 1):
+            add_lo = bin_vol[lo_idx - 1] if lo_idx > 0 else -1
+            add_hi = bin_vol[hi_idx + 1] if hi_idx < n_bins - 1 else -1
+            if add_lo >= add_hi and lo_idx > 0:
+                lo_idx -= 1; va_vol += bin_vol[lo_idx]
+            elif hi_idx < n_bins - 1:
+                hi_idx += 1; va_vol += bin_vol[hi_idx]
+            else:
+                break
+
+        vah = round(float(bins[hi_idx + 1]), 4)
+        val = round(float(bins[lo_idx]), 4)
+
+        current_price = float(cl[-1])
+        if abs(current_price - vpoc) / max(vpoc, 1e-9) < 0.002:
+            price_vs_vpoc = "AT"
+        elif current_price > vpoc:
+            price_vs_vpoc = "ABOVE"
+        else:
+            price_vs_vpoc = "BELOW"
+
+        vol_concentration = "HIGH" if val <= current_price <= vah else "LOW"
+
+        return {
+            "vpoc":              vpoc,
+            "vah":               vah,
+            "val":               val,
+            "price_vs_vpoc":     price_vs_vpoc,
+            "vol_concentration": vol_concentration,
+        }
+    except Exception as e:
+        print(f"[vol_profile] error: {e}")
+        return empty
+
+
+def _compute_order_flow(df):
+    """
+    Order flow analysis beyond simple wick geometry.
+    Computes delta (estimated buy volume minus sell volume) for each bar
+    using the candle's close position within its range as a proxy for
+    aggressor direction. Produces:
+      - cumulative_delta_trend : 'BULLISH' / 'BEARISH' / 'NEUTRAL'
+        (direction of cumulative delta over last 10 bars)
+      - delta_divergence : True if price makes new high/low but delta diverges
+        (price rising but delta falling = hidden selling, and vice versa)
+      - absorption : True if large-volume bar with small body
+        (high volume absorbed by the other side — indecision / reversal risk)
+      - conviction: 'STRONG' / 'MODERATE' / 'WEAK'
+        (how consistently delta aligns with price direction over last 10 bars)
+    Falls back to neutral on < 20 bars or any error.
+    """
+    neutral = {
+        "cumulative_delta_trend": "NEUTRAL",
+        "delta_divergence": False,
+        "absorption": False,
+        "conviction": "WEAK",
+    }
+    try:
+        import numpy as np
+        if df is None or len(df) < 20:
+            return neutral
+
+        hi  = df["High"].values.astype(float)
+        lo  = df["Low"].values.astype(float)
+        cl  = df["Close"].values.astype(float)
+        op  = df["Open"].values.astype(float)
+        vol = df["Volume"].values.astype(float)
+
+        # Delta proxy: proportion of bar that closed bullish × volume = buy vol
+        # (cl - lo) / (hi - lo) gives 0→1 where 1 = closed at high (pure buyers)
+        rng   = hi - lo
+        rng   = np.where(rng <= 0, 1e-9, rng)
+        buy_frac = (cl - lo) / rng          # 0..1
+        delta    = (buy_frac * 2 - 1) * vol  # positive = net buying, negative = net selling
+
+        # ── Cumulative delta over last 10 bars ──
+        window = min(10, len(delta))
+        cum_d  = delta[-window:].sum()
+        if cum_d > 0:
+            cum_trend = "BULLISH"
+        elif cum_d < 0:
+            cum_trend = "BEARISH"
+        else:
+            cum_trend = "NEUTRAL"
+
+        # ── Delta divergence (last 5 bars) ──
+        w5 = min(5, len(delta))
+        price_dir = cl[-1] - cl[-w5]   # positive = price went up
+        delta_dir = delta[-w5:].sum()   # positive = delta went up
+        divergence = (price_dir > 0 and delta_dir < 0) or (price_dir < 0 and delta_dir > 0)
+
+        # ── Absorption: last 3 bars — any bar with vol > 1.5× avg but body < 30% of range ──
+        vol_avg  = np.mean(vol[-20:]) if len(vol) >= 20 else np.mean(vol)
+        body     = np.abs(cl - op)
+        absorption = any(
+            vol[i] > 1.5 * vol_avg and body[i] < 0.3 * rng[i]
+            for i in range(max(0, len(vol)-3), len(vol))
+        )
+
+        # ── Conviction: how many of last 10 bars have delta aligned with price direction ──
+        price_changes = np.diff(cl[-window-1:]) if len(cl) > window else np.diff(cl)
+        delta_recent  = delta[-(len(price_changes)):]
+        aligned = np.sum(np.sign(price_changes) == np.sign(delta_recent))
+        pct_aligned = aligned / max(len(price_changes), 1)
+        if pct_aligned >= 0.70:
+            conviction = "STRONG"
+        elif pct_aligned >= 0.50:
+            conviction = "MODERATE"
+        else:
+            conviction = "WEAK"
+
+        return {
+            "cumulative_delta_trend": cum_trend,
+            "delta_divergence":       bool(divergence),
+            "absorption":             bool(absorption),
+            "conviction":             conviction,
+        }
+    except Exception as e:
+        print(f"[order_flow] error: {e}")
+        return neutral
+
+
+def _get_regime_adaptive_rsi_zones(atr_pct):
+    """
+    Regime-adaptive RSI zones.
+    In HIGH volatility (ATR > 3% of price): widen zones — momentum runs further
+      before mean-reverting. Standard RSI 70/30 will fire too early.
+    In LOW volatility (ATR < 0.5% of price): tighten zones — price oscillates
+      in a narrow band, RSI 60 is already overbought in a ranging market.
+    In NORMAL volatility: standard zones.
+
+    Returns dict with overbought / neutral_high / neutral_low / oversold thresholds.
+    """
+    if atr_pct >= 3.0:        # HIGH volatility — trending / crypto
+        return {"overbought": 80, "neutral_high": 65, "neutral_low": 40, "oversold": 22}
+    elif atr_pct >= 1.0:      # NORMAL volatility — most liquid assets
+        return {"overbought": 75, "neutral_high": 55, "neutral_low": 45, "oversold": 25}
+    else:                     # LOW volatility — tight range / indices
+        return {"overbought": 65, "neutral_high": 55, "neutral_low": 45, "oversold": 35}
+
+
+def _compute_htf_structural_confluence(mtf, signal_direction):
+    """
+    Multi-timeframe structural confluence beyond 'HTF is bullish'.
+    Checks actual swing structure on the HTF: is price above the last swing high
+    (breakout), between swing high and low (range), or below last swing low (breakdown)?
+    Also checks mid-TF alignment.
+
+    Returns:
+      structural_bias: 'STRONG_BULL' / 'BULL' / 'NEUTRAL' / 'BEAR' / 'STRONG_BEAR'
+      htf_structure:   'BREAKOUT' / 'RANGE' / 'BREAKDOWN'
+      aligned:         True if structural_bias matches signal_direction
+      confluence_note: plain-English explanation
+    """
+    result = {
+        "structural_bias": "NEUTRAL",
+        "htf_structure":   "RANGE",
+        "aligned":         False,
+        "confluence_note": "",
+    }
+    if not mtf:
+        return result
+    try:
+        # Collect available TF data from mtf dict
+        tfs_checked = 0
+        bull_count  = 0
+        bear_count  = 0
+
+        for tf_key, tf_data in mtf.items():
+            if not isinstance(tf_data, dict):
+                continue
+            trend   = (tf_data.get("trend")   or "NEUTRAL").upper()
+            rsi_val = tf_data.get("rsi")
+            # Map trend to direction vote
+            if trend in ("STRONG BULL", "BULL", "BULLISH"):
+                bull_count += 1; tfs_checked += 1
+            elif trend in ("STRONG BEAR", "BEAR", "BEARISH"):
+                bear_count += 1; tfs_checked += 1
+            else:
+                tfs_checked += 1  # neutral TF — still counts toward total
+
+        if tfs_checked == 0:
+            return result
+
+        bull_ratio = bull_count / tfs_checked
+        bear_ratio = bear_count / tfs_checked
+
+        if bull_ratio >= 0.75:
+            structural_bias = "STRONG_BULL"
+            htf_structure   = "BREAKOUT"
+        elif bull_ratio >= 0.50:
+            structural_bias = "BULL"
+            htf_structure   = "RANGE"
+        elif bear_ratio >= 0.75:
+            structural_bias = "STRONG_BEAR"
+            htf_structure   = "BREAKDOWN"
+        elif bear_ratio >= 0.50:
+            structural_bias = "BEAR"
+            htf_structure   = "RANGE"
+        else:
+            structural_bias = "NEUTRAL"
+            htf_structure   = "RANGE"
+
+        aligned = (
+            (signal_direction == "BUY"  and structural_bias in ("STRONG_BULL", "BULL")) or
+            (signal_direction == "SELL" and structural_bias in ("STRONG_BEAR", "BEAR"))
+        )
+
+        notes = {
+            "STRONG_BULL": f"All {tfs_checked} higher timeframes align bullish — structural breakout confirmed.",
+            "BULL":        f"{bull_count}/{tfs_checked} higher timeframes bullish — uptrend structure intact.",
+            "NEUTRAL":     f"Higher timeframes are mixed — no structural consensus.",
+            "BEAR":        f"{bear_count}/{tfs_checked} higher timeframes bearish — downtrend structure intact.",
+            "STRONG_BEAR": f"All {tfs_checked} higher timeframes align bearish — structural breakdown confirmed.",
+        }
+
+        result.update({
+            "structural_bias": structural_bias,
+            "htf_structure":   htf_structure,
+            "aligned":         aligned,
+            "confluence_note": notes.get(structural_bias, ""),
+        })
+    except Exception as e:
+        print(f"[htf_struct] error: {e}")
+    return result
+
+
+def detect_smc_structures(df):
+    """
+    Detect Smart Money Concept structures from OHLCV data.
+    Returns a dict with four boolean flags and context for each:
+      fvg_bullish   : bullish Fair Value Gap in the last 10 bars
+      fvg_bearish   : bearish Fair Value Gap in the last 10 bars
+      liquidity_grab_bull : swing-high sweep + rejection (bullish)
+      liquidity_grab_bear : swing-low sweep + rejection (bearish)
+      displacement_bull   : bullish displacement candle (body > 2× ATR)
+      displacement_bear   : bearish displacement candle
+      choch_bull          : Change of Character bullish (first swing-high break after downtrend)
+      choch_bear          : Change of Character bearish (first swing-low break after uptrend)
+    All detection is purely mechanical on OHLCV — no LLMs, no pattern-matching heuristics.
+    Returns empty dict (all False) if df has fewer than 20 bars.
+    """
+    result = {
+        "fvg_bullish": False, "fvg_bearish": False,
+        "liquidity_grab_bull": False, "liquidity_grab_bear": False,
+        "displacement_bull": False, "displacement_bear": False,
+        "choch_bull": False, "choch_bear": False,
+    }
+    try:
+        import pandas as pd, numpy as np
+        if df is None or len(df) < 20:
+            return result
+
+        hi  = df["High"].values
+        lo  = df["Low"].values
+        cl  = df["Close"].values
+        op  = df["Open"].values
+        n   = len(hi)
+
+        # ── ATR for displacement threshold ─────────────────────────────────
+        tr = np.maximum(hi[1:] - lo[1:],
+             np.maximum(np.abs(hi[1:] - cl[:-1]),
+                        np.abs(lo[1:] - cl[:-1])))
+        atr = float(np.mean(tr[-14:])) if len(tr) >= 14 else float(np.mean(tr))
+
+        # ── 1. Fair Value Gap (FVG) ─────────────────────────────────────────
+        # Bullish FVG: candle[i-2] high < candle[i] low — gap not filled by candle[i-1]
+        # Bearish FVG: candle[i-2] low  > candle[i] high — gap not filled by candle[i-1]
+        # Check last 10 complete bars for a recent unfilled FVG.
+        for i in range(max(2, n-10), n):
+            if lo[i] > hi[i-2]:           # gap between c[i-2] top and c[i] bottom
+                result["fvg_bullish"] = True
+            if hi[i] < lo[i-2]:           # gap between c[i-2] bottom and c[i] top
+                result["fvg_bearish"] = True
+
+        # ── 2. Liquidity Grab ───────────────────────────────────────────────
+        # Find equal highs/lows in recent 20 bars (within 0.1% tolerance).
+        # Bullish grab: equal lows swept (lo pierces below) then candle closes ABOVE them.
+        # Bearish grab: equal highs swept (hi pierces above) then candle closes BELOW them.
+        tol = 0.001  # 0.1%
+        for i in range(5, n):
+            # equal lows in [i-5 .. i-1]
+            ref_lo = lo[i-5:i]
+            eq_lo  = ref_lo[np.abs(ref_lo - ref_lo.min()) / max(ref_lo.min(), 1e-9) < tol]
+            if len(eq_lo) >= 2:
+                sweep_level = eq_lo.min()
+                if lo[i] < sweep_level and cl[i] > sweep_level:
+                    result["liquidity_grab_bull"] = True
+            # equal highs in [i-5 .. i-1]
+            ref_hi = hi[i-5:i]
+            eq_hi  = ref_hi[np.abs(ref_hi - ref_hi.max()) / max(ref_hi.max(), 1e-9) < tol]
+            if len(eq_hi) >= 2:
+                sweep_level = eq_hi.max()
+                if hi[i] > sweep_level and cl[i] < sweep_level:
+                    result["liquidity_grab_bear"] = True
+
+        # ── 3. Displacement candle ──────────────────────────────────────────
+        # Body > 2× ATR in the last 5 bars = institutional order flow entering.
+        for i in range(max(0, n-5), n):
+            body = abs(cl[i] - op[i])
+            if body > 2 * atr:
+                if cl[i] > op[i]:
+                    result["displacement_bull"] = True
+                else:
+                    result["displacement_bear"] = True
+
+        # ── 4. Change of Character (CHOCH) ──────────────────────────────────
+        # Detect the FIRST break of a swing high after a series of lower-highs
+        # (downtrend), or FIRST break of swing low after series of higher-lows.
+        # Use last 20 bars. Minimum 3 swings needed.
+        def _swings(prices, order=3):
+            """Return indices of local pivot highs or lows."""
+            pivots = []
+            for j in range(order, len(prices) - order):
+                if all(prices[j] >= prices[j-k] for k in range(1, order+1)) and \
+                   all(prices[j] >= prices[j+k] for k in range(1, order+1)):
+                    pivots.append(j)
+            return pivots
+
+        window = min(n, 30)
+        hi_w   = hi[-window:]
+        lo_w   = lo[-window:]
+        cl_w   = cl[-window:]
+
+        swing_highs = _swings(hi_w, order=2)
+        swing_lows  = _swings(lo_w, order=2)
+
+        # CHOCH bullish: after 2+ lower-highs, last bar closes above the last swing high
+        if len(swing_highs) >= 2:
+            sh_vals = [hi_w[j] for j in swing_highs]
+            if sh_vals[-1] < sh_vals[-2]:           # lower-high pattern confirmed
+                last_sh = hi_w[swing_highs[-1]]
+                if cl_w[-1] > last_sh:              # price now breaks above it → CHOCH bull
+                    result["choch_bull"] = True
+
+        # CHOCH bearish: after 2+ higher-lows, last bar closes below the last swing low
+        if len(swing_lows) >= 2:
+            sl_vals = [lo_w[j] for j in swing_lows]
+            if sl_vals[-1] > sl_vals[-2]:           # higher-low pattern confirmed
+                last_sl = lo_w[swing_lows[-1]]
+                if cl_w[-1] < last_sl:              # price now breaks below it → CHOCH bear
+                    result["choch_bear"] = True
+
+    except Exception as e:
+        print(f"[smc] detect_smc_structures error: {e}")
+
+    return result
+
+
 def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=None):
     """Generate trading signal using gated template logic.
 
@@ -2640,27 +3218,37 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     ema200 = ind.get("ema200", price)
     bb_width = ind.get("bb_width", 0.02) or 0.02
 
-    # Count bullish/bearish indicators
+    # Count bullish/bearish/neutral indicators
     bullish_count = 0
     bearish_count = 0
+    neutral_count = 0
 
-    # ── RSI logic (trend-aware) ──
-    # In a strong uptrend, RSI 60-80 is continuation, not reversal.
-    # In a downtrend, RSI 20-40 is continuation, not bounce.
-    if rsi >= 75:
+    # ── Regime-adaptive RSI zones ─────────────────────────────────────────────
+    # Static RSI zones (75/55/45/25) are wrong in different volatility regimes.
+    # Crypto in a bull run: RSI 75+ is continuation, not reversal.
+    # Low-vol index: RSI 65 is already overbought. Adapt zones to current ATR.
+    _atr_pct = (atr / price * 100) if price > 0 else 1.0
+    _rsi_zones = _get_regime_adaptive_rsi_zones(_atr_pct)
+    _rsi_ob  = _rsi_zones["overbought"]
+    _rsi_nh  = _rsi_zones["neutral_high"]
+    _rsi_nl  = _rsi_zones["neutral_low"]
+    _rsi_os  = _rsi_zones["oversold"]
+
+    if rsi >= _rsi_ob:
         bearish_count += 1
-        rsi_assessment = f"RSI at {rsi} signals overbought conditions; pullback risk is elevated."
-    elif 55 <= rsi < 75:
+        rsi_assessment = f"RSI at {rsi} — overbought for this asset's volatility (threshold {_rsi_ob}). Pullback risk elevated."
+    elif _rsi_nh <= rsi < _rsi_ob:
         bullish_count += 1
-        rsi_assessment = f"RSI at {rsi} shows strong bullish momentum in the continuation zone."
-    elif 45 <= rsi < 55:
-        rsi_assessment = f"RSI at {rsi} is neutral; looking for directional confirmation."
-    elif 25 < rsi < 45:
+        rsi_assessment = f"RSI at {rsi} shows bullish momentum in the continuation zone (above {_rsi_nh})."
+    elif _rsi_nl <= rsi < _rsi_nh:
+        neutral_count += 1
+        rsi_assessment = f"RSI at {rsi} is neutral — no clear directional momentum."
+    elif _rsi_os < rsi < _rsi_nl:
         bearish_count += 1
-        rsi_assessment = f"RSI at {rsi} shows bearish momentum below the midline."
-    else:  # rsi <= 25
+        rsi_assessment = f"RSI at {rsi} shows bearish momentum below midline (below {_rsi_nl})."
+    else:  # rsi <= _rsi_os
         bullish_count += 1
-        rsi_assessment = f"RSI at {rsi} indicates oversold conditions; bounce potential is present."
+        rsi_assessment = f"RSI at {rsi} — oversold for this asset's volatility (threshold {_rsi_os}). Bounce potential."
 
     # ── EMA Trend logic (higher weight: counts as 2-3) ──
     # FIX 2026-04-29: calculate_indicators produces "STRONG BULL"/"BULL"/"STRONG BEAR"/
@@ -2690,6 +3278,7 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         bearish_count += 1
         trend_assessment = "EMA stack is bearish; downtrend structure dominates and price remains below key MAs."
     else:
+        neutral_count += 1
         trend_assessment = "EMAs are mixed; trend definition is unclear at current price."
 
     # ── MACD logic ──
@@ -2700,6 +3289,7 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         bearish_count += 1
         macd_assessment = "MACD histogram is negative; bearish momentum dominates the tape."
     else:
+        neutral_count += 1
         macd_assessment = "MACD histogram is flat; momentum is transitioning."
 
     # ── Volume logic (cross-check with EMA trend direction) ──
@@ -2710,8 +3300,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             bullish_count += 1
         elif _emat in ("STRONG BEAR", "BEAR"):
             bearish_count += 1
+        else:
+            neutral_count += 1  # High vol but no trend — no directional vote
         volume_assessment = f"Volume ratio at {vol_ratio:.2f}x confirms participation above average."
     else:
+        neutral_count += 1
         volume_assessment = f"Volume ratio at {vol_ratio:.2f}x suggests weak conviction; confirmation needed."
 
     # ── Supertrend logic ──
@@ -2722,6 +3315,7 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         bearish_count += 1
         supertrend_assessment = "Supertrend is bearish; downside is protected and rallies face selling."
     else:
+        neutral_count += 1
         supertrend_assessment = "Supertrend is neutral; waiting for directional confirmation."
 
     # ── Bollinger Bands (FIXED — overbought is bearish, oversold is bullish) ──
@@ -2729,19 +3323,181 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         bearish_count += 1  # Near upper band = overbought, mean reversion risk
     elif bb_pos < 0.15:
         bullish_count += 1  # Near lower band = oversold, bounce potential
+    else:
+        neutral_count += 1  # Mid-band = no BB conviction signal
 
-    # ── Net score (kept for confidence calculation) ──
+    # ── Smart Money Concepts (SMC) — 4 additional votes ────────────────────────
+    # Each SMC structure that aligns with the signal direction adds 1 bullish or
+    # bearish vote. Structures that are present but opposite add a bearish/bullish
+    # vote. Structures that are absent or neutral add to neutral_count so they
+    # still widen the denominator (harder to reach threshold without SMC alignment).
+    #
+    # This means a TV STRONG BUY + 4 local bullish + 2 SMC bullish structures
+    # = (4+3+2) / (4+3+2+0) = 9/9 = 100% CONFIRMED. Real institutional alignment.
+    # A TV BUY + 3 local bullish + NO SMC = (3+2) / (3+2+4) = 5/9 = 56% → HOLD.
+    # SMC absence genuinely weakens signals that lack structural backing.
+    _smc = ind.get("smc_structures") or {}
+    # FVG: bullish FVG present → +1 bull. Bearish FVG → +1 bear. Neither → neutral.
+    if _smc.get("fvg_bullish"):
+        bullish_count += 1
+    elif _smc.get("fvg_bearish"):
+        bearish_count += 1
+    else:
+        neutral_count += 1
+    # Liquidity grab: bull grab (sweep of lows, rejection up) → +1 bull. Bear grab → +1 bear.
+    if _smc.get("liquidity_grab_bull"):
+        bullish_count += 1
+    elif _smc.get("liquidity_grab_bear"):
+        bearish_count += 1
+    else:
+        neutral_count += 1
+    # Displacement: bullish displacement (large bull candle) → +1 bull. Bear → +1 bear.
+    if _smc.get("displacement_bull"):
+        bullish_count += 1
+    elif _smc.get("displacement_bear"):
+        bearish_count += 1
+    else:
+        neutral_count += 1
+    # CHOCH: Change of Character bullish → +1 bull. Bearish → +1 bear.
+    if _smc.get("choch_bull"):
+        bullish_count += 1
+    elif _smc.get("choch_bear"):
+        bearish_count += 1
+    else:
+        neutral_count += 1
+
+    # ── Volume Profile vote ───────────────────────────────────────────────────
+    # VPOC above price = overhead supply (bearish). VPOC below = support (bullish).
+    # Price inside value area = consolidation (neutral). Outside = trending.
+    _vp = ind.get("volume_profile") or {}
+    _vp_rel = _vp.get("price_vs_vpoc", "UNKNOWN")
+    _vp_conc = _vp.get("vol_concentration", "UNKNOWN")
+    if _vp_rel == "ABOVE" and _vp_conc == "HIGH":
+        # Price above VPOC and inside value area — supported by volume
+        bullish_count += 1
+    elif _vp_rel == "BELOW" and _vp_conc == "HIGH":
+        # Price below VPOC but inside value area — overhead supply
+        bearish_count += 1
+    elif _vp_rel == "ABOVE" and _vp_conc == "LOW":
+        # Price above value area entirely — extended, possible mean-reversion risk
+        neutral_count += 1
+    elif _vp_rel == "BELOW" and _vp_conc == "LOW":
+        # Price below value area — in breakdown territory
+        bearish_count += 1
+    else:
+        neutral_count += 1  # AT VPOC or unknown — no directional edge
+
+    # ── Order Flow vote ───────────────────────────────────────────────────────
+    # Cumulative delta trend: net buying (bullish) or selling (bearish) pressure.
+    # Delta divergence overrides the direction vote — divergence means hidden
+    # opposite-side pressure despite price direction. Absorption = stalemate.
+    _of = ind.get("order_flow") or {}
+    _of_trend    = _of.get("cumulative_delta_trend", "NEUTRAL")
+    _of_div      = _of.get("delta_divergence", False)
+    _of_absorb   = _of.get("absorption", False)
+    _of_conv     = _of.get("conviction", "WEAK")
+    if _of_absorb:
+        # Absorption: high-volume bar with small body = indecision or reversal
+        neutral_count += 1
+    elif _of_div:
+        # Delta divergence: price and order flow disagree — no edge
+        neutral_count += 1
+    elif _of_trend == "BULLISH" and _of_conv in ("STRONG", "MODERATE"):
+        bullish_count += 1
+    elif _of_trend == "BEARISH" and _of_conv in ("STRONG", "MODERATE"):
+        bearish_count += 1
+    else:
+        neutral_count += 1
+
+    # ── ADX vote (ta library) ─────────────────────────────────────────────────
+    # ADX measures trend STRENGTH not direction. Strong trend confirms the directional
+    # vote already cast by EMA/Supertrend. Weak ADX (ranging) adds neutral — price may
+    # reverse without follow-through.
+    _adx_data     = ind.get("adx") or {}
+    _adx_strength = _adx_data.get("trend_strength", "UNKNOWN")
+    if _adx_strength == "STRONG":
+        # Strong trend — confirms whichever direction the other indicators show
+        bullish_count += 1 if bullish_count >= bearish_count else 0
+        bearish_count += 1 if bearish_count > bullish_count else 0
+    elif _adx_strength == "MODERATE":
+        neutral_count += 1   # moderate trend — no strong confirmation
+    else:
+        neutral_count += 1   # weak/ranging — ADX says no trend, penalise directional count
+
+    # ── Ichimoku vote (ta library) ────────────────────────────────────────────
+    # Comprehensive trend system: cloud position + cloud colour + TK cross.
+    # 2 of 3 conditions = directional signal. Otherwise neutral.
+    _ichi      = ind.get("ichimoku") or {}
+    _ichi_sig  = _ichi.get("signal", "NEUTRAL")
+    if _ichi_sig == "BULLISH":
+        bullish_count += 1
+    elif _ichi_sig == "BEARISH":
+        bearish_count += 1
+    else:
+        neutral_count += 1
+
+    # ── VWAP vote (ta library) ───────────────────────────────────────────────
+    # Institutional reference: price above VWAP = institutions are net long.
+    # Not applicable to forex (zero volume). Skipped when vwap=None.
+    _vwap_data = ind.get("vwap") or {}
+    _vwap_sig  = _vwap_data.get("signal", "NEUTRAL")
+    _vwap_val  = _vwap_data.get("vwap")
+    if _vwap_val is not None:   # only vote when VWAP is computable
+        if _vwap_sig == "BULLISH":
+            bullish_count += 1
+        elif _vwap_sig == "BEARISH":
+            bearish_count += 1
+        else:
+            neutral_count += 1
+    # If _vwap_val is None (forex / no volume) → no vote at all, not even neutral
+
+    # ── StochRSI vote (ta library) ────────────────────────────────────────────
+    # Faster momentum signal. Crossover from oversold = bullish. From overbought = bearish.
+    # Neutral zone K → neutral vote.
+    _srsi      = ind.get("stochrsi") or {}
+    _srsi_sig  = _srsi.get("signal", "NEUTRAL")
+    _srsi_k    = _srsi.get("k")
+    if _srsi_k is not None:
+        if _srsi_sig == "BULLISH":
+            bullish_count += 1
+        elif _srsi_sig == "BEARISH":
+            bearish_count += 1
+        else:
+            neutral_count += 1
+
+    # ── HTF Structural Confluence vote ───────────────────────────────────────
+    # Beyond "HTF is bullish": checks actual swing structure alignment across
+    # all available MTF timeframes. Strong structural alignment = extra vote.
+    # Misalignment or RANGE = neutral.
+    _htf_struct = _compute_htf_structural_confluence(mtf, "BUY")  # evaluate direction after gate
+    _htf_bias_struct = _htf_struct.get("structural_bias", "NEUTRAL")
+    if _htf_bias_struct == "STRONG_BULL":
+        bullish_count += 1
+    elif _htf_bias_struct == "STRONG_BEAR":
+        bearish_count += 1
+    elif _htf_bias_struct == "BULL":
+        bullish_count += 1
+    elif _htf_bias_struct == "BEAR":
+        bearish_count += 1
+    else:
+        neutral_count += 1  # NEUTRAL or RANGE — no structural edge
+
+    # ── Net score (kept for reference) ──
     net = bullish_count - bearish_count
 
     # ── 3a: Confluence gate — signal requires ≥THRESHOLD sub-indicator agreement ──
     # Threshold is per-user from Risk Tolerance (F1.3): Conservative 0.85, Moderate
-    # 0.75, Aggressive 0.65 (legacy default). Only indicators that actually voted
-    # count toward the denominator; neutral indicators are excluded. Below the
-    # threshold → HOLD regardless of net score.
-    total_votes = bullish_count + bearish_count
-    if total_votes > 0:
-        bull_pct = bullish_count / total_votes
-        bear_pct = bearish_count / total_votes
+    # 0.75, Aggressive 0.65 (legacy default).
+    # CRITICAL FIX (2026-05-25): denominatot must include ALL indicators — bullish,
+    # bearish, AND neutral. Previous formula (bullish/bullish+bearish) excluded
+    # neutrals entirely, so 3 bullish + 0 bearish + 3 neutral = 3/3 = 100% — a BUY
+    # fired even though only half the indicators agreed. With neutrals included:
+    # 3/6 = 50% → correctly blocked as HOLD.
+    total_votes      = bullish_count + bearish_count
+    total_indicators = bullish_count + bearish_count + neutral_count
+    if total_indicators > 0:
+        bull_pct = bullish_count / total_indicators
+        bear_pct = bearish_count / total_indicators
     else:
         bull_pct = bear_pct = 0.0
 
@@ -2776,72 +3532,85 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     # 7-indicator vote also said BUY (cross-confirmation).
     local_signal = signal
 
-    # ── Confidence from absolute net score ──
-    if abs(net) >= 5:
+    # ── Confidence from unified directional pct (same formula as the gate) ──
+    # Uses the same total_indicators denominator so confidence, gate, and the
+    # displayed % number are always derived from one consistent formula.
+    # ≥80% agreement (e.g. 5/6 indicators) → HIGH
+    # ≥65% agreement (e.g. 4/6 indicators) → MEDIUM  (just passed the gate)
+    # <65% → LOW (signal was blocked by gate, or TV override degraded it)
+    _dir_pct = bull_pct if signal in ("BUY", "HOLD") else bear_pct
+    if _dir_pct >= 0.80:
         confidence = "HIGH"
-    elif abs(net) >= 3:
+    elif _dir_pct >= 0.65:
         confidence = "MEDIUM"
     else:
         confidence = "LOW"
 
     # ══════════════════════════════════════════════════════════════
-    # TRADINGVIEW PRIMARY SIGNAL (restored 2026-04-29 — v1 behaviour)
-    # When TV data is available, use TradingView's 26-indicator
-    # Recommend.All score as the authoritative signal. TV's score
-    # combines moving averages + oscillators (RSI, Stochastic, CCI,
-    # Williams %R, MACD, etc) — the same indicators experienced
-    # traders use. Mean-reversion + trend signals blended.
+    # TRADINGVIEW VOTES — integrated into the unified confluence pool
+    # TV is no longer an override. Its 26-indicator Recommend.All score
+    # is converted into weighted votes and added to bullish_count /
+    # bearish_count / neutral_count BEFORE the gate runs.
     #
-    # Our local 7-indicator vote count remains in the response
-    # (bullish_count, bearish_count, summary, gate_note) as a
-    # cross-check / context layer for transparency. TV-derived
-    # signal is the verdict displayed on the card; local votes
-    # are shown as "DotVerse cross-check" so users see when our
-    # local view aligns or differs.
+    # Weight rationale: TV STRONG BUY represents 26 technical indicators
+    # in strong agreement — equivalent to 3 of our local indicators.
+    # TV BUY = 2 votes (moderate agreement). TV NEUTRAL = neutral (adds
+    # to denominator, no direction). TV SELL/STRONG SELL = mirror.
     #
-    # Earlier in this session we tried using local-only signals
-    # for "trust integrity" but measurement showed local-only
-    # signals at 8% win rate. TV restored as primary signal source.
+    # This means TV can shift the gate decisively but CANNOT override:
+    #   - A STRONG BUY with 3 local HOLD indicators = (3+0)/(3+0+3+2)= 37% → HOLD
+    #   - A STRONG BUY with 4 local bullish = (4+3)/(4+3+0+2)= 78% → BUY HIGH
+    #   - TV NEUTRAL with 4 local bullish = (4)/(4+0+2+1)= 57% → HOLD (neutral kills it)
     # ══════════════════════════════════════════════════════════════
     tv_signal_used = False
+    tv_rec_label   = ""
     if tv:
         tv_rec_label = tv.get("tv_rec_label", "")
         tv_rec_all   = tv.get("tv_rec_all")
-        if tv_rec_label in ("STRONG BUY", "BUY", "NEUTRAL", "SELL", "STRONG SELL"):
-            if tv_rec_label == "STRONG BUY":
-                signal, confidence = "BUY",  "HIGH"
-            elif tv_rec_label == "BUY":
-                signal, confidence = "BUY",  "MEDIUM"
-            elif tv_rec_label == "NEUTRAL":
-                signal, confidence = "HOLD", "LOW"
-            elif tv_rec_label == "SELL":
-                signal, confidence = "SELL", "MEDIUM"
-            else:  # STRONG SELL
-                signal, confidence = "SELL", "HIGH"
+        if tv_rec_label == "STRONG BUY":
+            bullish_count += 3; neutral_count += 0
             tv_signal_used = True
-            print(f"[TV-signal] {ticker} {timeframe} -> {tv_rec_label} (score={tv_rec_all}) -> {signal}/{confidence}")
+        elif tv_rec_label == "BUY":
+            bullish_count += 2; neutral_count += 0
+            tv_signal_used = True
+        elif tv_rec_label == "NEUTRAL":
+            neutral_count += 2          # drags denominator up → harder to fire signal
+            tv_signal_used = True
+        elif tv_rec_label == "SELL":
+            bearish_count += 2; neutral_count += 0
+            tv_signal_used = True
+        elif tv_rec_label == "STRONG SELL":
+            bearish_count += 3; neutral_count += 0
+            tv_signal_used = True
+        if tv_signal_used:
+            print(f"[TV-votes] {ticker} {timeframe} -> {tv_rec_label} (score={tv_rec_all}) added to pool")
 
-    # ══════════════════════════════════════════════════════════════
-    # RISK TOLERANCE FILTER on TV signal (F1.3 step 24a2)
-    # The TV override above replaces the local confluence-gate signal with TV's
-    # 26-indicator verdict. Without this filter, Risk Tolerance would only
-    # affect non-TV cases — which is rare. This block applies the user's risk
-    # preference to the TV-derived signal:
-    #   - Aggressive: trust TV entirely (legacy behaviour)
-    #   - Moderate:   trust STRONG signals; trust regular BUY/SELL only when
-    #                 the local confluence gate independently agrees
-    #   - Conservative: trust ONLY STRONG signals; everything else -> HOLD
-    # ══════════════════════════════════════════════════════════════
-    if tv_signal_used and signal in ("BUY", "SELL") and user_risk in ("moderate", "conservative"):
-        is_strong = tv_rec_label in ("STRONG BUY", "STRONG SELL")
-        if user_risk == "conservative" and not is_strong:
-            print(f"[risk-conservative] {ticker} {timeframe} regular TV {tv_rec_label} -> HOLD")
-            signal = "HOLD"
-            confidence = "LOW"
-        elif user_risk == "moderate" and not is_strong and local_signal != signal:
-            print(f"[risk-moderate] {ticker} {timeframe} TV={tv_rec_label} but local={local_signal} -> HOLD")
-            signal = "HOLD"
-            confidence = "LOW"
+    # Recompute totals and pcts after TV votes are added to the pool
+    total_votes      = bullish_count + bearish_count
+    total_indicators = bullish_count + bearish_count + neutral_count
+    if total_indicators > 0:
+        bull_pct = bullish_count / total_indicators
+        bear_pct = bearish_count / total_indicators
+    else:
+        bull_pct = bear_pct = 0.0
+
+    # Recompute signal and confidence from the enriched pool
+    if bull_pct >= threshold:
+        signal = "BUY"
+    elif bear_pct >= threshold:
+        signal = "SELL"
+    else:
+        signal = "HOLD"
+
+    _dir_pct = bull_pct if signal in ("BUY", "HOLD") else bear_pct
+    if _dir_pct >= 0.80:
+        confidence = "HIGH"
+    elif _dir_pct >= 0.65:
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
+    local_signal = signal  # snapshot after TV integration, before gates
 
     # ══════════════════════════════════════════════════════════════
     # GATE 1: Higher-timeframe trend filter (SIG-1 2026-05-24)
@@ -3214,8 +3983,27 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         "footprint_seller_pct": seller_pct,
         "bullish_count": bullish_count,
         "bearish_count": bearish_count,
-        # UX-1: real confidence % — bull indicators / total indicators (never faked)
-        "confidence_pct": round(bull_pct * 100, 1),
+        # confidence_pct: percentage of ALL evaluated indicators that align with
+        # the signal direction, capped by the final penalized confidence level.
+        # Three-way consistency guarantee:
+        #   confidence=HIGH   → confidence_label=CONFIRMED  → confidence_pct up to 100%
+        #   confidence=MEDIUM → confidence_label=LIKELY     → confidence_pct capped at 79%
+        #   confidence=LOW    → confidence_label=HYPOTHESIS → confidence_pct capped at 64%
+        # This means "100 LIKELY" and "100 HYPOTHESIS" are impossible — the number
+        # always reflects the same strength as the label. SIG-4 divergence penalty
+        # automatically reduces all three when it drops confidence HIGH→MEDIUM.
+        "confidence_pct": round(
+            (lambda _r: (
+                0.0 if signal == "HOLD" else
+                _r if confidence == "HIGH" else
+                min(_r, 79.0) if confidence == "MEDIUM" else
+                min(_r, 64.0)
+            ))(
+                (bearish_count if signal == "SELL" else bullish_count)
+                / max(bullish_count + bearish_count + neutral_count, 1)
+                * 100
+            ), 1
+        ),
         "net_score": net,
         "tv_signal_used": tv_signal_used,
         "tv_rec_label": tv.get("tv_rec_label") if tv else None,
@@ -3236,16 +4024,19 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # session_context: current trading session + off-hours warning for this asset.
         # off_hours=True → show amber/red warning card on UND tab.
         "session_context": _get_session_context(asset_type),
-        # ── 3d: Confidence label (SIG-2 2026-05-24) ────────────────────────────
-        # CONFIRMED  — strong local indicator agreement (net >= 5). TV alone
-        #              does not earn CONFIRMED — a HOLD that TV caused cannot
-        #              be CONFIRMED. The label must reflect actual conviction.
-        # LIKELY     — moderate local agreement (net >= 3)
-        # HYPOTHESIS — weak agreement; signal exists but conviction is marginal
+        # ── Confidence label — derived from the FINAL penalized confidence string ──
+        # Must always match confidence_pct range:
+        #   HIGH   → CONFIRMED  (confidence_pct up to 100%)
+        #   MEDIUM → LIKELY     (confidence_pct capped at 79%)
+        #   LOW    → HYPOTHESIS (confidence_pct capped at 64%)
+        # Derived from `confidence` (not `net`) so SIG-4 divergence penalty,
+        # Gate 1/2 overrides, and VIX gate all automatically propagate here.
+        # A signal that was CONFIRMED but lost one level due to divergence correctly
+        # shows LIKELY — not the misleading CONFIRMED it showed before this fix.
         "confidence_label": (
-            "CONFIRMED"  if (signal != "HOLD" and abs(net) >= 5) else
-            "LIKELY"     if (signal != "HOLD" and abs(net) >= 3) else
-            "HYPOTHESIS" if signal != "HOLD" else
+            "CONFIRMED"  if (signal != "HOLD" and confidence == "HIGH")   else
+            "LIKELY"     if (signal != "HOLD" and confidence == "MEDIUM") else
+            "HYPOTHESIS" if signal != "HOLD"                              else
             "—"
         ),
     }
