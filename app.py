@@ -3214,6 +3214,8 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         "footprint_seller_pct": seller_pct,
         "bullish_count": bullish_count,
         "bearish_count": bearish_count,
+        # UX-1: real confidence % — bull indicators / total indicators (never faked)
+        "confidence_pct": round(bull_pct * 100, 1),
         "net_score": net,
         "tv_signal_used": tv_signal_used,
         "tv_rec_label": tv.get("tv_rec_label") if tv else None,
@@ -8713,6 +8715,7 @@ def analyze():
                         f"Stop Loss:  {_h4_sl}\n"
                         f"TP1:        {_h4_tp1}\n\n"
                         f"Why: {_h4_why}\n\n"
+                        f"DotVerse recommends you TAKE THIS TRADE.\n\n"
                         f"Open DotVerse to review the full analysis before entering."
                     )
                     # Thread so Telegram's 15s timeout never blocks the analyze response

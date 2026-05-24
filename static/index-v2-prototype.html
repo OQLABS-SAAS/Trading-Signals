@@ -7115,7 +7115,7 @@ async function dvRunAnalyze(){
       sig:data.signal||'HOLD', entry:data.entry, sl:data.stop_loss,
       tp:data.tp1, tp2:data.tp2, tp3:data.tp3,
       rr:data.rr1, rr2:data.rr2, rr3:data.rr3,
-      conf:data.confidence_score||data.confidence||0,
+      conf:data.confidence_pct!=null?data.confidence_pct:(data.bullish_count!=null&&(data.bullish_count+data.bearish_count)>0?Math.round(data.bullish_count/(data.bullish_count+data.bearish_count)*100):0),
       confLbl:data.confidence_label||'HYPOTHESIS',
       reason:data.summary||'',
       chg:(data.price_change_pct!=null?((data.price_change_pct>=0?'+':'')+data.price_change_pct.toFixed(2)+'%'):''),
@@ -7456,6 +7456,7 @@ function updateFlowBadge() {
     + sourceTag
     + '</div>'
     + '<div style="font-family:var(--mono);font-size:28px;font-weight:700;color:' + gradeCol + ';line-height:1;">' + sugRisk.toFixed(1) + '<span style="font-size:14px;opacity:.7;">%</span></div>'
+    + (function(){ var _acct=parseFloat(document.getElementById('szAcct')?.value)||0; return _acct>0?'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.45);margin-top:4px;">= $'+(_acct*sugRisk/100).toFixed(2)+' on a $'+_acct.toLocaleString()+' account</div>':''; })()
     + '</div>'
     + '</div>'
     // Factor pills
@@ -8143,7 +8144,7 @@ async function _sfFetchSignals(){
             tp2:     r.tp2        || null,
             tp3:     r.tp3        || null,
             rr:      r.rr1 || r.rr || '--',
-            conf:    typeof r.confidence === 'number' ? r.confidence : (r.confidence === 'HIGH' ? 82 : r.confidence === 'MEDIUM' ? 70 : 60),
+            conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
             confLbl: r.confidence_label || r.confidence || 'LIKELY',
             asset:   r.asset_type || 'equity',
             reason:  r.reason || r.summary || 'Live DotVerse signal',
@@ -8384,6 +8385,7 @@ async function _sfFetchSignals(){
       +     '<span style="display:inline-block;padding:2px 7px;border-radius:3px;background:rgba(255,255,255,.04);border:1px solid ' + _tt.color + ';color:' + _tt.color + ';font-weight:700;letter-spacing:.04em;font-size:9px;margin-right:6px;text-transform:uppercase;">' + _tt.label + '</span>'
       +     '<span style="color:rgba(237,232,216,.55);">' + o.tf + ' · ' + o.asset + '</span>'
       +     '<div style="font-size:9.5px;color:rgba(237,232,216,.4);margin-top:2px;font-style:italic;">Holding period: ' + _tt.hold + '</div>'
+      +     (_tt.tip?'<div style="font-size:9px;color:rgba(237,232,216,.35);margin-top:2px;">' + _tt.tip + '</div>':'')
       +   '</div>'
       + '</div>'
       + '<span class="opp-badge ' + sig.toLowerCase() + '" data-guide="signal-' + sig.toLowerCase() + '">' + sig + '</span>'
@@ -8405,9 +8407,10 @@ async function _sfFetchSignals(){
       + (btBadge ? '<div style="padding:0 14px 4px;">' + btBadge + (tfHint||'') + '</div>' : '')
       + (o.spreadCost && o.spreadCost > 0 ? '<div style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;"><span style="color:rgba(201,168,76,.45);">spread adj</span><span style="padding:1px 6px;border-radius:3px;font-size:8px;letter-spacing:.05em;' + ({'wide':'background:rgba(224,85,85,.12);color:#e05555;','fair':'background:rgba(237,232,216,.07);color:rgba(237,232,216,.4);','tight':'background:rgba(61,190,108,.1);color:#3dbe6c;'}[o.spreadQuality||'fair']||'') + '">' + (o.spreadQuality||'fair').toUpperCase() + '</span>' + (o.spreadSrc === 'live' ? '<span style="display:inline-flex;align-items:center;gap:3px;color:#3dbe6c;font-size:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#3dbe6c;animation:lpulse 1.8s ease-in-out infinite;flex-shrink:0;"></span>LIVE</span>' : '') + '</div>' : '')
       + '<div class="opp-reason">' + o.reason + '</div>'
-      + ((o.confLbl==='HYPOTHESIS'||o.confLbl==='LOW'||(o.conf||0)<70)?'<div style="padding:0 14px;margin-top:6px;font-size:9px;color:rgba(201,168,76,.8);font-family:var(--mono);"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" style="display:inline-block;vertical-align:-1px;margin-right:3px"><path d="M6 2L11 10H1L6 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="6" y1="5" x2="6" y2="7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="6" cy="9" r=".7" fill="currentColor"/></svg> Lower confidence · consider smaller position</div>':'')
+      + ''
       + (o.sig !== 'HOLD' && o.entry ? '<div id="lp-' + o.sym.replace(/[^a-zA-Z0-9]/g,'') + '-' + i + '" style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);">'
         + '<span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.2);flex-shrink:0;"></span>loading live price…</div>' : '')
+      + (o.sig!=='HOLD'?((o.conf||0)>=70?'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>':'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>')
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
       + '</div></div>';
@@ -8441,26 +8444,26 @@ function _tradeTypeLabel(tf, mode){
   var M = String(mode||window._stratMode||'all').toLowerCase();
   // Unambiguous: minutes → Scalp, weeks/months → Position
   if (T === '5M' || T === '15M' || T === '30M' || T === '1M' && M === 'scalp') {
-    return { label: 'Scalp',    color: '#e8706e', hold: 'minutes – 1 hour' };
+    return { label: 'Scalp',    color: '#e8706e', hold: 'minutes – 1 hour',         tip: 'Quick in, quick out. Requires active monitoring.' };
   }
   if (T === '1W' || T === '1MO' || (T === '1M' && M !== 'scalp')) {
-    return { label: 'Position', color: '#5de8a0', hold: 'weeks – months' };
+    return { label: 'Position', color: '#5de8a0', hold: 'weeks – months',            tip: 'Follows a major trend. High patience required.' };
   }
   // Hourly: 1H is Day Trade
   if (T === '1H') {
-    return { label: 'Day Trade', color: 'var(--amb)', hold: '1–8 hours, close same day' };
+    return { label: 'Day Trade', color: 'var(--amb)', hold: '1–8 hours, close same day', tip: 'Open and close same day. No overnight risk.' };
   }
   // 4H — usually day trading; swing if user is in swing mode
   if (T === '4H') {
-    if (M === 'swing') return { label: 'Swing', color: '#7c9ff5', hold: '2–10 days' };
-    return { label: 'Day Trade', color: 'var(--amb)', hold: '4–24 hours' };
+    if (M === 'swing') return { label: 'Swing', color: '#7c9ff5', hold: '2–10 days',    tip: 'Rides a multi-day price wave. Check charts daily.' };
+    return { label: 'Day Trade', color: 'var(--amb)', hold: '4–24 hours',               tip: 'Open and close within a day. No overnight risk.' };
   }
   // 1D — usually swing; position if user is in position mode
   if (T === '1D') {
-    if (M === 'position') return { label: 'Position', color: '#5de8a0', hold: 'weeks – months' };
-    return { label: 'Swing', color: '#7c9ff5', hold: '2–10 days' };
+    if (M === 'position') return { label: 'Position', color: '#5de8a0', hold: 'weeks – months', tip: 'Follows a major trend. High patience required.' };
+    return { label: 'Swing', color: '#7c9ff5', hold: '2–10 days',                       tip: 'Rides a multi-day price wave. Check charts daily.' };
   }
-  return { label: 'Trade', color: 'var(--t2)', hold: 'depends on chart structure' };
+  return { label: 'Trade', color: 'var(--t2)', hold: 'depends on chart structure',      tip: 'Use your chart timeframe to guide holding period.' };
 }
 
 /* Helper: update progress bar fill and label text */
@@ -11961,6 +11964,91 @@ function dvStatExpand(key, el) {
   panel.style.display = '';
 }
 
+/* UX-2: Build plain-English explain body from real signal data */
+function _dvBuildExplain(sig){
+  if(!sig||!sig.sym) return 'No signal data available.';
+  var sym = sig.sym, tf = sig.tf||'', isBuy = (sig.sig||'') === 'BUY', isSell = (sig.sig||'') === 'SELL';
+  var dir = isBuy ? 'buying' : isSell ? 'selling' : 'analysing';
+  var lines = [];
+
+  // Opening conviction line
+  if(isBuy){
+    lines.push('<strong>'+sym+'</strong> is showing a buying opportunity on the '+tf+' timeframe. DotVerse\'s indicators are pointing upward — here is what the data shows:');
+  } else if(isSell){
+    lines.push('<strong>'+sym+'</strong> is showing a selling opportunity on the '+tf+' timeframe. DotVerse\'s indicators are pointing downward — here is what the data shows:');
+  } else {
+    lines.push('<strong>'+sym+'</strong> on '+tf+': conditions are not clear enough to trade right now. Wait for a stronger signal before committing money.');
+  }
+
+  if(isBuy||isSell){
+    // EMA trend
+    var ema = (sig.emaTrend||'').toUpperCase();
+    if(ema==='BULLISH'||ema==='STRONG_BULL'||ema==='STRONGLY BULLISH'){
+      lines.push('Price is <strong>above its key moving averages</strong> (EMAs) — a bullish structure. This tells us the trend is currently upward.');
+    } else if(ema==='BEARISH'||ema==='STRONG_BEAR'||ema==='STRONGLY BEARISH'){
+      lines.push('Price is <strong>below its key moving averages</strong> (EMAs) — a bearish structure. This tells us the trend is currently downward.');
+    } else if(ema){
+      lines.push('The moving average trend is <strong>mixed</strong> — not fully aligned yet. This is a lower-conviction setup.');
+    }
+
+    // RSI reading
+    var rsi = parseFloat(sig.rsi||0);
+    if(rsi>0){
+      if(rsi>70){
+        lines.push('RSI is at <strong>'+rsi.toFixed(1)+'</strong> — overbought territory. Momentum is strong but price may pull back before continuing. A smaller position size is wise here.');
+      } else if(rsi<30){
+        lines.push('RSI is at <strong>'+rsi.toFixed(1)+'</strong> — oversold territory. Selling pressure has been extreme and a bounce is likely. Be cautious about chasing too late.');
+      } else {
+        lines.push('RSI is at <strong>'+rsi.toFixed(1)+'</strong> — neutral momentum. This is a healthy range for entering a trade. Neither overbought nor oversold.');
+      }
+    }
+
+    // HTF bias
+    var htf = (sig.htf_bias||'').toUpperCase();
+    if(htf==='BULLISH'){
+      lines.push('The <strong>higher timeframe agrees</strong> — the bigger trend is bullish. This increases the probability of success because you are trading with the major trend, not against it.');
+    } else if(htf==='BEARISH'){
+      lines.push('The <strong>higher timeframe is bearish</strong> — the bigger trend is downward. Trading with the major trend increases your edge.');
+    } else if(htf==='NEUTRAL'){
+      lines.push('The <strong>higher timeframe is neutral</strong> — no clear macro trend direction. This is a lower-probability setup without big-trend confirmation.');
+    }
+
+    // RSI divergence
+    if(sig.rsiDiv&&sig.rsiDiv.type){
+      var divType = (sig.rsiDiv.type||'').toLowerCase();
+      if(divType.includes('bearish')){
+        lines.push('<strong>Warning:</strong> RSI divergence detected — price is making higher highs but momentum is falling. This weakens the BUY signal. Consider a smaller position.');
+      } else if(divType.includes('bullish')){
+        lines.push('<strong>Note:</strong> Bullish RSI divergence — momentum is recovering even as price dips. This strengthens the setup.');
+      }
+    }
+
+    // Regime
+    if((sig.regime||'').toUpperCase()==='RANGING'){
+      lines.push('<strong>Market regime: ranging</strong> — price is moving sideways with no clear trend. Signals in choppy conditions frequently reverse. Wait for a breakout confirmation before entering.');
+    } else if((sig.regime||'').toUpperCase()==='TRENDING'){
+      lines.push('<strong>Market regime: trending</strong> — price is in a clear directional move. Trending markets increase the reliability of this signal.');
+    }
+
+    // Confidence context
+    var conf = parseFloat(sig.conf||0);
+    if(conf>=80){
+      lines.push('Confidence is <strong>'+conf+'%</strong> — strong agreement between DotVerse\'s indicators. This is a higher-probability setup.');
+    } else if(conf>=65){
+      lines.push('Confidence is <strong>'+conf+'%</strong> — the minimum DotVerse threshold. The indicators mostly agree but not all. This is tradeable, but consider a smaller position.');
+    } else if(conf>0){
+      lines.push('Confidence is <strong>'+conf+'%</strong> — below DotVerse\'s 65% threshold. The indicators do not agree enough to call this a reliable signal. Wait for a stronger setup.');
+    }
+
+    // Levels
+    if(sig.entry&&sig.sl&&sig.tp){
+      lines.push('Enter near <strong>'+sig.entry+'</strong> · Stop loss at <strong style="color:#e8706e">'+sig.sl+'</strong> · First profit target at <strong style="color:#5de8a0">'+sig.tp+'</strong> · R:R 1:'+sig.rr+'.');
+    }
+  }
+
+  return lines.join('<br><br>');
+}
+
 function showUnderstand(){
   const el=document.getElementById('dashContent'); if(!el) return;
   // Empty state — no signal selected
@@ -12457,22 +12545,29 @@ function showUnderstand(){
           <div class="und-dur-cell"><span class="und-dur-lbl">Target Date</span><span class="und-dur-val">${d.target}</span><span class="und-dur-sub">If entered today</span></div>
           <div class="und-dur-cell"><span class="und-dur-lbl">Active Session</span><span class="und-dur-val">${d.session}</span><span class="und-dur-sub">Current market hours</span></div>
         </div>`;})()}
+        <!-- UX-11: Signal summary banner -->
+        <div style="margin-bottom:12px;padding:9px 14px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:7px;font-family:var(--mono);font-size:11px;line-height:1.5;">
+          <span style="color:${sigCol};font-weight:700;">${sig.sig||'—'}</span>
+          <span style="color:var(--t3);"> · </span><span style="color:var(--t2);">${sig.sym||''}</span>
+          <span style="color:var(--t3);"> · </span><span style="color:var(--t3);">${sig.tf||''}</span>
+          ${(sig.conf||0)>0?'<span style="color:var(--t3);"> · </span><span style="color:'+sigCol+';">'+Math.round(sig.conf||0)+'% confidence</span>':''}
+          ${sig.trade_type?'<span style="color:var(--t3);"> · </span><span style="color:var(--t3);">'+sig.trade_type+'</span>':''}
+        </div>
         <!-- Confidence ring -->
         <div class="und-conf-row" data-guide="confidence-ring">
           <svg width="56" height="56" viewBox="0 0 56 56">
             <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(237,232,216,.08)" stroke-width="3"/>
             <circle cx="28" cy="28" r="22" fill="none" stroke="${sigCol}" stroke-width="3"
-              stroke-dasharray="${Math.round((sig.conf||88)/100*138.2)} 138.2"
+              stroke-dasharray="${Math.round((sig.conf||0)/100*138.2)} 138.2"
               stroke-linecap="round" transform="rotate(-90 28 28)"
               style="filter:drop-shadow(0 0 6px ${sigCol})"/>
-            <text x="28" y="34" text-anchor="middle" fill="${sigCol}" font-family="IBM Plex Mono" font-size="13" font-weight="400">${sig.conf||88}</text>
+            <text x="28" y="34" text-anchor="middle" fill="${sigCol}" font-family="IBM Plex Mono" font-size="13" font-weight="400">${sig.conf||0}</text>
           </svg>
           <div>
             <div style="font-size:13px;font-weight:500;color:${sigCol}" data-guide="confidence-${(sig.confLbl||'confirmed').toLowerCase()}">${sig.confLbl||'CONFIRMED'}</div>
             <div style="font-size:10.5px;color:var(--t3);margin-top:2px;">Confluence = indicator agreement, not win rate</div>
           </div>
         </div>
-        ${(sig.confLbl==='HYPOTHESIS'||sig.confLbl==='LOW'||(sig.conf||0)<70)?'<div style="margin-top:10px;padding:8px 12px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.25);border-radius:6px;font-size:10px;color:rgba(201,168,76,.9);line-height:1.5;"><strong>Lower confidence signal</strong> — consider a smaller position or wait for a stronger setup. The indicators are not in full agreement. Check higher timeframes for confirmation.</div>':''}
         <!-- Engine context badges (commits 1-7 — surface engine state) -->
         ${(()=>{
           const badges = [];
@@ -12531,17 +12626,20 @@ function showUnderstand(){
         <!-- Plain English explain -->
         <div class="und-explain">
           <div class="und-explain-title">What this signal means</div>
-          <div class="und-explain-body">
-            ${isBuy
-              ? `<strong>${sig.sym}</strong> is showing a high-probability buying opportunity on the ${sig.tf} timeframe. Price is above its key moving averages (bullish structure), momentum indicators confirm buying pressure, and the higher timeframe trend agrees. Enter near <strong>${sig.entry}</strong>, protect with a stop at <strong>${sig.sl}</strong>. Target is <strong>${sig.tp}</strong> — R:R 1:${sig.rr}.`
-              : `<strong>${sig.sym}</strong> is showing a high-probability selling opportunity on the ${sig.tf} timeframe. Price has broken below key support, momentum is turning negative, and higher timeframes confirm downward pressure. Enter near <strong>${sig.entry}</strong>, protect with a stop at <strong>${sig.sl}</strong>. Target is <strong>${sig.tp}</strong> — R:R 1:${sig.rr}.`
-            }
+          <div class="und-explain-body" style="line-height:1.7;">
+            ${_dvBuildExplain(sig)}
           </div>
         </div>
+        <div style="margin-bottom:12px;padding:10px 14px;border-radius:7px;${sig.sig!=='HOLD'&&(sig.conf||0)>=70?'background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.2);':'sig.sig!==\'HOLD\'?\'background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);\':\'background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);\'}">
+          <div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;${sig.sig!=='HOLD'&&(sig.conf||0)>=70?'color:#5de8a0;':sig.sig!=='HOLD'?'color:rgba(201,168,76,.85);':'color:rgba(201,168,76,.7);'}">${sig.sig!=='HOLD'&&(sig.conf||0)>=70?'DOTVERSE RECOMMENDS THIS TRADE':sig.sig!=='HOLD'?'LOW CONFIDENCE — WAIT FOR BETTER SETUP':'HOLD — CONDITIONS NOT CLEAR ENOUGH TO TRADE'}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:4px;line-height:1.5;">${sig.sig!=='HOLD'&&(sig.conf||0)>=70?'Confidence is above the minimum threshold. The indicators are in agreement. Size this trade and execute when ready.':sig.sig!=='HOLD'?'Confidence is below 65% — DotVerse indicators do not fully agree. Consider waiting for a stronger setup or use a smaller position.':'The market is not showing a clear enough setup to trade right now. Wait for conditions to improve before committing money.'}</div>
+        </div>
         <div class="und-action-row">
-          <button class="btn-ghost btn-pipeline" onclick="setNav('verdict');showVerdict()">→ Verdict</button>
-          <button class="btn-ghost btn-pipeline" onclick="setNav('size');showSize()">→ Size this trade</button>
-          <button class="btn-amber btn-pipeline" onclick="setNav('act');showAct()">→ Execute trade</button>
+          <button class="btn-amber btn-pipeline" style="width:100%;font-size:13px;padding:12px;" onclick="setNav('size');showSize()">Size this trade →</button>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:8px;justify-content:center;">
+          <span style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" onclick="setNav('verdict');showVerdict()">Run AI Verdict first</span>
+          <span style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" onclick="setNav('act');showAct()">Skip to Act</span>
         </div>
         <div class="und-action-row" style="margin-top:8px;">
           <button class="btn-ghost btn-pipeline" style="font-size:11px;" onclick="undRunBacktest()">
@@ -13739,7 +13837,7 @@ function showVerdict(){
       <div style="font-size:18px;font-weight:400;font-family:var(--syne);margin-bottom:12px">No Signal Loaded</div>
       <div style="font-size:12px;color:var(--t2);line-height:1.8;margin-bottom:24px">
         The Verdict panel runs a multi-agent AI analysis on your signal.<br>
-        It deploys 8 specialist agents who debate the trade before giving a final verdict.
+        DotVerse AI analyses the trade from every angle — then gives you a plain-English verdict so you can decide with confidence.
       </div>
       <div style="font-size:11px;color:var(--t3);line-height:1.7;background:rgba(255,255,255,.03);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:16px 20px;text-align:left;display:inline-block">
         <strong style="color:var(--t1)">How to use Verdict:</strong><br>
@@ -13761,6 +13859,11 @@ function showVerdict(){
 
   // ── Live API integration ──
   _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy);
+  // UX-12: If a pre-warm result is ready, render it immediately — no need to click Run Analysis
+  if (window._verdictPrewarmResult && !window._lastVerdict) {
+    _vRenderLive(sig, window._verdictPrewarmResult, window._verdictPrewarmStructured || null);
+    return;
+  }
   // If a verdict was already completed, restore it immediately instead of showing empty state
   if (window._lastVerdict) {
     _vRenderLive(sig, window._lastVerdict, window._structuredVerdict || null);
@@ -13785,7 +13888,7 @@ function _vRunAnalysis(){
   var btn = document.getElementById('verdictRunBtn');
   if (btn){ btn.disabled = true; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Running…'; }
   var main = document.getElementById('verdictMain');
-  if (main) main.innerHTML = '<div style="padding:36px 20px 28px;text-align:center"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" style="margin-bottom:14px;animation:pulse 1.5s infinite"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><div style="font-size:14px;font-weight:400;font-family:var(--syne);margin-bottom:6px">Analysing '+sig.sym+'…</div><div style="font-size:10px;color:var(--t3);line-height:1.8;margin-bottom:24px">8 specialist agents are studying market data, debating the trade, and reviewing your Automations.</div>'
+  if (main) main.innerHTML = '<div style="padding:36px 20px 28px;text-align:center"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" style="margin-bottom:14px;animation:pulse 1.5s infinite"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><div style="font-size:14px;font-weight:400;font-family:var(--syne);margin-bottom:6px">Analysing '+sig.sym+'…</div><div style="font-size:10px;color:var(--t3);line-height:1.8;margin-bottom:24px">DotVerse AI is studying market data, reviewing your Automations, and preparing a plain-English verdict.</div>'
     + '<div style="max-width:420px;margin:0 auto 8px">'
     + '<div style="display:flex;justify-content:space-between;font-size:9px;font-family:var(--mono);color:var(--t3);margin-bottom:6px"><span id="verdictProgressLabel">Initialising…</span><span id="verdictProgressPct">0%</span></div>'
     + '<div style="height:4px;background:rgba(237,232,216,.08);border-radius:2px;overflow:hidden"><div id="verdictProgressFill" style="height:100%;width:0%;background:linear-gradient(90deg,rgba(201,168,76,.6),var(--gold));border-radius:2px;transition:width .8s ease"></div></div>'
@@ -14360,7 +14463,7 @@ function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy)
 
   <div id="verdictBanner" style="background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:10px;color:var(--t2);line-height:1.6;display:flex;align-items:flex-start;gap:8px">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2.5" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-    <span><strong style="color:var(--gold)">Ready.</strong> Run a deep analysis and 8 AI agents will study this signal — debating the trade before giving a final verdict with your Automations factored in.</span>
+    <span><strong style="color:var(--gold)">Ready.</strong> Run a deep analysis and DotVerse AI will study this signal from every angle — giving you a plain-English verdict with your Automations factored in.</span>
   </div>
 
   <div class="verdict-hero">
@@ -14377,7 +14480,7 @@ function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy)
   <div style="text-align:center;padding:40px 20px" id="verdictMain">
     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" style="margin-bottom:16px"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 6.91-1.01z"/></svg>
     <div style="font-size:16px;font-weight:400;font-family:var(--syne);margin-bottom:8px">Run Deep Analysis</div>
-    <div style="font-size:11px;color:var(--t3);line-height:1.8;margin-bottom:20px">8 specialist agents will analyse ${sym} from every angle and debate the trade.<br>The Portfolio Manager issues a final verdict with size recommendations.</div>
+    <div style="font-size:11px;color:var(--t3);line-height:1.8;margin-bottom:20px">DotVerse AI will analyse ${sym} from every angle.<br>You get a plain-English verdict — and a clear recommendation before you commit any money.</div>
     <button onclick="_vRunAnalysis()" id="verdictRunBtn" style="padding:12px 32px;border-radius:8px;font-size:12px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:var(--gold);color:#07080c;display:inline-flex;align-items:center;gap:8px">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       Run Analysis
@@ -14537,7 +14640,7 @@ function showSize(){
       <div style="display:flex;align-items:center;gap:8px;">
         <strong>${sig.sym}</strong>
         <span class="sz-dir-badge ${(sig.sig||'').toLowerCase()}">${sig.sig||'–'}</span>
-        <span style="color:var(--mut);font-size:10px;">${sig.tf||''}</span>
+        <span style="color:var(--mut);font-size:13px;">${sig.tf||''}</span>
       </div>
       <div style="display:flex;gap:14px;font-size:10px;font-family:var(--mono);flex-wrap:wrap;">
         <span>Signal Entry <strong style="color:var(--txt);">${sig.entry||pf.entry||'—'}</strong></span>
@@ -14566,7 +14669,7 @@ function showSize(){
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
         <div id="szLiveStatusDot" style="width:7px;height:7px;border-radius:50%;background:rgba(201,168,76,.45);flex-shrink:0;transition:background .3s;"></div>
-        <span id="szLiveStatusText" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--gold);transition:color .3s;">CONNECTING</span>
+        <span id="szLiveStatusText" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--gold);transition:color .3s;">Fetching live price…</span>
       </div>
     </div>
     <div style="height:2px;border-radius:1px;background:rgba(237,232,216,.07);overflow:hidden;margin-bottom:8px;">
@@ -16271,12 +16374,15 @@ function showAct(){
     <!-- How many units — simple label -->
     <div style="margin-bottom:16px;">
       <label style="font-family:var(--mono);font-size:10px;font-weight:700;color:rgba(237,232,216,.5);letter-spacing:.08em;display:block;margin-bottom:6px;">HOW MANY UNITS ARE YOU BUYING?</label>
-      <input class="sz-inp" id="actLots" type="text" placeholder="0.10" value=""
+      <input class="sz-inp" id="actLots" type="text" placeholder="${(window._szLastCalc&&window._szLastCalc.lots>0)?window._szLastCalc.lots.toFixed(2):'0.10'}" value="${(window._szLastCalc&&window._szLastCalc.lots>0)?window._szLastCalc.lots.toFixed(2):''}"
         style="font-size:16px;font-weight:700;letter-spacing:.02em;padding:10px 14px;">
       <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.35);margin-top:5px;line-height:1.5;">
-        This is pre-filled from your SIZE calculation. Only change it if you want to trade more or less than recommended.
+        ${(window._szLastCalc&&window._szLastCalc.lots>0)?'Pre-filled from your SIZE calculation — change only if you want to trade a different amount.':'<span style="color:rgba(201,168,76,.7);">No SIZE calculation found — go to the SIZE tab first to calculate your position. Enter the number manually only if you know what you are doing.</span>'}
       </div>
     </div>
+
+    <!-- UX-17: Stop loss dollar warning above Place button -->
+    ${(window._szLastCalc&&window._szLastCalc.moneyAtRisk>0)?`<div style="margin-bottom:10px;padding:9px 14px;background:rgba(232,112,110,.07);border:1px solid rgba(232,112,110,.2);border-radius:7px;font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.9);line-height:1.5;">If this trade hits your stop loss, you lose: <strong>$${parseFloat(window._szLastCalc.moneyAtRisk).toFixed(2)}</strong>. This is your maximum possible loss on this trade.</div>`:''}
 
     <!-- THE button — one single action -->
     <button id="mt5ExecBtn" onclick="actExecute()"
@@ -16506,6 +16612,9 @@ function showAct(){
   // Show demo trades immediately — replaced by live data when EA connects
   _mt5RenderPositions([]);
 
+  // UX-9: update automation banner immediately on render with real watch state
+  _autoUpdateActBanner(window._avLastWatches||[]);
+
   // Load real MT5 state + start 5s poll
   mt5LoadTab();
 
@@ -16592,8 +16701,20 @@ function actExecute(){
   if(platform.includes('MT5')){
     mt5Execute();
   } else {
-    const sig=window._activeSignal;
-    alert('Manual trade:\n\nCopy these levels to your broker:\nEntry: '+(sig?.entry||'—')+'\nSL: '+(sig?.sl||'—')+'\nTP: '+(sig?.tp||'—'));
+    const sig=window._activeSignal||{};
+    const status=document.getElementById('mt5ExecStatus');
+    if(status){
+      status.innerHTML='<div style="text-align:left;padding:14px 16px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.12);border-radius:8px;margin-top:6px;">'
+        +'<div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:10px;">COPY THESE LEVELS TO YOUR BROKER</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'
+        +'<div style="padding:8px 10px;background:rgba(237,232,216,.04);border-radius:6px;"><div style="font-size:9px;color:var(--t3);font-family:var(--mono);letter-spacing:.05em;margin-bottom:3px;">ENTRY</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:var(--txt);">'+(sig.entry||'—')+'</div></div>'
+        +'<div style="padding:8px 10px;background:rgba(224,85,85,.06);border-radius:6px;"><div style="font-size:9px;color:var(--t3);font-family:var(--mono);letter-spacing:.05em;margin-bottom:3px;">STOP LOSS</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#e8706e;">'+(sig.sl||'—')+'</div></div>'
+        +'<div style="padding:8px 10px;background:rgba(93,232,160,.06);border-radius:6px;"><div style="font-size:9px;color:var(--t3);font-family:var(--mono);letter-spacing:.05em;margin-bottom:3px;">TAKE PROFIT 1</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">'+(sig.tp||'—')+'</div></div>'
+        +'<div style="padding:8px 10px;background:rgba(93,232,160,.04);border-radius:6px;"><div style="font-size:9px;color:var(--t3);font-family:var(--mono);letter-spacing:.05em;margin-bottom:3px;">TAKE PROFIT 2</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">'+(sig.tp2||'—')+'</div></div>'
+        +'</div>'
+        +'<div style="margin-top:10px;font-size:10px;color:var(--t3);line-height:1.6;">Enter these exact levels in your broker platform. Set your stop loss first — it limits your maximum loss if the trade goes against you.</div>'
+        +'</div>';
+    }
   }
 }
 function actLogToPortfolio(){
