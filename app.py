@@ -3110,10 +3110,14 @@ def detect_smc_structures(df):
         if df is None or len(df) < 20:
             return result
 
-        hi  = df["High"].values
-        lo  = df["Low"].values
-        cl  = df["Close"].values
-        op  = df["Open"].values
+        # Normalise column names — yfinance returns lowercase after auto_adjust
+        df = df.copy()
+        df.columns = [c.lower() if isinstance(c, str) else str(c[0]).lower() for c in df.columns]
+
+        hi  = df["high"].values
+        lo  = df["low"].values
+        cl  = df["close"].values
+        op  = df["open"].values
         n   = len(hi)
 
         # ── ATR for displacement threshold ─────────────────────────────────
