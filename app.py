@@ -5406,6 +5406,50 @@ scheduler.add_job(_job_auto_scan, "interval", minutes=15,
 scheduler.add_job(_job_trade_suggestions, "cron", hour=8, minute=0,
                   id="trade_suggestions", max_instances=1, coalesce=True)
 
+# G3 — Signal expiry check every 30 minutes
+def _job_check_signal_expiry():
+    """Fires every 30 min. Finds signals that just expired and notifies the trader via Telegram.
+    Only fires once per signal (Redis dedup key expiry_notified:{id}, TTL 48h).
+    Plain-English message: tells the trader the window closed and to wait for a fresh signal."""
+    if not _DBSession:
+        return
+    try:
+        now = datetime.utcnow()
+        window_start = now - timedelta(minutes=30)
+        db = _DBSession()
+        expired = db.query(SignalHistory).filter(
+            SignalHistory.expires_at >= window_start,
+            SignalHistory.expires_at <  now,
+        ).all()
+        db.close()
+        for row in expired:
+            dedup_key = f"expiry_notified:{row.id}"
+            if _redis_client and _redis_client.get(dedup_key):
+                continue  # already notified
+            trade_label = {
+                "scalp":    "Scalp (4h window)",
+                "day":      "Day Trade (24h window)",
+                "swing":    "Swing (72h window)",
+                "position": "Position (7-day window)",
+            }.get(row.trade_type or "day", "Signal")
+            msg = (
+                f"⏰ Signal Expired — {row.ticker} ({row.timeframe})\n"
+                f"Type: {trade_label}\n"
+                f"Direction: {row.signal}\n"
+                f"Entry was: {row.entry or '—'}\n\n"
+                f"The entry window for this signal has closed. "
+                f"Do not chase this trade — wait for DotVerse to generate a fresh signal."
+            )
+            send_telegram(msg)
+            if _redis_client:
+                _redis_client.setex(dedup_key, 172800, "1")  # 48h TTL
+            print(f"[expiry] Notified: {row.ticker} {row.timeframe} {row.signal} id={row.id}")
+    except Exception as _e:
+        print(f"[expiry] check failed: {_e}")
+
+scheduler.add_job(_job_check_signal_expiry, "interval", minutes=30,
+                  id="signal_expiry_check", max_instances=1, coalesce=True)
+
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown(wait=False))
 
@@ -8520,6 +8564,17 @@ def analyze():
                 _conf_str = response_data.get("confidence", "LOW")
                 _conf_num = {"HIGH": 90.0, "MEDIUM": 70.0, "LOW": 50.0}.get(_conf_str, 50.0)
                 _sh_db = _DBSession()
+                # G3: normalise trade_type to short token, compute expires_at
+                # _profile["type"] returns display labels ("Day Trade","Scalp","Swing","Position")
+                # — must normalise to short tokens before storing so future queries work.
+                _tt_raw = (response_data.get("trade_type") or "day").lower()
+                if   "scalp"    in _tt_raw: _tt = "scalp";    _expiry_h = 4
+                elif "day"      in _tt_raw: _tt = "day";      _expiry_h = 24
+                elif "swing"    in _tt_raw: _tt = "swing";    _expiry_h = 72
+                elif "position" in _tt_raw: _tt = "position"; _expiry_h = 168
+                else:                        _tt = "day";      _expiry_h = 24
+                # Append "Z" so isoformat() output is unambiguous UTC for JS new Date()
+                _expires = datetime.utcnow() + timedelta(hours=_expiry_h)
                 _sh = SignalHistory(
                     user_id   = str(session.get("user_id", "default")),
                     ticker    = ticker,
@@ -8532,6 +8587,8 @@ def analyze():
                     tp1       = response_data.get("tp1"),
                     confidence= _conf_num,
                     confidence_label = response_data.get("confidence_label"),
+                    trade_type= _tt,
+                    expires_at= _expires,
                 )
                 _sh_db.add(_sh)
                 _sh_db.commit()
@@ -10606,6 +10663,8 @@ class SignalHistory(_Base):
     confidence   = Column(Float,      nullable=True)    # 0–100
     confidence_label = Column(String(16), nullable=True)
     fired_at     = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    trade_type   = Column(String(16),  nullable=True)   # scalp / day / swing / position
+    expires_at   = Column(DateTime,    nullable=True)   # fired_at + type-based window
 
 class ExchangeKey(_Base):
     """Exchange API keys — Fernet-encrypted, one row per connected exchange per user."""
@@ -11010,6 +11069,9 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS weekend_on BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS entry_price FLOAT"))
                 _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS entry_atr FLOAT"))
+                # G3: signal expiry columns
+                _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS trade_type VARCHAR(16)"))
+                _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")
@@ -11201,6 +11263,8 @@ def signal_history_get():
             "confidence": r.confidence,
             "confidence_label": r.confidence_label,
             "fired_at":   r.fired_at.strftime("%d %b %H:%M") if r.fired_at else None,
+            "trade_type": r.trade_type,
+            "expires_at": r.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ") if r.expires_at else None,
         } for r in rows])
     finally:
         db.close()

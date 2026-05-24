@@ -1117,11 +1117,11 @@ elif watch.direction == 'SELL':
 | **A4** | ✅ | `index-v2-prototype.html` | `avLoadWatchDash()` reads real flag state from `/api/watches`. Active flags coloured, inactive greyed. `entry_price`/`entry_atr` shown. | Code-verified 2026-05-19 |
 | **D1** | ✅ | `app.py` | Automatic BE: `w.get("be_on")` AND price ≥ entry+ATR AND SL not at entry → MT5Order(MODIFY) + Telegram + Redis dedup (7-day). | Code-verified 2026-05-19 |
 | **F1** | ✅ | `app.py` | `auto_macro_response`, `auto_invalidation_act`, `auto_sentiment_watch`, `macro_hours_threshold`, `auto_close_pct` in AutomationSettings model. | Code-verified 2026-05-19 |
-| **F2** | ⚠️ | `app.py` | MACRO: `macro_on` gated, `_get_macro_context_inline` called, Telegram keyboard sent. **NOT YET:** automatic P&L-aware CLOSE/MOVE_BE/TIGHTEN_TRAIL without human tap. | Resumes after B1→C1-C3→E1-E5 |
-| **F3** | ⚠️ | `app.py` | INVAL: `inval_on` gated, EMA cross + ST flip + confluence drop detection, Telegram keyboard. **NOT YET:** automatic tighten/close based on HTF check. | Resumes after B1→C1-C3→E1-E5 |
-| **F4** | ⚠️ | `app.py` | SENT: `sent_on` gated, Finnhub+DeepSeek pipeline, Telegram keyboard ("Protect 25% now"). **NOT YET:** automatic partial close without human tap. | Resumes after B1→C1-C3→E1-E5 |
+| **F2** | ✅ | `app.py` | MACRO: `macro_on` gated, `_get_macro_context_inline` called, Telegram keyboard sent. Per Omar's constraint: human tap required — no auto-close. | Code-verified 2026-05-22 (full implementation confirmed in code audit) |
+| **F3** | ✅ | `app.py` | INVAL: `inval_on` gated, EMA cross + ST flip + confluence drop detection, Telegram keyboard. Per Omar's constraint: human tap required — no auto-close. | Code-verified 2026-05-22 (full implementation confirmed in code audit) |
+| **F4** | ✅ | `app.py` | SENT: `sent_on` gated, Finnhub+DeepSeek pipeline, Telegram keyboard ("Protect 25% now"). Per Omar's constraint: human tap required — no auto-close. | Code-verified 2026-05-22 (full implementation confirmed in code audit) |
 | **F5** | ✅ | `app.py` | TRAIL: `trail_on` gated, TRAILING MT5Order queued to EA (10% ATR change gate), EA handles ratchet and close. | Code-verified 2026-05-19 |
-| **F6** | ❌ | `app.py` | `_global_automation_job()`: RQ-scheduled every 5 min. Fetches VIX + economic calendar. Per open watch: VIX NO_TRADE → Telegram. High-impact event <2h → `macro_alert=True`. | Not started |
+| **F6** | ✅ | `app.py` | `_global_automation_job()`: APScheduler every 5 min. `_redis_client` fix in `_get_vix_score()`. VIX REDUCED/NO_TRADE → Telegram broadcast with plain-English message + Redis dedup (6h). No auto-closes. | Commit `94d1cb5` 2026-05-22. Railway startup verified (no crash). Telegram output verifiable when VIX > 20. Check Railway logs for `[global_auto]` entries. |
 
 ---
 
@@ -1129,8 +1129,8 @@ elif watch.direction == 'SELL':
 
 | Label | Status | File(s) | What | Verify |
 |---|---|---|---|---|
-| **G1** | ❌ | `app.py` | Market regime: `atr_regime` = current ATR vs 50-period mean. <70%→RANGING, >130%→TRENDING. `get_analysis()` returns `market_regime`. Signal card regime badge. Warning when breakout fires in RANGING. | RANGING → amber "Choppy market" badge on signal card |
-| **G2** | ❌ | `app.py` + `index-v2-prototype.html` | Session filter: London 07:00–16:00 UTC, NY 12:00–21:00 UTC, Crypto 24/7 (flag 00:00–06:00 UTC), Stocks exchange hours only. Off-hours warning: "Spreads wider outside primary session." | Forex at 23:00 UTC → amber off-hours warning |
+| **G1** | ✅ | `app.py` + `index-v2-prototype.html` | Market regime: `atr_regime` = current ATR vs 50-period mean. <70%→RANGING, >130%→TRENDING. `get_analysis()` returns `regime`. Signal card regime chip (Understand tab). Warning card for RANGING signals and counter-trend TRENDING signals. ADX block renamed `adx_regime` (no longer overwrites). Scanner path forwarded. `_dvGuide['regime-warning']` key added. | Live verified 2026-05-23: `chipInDash=true`, `warnInDash=true` for RANGING+BUY. NORMAL→no chip. `adx_regime` ≠ `regime` confirmed. Commit: `05440d5`. |
+| **G2** | ✅ | `app.py` + `index-v2-prototype.html` | Session filter: London 07:00–16:00 UTC, NY 12:00–21:00 UTC, Crypto 24/7 (flag 00:00–06:00 UTC), Stocks exchange hours only. Off-hours warning: "Spreads wider outside primary session." | Live verified 2026-05-23: warning_card=true, session_chip=true, market_closed=true confirmed in dashContent DOM. Commit: `21a0573`. Bug fix 2026-05-23: `loadSignalContext()` (signal-feed path) was not injecting `session_context`/`regime`/`trade_type` — SESSION chip missing on Analyse→ path. Fixed with `_dvSessionContext()` JS helper + field injection. VIX badge REDUCED zone wrong amber rgba(201,120,32) → correct DotVerse gold rgba(201,168,76). Both live verified in browser. Commit: `993e81e`. |
 | **G3** | ❌ | `app.py` + `index-v2-prototype.html` | Signal expiry: `signal_history.expires_at`. scalp=4h, day=24h, swing=72h, position=7d. `run_watch_job` checks expiry → Telegram if expired without entry. Expired signals greyed in history. | Scalp signal 5h old → greyed with "Expired" label |
 | **G4** | ❌ | `index-v2-prototype.html` | Spread modelling: `effectiveRR` in `recalc()`. forex majors 1–2 pips, minors 3–5 pips, crypto 0.1%, stocks 0.05%. effectiveRR < 1.5 → amber warning. | Forex trade with 3-pip spread → effective R:R shown below theoretical |
 
@@ -1197,7 +1197,7 @@ STEP 9:            J1 → J2 → J3 → J4
 STEP 10:           K1 → K2 → K3 → K4 → K5
 ```
 
-**CURRENT POSITION: F2 is the next item.** *(E1–E5 complete — commit `feat(guidance): E1+E2+E3+E4+E5 plain-English tooltip engine`. Steps 1+2+3+4 all complete. Next: STEP 5 continuation — F2 MACRO automatic execution.)*
+**CURRENT POSITION: G3 is the next item.** *(STEP 6 in progress — G1 ✅ done 2026-05-23. G2 ✅ done 2026-05-23. Next: G3 — Signal expiry: `signal_history.expires_at`, scalp=4h, day=24h, swing=72h, position=7d. `run_watch_job` checks expiry → Telegram if expired without entry. Expired signals greyed in history.)*
 
 ---
 
