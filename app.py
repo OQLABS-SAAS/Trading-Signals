@@ -3592,7 +3592,10 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             bullish_count += 2; neutral_count += 0
             tv_signal_used = True
         elif tv_rec_label == "NEUTRAL":
-            neutral_count += 2          # drags denominator up → harder to fire signal
+            # TV has no directional opinion — contribute 0 votes (abstain).
+            # Adding +2 neutrals to the denominator was suppressing valid DotVerse
+            # signals (e.g. 83% bull → 62.5% after TV neutral, below 75% VIX gate).
+            # TV "no opinion" must not override DotVerse's own strong indicator agreement.
             tv_signal_used = True
         elif tv_rec_label == "SELL":
             bearish_count += 2; neutral_count += 0
