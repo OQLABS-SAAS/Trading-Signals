@@ -1163,6 +1163,24 @@ def build_ind_from_tv(tv):
                      "tenkan_kijun_bull": None, "tenkan": None, "kijun": None},
         "vwap":     {"vwap": None, "price_vs_vwap": "N/A", "signal": "NEUTRAL"},
         "stochrsi": {"k": None, "d": None, "zone": "UNKNOWN", "signal": "NEUTRAL"},
+        # TV-FIX: neutral defaults so get_analysis() SMC/VP/OF vote blocks
+        # never KeyError when yfinance is unavailable (TV fallback path).
+        "smc_structures": {
+            "fvg_bullish": False, "fvg_bearish": False,
+            "liquidity_grab_bull": False, "liquidity_grab_bear": False,
+            "displacement_bull": False, "displacement_bear": False,
+            "choch_bull": False, "choch_bear": False,
+        },
+        "volume_profile": {
+            "vpoc": None, "vah": None, "val": None,
+            "price_vs_vpoc": "UNKNOWN", "vol_concentration": "UNKNOWN",
+        },
+        "order_flow": {
+            "cumulative_delta_trend": "NEUTRAL",
+            "delta_divergence": False,
+            "absorption": False,
+            "conviction": "WEAK",
+        },
     }
 
 def _enrich_chart_indicators(prices_c):
@@ -4039,6 +4057,10 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             "HYPOTHESIS" if signal != "HOLD"                              else
             "—"
         ),
+        # ── SMC-FE: expose Smart Money structures so the frontend card can
+        # show traders what institutional patterns DotVerse detected.
+        # _smc is already computed at voting time (line ~3357).
+        "smc_structures": _smc,
     }
 
     # Call OpenAI to narrate data if API key is configured
@@ -6094,6 +6116,29 @@ def _job_auto_scan():
         if inst["swing"]:
             scans.append((inst, "4h", "swing"))
 
+    # H5-CB: hourly circuit breaker — max 5 scan alerts per hour to prevent spam.
+    # Redis key auto_scan_hourly:{UTC_hour} expires after 3600s (fail-open if Redis down).
+    _cb_max   = 5
+    _cb_hour  = __import__('datetime').datetime.utcnow().strftime('%Y%m%d%H')
+    _cb_key   = f"auto_scan_hourly:{_cb_hour}"
+    _cb_count = 0
+    try:
+        if _redis_client:
+            _cb_raw = _redis_client.get(_cb_key)
+            _cb_count = int(_cb_raw) if _cb_raw else 0
+    except Exception:
+        pass  # fail open — Redis down, allow scan to proceed
+    if _cb_count >= _cb_max:
+        print(f"[auto_scan] Hourly limit reached ({_cb_count}/{_cb_max}) — skipping scan")
+        try:
+            send_telegram(
+                f"⏸ DotVerse scan paused — {_cb_max} alerts already sent this hour. "
+                f"Next scan window starts at the top of the hour."
+            )
+        except Exception:
+            pass
+        return
+
     found = 0
     for inst, tf, trade_type in scans:
         ticker     = inst["ticker"]
@@ -6185,6 +6230,18 @@ def _job_auto_scan():
                                 f"Entry {entry:.5g} · SL {sl:.5g} · TP1 {tp1:.5g} · {lot:.2f} lots · R:R 1:{rr:.1f}",
                                 data=notif_data)
             found += 1
+            _cb_count += 1
+            # Increment hourly circuit breaker counter in Redis
+            try:
+                if _redis_client:
+                    _redis_client.incr(_cb_key)
+                    _redis_client.expire(_cb_key, 3600)
+            except Exception:
+                pass
+            # Stop scanning once we hit the hourly cap
+            if _cb_count >= _cb_max:
+                print(f"[auto_scan] Hourly cap ({_cb_max}) reached — stopping scan early")
+                break
             _time.sleep(1.0)   # rate-limit between instruments
         except Exception as e:
             print(f"[auto_scan] {ticker} {tf}: {e}")
