@@ -3506,16 +3506,17 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     # ── 3a: Confluence gate — signal requires ≥THRESHOLD sub-indicator agreement ──
     # Threshold is per-user from Risk Tolerance (F1.3): Conservative 0.85, Moderate
     # 0.75, Aggressive 0.65 (legacy default).
-    # CRITICAL FIX (2026-05-25): denominatot must include ALL indicators — bullish,
-    # bearish, AND neutral. Previous formula (bullish/bullish+bearish) excluded
-    # neutrals entirely, so 3 bullish + 0 bearish + 3 neutral = 3/3 = 100% — a BUY
-    # fired even though only half the indicators agreed. With neutrals included:
-    # 3/6 = 50% → correctly blocked as HOLD.
+    #
+    # Denominator = total_votes (directional only, excludes neutrals).
+    # Neutral votes mean "no opinion" — they abstain rather than suppressing signals.
+    # Example: 5 bull + 1 bear + 2 neutral → bull_pct = 5/6 = 83% → BUY ✓
+    # Old formula used total_indicators (5/8 = 62%) → suppressed a valid signal.
+    # MIN_VOTES gate (below) requires ≥3 directional votes, preventing 1-indicator fires.
     total_votes      = bullish_count + bearish_count
     total_indicators = bullish_count + bearish_count + neutral_count
-    if total_indicators > 0:
-        bull_pct = bullish_count / total_indicators
-        bear_pct = bearish_count / total_indicators
+    if total_votes > 0:
+        bull_pct = bullish_count / total_votes
+        bear_pct = bearish_count / total_votes
     else:
         bull_pct = bear_pct = 0.0
 
@@ -3607,11 +3608,14 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             print(f"[TV-votes] {ticker} {timeframe} -> {tv_rec_label} (score={tv_rec_all}) added to pool")
 
     # Recompute totals and pcts after TV votes are added to the pool
+    # Denominator = total_votes (directional only). Neutrals abstain — they do
+    # not suppress a strong directional signal. MIN_VOTES gate (≥3) below prevents
+    # fires from a single indicator agreeing with itself.
     total_votes      = bullish_count + bearish_count
     total_indicators = bullish_count + bearish_count + neutral_count
-    if total_indicators > 0:
-        bull_pct = bullish_count / total_indicators
-        bear_pct = bearish_count / total_indicators
+    if total_votes > 0:
+        bull_pct = bullish_count / total_votes
+        bear_pct = bearish_count / total_votes
     else:
         bull_pct = bear_pct = 0.0
 
