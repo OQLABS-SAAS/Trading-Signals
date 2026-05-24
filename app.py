@@ -2804,41 +2804,44 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             confidence = "LOW"
 
     # ══════════════════════════════════════════════════════════════
-    # GATE 1: Higher-timeframe trend filter
-    # Skip when TV signal is used — TV already aggregates HTF context.
+    # GATE 1: Higher-timeframe trend filter (SIG-1 2026-05-24)
+    # Runs on ALL signals regardless of source. TV's 26-indicator score
+    # is computed on the current timeframe only — it does not check
+    # whether the 4H trend contradicts a 15M signal. Gate 1 is
+    # DotVerse's own HTF quality filter and must always run.
     # ══════════════════════════════════════════════════════════════
     htf_bias = _htf_trend_bias(mtf, timeframe)
     gate_note = ""
-    if not tv_signal_used:
-        if signal == "SELL" and htf_bias == "BULLISH":
-            print(f"[gate] HTF trend BULLISH — blocking SELL on {ticker} {timeframe}")
-            signal = "HOLD"
-            confidence = "LOW"
-            gate_note = "HTF trend is bullish — counter-trend SELL suppressed."
-        elif signal == "BUY" and htf_bias == "BEARISH":
-            print(f"[gate] HTF trend BEARISH — blocking BUY on {ticker} {timeframe}")
-            signal = "HOLD"
-            confidence = "LOW"
-            gate_note = "HTF trend is bearish — counter-trend BUY suppressed."
+    if signal == "SELL" and htf_bias == "BULLISH":
+        print(f"[gate1] HTF trend BULLISH — blocking SELL on {ticker} {timeframe}")
+        signal = "HOLD"
+        confidence = "LOW"
+        gate_note = "HTF trend is bullish — counter-trend SELL suppressed."
+    elif signal == "BUY" and htf_bias == "BEARISH":
+        print(f"[gate1] HTF trend BEARISH — blocking BUY on {ticker} {timeframe}")
+        signal = "HOLD"
+        confidence = "LOW"
+        gate_note = "HTF trend is bearish — counter-trend BUY suppressed."
 
     # ══════════════════════════════════════════════════════════════
-    # GATE 2: Candle footprint sanity check
+    # GATE 2: Candle footprint sanity check (SIG-1 2026-05-24)
     # If the last few candles show strong one-sided pressure that
     # contradicts the proposed signal direction, downgrade to HOLD.
-    # Skip when TV signal is used — TV already aggregates 26 indicators
-    # including price action. Scanner does not enrich ind with chart data
-    # so running this gate only in analyze would create a systematic
-    # scanner/signals mismatch. Consistent with Gate 1 skip rule.
+    # Runs on ALL signals regardless of source. TV's 26-indicator
+    # blend does not see DotVerse's footprint dominance calculation.
+    # Scanner path: _compute_footprint_dominance returns (None, None)
+    # when chart data is absent — the `if buyer_pct is not None` guard
+    # below ensures no false HOLD on scanner path.
     # ══════════════════════════════════════════════════════════════
     buyer_pct, seller_pct = _compute_footprint_dominance(ind)
-    if not tv_signal_used and buyer_pct is not None:
+    if buyer_pct is not None:
         if signal == "SELL" and buyer_pct >= 70:
-            print(f"[gate] footprint shows {buyer_pct}% buyers — blocking SELL on {ticker}")
+            print(f"[gate2] footprint shows {buyer_pct}% buyers — blocking SELL on {ticker}")
             signal = "HOLD"
             confidence = "LOW"
             gate_note = f"Footprint shows {buyer_pct}% buyer pressure — SELL contradicts order flow."
         elif signal == "BUY" and seller_pct >= 70:
-            print(f"[gate] footprint shows {seller_pct}% sellers — blocking BUY on {ticker}")
+            print(f"[gate2] footprint shows {seller_pct}% sellers — blocking BUY on {ticker}")
             signal = "HOLD"
             confidence = "LOW"
             gate_note = f"Footprint shows {seller_pct}% seller pressure — BUY contradicts order flow."
