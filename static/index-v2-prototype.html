@@ -10034,7 +10034,9 @@ async function showPortfolio(){
   const portVal   = positions.reduce((s,p)=>s+(parseFloat(p.entry_price)||0)*(parseFloat(p.size)||0),0);
   const varResp   = await dvFetch('/api/var',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_value:portVal||10000,confidence:0.95})});
   const varData   = varResp || {var_1d_usd:0,var_1d_pct:0,portfolio_std:0};
-  (function([positions,varData]){
+  const corrResp  = await dvFetch('/api/positions/correlation-risk');
+  const corrRisk  = (corrResp && Array.isArray(corrResp.warnings)) ? corrResp : {warnings:[],exposure_map:{}};
+  (function([positions,varData,corrRisk]){
     const varAmt=(varData.var_1d_usd!=null?varData.var_1d_usd:varData.var_amount)??0;
     const varPct=(varData.var_1d_pct!=null?varData.var_1d_pct:varData.var_pct)??0;
     const varAmtStr=parseFloat(varAmt).toFixed(2);
@@ -10190,6 +10192,36 @@ async function showPortfolio(){
         <button onclick="pfAddPosition()" style="background:#c9a84c;color:#07080c;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;font-family:var(--mono);cursor:pointer;">+ Add</button>
       </div>
     </div>`;
+    // H2: pre-compute correlation warnings banner (avoids nested template-literal complexity)
+    const _corrBanner = (function(){
+      const ws = (corrRisk && corrRisk.warnings) ? corrRisk.warnings : [];
+      if(!ws.length) return '';
+      const isDanger = ws.some(function(w){ return w.severity === 'danger'; });
+      const bg  = isDanger ? 'rgba(224,85,85,.1)'  : 'rgba(201,168,76,.08)';
+      const bd  = isDanger ? 'rgba(224,85,85,.35)' : 'rgba(201,168,76,.3)';
+      const col = isDanger ? '#e05555'              : 'rgba(201,168,76,.9)';
+      const ico = isDanger
+        ? '<path d="M12 2L2 22h20L12 2zM12 9v6M12 18h.01"/>'
+        : '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>';
+      const title = isDanger ? 'High Currency Concentration Risk' : 'Currency Concentration Warning';
+      const rows = ws.map(function(w){
+        var dColor = w.net_exposure_pct > 0 ? '#5de8a0' : '#e8706e';
+        var dLabel = w.net_exposure_pct > 0 ? '▲ Long' : '▼ Short';
+        return '<div style="display:flex;align-items:flex-start;gap:10px;padding:5px 0;border-top:1px solid rgba(237,232,216,.06);">'
+          +'<span style="font-family:var(--mono);font-size:12px;font-weight:600;min-width:42px;color:rgba(237,232,216,.85);">'+w.currency+'</span>'
+          +'<span style="font-size:11px;color:'+dColor+';min-width:70px;white-space:nowrap;">'+dLabel+' '+Math.abs(w.net_exposure_pct||0).toFixed(1)+'%</span>'
+          +'<span style="font-size:11px;color:rgba(237,232,216,.55);flex:1;line-height:1.5;">'+w.message+'</span>'
+          +'</div>';
+      }).join('');
+      return '<div style="background:'+bg+';border:1px solid '+bd+';border-radius:8px;padding:10px 14px;margin-bottom:14px;">'
+        +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:'+(ws.length?'6':'0')+'px;">'
+          +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="'+col+'" stroke-width="2.2">'+ico+'</svg>'
+          +'<span style="font-size:12px;color:'+col+';font-weight:600;">'+title+'</span>'
+        +'</div>'
+        +rows
+        +'<div style="font-size:10px;color:rgba(237,232,216,.35);margin-top:8px;font-family:var(--mono);">Keep any single currency below 3% combined exposure. Add opposing trades to reduce concentration.</div>'
+        +'</div>';
+    })();
     el.innerHTML=`
     <div id="pfHealthBanner" class="pf-health-banner" style="background:rgba(61,190,108,.08);border:1px solid rgba(61,190,108,.2);">
       <div style="display:flex;align-items:center;gap:8px;">
@@ -10204,10 +10236,11 @@ async function showPortfolio(){
       <div id="pfHealthTs" style="font-size:11px;color:rgba(237,232,216,.5);"></div>
     </div>
     <div class="pg-hd"><div class="pg-hd-left"><div class="pg-hd-title">Portfolio</div><div class="pg-hd-sub">Track your open positions, P&L, and risk metrics. Positions are saved to your account.</div></div><div class="pg-hd-right"><span class="pg-tag live">Live</span></div></div>
-    <div style="background:${hBg};border:1px solid ${hBd};border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+    <div style="background:${hBg};border:1px solid ${hBd};border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;margin-bottom:${_corrBanner?'10':'16'}px;">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${hTxt}" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <span style="font-size:12px;color:${hTxt};font-weight:500">${hMsg}</span>
     </div>
+    ${_corrBanner}
     <div class="pf-summary">
       <div class="pf-card"><div class="pf-card-lbl">Portfolio Value</div><div class="pf-card-val">${portVal}</div></div>
       <div class="pf-card"><div class="pf-card-lbl">VaR (95%)</div><div class="pf-card-val red">$${varAmtStr}</div><div class="pf-card-sub">${varPctStr}% of portfolio</div></div>
@@ -10311,7 +10344,7 @@ async function showPortfolio(){
     </div>
     ${addForm}`;
     pfUpdateHealth(positions, varData);
-  })([positions, varData]);
+  })([positions, varData, corrRisk]);
 }
 function pfTogglePos(id, ticker, assetType, entry, dir){
   const row=document.getElementById('pfexp-'+id);

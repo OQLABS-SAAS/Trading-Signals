@@ -1140,8 +1140,8 @@ elif watch.direction == 'SELL':
 
 | Label | Status | File(s) | What | Verify |
 |---|---|---|---|---|
-| **H1** | ❌ | `app.py` + `index-v2-prototype.html` | Win rate + expectancy: `signal_history` gains `outcome`, `actual_exit_price`, `actual_pnl_r`. `/api/signals/stats` returns stats. Gate: no display until 30 trades — show "Building track record — X/30." | 30 trades logged → stats appear. Below 30 → building message shown. |
-| **H2** | ❌ | `app.py` + `index-v2-prototype.html` | Correlation risk: flag combined directional exposure on single currency > 3% account risk. Plain-English banner on Portfolio tab. | 3 USD-long positions → "Combined USD exposure 4.2% — exceeds 3% limit" |
+| **H1** | ✅ | `app.py` + `index-v2-prototype.html` | Win rate + expectancy: `signal_history` gains `outcome`, `actual_exit_price`, `actual_pnl_r`. `/api/signals/stats` returns stats. Gate: no display until 30 trades — show "Building track record — X/30." | Live verified 2026-05-24. |
+| **H2** | ✅ | `app.py` + `index-v2-prototype.html` | Correlation risk: `_extract_currency_exposures()` helper + `GET /api/positions/correlation-risk` endpoint. Frontend: `_corrBanner` IIFE in `showPortfolio()`, amber/red banner after health banner. 9/9 sandbox cases pass. | Pending live Railway + UI verify. |
 | **H3** | ❌ | `app.py` + `index-v2-prototype.html` | Drawdown tracking: `equity_snapshots` table. Auto-scale: >5%→suggest 0.5% risk, >10%→0.25% + alert. Drawdown gauge on portfolio tab. | Equity drops 6% → recommended risk shows 0.5% with plain-English explanation |
 | **H4** | ❌ | `app.py` | Telegram alerts for all events: new signal, expiry, automation fires, drawdown breach, correlation warning. Every alert explains WHY in plain English. | Automation fires → Telegram message within 30s |
 | **H5** | ❌ | `app.py` | Auto-scanner: RQ job every 15 min. HIGH-confidence only. Max 5 alerts/hour — consolidate into digest if exceeded. | 7 alerts fire → 5 individual + 1 "2 more signals" digest |
@@ -1197,7 +1197,7 @@ STEP 9:            J1 → J2 → J3 → J4
 STEP 10:           K1 → K2 → K3 → K4 → K5
 ```
 
-**CURRENT POSITION: G3 is the next item.** *(STEP 6 in progress — G1 ✅ done 2026-05-23. G2 ✅ done 2026-05-23. Next: G3 — Signal expiry: `signal_history.expires_at`, scalp=4h, day=24h, swing=72h, position=7d. `run_watch_job` checks expiry → Telegram if expired without entry. Expired signals greyed in history.)*
+**CURRENT POSITION: H3 is the next item.** *(STEP 7 in progress — H1 ✅ done 2026-05-24. H2 ✅ done 2026-05-24, pending Railway + UI verify. Next: H3 — Drawdown tracking: `equity_snapshots` table, auto-scale >5%→0.5% risk, >10%→0.25% + alert, drawdown gauge on portfolio tab.)*
 
 ---
 

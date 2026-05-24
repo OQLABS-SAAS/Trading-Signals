@@ -10663,8 +10663,12 @@ class SignalHistory(_Base):
     confidence   = Column(Float,      nullable=True)    # 0–100
     confidence_label = Column(String(16), nullable=True)
     fired_at     = Column(DateTime,   nullable=False, default=datetime.utcnow)
-    trade_type   = Column(String(16),  nullable=True)   # scalp / day / swing / position
-    expires_at   = Column(DateTime,    nullable=True)   # fired_at + type-based window
+    trade_type        = Column(String(16),  nullable=True)   # scalp / day / swing / position
+    expires_at        = Column(DateTime,    nullable=True)   # fired_at + type-based window
+    # H1: outcome tracking — trader logs result after closing trade
+    outcome           = Column(String(10),  nullable=True)   # WIN / LOSS / BE
+    actual_exit_price = Column(Float,       nullable=True)
+    actual_pnl_r      = Column(Float,       nullable=True)   # R-multiples: positive=profit, negative=loss
 
 class ExchangeKey(_Base):
     """Exchange API keys — Fernet-encrypted, one row per connected exchange per user."""
@@ -11072,6 +11076,10 @@ def _init_db():
                 # G3: signal expiry columns
                 _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS trade_type VARCHAR(16)"))
                 _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
+                # H1: outcome tracking
+                _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS outcome VARCHAR(10)"))
+                _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS actual_exit_price FLOAT"))
+                _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS actual_pnl_r FLOAT"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")
@@ -11230,6 +11238,91 @@ def positions_close(pos_id):
     finally:
         db.close()
 
+# ─── H2: Currency Correlation Risk ──────────────────────────
+
+def _extract_currency_exposures(ticker, asset_type, direction, size):
+    """H2 helper. Returns {currency: signed_exposure_pct}.
+    Positive = long, negative = short. size is % of account (e.g. 2.0 = 2%)."""
+    t    = (ticker or '').upper().strip()
+    sign = 1.0 if (direction or 'BUY').upper() == 'BUY' else -1.0
+    exposures = {}
+    # Forex: EURUSD=X, GBPUSD, EUR/USD → 3-char base + 3-char quote
+    if (asset_type or '') == 'forex' or t.endswith('=X'):
+        pair = t.replace('=X', '').replace('/', '').replace('-', '').replace(' ', '')
+        if len(pair) >= 6:
+            base  = pair[:3]
+            quote = pair[3:6]
+            exposures[base]  = +sign * size
+            exposures[quote] = -sign * size
+        else:
+            exposures['USD'] = sign * size
+        return exposures
+    # Crypto: BTC-USD, ETH-USDT, BTC/USD → base coin + quote
+    if (asset_type or '') == 'crypto' or '-' in t or '/' in t:
+        parts = t.replace('/', '-').split('-')
+        base  = parts[0] if parts else t
+        quote = parts[1][:5] if len(parts) >= 2 else 'USD'
+        if quote in ('USDT', 'USDC', 'BUSD'): quote = 'USD'
+        exposures[base]  = +sign * size
+        exposures[quote] = -sign * size
+        return exposures
+    # Stocks, indices, commodities → USD-denominated
+    exposures['USD'] = sign * size
+    return exposures
+
+
+@app.route("/api/positions/correlation-risk", methods=["GET"])
+@login_required
+def positions_correlation_risk():
+    """H2 — Currency correlation risk. Aggregates directional currency exposure
+    across all open positions. Flags any currency with |net| > 3% of account."""
+    if not _DBSession:
+        return jsonify({"warnings": [], "exposure_map": {}})
+    db = _DBSession()
+    try:
+        rows = db.query(Position).filter(Position.closed_at == None).all()
+        # Aggregate signed exposure per currency
+        exposure_map = {}
+        for pos in rows:
+            size = float(pos.size or 0)
+            if size <= 0:
+                continue
+            direction = (pos.signal or 'BUY').upper()
+            exps = _extract_currency_exposures(
+                pos.ticker, pos.asset_type or 'stock', direction, size
+            )
+            for ccy, amt in exps.items():
+                exposure_map[ccy] = round(exposure_map.get(ccy, 0.0) + amt, 4)
+        # Warn when |net| > 3%
+        WARN_THRESHOLD   = 3.0
+        DANGER_THRESHOLD = 5.0
+        warnings = []
+        for ccy, net in sorted(exposure_map.items(), key=lambda x: abs(x[1]), reverse=True):
+            abs_net = abs(net)
+            if abs_net <= WARN_THRESHOLD:
+                continue
+            direction_word = 'long' if net > 0 else 'short'
+            severity = 'danger' if abs_net > DANGER_THRESHOLD else 'warning'
+            if abs_net > DANGER_THRESHOLD:
+                msg = (f"You have {abs_net:.1f}% combined {direction_word} {ccy} exposure. "
+                       f"This exceeds the 5% danger level — a sharp {ccy} move could hit "
+                       f"multiple positions at once. Reduce size or add opposing trades.")
+            else:
+                msg = (f"You have {abs_net:.1f}% combined {direction_word} {ccy} exposure "
+                       f"across your open trades. DotVerse recommends staying below 3% "
+                       f"on any one currency to limit concentration risk.")
+            warnings.append({
+                "currency":         ccy,
+                "net_exposure_pct": net,
+                "abs_exposure_pct": abs_net,
+                "severity":         severity,
+                "message":          msg,
+            })
+        return jsonify({"warnings": warnings, "exposure_map": exposure_map})
+    finally:
+        db.close()
+
+
 # ─── Signal History ──────────────────────────────────────────
 
 @app.route("/api/signals/history", methods=["GET"])
@@ -11263,11 +11356,115 @@ def signal_history_get():
             "confidence": r.confidence,
             "confidence_label": r.confidence_label,
             "fired_at":   r.fired_at.strftime("%d %b %H:%M") if r.fired_at else None,
-            "trade_type": r.trade_type,
-            "expires_at": r.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ") if r.expires_at else None,
+            "trade_type":        r.trade_type,
+            "expires_at":        r.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ") if r.expires_at else None,
+            "outcome":           r.outcome,
+            "actual_exit_price": r.actual_exit_price,
+            "actual_pnl_r":      r.actual_pnl_r,
         } for r in rows])
     finally:
         db.close()
+
+# ─── H1: Log trade outcome ────────────────────────────────────
+
+@app.route("/api/signals/history/<int:sig_id>/outcome", methods=["PATCH"])
+@login_required
+def signal_outcome_patch(sig_id):
+    """Trader logs the outcome of a signal after closing the trade."""
+    if not _DBSession:
+        return jsonify({"error": "Database not configured"}), 503
+    data       = request.get_json(force=True) or {}
+    outcome    = (data.get("outcome") or "").upper().strip()
+    exit_price = data.get("exit_price")
+
+    if outcome not in ("WIN", "LOSS", "BE", ""):
+        return jsonify({"error": "outcome must be WIN, LOSS, or BE"}), 400
+
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        row = (db.query(SignalHistory)
+                 .filter(SignalHistory.id == sig_id, SignalHistory.user_id == uid)
+                 .first())
+        if not row:
+            return jsonify({"error": "Signal not found"}), 404
+
+        row.outcome = outcome or None
+        if exit_price is not None:
+            row.actual_exit_price = float(exit_price)
+            # Auto-compute pnl_r from entry + SL
+            if row.entry and row.stop_loss and abs(row.entry - row.stop_loss) > 0:
+                sl_dist = abs(row.entry - row.stop_loss)
+                if row.signal == "BUY":
+                    row.actual_pnl_r = round((float(exit_price) - row.entry) / sl_dist, 2)
+                elif row.signal == "SELL":
+                    row.actual_pnl_r = round((row.entry - float(exit_price)) / sl_dist, 2)
+        db.commit()
+        return jsonify({"id": sig_id, "outcome": row.outcome, "actual_pnl_r": row.actual_pnl_r})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/signals/stats", methods=["GET"])
+@login_required
+def signal_stats():
+    """Compute win rate, expectancy, avg R for closed BUY/SELL signals with logged outcomes.
+    Returns ready=False with a progress message until sample_size >= 30."""
+    if not _DBSession:
+        return jsonify({"sample_size": 0, "ready": False,
+                        "message": "Database not available"}), 503
+    GATE = 30
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        rows = (db.query(SignalHistory)
+                  .filter(SignalHistory.user_id == uid,
+                          SignalHistory.outcome.isnot(None),
+                          SignalHistory.signal.in_(["BUY", "SELL"]))
+                  .all())
+        sample_size = len(rows)
+
+        if sample_size == 0:
+            return jsonify({"sample_size": 0, "ready": False,
+                            "message": f"Building track record — 0/{GATE} trades logged."})
+
+        wins    = [r for r in rows if r.outcome == "WIN"]
+        losses  = [r for r in rows if r.outcome == "LOSS"]
+        bes     = [r for r in rows if r.outcome == "BE"]
+        decided = len(wins) + len(losses)   # BE excluded from win rate
+
+        win_rate = round(len(wins) / decided * 100, 1) if decided > 0 else 0.0
+
+        win_r_vals  = [r.actual_pnl_r for r in wins   if r.actual_pnl_r is not None]
+        loss_r_vals = [r.actual_pnl_r for r in losses if r.actual_pnl_r is not None]
+
+        avg_win_r  = round(sum(win_r_vals)  / len(win_r_vals),  2) if win_r_vals  else None
+        avg_loss_r = round(sum(loss_r_vals) / len(loss_r_vals), 2) if loss_r_vals else None
+
+        expectancy = None
+        if avg_win_r is not None and avg_loss_r is not None and decided > 0:
+            wr = win_rate / 100
+            expectancy = round(wr * avg_win_r + (1 - wr) * avg_loss_r, 2)
+
+        return jsonify({
+            "sample_size":  sample_size,
+            "ready":        sample_size >= GATE,
+            "message":      f"Building track record — {sample_size}/{GATE} trades logged." if sample_size < GATE else None,
+            "win_rate":     win_rate,
+            "avg_win_r":    avg_win_r,
+            "avg_loss_r":   avg_loss_r,
+            "expectancy":   expectancy,
+            "wins":         len(wins),
+            "losses":       len(losses),
+            "breakevens":   len(bes),
+            "total_closed": sample_size,
+        })
+    finally:
+        db.close()
+
 
 # ─── 5b: PARAMETRIC VaR ──────────────────────────────────────
 
