@@ -899,8 +899,43 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
     high52 = float(high.iloc[-252:].max()) if len(high) >= 252 else float(high.max())
     low52  = float(low.iloc[-252:].min())  if len(low)  >= 252 else float(low.min())
 
-    res = float(high.rolling(10).max().iloc[-1])
-    sup = float(low.rolling(10).min().iloc[-1])
+    # SIG-6 2026-05-24: Swing pivot S/R replaces 10-bar rolling window.
+    # 10-bar rolling max/min changes every candle and is not a structural level.
+    # Swing pivots (bar higher/lower than N bars each side) are the actual levels
+    # institutions and traders watch. Fall back to rolling if fewer than 2 pivots found.
+    _pivot_n = 3  # bars each side required to confirm a swing pivot
+    _lookback = min(50, len(high) - _pivot_n * 2)
+    _pivot_highs = []
+    _pivot_lows  = []
+    if _lookback > 0:
+        for _i in range(_pivot_n, _lookback + _pivot_n):
+            _idx = -(1 + _i)
+            try:
+                _h = float(high.iloc[_idx])
+                _l = float(low.iloc[_idx])
+                _is_ph = all(float(high.iloc[_idx - _j]) < _h for _j in range(1, _pivot_n + 1)) and \
+                         all(float(high.iloc[_idx + _j]) < _h for _j in range(1, _pivot_n + 1))
+                _is_pl = all(float(low.iloc[_idx - _j])  > _l for _j in range(1, _pivot_n + 1)) and \
+                         all(float(low.iloc[_idx + _j])  > _l for _j in range(1, _pivot_n + 1))
+                if _is_ph:
+                    _pivot_highs.append(_h)
+                if _is_pl:
+                    _pivot_lows.append(_l)
+            except (IndexError, ValueError):
+                continue
+    _p_cur = float(close.iloc[-1])
+    # Nearest pivot high above current price = resistance
+    # Nearest pivot low below current price = support
+    _res_pivots = [v for v in _pivot_highs if v > _p_cur]
+    _sup_pivots = [v for v in _pivot_lows  if v < _p_cur]
+    if len(_res_pivots) >= 2:
+        res = float(min(_res_pivots))   # nearest pivot high above price
+    else:
+        res = float(high.rolling(10).max().iloc[-1])   # fallback
+    if len(_sup_pivots) >= 2:
+        sup = float(max(_sup_pivots))   # nearest pivot low below price
+    else:
+        sup = float(low.rolling(10).min().iloc[-1])    # fallback
 
     ema_trend = (
         "STRONG BULL" if p > e20 > e50 > e200 else
@@ -2636,18 +2671,23 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     # removed in the same session: TV had been masking the broken local logic.
     # Now matches the actual values, with STRONG BULL/BEAR weighted +3 to reflect
     # the additional macro-trend confirmation (price aligned through EMA-200).
+    # SIG-5 2026-05-24: EMA vote weight reduced to 1 per direction.
+    # Previous weights (STRONG BULL=+3, BULL=+2) meant EMA alone could
+    # represent 37% of all votes and single-handedly push past the 65%
+    # confluence gate. One indicator = one vote. STRONG vs regular
+    # distinction is preserved in trend_assessment text only.
     _emat = (ema_trend or "").upper()
     if _emat == "STRONG BULL":
-        bullish_count += 3
+        bullish_count += 1
         trend_assessment = "EMA stack is strongly bullish — price is above all key moving averages with macro alignment."
     elif _emat == "BULL":
-        bullish_count += 2
+        bullish_count += 1
         trend_assessment = "EMA stack is bullish; uptrend structure is intact and price is above key moving averages."
     elif _emat == "STRONG BEAR":
-        bearish_count += 3
+        bearish_count += 1
         trend_assessment = "EMA stack is strongly bearish — price is below all key moving averages with macro alignment."
     elif _emat == "BEAR":
-        bearish_count += 2
+        bearish_count += 1
         trend_assessment = "EMA stack is bearish; downtrend structure dominates and price remains below key MAs."
     else:
         trend_assessment = "EMAs are mixed; trend definition is unclear at current price."
@@ -2845,6 +2885,37 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             signal = "HOLD"
             confidence = "LOW"
             gate_note = f"Footprint shows {seller_pct}% seller pressure — BUY contradicts order flow."
+
+    # ══════════════════════════════════════════════════════════════
+    # SIG-4 2026-05-24: RSI Divergence confidence penalty
+    # rsi_divergence is computed in calculate_indicators() and stored in ind.
+    # When divergence contradicts the signal direction, drop confidence one
+    # level. This does not block the signal — it adjusts the label so the
+    # trader sees "LIKELY" or "HYPOTHESIS" instead of a false "CONFIRMED".
+    # TV path: divergence is computed via safety-net in analyze() endpoint
+    # so ind["rsi_divergence"] is always present on the analyze path.
+    # ══════════════════════════════════════════════════════════════
+    _rsi_div = ind.get("rsi_divergence") or {}
+    _div_type = (_rsi_div.get("type") or "none").lower()
+    _div_note = ""
+    if signal == "BUY" and "bearish" in _div_type:
+        # Bearish divergence on a BUY: price making higher highs, RSI lower highs
+        # Momentum is weakening — reduce confidence one step
+        if confidence == "HIGH":
+            confidence = "MEDIUM"
+        elif confidence == "MEDIUM":
+            confidence = "LOW"
+        _div_note = "RSI bearish divergence detected — price is rising but momentum is falling. This weakens the BUY signal."
+        gate_note = gate_note or _div_note
+    elif signal == "SELL" and "bullish" in _div_type:
+        # Bullish divergence on a SELL: price making lower lows, RSI higher lows
+        # Momentum is recovering — reduce confidence one step
+        if confidence == "HIGH":
+            confidence = "MEDIUM"
+        elif confidence == "MEDIUM":
+            confidence = "LOW"
+        _div_note = "RSI bullish divergence detected — price is falling but momentum is recovering. This weakens the SELL signal."
+        gate_note = gate_note or _div_note
 
     # ══════════════════════════════════════════════════════════════
     # GATE 3: Minimum votes (refactored 2026-04-29 from confidence floor)
@@ -3072,11 +3143,16 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     _ema_down = "BEAR" in _emat   # True only when EMA is explicitly BEARISH
     # NEUTRAL EMA is NOT counter-trend — it means no confirmed direction yet (early breakout possible).
     if atr_regime == "RANGING" and signal in ("BUY", "SELL"):
+        # SIG-3 2026-05-24: override signal to HOLD in ranging markets.
+        # A BUY or SELL in a choppy sideways market is not a trade — price
+        # will whipsaw before following through. Suppress the direction,
+        # explain why in plain English so the beginner understands.
+        signal = "HOLD"
         _regime_warning = (
-            "This asset is in a sideways, choppy market right now — average price movement is "
-            "below normal. Signals in ranging markets have lower reliability because price can "
-            "whipsaw before following through. Consider waiting for a clear breakout with rising "
-            "volume, or use a smaller position size."
+            "This asset is moving sideways with no clear trend — price is choppy and "
+            "signals in this condition frequently reverse before hitting their target. "
+            "DotVerse has held back the signal to protect you. Wait for a clean breakout "
+            "with rising volume before entering a trade."
         )
     elif atr_regime == "TRENDING" and signal in ("BUY", "SELL"):
         if (signal == "BUY" and _ema_down) or (signal == "SELL" and _ema_up):
@@ -3158,14 +3234,17 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # session_context: current trading session + off-hours warning for this asset.
         # off_hours=True → show amber/red warning card on UND tab.
         "session_context": _get_session_context(asset_type),
-        # ── 3d: Confidence label (restored TV-aware vocabulary 2026-04-29) ────
-        # CONFIRMED  — TV scanner data used (26-indicator score) OR very strong net (>=5)
-        # LIKELY     — TV BUY/SELL with medium conviction OR net >= 3 from local stack
-        # HYPOTHESIS — Weak agreement; signal exists but conviction is marginal
+        # ── 3d: Confidence label (SIG-2 2026-05-24) ────────────────────────────
+        # CONFIRMED  — strong local indicator agreement (net >= 5). TV alone
+        #              does not earn CONFIRMED — a HOLD that TV caused cannot
+        #              be CONFIRMED. The label must reflect actual conviction.
+        # LIKELY     — moderate local agreement (net >= 3)
+        # HYPOTHESIS — weak agreement; signal exists but conviction is marginal
         "confidence_label": (
-            "CONFIRMED"  if (tv_signal_used or abs(net) >= 5) else
-            "LIKELY"     if abs(net) >= 3 else
-            "HYPOTHESIS"
+            "CONFIRMED"  if (signal != "HOLD" and abs(net) >= 5) else
+            "LIKELY"     if (signal != "HOLD" and abs(net) >= 3) else
+            "HYPOTHESIS" if signal != "HOLD" else
+            "—"
         ),
     }
 
