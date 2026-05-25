@@ -12735,7 +12735,7 @@ def signals_cost_analysis():
         return jsonify({"ready": False, "message": "Database not available"})
     db = _DBSession()
     try:
-        uid  = session["user_id"]
+        uid  = str(session["user_id"])
         rows = db.query(SignalHistory).filter(
             SignalHistory.user_id == uid,
             SignalHistory.outcome.in_(["WIN","LOSS","BE"]),
@@ -12788,7 +12788,7 @@ def validate_montecarlo():
         return jsonify({"ready": False, "message": "Database not available"})
     db = _DBSession()
     try:
-        uid  = session["user_id"]
+        uid  = str(session["user_id"])
         rows = db.query(SignalHistory).filter(
             SignalHistory.user_id == uid,
             SignalHistory.actual_pnl_r.isnot(None)
