@@ -1094,10 +1094,47 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
         "stochrsi":  _compute_stochrsi(df),
     }
 
+# SIG-7: in-memory vol_ratio cache for TV path — avoids repeated yfinance fetches.
+# Key: (ticker, timeframe). Value: (vol_ratio, fetched_at_epoch). TTL = 300s.
+_tv_vol_cache = {}
+
+def _tv_vol_ratio(ticker, asset_type):
+    """Fetch real vol_ratio for TV path. Returns last_vol / 20bar_avg.
+    Falls back to 1.0 for forex (volume always 0) or any error.
+    Cached 5 minutes per ticker to avoid latency on every analysis.
+    """
+    import time as _time
+    if not ticker:
+        return 1.0
+    # Forex has no real centralised volume — skip fetch, return neutral 1.0
+    if (asset_type or "").lower() in ("forex",):
+        return 1.0
+    now = _time.time()
+    cached = _tv_vol_cache.get(ticker)
+    if cached and (now - cached[1]) < 300:
+        return cached[0]
+    try:
+        import yfinance as _yf
+        h = _yf.Ticker(ticker).history(period="3d", interval="1h")
+        if h is None or len(h) < 2:
+            return 1.0
+        vols = h["Volume"].values.astype(float)
+        last_vol = float(vols[-1])
+        avg_vol  = float(vols[:-1].mean()) if len(vols) > 1 else float(vols[0])
+        if avg_vol <= 0:
+            return 1.0
+        ratio = round(last_vol / avg_vol, 3)
+        _tv_vol_cache[ticker] = (ratio, now)
+        return ratio
+    except Exception:
+        return 1.0
+
 # ─── INDICATOR BUILDER FROM TV DATA ──────────────────────────
-def build_ind_from_tv(tv):
+def build_ind_from_tv(tv, ticker=None, timeframe=None, asset_type=None):
     """Build the indicator dict directly from TradingView scanner data.
     TV provides real RSI, EMA, MACD, BB, ATR — same values traders see on charts.
+    SIG-7: vol_ratio now fetched from yfinance (5-min cache) instead of hardcoded 1.0.
+    Forex is excluded (no centralised volume) and falls back to 1.0 safely.
     """
     p    = tv.get("tv_price") or 0
     rsi  = tv.get("tv_rsi")   or 50.0
@@ -1140,7 +1177,7 @@ def build_ind_from_tv(tv):
         "bb_pos":         round(bb_pos,  3),
         "bb_width":       round(bb_width, 3),
         "atr":            round(float(atr), 6),
-        "vol_ratio":      1.0,
+        "vol_ratio":      _tv_vol_ratio(ticker, asset_type),  # SIG-7: real volume ratio
         "supertrend":     "NEUTRAL",
         "resistance":     round(bbu, 4),
         "support":        round(bbl, 4),
@@ -9054,7 +9091,7 @@ def analyze():
         mtf  = {}
         _t1  = time.time()
         if tv_ok:
-            ind = build_ind_from_tv(tv)
+            ind = build_ind_from_tv(tv, ticker=ticker, timeframe=timeframe, asset_type=asset_type)  # SIG-7
             print(f"[analyze] TV OK — {ticker} {timeframe}: price={tv['tv_price']} RSI={tv.get('tv_rsi')} [{_t1-_t0:.1f}s]")
             # MTF trend from TV MTF columns
             tv_mtf = tv.get("tv_mtf", {})
