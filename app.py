@@ -3606,6 +3606,22 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     else:
         confidence = "LOW"
 
+    # SMC opposing-pattern penalty: 2+ active opposing patterns → drop confidence
+    # one level so signal card and Understand tab stay coherent. No UI warning needed.
+    _smc_pen = ind.get("smc_structures") or {}
+    if signal == "BUY":
+        _opp = sum(1 for k in ("fvg_bearish","liquidity_grab_bear","displacement_bear","choch_bear") if _smc_pen.get(k))
+        if _opp >= 2:
+            if   confidence == "HIGH":   confidence = "MEDIUM"
+            elif confidence == "MEDIUM": confidence = "LOW"
+            else:                        signal = "HOLD"
+    elif signal == "SELL":
+        _opp = sum(1 for k in ("fvg_bullish","liquidity_grab_bull","displacement_bull","choch_bull") if _smc_pen.get(k))
+        if _opp >= 2:
+            if   confidence == "HIGH":   confidence = "MEDIUM"
+            elif confidence == "MEDIUM": confidence = "LOW"
+            else:                        signal = "HOLD"
+
     # ══════════════════════════════════════════════════════════════
     # TRADINGVIEW VOTES — integrated into the unified confluence pool
     # TV is no longer an override. Its 26-indicator Recommend.All score

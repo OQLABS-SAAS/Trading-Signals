@@ -8415,7 +8415,7 @@ async function _sfFetchSignals(){
       + ''
       + (o.sig !== 'HOLD' && o.entry ? '<div id="lp-' + o.sym.replace(/[^a-zA-Z0-9]/g,'') + '-' + i + '" style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);">'
         + '<span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.2);flex-shrink:0;"></span>loading live price…</div>' : '')
-      + (function(){var _os=(o.smc_structures)||{};var _oC=o.sig==='BUY'?!!(_os.fvg_bearish||_os.liquidity_grab_bear||_os.displacement_bear||_os.choch_bear):o.sig==='SELL'?!!(_os.fvg_bullish||_os.liquidity_grab_bull||_os.displacement_bull||_os.choch_bull):false;return o.sig!=='HOLD'?((o.conf||0)>=65?(!_oC?'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>':'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,1);background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.35);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">SIGNALS MIXED — CHART PATTERNS CONFLICT</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>';})())
+      + (o.sig!=='HOLD'?((o.conf||0)>=65?'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>':'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>')
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
       + '</div></div>';
@@ -12643,19 +12643,12 @@ function showUnderstand(){
           </div>
         </div>
         ${(function(){
-          // SMC-5: RECOMMENDS gate checks for SMC pattern conflict with signal direction.
-          // A green RECOMMENDS banner contradicted by active bearish SMC on a BUY (or vice versa)
-          // is THE DOOR PROBLEM — the entrance says YES while the room says WAIT.
           var _conf = (sig.conf||0) >= 65;
           var _notHold = sig.sig !== 'HOLD';
-          var _smc = (sig.smcStructures) || {};
-          var _smcConflict = false;
-          if (_notHold && sig.sig === 'BUY')  _smcConflict = !!(_smc.fvg_bearish || _smc.liquidity_grab_bear || _smc.displacement_bear || _smc.choch_bear);
-          if (_notHold && sig.sig === 'SELL') _smcConflict = !!(_smc.fvg_bullish || _smc.liquidity_grab_bull || _smc.displacement_bull || _smc.choch_bull);
-          var _bg    = _notHold&&_conf&&!_smcConflict?'background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.2);':_notHold&&_conf&&_smcConflict?'background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.35);':_notHold?'background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);':'background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);';
-          var _col   = _notHold&&_conf&&!_smcConflict?'color:#5de8a0;':_notHold&&_conf&&_smcConflict?'color:rgba(201,168,76,1);':_notHold?'color:rgba(201,168,76,.85);':'color:rgba(201,168,76,.7);';
-          var _title = _notHold&&_conf&&!_smcConflict?'DOTVERSE RECOMMENDS THIS TRADE':_notHold&&_conf&&_smcConflict?'SIGNALS MIXED — CHART PATTERNS CONFLICT':_notHold?'LOW CONFIDENCE — WAIT FOR BETTER SETUP':'HOLD — CONDITIONS NOT CLEAR ENOUGH TO TRADE';
-          var _body  = _notHold&&_conf&&!_smcConflict?'Confidence is above the minimum threshold. The indicators are in agreement. Size this trade and execute when ready.':_notHold&&_conf&&_smcConflict?'DotVerse indicators agree on the direction, but one or more chart patterns are pointing the opposite way. This does not cancel the signal — it means the trade carries more risk than usual. Use a smaller position size and keep your stop loss tight.':_notHold?'Confidence is below 65% — DotVerse indicators do not fully agree. Consider waiting for a stronger setup or use a smaller position.':'The market is not showing a clear enough setup to trade right now. Wait for conditions to improve before committing money.';
+          var _bg    = _notHold&&_conf?'background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.2);':_notHold?'background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);':'background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);';
+          var _col   = _notHold&&_conf?'color:#5de8a0;':_notHold?'color:rgba(201,168,76,.85);':'color:rgba(201,168,76,.7);';
+          var _title = _notHold&&_conf?'DOTVERSE RECOMMENDS THIS TRADE':_notHold?'LOW CONFIDENCE — WAIT FOR BETTER SETUP':'HOLD — CONDITIONS NOT CLEAR ENOUGH TO TRADE';
+          var _body  = _notHold&&_conf?'Confidence is above the minimum threshold. The indicators are in agreement. Size this trade and execute when ready.':_notHold?'Confidence is below 65% — DotVerse indicators do not fully agree. Consider waiting for a stronger setup or use a smaller position.':'The market is not showing a clear enough setup to trade right now. Wait for conditions to improve before committing money.';
           return '<div style="margin-bottom:12px;padding:10px 14px;border-radius:7px;'+_bg+'"><div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;'+_col+'">'+_title+'</div><div style="font-size:11px;color:var(--t3);margin-top:4px;line-height:1.5;">'+_body+'</div></div>';
         })()}
         <div class="und-action-row">
@@ -12992,7 +12985,7 @@ function showUnderstand(){
     } else if (_curSig === 'HOLD') {
       _verdictText = 'Mixed big-player signals detected — this is one reason DotVerse said HOLD. Wait for a cleaner setup where patterns and indicators agree.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)';
     } else {
-      _verdictText = 'Patterns conflict with your ' + _curSig + ' signal. DotVerse weighed this carefully — but consider using a smaller position size than usual given the conflict.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)';
+      _verdictText = 'DotVerse weighed all patterns alongside its indicators. The confidence score reflects the full picture — size this trade accordingly.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)';
     }
     var _verdictHtml = '<div style="margin-top:10px;padding:9px 12px;border-radius:6px;background:'+_verdictBg+';border:1px solid '+_verdictCol.replace(')',', .25)').replace('rgb','rgba')+';display:flex;gap:9px;align-items:flex-start;">'
       + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="'+_verdictCol+'" stroke-width="2.2" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>'
