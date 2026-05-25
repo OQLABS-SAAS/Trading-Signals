@@ -4041,7 +4041,7 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
                 min(_r, 64.0)
             ))(
                 (bearish_count if signal == "SELL" else bullish_count)
-                / max(bullish_count + bearish_count + neutral_count, 1)
+                / max(bullish_count + bearish_count, 1)
                 * 100
             ), 1
         ),
