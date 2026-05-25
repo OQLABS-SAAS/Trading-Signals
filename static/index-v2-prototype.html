@@ -20365,7 +20365,14 @@ function dvGuideInit() {
         ? '<div style="font-size:10px;line-height:1.5;color:rgba(237,232,216,.38);' +
             'margin-top:9px;border-top:1px solid rgba(201,168,76,.12);padding-top:9px;font-style:italic;">' +
             cfg.example + '</div>'
-        : '');
+        : '') +
+      // Arrow — two overlapping triangles for bordered pointer
+      '<div id="dv-guide-tip-arrow-o" style="position:absolute;width:0;height:0;pointer-events:none;' +
+        'border-left:9px solid transparent;border-right:9px solid transparent;"></div>' +
+      '<div id="dv-guide-tip-arrow-i" style="position:absolute;width:0;height:0;pointer-events:none;' +
+        'border-left:8px solid transparent;border-right:8px solid transparent;"></div>';
+    // Verify element is still attached and visible — skip if detached after re-render
+    if (!el.isConnected || !el.offsetParent) { _hide(); return; }
     // Show (invisible) so browser computes actual height before we position
     tip.style.display = 'block';
     var r  = el.getBoundingClientRect();
@@ -20380,6 +20387,30 @@ function dvGuideInit() {
     if (ty < 12) ty = r.bottom + 10;
     tip.style.left = lx + 'px';
     tip.style.top  = ty + 'px';
+    // Position arrow pointer toward the target element
+    var arrowO = document.getElementById('dv-guide-tip-arrow-o');
+    var arrowI = document.getElementById('dv-guide-tip-arrow-i');
+    if (arrowO && arrowI) {
+      // Horizontal center of target relative to tip left edge
+      var arrowX = Math.round(r.left + r.width / 2 - lx);
+      arrowX = Math.max(18, Math.min(arrowX, tw - 18));
+      arrowO.style.left = arrowX + 'px';
+      arrowI.style.left = arrowX + 'px';
+      var aboveTarget = ty < r.top;  // tooltip rendered above the element
+      if (aboveTarget) {
+        // Arrow on bottom edge pointing down
+        arrowO.style.bottom = '-9px'; arrowO.style.top = 'auto';
+        arrowO.style.borderTop = '9px solid rgba(201,168,76,.4)'; arrowO.style.borderBottom = 'none';
+        arrowI.style.bottom = '-8px'; arrowI.style.top = 'auto';
+        arrowI.style.borderTop = '8px solid rgba(10,14,22,.97)'; arrowI.style.borderBottom = 'none';
+      } else {
+        // Arrow on top edge pointing up
+        arrowO.style.top = '-9px'; arrowO.style.bottom = 'auto';
+        arrowO.style.borderBottom = '9px solid rgba(201,168,76,.4)'; arrowO.style.borderTop = 'none';
+        arrowI.style.top = '-8px'; arrowI.style.bottom = 'auto';
+        arrowI.style.borderBottom = '8px solid rgba(10,14,22,.97)'; arrowI.style.borderTop = 'none';
+      }
+    }
     tip.style.opacity = '1';
   }
 
@@ -20407,10 +20438,15 @@ function dvGuideInit() {
     _hide();
   }, true);
 
-  // Mobile — tap to toggle
+  // Mobile — tap to toggle (touch-only, skip interactive children)
   document.addEventListener('click', function (e) {
+    // Only activate on touch devices, not desktop mouse clicks
+    if (!window.matchMedia('(pointer: coarse)').matches) return;
     var el = e.target && e.target.closest && e.target.closest('[data-guide]');
     if (!el) return;
+    // Skip clicks on interactive children (buttons, inputs, selects, links, textareas)
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'button' || tag === 'input' || tag === 'select' || tag === 'a' || tag === 'textarea') return;
     if (_tipTarget === el) { _tipTarget = null; _hide(); }
     else { _tipTarget = el; _show(el.getAttribute('data-guide'), el); }
   }, false);
