@@ -12692,6 +12692,39 @@ def signal_stats():
         db.close()
 
 
+
+@app.route("/api/portfolio/reset", methods=["POST"])
+@login_required
+def portfolio_reset():
+    """Master reset — delete all positions, signal_history, and equity_snapshots
+    for the current user. Requires confirmation token in body.
+    Protects against accidental clicks."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body = request.json or {}
+    if body.get("confirm") != "RESET":
+        return jsonify({"error": "Send {\"confirm\": \"RESET\"} to confirm deletion"}), 400
+    uid = str(session.get("user_id", "default"))
+    db = _DBSession()
+    try:
+        deleted_positions = db.query(Position).filter(Position.user_id == uid).delete()
+        deleted_signals   = db.query(SignalHistory).filter(SignalHistory.user_id == uid).delete()
+        deleted_equity    = db.query(EquitySnapshot).filter(EquitySnapshot.user_id == uid).delete()
+        db.commit()
+        return jsonify({
+            "status": "ok",
+            "deleted": {
+                "positions": deleted_positions,
+                "signal_history": deleted_signals,
+                "equity_snapshots": deleted_equity,
+            }
+        })
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
 @app.route("/api/signals/cost-analysis", methods=["GET"])
 @login_required
 def signals_cost_analysis():
