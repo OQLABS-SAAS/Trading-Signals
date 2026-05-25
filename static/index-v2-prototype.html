@@ -12411,7 +12411,7 @@ function showUnderstand(){
       <div class="dv-ic-lbl">Timeframe</div>
       <div class="dv-ic-val">${sig.tf}</div>
     </div>
-    <div class="dv-ic" id="dvStat_winrate" onclick="dvStatExpand('winrate',this)">
+    <div class="dv-ic" id="dvStat_winrate" data-guide="win-rate" onclick="dvStatExpand('winrate',this)">
       <div class="dv-ic-lbl">Win Rate</div>
       <div class="dv-ic-val" style="color:${sig.winRate!=null&&sig.winRate>=55?'#5de8a0':sig.winRate!=null&&sig.winRate<45?'#e8706e':'inherit'}">${sig.winRate!=null?sig.winRate.toFixed(0)+'%':'–'}</div>
     </div>
@@ -12614,7 +12614,7 @@ function showUnderstand(){
           return badges.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${badges.join('')}</div>` : '';
         })()}
         <!-- Win rate badge — populated automatically after backtest -->
-        <div id="undWrWrap" style="display:none;margin-top:12px;padding:10px 14px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:7px;animation:wbPop .35s ease;">
+        <div id="undWrWrap" data-guide="win-rate" style="display:none;margin-top:12px;padding:10px 14px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:7px;animation:wbPop .35s ease;">
           <div style="display:flex;align-items:center;gap:12px;">
             <div style="flex-shrink:0;">
               <div id="undWrVal" style="font-family:var(--mono);font-size:20px;font-weight:700;line-height:1;">—</div>
@@ -12628,6 +12628,8 @@ function showUnderstand(){
             </div>
             <div id="undWrExtra" style="font-family:var(--mono);font-size:10px;color:var(--t3);text-align:right;flex-shrink:0;line-height:1.6;"></div>
           </div>
+          <!-- Beginner plain-English explanation — always visible when win rate is shown -->
+          <div id="undWrExplain" style="margin-top:10px;padding-top:9px;border-top:1px solid rgba(237,232,216,.07);font-size:11px;color:rgba(237,232,216,.55);line-height:1.65;"></div>
         </div>
 
         <!-- Plain English explain -->
@@ -12667,75 +12669,6 @@ function showUnderstand(){
         <div id="undBtPanel" style="display:none;margin-top:12px;background:rgba(10,14,22,.8);border:1px solid rgba(237,232,216,.13);border-radius:10px;padding:14px 16px;"><div id="undBtContent"></div></div>
       </div>
 
-      <!-- SMC-FE: Smart Money Concepts structures card -->
-      ${(()=>{
-        const _smc = sig.smcStructures;
-        // Show card only when backend provided structure data
-        if (!_smc) return '';
-        // Build list of active structures with plain-English descriptions
-        const _smcDefs = [
-          { key: 'fvg_bullish',        label: 'Bullish Fair Value Gap',       col: '#5de8a0',
-            beg: 'A gap where buyers jumped in hard. Price may return to fill this gap before continuing up — a potential entry zone.',
-            adv: 'Bullish FVG in last 10 bars. Candle 3 high does not overlap candle 1 low — institutional demand imbalance.' },
-          { key: 'fvg_bearish',        label: 'Bearish Fair Value Gap',        col: '#e8706e',
-            beg: 'A gap where sellers pushed hard. Price may return to fill this gap before continuing down — a potential short entry zone.',
-            adv: 'Bearish FVG in last 10 bars. Candle 3 low does not overlap candle 1 high — institutional supply imbalance.' },
-          { key: 'liquidity_grab_bull',label: 'Bullish Liquidity Grab',        col: '#5de8a0',
-            beg: 'Price swept below a recent low (triggering stop-losses), then rejected sharply upward. Big players collected cheap positions.',
-            adv: 'Swing-low sweep + bullish rejection within same/next candle. Equal-low stop hunt confirmed.' },
-          { key: 'liquidity_grab_bear',label: 'Bearish Liquidity Grab',        col: '#e8706e',
-            beg: 'Price swept above a recent high (triggering buy-stops), then rejected sharply downward. Big players distributed into retail buyers.',
-            adv: 'Swing-high sweep + bearish rejection within same/next candle. Equal-high stop hunt confirmed.' },
-          { key: 'displacement_bull',  label: 'Bullish Displacement Candle',   col: '#5de8a0',
-            beg: 'An unusually large bullish candle — far bigger than normal. This is institutional order flow, not retail. Signals strong directional intent.',
-            adv: 'Bullish candle body > 2× ATR. Strong institutional momentum candle.' },
-          { key: 'displacement_bear',  label: 'Bearish Displacement Candle',   col: '#e8706e',
-            beg: 'An unusually large bearish candle — far bigger than normal. Institutions sold aggressively. Signals strong downside intent.',
-            adv: 'Bearish candle body > 2× ATR. Strong institutional momentum candle.' },
-          { key: 'choch_bull',         label: 'Change of Character (Bullish)', col: '#5de8a0',
-            beg: 'After a downtrend, price has broken its first swing high. This is the earliest signal that the trend may be reversing upward.',
-            adv: 'First higher swing-high break after a series of lower highs. CHOCH bullish — structure shift.' },
-          { key: 'choch_bear',         label: 'Change of Character (Bearish)', col: '#e8706e',
-            beg: 'After an uptrend, price has broken its first swing low. This is the earliest signal that the trend may be reversing downward.',
-            adv: 'First lower swing-low break after a series of higher lows. CHOCH bearish — structure shift.' },
-        ];
-        const _active = _smcDefs.filter(d => _smc[d.key] === true);
-        if (_active.length === 0) {
-          // Show collapsed "no structures" state — still educational
-          return '<div style="background:rgba(20,25,38,.95);border:1px solid rgba(201,168,76,.2);border-radius:12px;padding:14px 18px;margin-top:12px;">'
-            + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">'
-            + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,.7)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
-            + '<span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:rgba(237,232,216,.75);margin:0;">Smart Money Structures</span>'
-            + '<span style="font-family:var(--mono);font-size:9px;color:rgba(201,168,76,.6);margin-left:auto;letter-spacing:.05em;">NONE DETECTED</span>'
-            + '</div>'
-            + '<div style="font-size:10.5px;color:rgba(237,232,216,.5);line-height:1.55;">No institutional structure patterns detected on the last 10 bars. This is normal in trending or quiet markets — SMC patterns appear at turning points and after liquidity sweeps.</div>'
-            + '</div>';
-        }
-        // Show detected structures
-        const _isBeg = (typeof window._dvTier === 'string' && window._dvTier === 'beginner') || document.querySelector('[data-tier="beginner"]')?.style.display !== 'none';
-        const _rows = _active.map(d => {
-          return '<div data-guide="smc-' + d.key.replace(/_/g,'-') + '" style="display:flex;flex-direction:column;gap:4px;padding:10px 0;border-bottom:1px solid rgba(237,232,216,.07);">'
-            + '<div style="display:flex;align-items:center;gap:8px;">'
-            + '<span style="width:6px;height:6px;border-radius:50%;background:' + d.col + ';flex-shrink:0;"></span>'
-            + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;color:' + d.col + ';">' + d.label + '</span>'
-            + '</div>'
-            + '<div style="font-size:10.5px;color:rgba(237,232,216,.65);line-height:1.55;padding-left:14px;">' + d.beg + '</div>'
-            + '<div style="font-size:9.5px;font-family:var(--mono);color:rgba(237,232,216,.3);line-height:1.45;padding-left:14px;">' + d.adv + '</div>'
-            + '</div>';
-        }).join('');
-        const _alignBadge = _active.some(d => (isBuy && d.col === '#5de8a0') || (!isBuy && d.col === '#e8706e'))
-          ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:' + (isBuy ? 'rgba(93,232,160,.12)' : 'rgba(232,112,110,.12)') + ';color:' + (isBuy ? '#5de8a0' : '#e8706e') + ';margin-left:auto;">ALIGNED</span>'
-          : '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);color:rgba(201,168,76,.8);margin-left:auto;">MIXED</span>';
-        return '<div style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:12px;padding:16px 18px;margin-top:12px;">'
-          + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:12px;">'
-          + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.75)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
-          + '<span class="und-card-title" style="margin:0;">Smart Money Structures</span>'
-          + _alignBadge
-          + '</div>'
-          + _rows.replace(/border-bottom[^;]+;(?=<\/div><\/div>$)/,'')
-          + '<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:10px;line-height:1.5;">Smart Money Concepts: institutional patterns detected in the last 10 bars. These show where large players are accumulating or distributing positions.</div>'
-          + '</div>';
-      })()}
       <!-- Indicators grid -->
       <div class="und-card" data-guide="confluence-score" style="margin-top:12px;">
         <div class="und-card-title">Indicator Confluence</div>
@@ -12838,6 +12771,75 @@ function showUnderstand(){
 
     <!-- RIGHT: MTF + reason -->
     <div class="und-right">
+      <!-- SMC-FE: Smart Money Concepts structures card -->
+      ${(()=>{
+        const _smc = sig.smcStructures;
+        // Show card only when backend provided structure data
+        if (!_smc) return '';
+        // Build list of active structures with plain-English descriptions
+        const _smcDefs = [
+          { key: 'fvg_bullish',        label: 'Bullish Fair Value Gap',       col: '#5de8a0',
+            beg: 'A gap where buyers jumped in hard. Price may return to fill this gap before continuing up — a potential entry zone.',
+            adv: 'Bullish FVG in last 10 bars. Candle 3 high does not overlap candle 1 low — institutional demand imbalance.' },
+          { key: 'fvg_bearish',        label: 'Bearish Fair Value Gap',        col: '#e8706e',
+            beg: 'A gap where sellers pushed hard. Price may return to fill this gap before continuing down — a potential short entry zone.',
+            adv: 'Bearish FVG in last 10 bars. Candle 3 low does not overlap candle 1 high — institutional supply imbalance.' },
+          { key: 'liquidity_grab_bull',label: 'Bullish Liquidity Grab',        col: '#5de8a0',
+            beg: 'Price swept below a recent low (triggering stop-losses), then rejected sharply upward. Big players collected cheap positions.',
+            adv: 'Swing-low sweep + bullish rejection within same/next candle. Equal-low stop hunt confirmed.' },
+          { key: 'liquidity_grab_bear',label: 'Bearish Liquidity Grab',        col: '#e8706e',
+            beg: 'Price swept above a recent high (triggering buy-stops), then rejected sharply downward. Big players distributed into retail buyers.',
+            adv: 'Swing-high sweep + bearish rejection within same/next candle. Equal-high stop hunt confirmed.' },
+          { key: 'displacement_bull',  label: 'Bullish Displacement Candle',   col: '#5de8a0',
+            beg: 'An unusually large bullish candle — far bigger than normal. This is institutional order flow, not retail. Signals strong directional intent.',
+            adv: 'Bullish candle body > 2× ATR. Strong institutional momentum candle.' },
+          { key: 'displacement_bear',  label: 'Bearish Displacement Candle',   col: '#e8706e',
+            beg: 'An unusually large bearish candle — far bigger than normal. Institutions sold aggressively. Signals strong downside intent.',
+            adv: 'Bearish candle body > 2× ATR. Strong institutional momentum candle.' },
+          { key: 'choch_bull',         label: 'Change of Character (Bullish)', col: '#5de8a0',
+            beg: 'After a downtrend, price has broken its first swing high. This is the earliest signal that the trend may be reversing upward.',
+            adv: 'First higher swing-high break after a series of lower highs. CHOCH bullish — structure shift.' },
+          { key: 'choch_bear',         label: 'Change of Character (Bearish)', col: '#e8706e',
+            beg: 'After an uptrend, price has broken its first swing low. This is the earliest signal that the trend may be reversing downward.',
+            adv: 'First lower swing-low break after a series of higher lows. CHOCH bearish — structure shift.' },
+        ];
+        const _active = _smcDefs.filter(d => _smc[d.key] === true);
+        if (_active.length === 0) {
+          // Show collapsed "no structures" state — still educational
+          return '<div style="background:rgba(20,25,38,.95);border:1px solid rgba(201,168,76,.2);border-radius:12px;padding:14px 18px;margin-top:12px;">'
+            + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">'
+            + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,.7)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
+            + '<span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:rgba(237,232,216,.75);margin:0;">Smart Money Structures</span>'
+            + '<span style="font-family:var(--mono);font-size:9px;color:rgba(201,168,76,.6);margin-left:auto;letter-spacing:.05em;">NONE DETECTED</span>'
+            + '</div>'
+            + '<div style="font-size:10.5px;color:rgba(237,232,216,.5);line-height:1.55;">No institutional structure patterns detected on the last 10 bars. This is normal in trending or quiet markets — SMC patterns appear at turning points and after liquidity sweeps.</div>'
+            + '</div>';
+        }
+        // Show detected structures
+        const _isBeg = (typeof window._dvTier === 'string' && window._dvTier === 'beginner') || document.querySelector('[data-tier="beginner"]')?.style.display !== 'none';
+        const _rows = _active.map(d => {
+          return '<div data-guide="smc-' + d.key.replace(/_/g,'-') + '" style="display:flex;flex-direction:column;gap:4px;padding:10px 0;border-bottom:1px solid rgba(237,232,216,.07);">'
+            + '<div style="display:flex;align-items:center;gap:8px;">'
+            + '<span style="width:6px;height:6px;border-radius:50%;background:' + d.col + ';flex-shrink:0;"></span>'
+            + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;color:' + d.col + ';">' + d.label + '</span>'
+            + '</div>'
+            + '<div style="font-size:10.5px;color:rgba(237,232,216,.65);line-height:1.55;padding-left:14px;">' + d.beg + '</div>'
+            + '<div style="font-size:9.5px;font-family:var(--mono);color:rgba(237,232,216,.3);line-height:1.45;padding-left:14px;">' + d.adv + '</div>'
+            + '</div>';
+        }).join('');
+        const _alignBadge = _active.some(d => (isBuy && d.col === '#5de8a0') || (!isBuy && d.col === '#e8706e'))
+          ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:' + (isBuy ? 'rgba(93,232,160,.12)' : 'rgba(232,112,110,.12)') + ';color:' + (isBuy ? '#5de8a0' : '#e8706e') + ';margin-left:auto;">ALIGNED</span>'
+          : '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);color:rgba(201,168,76,.8);margin-left:auto;">MIXED</span>';
+        return '<div style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:12px;padding:16px 18px;margin-top:12px;">'
+          + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:12px;">'
+          + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.75)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
+          + '<span class="und-card-title" style="margin:0;">Smart Money Structures</span>'
+          + _alignBadge
+          + '</div>'
+          + _rows.replace(/border-bottom[^;]+;(?=<\/div><\/div>$)/,'')
+          + '<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:10px;line-height:1.5;">Smart Money Concepts: institutional patterns detected in the last 10 bars. These show where large players are accumulating or distributing positions.</div>'
+          + '</div>';
+      })()}
       <div class="und-card" data-guide="mtf-row">
         <div class="und-card-title">Multi-Timeframe Alignment</div>
         <div class="und-mtf-row" data-guide="mtf-alignment">${mtfHtml}</div>
@@ -13529,6 +13531,23 @@ async function undRunBacktest(silent){
     const pf = data.profit_factor!=null?data.profit_factor.toFixed(2):'—';
     const dd = data.max_dd_pct!=null?data.max_dd_pct.toFixed(1)+'%':'—';
     if(wrExtra) wrExtra.innerHTML = 'Profit Factor <strong style="color:rgba(237,232,216,.8);">'+pf+'</strong><br>Max Drawdown <strong style="color:rgba(224,85,85,.7);">'+dd+'</strong>';
+    // Beginner plain-English explanation — always visible below the numbers
+    var wrExplain = document.getElementById('undWrExplain');
+    if(wrExplain && wr != null){
+      var _samp = data.total_trades||data.num_trades||0;
+      var _tier = data.validity_tier || (_samp >= 100 ? 'confirmed' : _samp >= 30 ? 'provisional' : 'insufficient');
+      var _wrMeaning = wr >= 55
+        ? 'More than half of past setups like this resulted in a winning trade — that is a solid track record.'
+        : wr >= 45
+        ? 'Around 50/50 historically. The setup can still be profitable as long as the R:R is above 1:1 — winning trades must pay more than losing ones cost.'
+        : 'Below half of past setups won. For this to be worth trading, the winning trades need to be significantly larger than the losses. Check the R:R ratio.';
+      var _tierNote = _tier === 'provisional'
+        ? ' This is provisional — based on ' + _samp + ' trades. Results become more reliable above 100 trades.'
+        : _tier === 'insufficient'
+        ? ' Small sample (' + _samp + ' trades) — treat this with caution. More data is needed to be reliable.'
+        : ' Based on ' + _samp + ' trades — statistically reliable sample.';
+      wrExplain.innerHTML = '<strong style="color:rgba(237,232,216,.75);">What does ' + wr.toFixed(0) + '% win rate mean?</strong> In backtesting, this exact setup worked <strong>' + wr.toFixed(0) + ' out of 100 times</strong>. ' + _wrMeaning + _tierNote;
+    }
   }
   // Also store on signal so SIZE tab can read it
   if(wr != null && window._activeSignal) window._activeSignal.winRate = wr;
@@ -19305,6 +19324,13 @@ window._dvGuide = {
     title: 'HYPOTHESIS — Weaker Signal',
     body: 'Fewer than two-thirds of indicators agree, or there is conflicting data. The signal has just passed the minimum 65% threshold. Consider using a smaller position size or waiting for the next candle to close and confirm.',
     example: 'DotVerse: 67% confluence, RSI overbought, volume low → HYPOTHESIS — proceed with caution.'
+  },
+
+  // ── WIN RATE ─────────────────────────────────────────────────────────────
+  'win-rate': {
+    title: 'Win Rate — Historical Performance',
+    body: 'Win rate tells you how often this type of setup historically ended in a winning trade (reached TP1 before SL). It is NOT a prediction — it is a track record from past data.\n\nAbove 55% = more wins than losses, solid.\nAround 50% = neutral — the R:R ratio decides if it\'s worth taking.\nBelow 45% = losing trades outnumber winners — you need a higher reward vs risk to compensate.\n\n"Provisional" means the sample is 30–99 trades. Reliable above 100 trades.',
+    example: '30% win rate on 94 trades means in past setups like this, 30 out of 100 ended at TP1. The other 70 hit the stop loss. This is still tradeable if the R:R is at least 1:2.5 — one win covers two and a half losses.'
   },
 
   // ── TRADE TYPE ───────────────────────────────────────────────────────────
