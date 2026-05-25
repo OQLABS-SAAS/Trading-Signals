@@ -12731,6 +12731,8 @@ def portfolio_reset():
 @login_required
 def signals_cost_analysis():
     """J1: Per-trade fee drag analysis across closed trades."""
+    if not _DBSession:
+        return jsonify({"ready": False, "message": "Database not available"}), 503
     db = _DBSession()
     try:
         uid  = session["user_id"]
@@ -12782,6 +12784,8 @@ def signals_cost_analysis():
 def validate_montecarlo():
     """J2: Monte Carlo simulation on historical R-multiples."""
     import random
+    if not _DBSession:
+        return jsonify({"ready": False, "message": "Database not available"}), 503
     db = _DBSession()
     try:
         uid  = session["user_id"]
