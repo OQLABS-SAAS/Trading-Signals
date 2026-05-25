@@ -12828,7 +12828,7 @@ function showUnderstand(){
       <div class="und-card" id="undSmcCard" style="margin-top:12px;">
         <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.75)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-          <span class="und-card-title" style="margin:0;">Smart Money Structures</span>
+          <span class="und-card-title" style="margin:0;cursor:help;" data-guide="smc-title">Smart Money Structures <span style="font-size:9px;color:rgba(201,168,76,.5);font-family:var(--mono);">ⓘ</span></span>
           <span id="undSmcBadge" style="font-family:var(--mono);font-size:9px;color:rgba(201,168,76,.7);margin-left:auto;letter-spacing:.05em;"></span>
         </div>
         <div id="undSmcBody" style="font-size:10.5px;color:rgba(237,232,216,.5);line-height:1.55;"></div>
@@ -12903,21 +12903,21 @@ function showUnderstand(){
     var _smc = (window._activeSignal && window._activeSignal.smcStructures) || null;
     var _smcDefs = [
       { key: 'fvg_bullish',         label: 'Bullish Fair Value Gap',        col: '#5de8a0',
-        body: 'A gap where buyers jumped in hard — price may return here before continuing up. A potential entry zone for bullish traders.' },
+        body: 'The market moved up so fast it skipped over this price level. It will likely come back here briefly before going higher. This is normal — it actually confirms the upward move.' },
       { key: 'fvg_bearish',         label: 'Bearish Fair Value Gap',         col: '#e8706e',
-        body: 'A gap where sellers pushed hard — price may return here before continuing down. A potential entry zone for bearish traders.' },
+        body: 'The market moved down so fast it skipped over this price level. It will likely come back here briefly before going lower. This is normal — it actually confirms the downward move.' },
       { key: 'liquidity_grab_bull', label: 'Bullish Liquidity Grab',         col: '#5de8a0',
-        body: 'Price swept below a recent low (triggering stop-losses), then rejected sharply upward. Big players collected cheap positions.' },
+        body: 'Price dropped lower than expected, then immediately shot back up. This was a trap — it shook out nervous traders before the real move upward started. Your BUY signal is supported by this.' },
       { key: 'liquidity_grab_bear', label: 'Bearish Liquidity Grab',         col: '#e8706e',
-        body: 'Price swept above a recent high (triggering buy-stops), then rejected downward. Big players distributed into retail buyers.' },
+        body: 'Price rose higher than expected, then immediately dropped back down. This was a trap — it got excited traders to buy before the real move downward started. Your SELL signal is supported by this.' },
       { key: 'displacement_bull',   label: 'Bullish Displacement Candle',    col: '#5de8a0',
-        body: 'An unusually large bullish candle — far bigger than normal. This is institutional order flow. Signals strong upside intent.' },
+        body: 'One bar on the chart is much taller than all the others around it — a massive upward move in a single moment. When price moves this fast and this far upward, it usually keeps going in the same direction.' },
       { key: 'displacement_bear',   label: 'Bearish Displacement Candle',    col: '#e8706e',
-        body: 'An unusually large bearish candle — institutions sold aggressively. Signals strong downside intent.' },
-      { key: 'choch_bull',          label: 'Change of Character (Bullish)',  col: '#5de8a0',
-        body: 'After a downtrend, price broke its first swing high. Earliest signal the trend may be reversing upward.' },
-      { key: 'choch_bear',          label: 'Change of Character (Bearish)',  col: '#e8706e',
-        body: 'After an uptrend, price broke its first swing low. Earliest signal the trend may be reversing downward.' },
+        body: 'One bar on the chart is much taller than all the others around it — a massive downward move in a single moment. When price moves this fast and this far downward, it usually keeps going in the same direction.' },
+      { key: 'choch_bull',          label: 'Change of Character — Bullish',  col: '#5de8a0',
+        body: 'The market was falling. It just showed the first sign it might turn around and go up instead. This is not confirmed yet — but DotVerse flagged it because it is the earliest possible warning that the fall may be ending.' },
+      { key: 'choch_bear',          label: 'Change of Character — Bearish',  col: '#e8706e',
+        body: 'The market was rising. It just showed the first sign it might turn around and go down instead. This is not confirmed yet — but DotVerse flagged it because it is the earliest possible warning that the rise may be ending.' },
     ];
     if (!_smc) {
       // Auto-fetch analyze to get smc_structures — mirrors C3b VIX fallback pattern.
@@ -12949,21 +12949,54 @@ function showUnderstand(){
     var _active = _smcDefs.filter(function(d){ return _smc[d.key] === true; });
     if (_active.length === 0) {
       smcBadge.textContent = 'NONE DETECTED';
-      smcCard.innerHTML = 'No institutional structure patterns detected on the last 10 bars. This is normal in trending markets — SMC patterns appear at turning points and after liquidity sweeps.';
+      smcCard.innerHTML = 'No hidden price patterns found in the last 10 candles. That is fine — DotVerse\'s signal is still based on its other indicators. These patterns are a bonus when they appear, not a requirement.';
       return;
     }
     smcBadge.style.color = '#5de8a0';
     smcBadge.textContent = _active.length + ' PATTERN' + (_active.length > 1 ? 'S' : '') + ' DETECTED';
+    // SMC verdict: count aligned vs opposing patterns vs current signal
+    var _bullKeys = ['fvg_bullish','liquidity_grab_bull','displacement_bull','choch_bull'];
+    var _bearKeys = ['fvg_bearish','liquidity_grab_bear','displacement_bear','choch_bear'];
+    var _activeBull = _active.filter(function(d){ return _bullKeys.indexOf(d.key) !== -1; }).length;
+    var _activeBear = _active.filter(function(d){ return _bearKeys.indexOf(d.key) !== -1; }).length;
+    var _curSig = (window._activeSignal && window._activeSignal.sig) ? window._activeSignal.sig.toUpperCase() : 'HOLD';
+    var _verdictText = '', _verdictCol = '', _verdictBg = '';
+    if (_active.length === 1) {
+      var _onlyBull = _activeBull === 1;
+      var _matchesSig = (_onlyBull && _curSig === 'BUY') || (!_onlyBull && _curSig === 'SELL');
+      if (_matchesSig) { _verdictText = 'This pattern supports your ' + _curSig + '. Big player activity is aligned with your trade.'; _verdictCol = '#5de8a0'; _verdictBg = 'rgba(93,232,160,.07)'; }
+      else if (_curSig === 'HOLD') { _verdictText = 'DotVerse detected a pattern but the overall signal is HOLD — conditions are not clear enough yet.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)'; }
+      else { _verdictText = 'This pattern does not align with your ' + _curSig + '. DotVerse weighed this alongside its other indicators — its verdict stands, but be aware of the conflict.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)'; }
+    } else if (_activeBull > 0 && _activeBear === 0 && _curSig === 'BUY') {
+      _verdictText = 'All ' + _active.length + ' patterns support your BUY. Multiple big-player footprints confirm the upward direction — this is a high-conviction setup.'; _verdictCol = '#5de8a0'; _verdictBg = 'rgba(93,232,160,.07)';
+    } else if (_activeBear > 0 && _activeBull === 0 && _curSig === 'SELL') {
+      _verdictText = 'All ' + _active.length + ' patterns support your SELL. Multiple big-player footprints confirm the downward direction — this is a high-conviction setup.'; _verdictCol = '#e8706e'; _verdictBg = 'rgba(232,112,110,.07)';
+    } else if (_activeBull > _activeBear && _curSig === 'BUY') {
+      _verdictText = _activeBull + ' of ' + _active.length + ' patterns support your BUY. The balance favours upward movement — proceed with your normal position size.'; _verdictCol = '#5de8a0'; _verdictBg = 'rgba(93,232,160,.07)';
+    } else if (_activeBear > _activeBull && _curSig === 'SELL') {
+      _verdictText = _activeBear + ' of ' + _active.length + ' patterns support your SELL. The balance favours downward movement — proceed with your normal position size.'; _verdictCol = '#e8706e'; _verdictBg = 'rgba(232,112,110,.07)';
+    } else if (_curSig === 'HOLD') {
+      _verdictText = 'Mixed big-player signals detected — this is one reason DotVerse said HOLD. Wait for a cleaner setup where patterns and indicators agree.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)';
+    } else {
+      _verdictText = 'Patterns conflict with your ' + _curSig + ' signal. DotVerse weighed this carefully — but consider using a smaller position size than usual given the conflict.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)';
+    }
+    var _verdictHtml = '<div style="margin-top:10px;padding:9px 12px;border-radius:6px;background:'+_verdictBg+';border:1px solid '+_verdictCol.replace(')',', .25)').replace('rgb','rgba')+';display:flex;gap:9px;align-items:flex-start;">'
+      + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="'+_verdictCol+'" stroke-width="2.2" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>'
+      + '<div><div style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:'+_verdictCol+';margin-bottom:3px;">DOTVERSE VERDICT</div>'
+      + '<div style="font-size:10.5px;color:rgba(237,232,216,.8);line-height:1.55;">'+_verdictText+'</div></div>'
+      + '</div>';
     smcCard.innerHTML = _active.map(function(d){
+      var guideKey = 'smc-' + d.key.replace(/_/g, '-');
       return '<div style="display:flex;flex-direction:column;gap:4px;padding:9px 0;border-bottom:1px solid rgba(237,232,216,.07);">'
         + '<div style="display:flex;align-items:center;gap:8px;">'
         + '<span style="width:7px;height:7px;border-radius:50%;background:'+d.col+';flex-shrink:0;"></span>'
-        + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;color:'+d.col+';">'+d.label+'</span>'
+        + '<span data-guide="'+guideKey+'" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;color:'+d.col+';cursor:help;">'+d.label+' <span style="font-size:8px;opacity:.5;">ⓘ</span></span>'
         + '</div>'
         + '<div style="font-size:10.5px;color:rgba(237,232,216,.7);line-height:1.55;padding-left:15px;">'+d.body+'</div>'
         + '</div>';
     }).join('').replace(/border-bottom:[^;]+;(<\/div><\/div>)$/, '$1')
-      + '<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:8px;line-height:1.5;">Institutional patterns detected in the last 10 bars. These show where large players are positioning.</div>';
+      + _verdictHtml
+      + '<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:8px;line-height:1.5;">DotVerse scanned the last 10 candles for these patterns. They show hidden activity that is normally invisible to regular traders. Hover any pattern name to learn more.</div>';
   })();
   // ── C3b: VIX badge async fallback ─────────────────────────────────────────
   // When the signal was loaded via loadScannerSignal() (signal feed cards),
@@ -19569,45 +19602,50 @@ window._dvGuide = {
   },
 
   // ── SMC: Smart Money Concepts ─────────────────────────────────────────────
+  'smc-title': {
+    title: 'What is Smart Money?',
+    body: 'Smart money refers to the large banks, hedge funds, and investment firms that control billions of dollars. Because they are so large, they cannot buy or sell without leaving footprints in the price chart that regular traders never notice. DotVerse scans for those footprints. Knowing what the big players are doing lets you trade alongside them — instead of being caught on the wrong side when they move the market.',
+    example: 'A large bank needs to buy $500 million of Bitcoin. If they place one huge buy order, the price shoots up before they finish — costing them more. So they use tricks: temporarily dip the price to force other traders out cheaply, then buy everything. DotVerse is designed to spot those tricks.'
+  },
   'smc-fvg-bullish': {
     title: 'Bullish Fair Value Gap',
-    body: 'A Fair Value Gap (FVG) is a 3-candle pattern where the middle candle moves so fast that price leaves a gap — an area that was never properly traded. A bullish FVG means buyers moved price up so quickly that they left unfilled orders below. Price often returns to fill these gaps before continuing upward, making them high-probability entry zones for BUY trades.',
-    example: 'BUY signal with bullish FVG: price may pull back to the FVG zone before rising further. This pullback is normal — it is the market filling the gap. Patient traders wait for price to touch the gap and show bullish reaction before entering.'
+    body: 'The market moved up so fast it skipped a price zone — big institutions bought aggressively and left a gap below the current price. Is your BUY still good? Yes. If price briefly dips back toward the gap, that is normal and expected — it is not the trade failing. What to do: Nothing. DotVerse is already tracking this zone. Hold your position and let your stop loss do its job.',
+    example: 'A lift jumps from floor 3 to floor 7 without stopping. Eventually it comes back to fill those floors. The gap is floors 4–6. When price returns there briefly, it is not reversing — it is just a healthy pause before going higher.'
   },
   'smc-fvg-bearish': {
     title: 'Bearish Fair Value Gap',
-    body: 'A bearish FVG means sellers moved price down so quickly that they left unfilled orders above. Price often returns to fill this gap before continuing downward, making it a high-probability entry zone for SELL trades.',
-    example: 'SELL signal with bearish FVG: price may pull back up to the FVG zone before dropping further. This retest is the market filling the gap — watch for price to show bearish reaction at that level.'
+    body: 'The market dropped so fast it skipped a price zone — big institutions sold aggressively and left a gap above the current price. Is your SELL still good? Yes. If price briefly bounces back toward the gap, that is normal and expected — it is not the trade failing. What to do: Nothing. DotVerse is already tracking this zone. Hold your position and let your stop loss do its job.',
+    example: 'A lift falls from floor 7 to floor 3 without stopping. When price bounces back up to those skipped floors, it is filling the gap — then it typically resumes falling.'
   },
   'smc-liquidity-grab-bull': {
     title: 'Bullish Liquidity Grab',
-    body: 'Large players (institutions, market makers) swept below a recent low to trigger retail stop-losses — collecting cheap positions from panicking sellers — then immediately reversed upward. This is a classic manipulation move. The reversal after the sweep is a strong signal that smart money has loaded long positions.',
-    example: 'Price drops below yesterday\'s low, hitting everyone\'s stop-losses, then aggressively bounces back up. That reversal is where institutions bought. This is a bullish entry signal, not a sign the market is going lower.'
+    body: 'Big institutions temporarily pushed the price lower to trigger nervous traders into panic-selling, then bought everything at those cheap prices. Price immediately shot back up. Is your BUY still good? Yes — this actually strengthens it. The big players just revealed they want this asset higher by buying aggressively at a discount. What to do: Nothing extra. Hold your plan. DotVerse has flagged this as direct supporting evidence for your BUY.',
+    example: 'A fund pushes price from $105 down to $99 to trigger automatic sell orders. The fund buys all those panic-sales at $99. Price jumps back to $112. The dip to $99 was manufactured to let the big players buy cheaply.'
   },
   'smc-liquidity-grab-bear': {
     title: 'Bearish Liquidity Grab',
-    body: 'Large players swept above a recent high to trigger buy-stop orders and lure retail traders into longs — then immediately reversed downward. The reversal after the sweep signals that smart money has distributed (sold) into the retail buy orders.',
-    example: 'Price breaks above last week\'s high, triggering buy-stops, then reverses hard downward. Retail traders who bought the breakout are now trapped. This is a bearish signal — institutions used the breakout to sell into demand.'
+    body: 'Big institutions temporarily pushed the price higher to trigger eager traders into buying, then sold everything into those buyers at inflated prices. Price immediately dropped back down. Is your SELL still good? Yes — this actually strengthens it. The big players just revealed they want this asset lower by selling aggressively into strength. What to do: Nothing extra. Hold your plan. DotVerse has flagged this as direct supporting evidence for your SELL.',
+    example: 'A fund pushes price from $190 up to $202 to trigger automatic buy orders. The fund sells everything into those eager buyers at $202. Price drops back to $183. The push to $202 was manufactured to let the big players sell at a premium.'
   },
   'smc-displacement-bull': {
     title: 'Bullish Displacement Candle',
-    body: 'A displacement candle is a single candle with a body more than twice the Average True Range (ATR). It shows that institutions entered with massive force — not typical retail buying. A bullish displacement candle signals a strong directional move driven by institutional order flow, not just retail momentum.',
-    example: 'Normal candle is $200 high-to-low. Displacement candle is $500+ high-to-low with a bullish close. This is not retail traders — this is a fund or large institution executing a large buy order. The direction of the displacement usually continues.'
+    body: 'One single candle moved far more than any candle around it — a massive green bar caused by a large institution placing a huge buy order all at once. Regular traders simply cannot produce a move that size. Is your BUY still good? Yes — this is one of the strongest possible signals. Institutions act decisively like this when they are very confident about direction. What to do: Nothing extra. This raises your confidence. DotVerse has already factored it into your analysis.',
+    example: 'Every candle for the past hour moves about $50. Then one candle moves $300 upward in a single minute. Only a large fund placing one massive order can do that. Their conviction usually continues in the same direction.'
   },
   'smc-displacement-bear': {
     title: 'Bearish Displacement Candle',
-    body: 'A large bearish candle (body > 2× ATR) shows institutions sold aggressively in a single candle. This is not normal selling — it is a directional statement. The bearish displacement signals strong downside intent from smart money.',
-    example: 'A candle that drops $500+ with a bearish close when normal candles are $200. Institutions are unloading a large position. The direction usually continues after displacement.'
+    body: 'One single candle moved far more than any candle around it — a massive red bar caused by a large institution placing a huge sell order all at once. Regular traders simply cannot produce a move that size. Is your SELL still good? Yes — this is one of the strongest possible signals. Institutions act decisively like this when they are very confident about direction. What to do: Nothing extra. This raises your confidence. DotVerse has already factored it into your analysis.',
+    example: 'Every candle for the past hour moves about $50. Then one candle drops $300 downward in a single minute. Only a large fund placing one massive sell order can do that. Their conviction usually continues in the same direction.'
   },
   'smc-choch-bull': {
-    title: 'Change of Character — Bullish',
-    body: 'After a downtrend (sequence of lower highs and lower lows), price has broken the first swing high. This is called a Change of Character (CHOCH) — the market structure has shifted. It does not confirm a full reversal yet, but it signals that selling pressure has weakened and buyers are beginning to take control.',
-    example: 'Price has been making lower highs for 3 weeks. Then it breaks above the last lower high for the first time. This CHOCH bullish signal tells you: the downtrend may be ending. Watch for a higher low to form next — if it does, that confirms the trend reversal.'
+    title: 'Change of Character — Bullish Shift',
+    body: 'The market had been falling. It just made its first move upward that broke above a previous high — the earliest possible sign of a potential trend reversal. Is your BUY still good? If DotVerse still shows BUY, yes — this pattern is part of the supporting evidence for that call. What to do: Nothing. DotVerse has already factored this into your signal. You do not need to monitor the chart — your stop loss is your protection if the reversal fails.',
+    example: 'A ball bouncing down stairs — each bounce is lower than the last. Then one bounce goes higher than the previous step. That is the Change of Character. DotVerse flagged it. Your job is to hold the plan, not interpret the chart.'
   },
   'smc-choch-bear': {
-    title: 'Change of Character — Bearish',
-    body: 'After an uptrend, price has broken the first swing low — signaling that buying pressure has weakened. This CHOCH bearish is the earliest structural warning that the uptrend may be reversing.',
-    example: 'Price has been making higher lows for a month. Then it breaks below the last higher low. This CHOCH bearish signal says: the uptrend structure is broken. Watch for a lower high to form — if it does, that confirms the reversal and a potential SELL setup.'
+    title: 'Change of Character — Bearish Shift',
+    body: 'The market had been rising. It just made its first move downward that broke below a previous low — the earliest possible sign of a potential trend reversal. Is your SELL still good? If DotVerse still shows SELL, yes — this pattern is part of the supporting evidence for that call. What to do: Nothing. DotVerse has already factored this into your signal. You do not need to monitor the chart — your stop loss is your protection if the reversal fails.',
+    example: 'A ball bouncing up stairs — each bounce reaches a higher step. Then one bounce fails and lands below the previous step. That is the Change of Character. DotVerse flagged it. Your job is to hold the plan, not interpret the chart.'
   },
 
   // ── WHAT TO DO NEXT (Understand tab) ─────────────────────────────────────
