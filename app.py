@@ -12696,7 +12696,7 @@ def signal_stats():
 @login_required
 def signals_cost_analysis():
     """J1: Per-trade fee drag analysis across closed trades."""
-    db = SessionLocal()
+    db = _DBSession()
     try:
         uid  = session["user_id"]
         rows = db.query(SignalHistory).filter(
@@ -12742,7 +12742,7 @@ def signals_cost_analysis():
 def validate_montecarlo():
     """J2: Monte Carlo simulation on historical R-multiples."""
     import random
-    db = SessionLocal()
+    db = _DBSession()
     try:
         uid  = session["user_id"]
         rows = db.query(SignalHistory).filter(
