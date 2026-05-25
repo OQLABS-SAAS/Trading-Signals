@@ -8412,7 +8412,27 @@ async function _sfFetchSignals(){
       + (btBadge ? '<div style="padding:0 14px 4px;">' + btBadge + (tfHint||'') + '</div>' : '')
       + (o.spreadCost && o.spreadCost > 0 ? '<div style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;"><span style="color:rgba(201,168,76,.45);">spread adj</span><span style="padding:1px 6px;border-radius:3px;font-size:8px;letter-spacing:.05em;' + ({'wide':'background:rgba(224,85,85,.12);color:#e05555;','fair':'background:rgba(237,232,216,.07);color:rgba(237,232,216,.4);','tight':'background:rgba(61,190,108,.1);color:#3dbe6c;'}[o.spreadQuality||'fair']||'') + '">' + (o.spreadQuality||'fair').toUpperCase() + '</span>' + (o.spreadSrc === 'live' ? '<span style="display:inline-flex;align-items:center;gap:3px;color:#3dbe6c;font-size:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#3dbe6c;animation:lpulse 1.8s ease-in-out infinite;flex-shrink:0;"></span>LIVE</span>' : '') + '</div>' : '')
       + '<div class="opp-reason">' + o.reason + '</div>'
-      + ''
+      + (function(_smc, _sig, _entry){
+          if (!_smc || typeof _smc !== 'object') return '';
+          var _keys = ['fvg_bullish','fvg_bearish','liquidity_grab_bull','liquidity_grab_bear','displacement_bull','displacement_bear','choch_bull','choch_bear'];
+          var _short = {fvg_bullish:'FVG ↑',fvg_bearish:'FVG ↓',liquidity_grab_bull:'Liq. Grab ↑',liquidity_grab_bear:'Liq. Grab ↓',displacement_bull:'Displacement ↑',displacement_bear:'Displacement ↓',choch_bull:'CHOCH ↑',choch_bear:'CHOCH ↓'};
+          var _lvlKeys = {fvg_bullish:'fvg_bullish_level',fvg_bearish:'fvg_bearish_level',liquidity_grab_bull:'liquidity_grab_bull_level',liquidity_grab_bear:'liquidity_grab_bear_level',displacement_bull:'displacement_bull_level',displacement_bear:'displacement_bear_level',choch_bull:'choch_bull_level',choch_bear:'choch_bear_level'};
+          var _bullKeys = {fvg_bullish:1,liquidity_grab_bull:1,displacement_bull:1,choch_bull:1};
+          var detected = _keys.filter(function(k){ return _smc[k] === true; });
+          if (!detected.length) return '';
+          var badges = detected.map(function(k){
+            var isBullPat = !!_bullKeys[k];
+            var aligned = (_sig==='BUY'&&isBullPat)||(_sig==='SELL'&&!isBullPat);
+            var lvl = _smc[_lvlKeys[k]];
+            var lvlTxt = lvl != null ? ' $'+lvl : '';
+            var col = aligned ? 'rgba(93,232,160,.9)' : 'rgba(201,168,76,.85)';
+            var bg  = aligned ? 'rgba(93,232,160,.06)' : 'rgba(201,168,76,.06)';
+            var bdr = aligned ? 'rgba(93,232,160,.18)' : 'rgba(201,168,76,.2)';
+            var tag = aligned ? '' : ' <span style="font-size:7.5px;opacity:.65;">(context)</span>';
+            return '<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:3px;background:'+bg+';border:1px solid '+bdr+';color:'+col+';font-family:var(--mono);font-size:8.5px;font-weight:600;white-space:nowrap;">'+_short[k]+lvlTxt+tag+'</span>';
+          }).join('');
+          return '<div style="padding:4px 14px 5px;border-top:1px solid rgba(255,255,255,.04);display:flex;flex-wrap:wrap;gap:4px;align-items:center;"><span style="font-size:8px;color:rgba(237,232,216,.3);font-family:var(--mono);letter-spacing:.05em;margin-right:2px;">SMC</span>'+badges+'</div>';
+        })(o.smc_structures, o.sig, o.entry)
       + (o.sig !== 'HOLD' && o.entry ? '<div id="lp-' + o.sym.replace(/[^a-zA-Z0-9]/g,'') + '-' + i + '" style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);">'
         + '<span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.2);flex-shrink:0;"></span>loading live price…</div>' : '')
       + (o.sig!=='HOLD'?((o.conf||0)>=65?'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>':'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>')
@@ -12156,7 +12176,71 @@ function showUnderstand(){
     i=>i.ok?'The higher timeframe (daily chart) agrees with this '+sig.sig+' setup.':'The daily chart trend doesn\'t fully agree. Consider waiting for alignment.',
     i=>{ const bull=sig.bullCount||0, bear=sig.bearCount||0, tot=bull+bear||8; return bull+' out of '+tot+' DotVerse checks agree this is a '+sig.sig+'. You need at least 65% agreement for a signal to fire.'; },
   ];
-  const agreedCount = indicators.filter(i=>i.ok).length;
+  // ── Inject ALL detected SMC patterns as indicator rows ─────────────────
+  // Aligned patterns (match signal direction) = green · confirms trade.
+  // Opposing patterns = amber · actionable context — exact instruction per pattern.
+  // The beginner sees: what this means for MY trade and what to do next.
+  var _smcStructures = (window._activeSignal && window._activeSignal.smcStructures) || {};
+  var _curSmcSig = (window._activeSignal && window._activeSignal.sig) ? window._activeSignal.sig.toUpperCase() : 'HOLD';
+  var _smcDefs = [
+    {k:'fvg_bullish',        lk:'fvg_bullish_level',        d:'bull',lbl:'Fair Value Gap'},
+    {k:'fvg_bearish',        lk:'fvg_bearish_level',        d:'bear',lbl:'Fair Value Gap'},
+    {k:'liquidity_grab_bull',lk:'liquidity_grab_bull_level',d:'bull',lbl:'Liquidity Grab'},
+    {k:'liquidity_grab_bear',lk:'liquidity_grab_bear_level',d:'bear',lbl:'Liquidity Grab'},
+    {k:'displacement_bull',  lk:'displacement_bull_level',  d:'bull',lbl:'Strong Candle'},
+    {k:'displacement_bear',  lk:'displacement_bear_level',  d:'bear',lbl:'Strong Candle'},
+    {k:'choch_bull',         lk:'choch_bull_level',         d:'bull',lbl:'Structure Break'},
+    {k:'choch_bear',         lk:'choch_bear_level',         d:'bear',lbl:'Structure Break'},
+  ];
+  // Beginner plain-English: aligned variant (green) — confirms the trade
+  var _smcBegAligned = {
+    fvg_bullish:         function(l){ return 'Institutions left a gap'+(l?' at '+l:'')+' — price may dip here before continuing up. If it pulls back, this is a re-entry opportunity — not a reversal. Hold your BUY.'; },
+    fvg_bearish:         function(l){ return 'Institutions left a gap'+(l?' at '+l:'')+' — price may rally here before continuing down. If it pulls back up, this is a re-entry zone. Hold your SELL.'; },
+    liquidity_grab_bull: function(l){ return 'Bears were stopped out'+(l?' at '+l:'')+'. Smart money absorbed their selling. Trapped bears are now forced buyers — powerful BUY confirmation. Enter with confidence.'; },
+    liquidity_grab_bear: function(l){ return 'Bulls were stopped out'+(l?' at '+l:'')+'. Smart money absorbed their buying. Trapped bulls are now forced sellers — powerful SELL confirmation. Enter with confidence.'; },
+    displacement_bull:   function(l){ return 'A big institution bought hard'+(l?' near '+l:'')+' — candle body more than twice the normal range. Real order flow, not a random spike. This directly confirms your BUY.'; },
+    displacement_bear:   function(l){ return 'A big institution sold hard'+(l?' near '+l:'')+' — candle body more than twice the normal range. Real order flow, not a random spike. This directly confirms your SELL.'; },
+    choch_bull:          function(l){ return 'The downtrend officially broke'+(l?' at '+l:'')+'. Price is now making higher highs — the market has changed direction. This is strong confirmation. Enter your BUY.'; },
+    choch_bear:          function(l){ return 'The uptrend officially broke'+(l?' at '+l:'')+'. Price is now making lower lows — the market has changed direction. This is strong confirmation. Enter your SELL.'; },
+  };
+  // Beginner plain-English: opposing variant (amber) — actionable context, not a contradiction
+  var _smcBegOpposing = {
+    fvg_bullish:         function(l){ return 'A bullish gap'+(l?' at '+l:'')+' sits below your entry. This acts as a support floor — if price dips here it will likely bounce. Your SELL is not invalidated. If price reverses sharply'+(l?' at '+l:' at this level')+', tighten your stop.'; },
+    fvg_bearish:         function(l){ return 'A bearish gap'+(l?' at '+l:'')+' sits above your entry. If price reaches this level it may stall temporarily. If it stalls and reverses'+(l?' at '+l:' there')+', tighten your stop. Otherwise, hold your BUY.'; },
+    liquidity_grab_bull: function(l){ return 'Bears were swept'+(l?' at '+l:'')+' — that level is now strong support below your trade. It is unlikely to break on a first test, which actually protects your SELL from below.'; },
+    liquidity_grab_bear: function(l){ return 'Bulls were swept'+(l?' at '+l:'')+' — that level is now resistance above your trade. If price reaches'+(l?' '+l:' that zone')+' and fails to break through, tighten your stop loss immediately.'; },
+    displacement_bull:   function(l){ return 'A strong buy candle printed'+(l?' near '+l:'')+'. This area is a support zone. If price re-tests here it is likely to hold — do not exit your SELL early on a brief dip to this level.'; },
+    displacement_bear:   function(l){ return 'A strong sell candle printed'+(l?' near '+l:'')+'. This area is a resistance zone. If price reaches this level and shows signs of rejection, that confirms your BUY is stalling — tighten your stop.'; },
+    choch_bull:          function(l){ return 'A prior downtrend broke'+(l?' at '+l:'')+' — this is now structure support. As long as price stays above'+(l?' '+l:' this level')+', your SELL can still work. If price pushes back above it, close the trade.'; },
+    choch_bear:          function(l){ return 'A prior uptrend broke'+(l?' at '+l:'')+'. This is resistance above your BUY entry. If price pushes back ABOVE'+(l?' '+l:' this level')+', your BUY signal is invalidated — close the trade immediately.'; },
+  };
+  // Advanced sub-line text
+  var _smcAdvSub = {
+    fvg_bullish:         function(l,al){ return 'Bullish FVG'+(l?' at $'+l:'')+' — '+(al?'demand zone, institutions defend.':'support floor below price.'); },
+    fvg_bearish:         function(l,al){ return 'Bearish FVG'+(l?' at $'+l:'')+' — '+(al?'supply zone, institutions defend.':'resistance ceiling above price.'); },
+    liquidity_grab_bull: function(l,al){ return 'Swept lows'+(l?' at $'+l:'')+' — '+(al?'trapped bears add buying fuel.':'support zone, unlikely to break easily.'); },
+    liquidity_grab_bear: function(l,al){ return 'Swept highs'+(l?' at $'+l:'')+' — '+(al?'trapped bulls add selling fuel.':'resistance zone, tighten stop if price fails here.'); },
+    displacement_bull:   function(l,al){ return 'Inst. buy candle'+(l?' at $'+l:'')+', body > 2× ATR — '+(al?'confirms order flow.':'support on re-test.'); },
+    displacement_bear:   function(l,al){ return 'Inst. sell candle'+(l?' at $'+l:'')+', body > 2× ATR — '+(al?'confirms order flow.':'resistance on re-test.'); },
+    choch_bull:          function(l,al){ return 'Structure break'+(l?' at $'+l:'')+' — '+(al?'lower-highs ended, reversal confirmed.':'now acts as support.'); },
+    choch_bear:          function(l,al){ return 'Structure break'+(l?' at $'+l:'')+' — '+(al?'higher-lows ended, reversal confirmed.':'now acts as resistance.'); },
+  };
+  _smcDefs.forEach(function(def) {
+    if (!_smcStructures[def.k]) return;
+    var lvl    = _smcStructures[def.lk];
+    var lvlStr = lvl != null ? lvl.toString() : null;
+    var aligned = (_curSmcSig === 'BUY' && def.d === 'bull') || (_curSmcSig === 'SELL' && def.d === 'bear');
+    var dirLabel = def.d === 'bull' ? 'Bullish' : 'Bearish';
+    var begFn  = aligned ? _smcBegAligned[def.k] : _smcBegOpposing[def.k];
+    var begTxt = begFn ? begFn(lvlStr) : (dirLabel + ' ' + def.lbl + (lvlStr ? ' at ' + lvlStr : '') + '.');
+    var subFn  = _smcAdvSub[def.k];
+    var advSub = subFn ? subFn(lvlStr, aligned) : (dirLabel + ' ' + def.lbl + '.');
+    var advVal = dirLabel + (aligned ? ' · confirms' : ' · context');
+    indicators.push({n: def.lbl+' '+(def.d==='bull'?'↑':'↓'), v: advVal, ok: aligned ? true : 'info', sub: advSub, _isSmc: true});
+    _begNames.push(def.lbl + ' (Smart Money)');
+    _begDesc.push((function(_t){ return function(){ return _t; }; })(begTxt));
+  });
+  const agreedCount = indicators.filter(i=>i.ok===true).length;
   // ── BEGINNER indicator card ──────────────────────────────────────────────
   const begIndHtml = `
     <div data-tier="beginner">
@@ -12166,26 +12250,37 @@ function showUnderstand(){
         <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;margin-bottom:12px;">
           <div style="height:100%;width:${Math.round(agreedCount/indicators.length*100)}%;background:${isBuy?'rgba(93,232,160,.7)':'rgba(232,112,110,.7)'};border-radius:3px;transition:width .5s ease;"></div>
         </div>
-        ${indicators.map((i,idx)=>`
-          <div class="beg-ind-row" data-guide="${['ind-trend-direction','ind-momentum-gauge','ind-price-momentum','ind-market-activity','ind-price-range','ind-price-swing','ind-htf-trend','ind-signal-agreement'][idx]}">
-            <div class="beg-dot" style="background:${i.ok?'rgba(93,232,160,.85)':'rgba(232,112,110,.65)'};box-shadow:0 0 5px ${i.ok?'rgba(93,232,160,.3)':'rgba(232,112,110,.25)'}"></div>
-            <div style="flex:1">
-              <div style="font-size:11px;font-weight:500;color:rgba(237,232,216,.85);margin-bottom:1px;">${_begNames[idx]}</div>
-              <div style="font-size:11.5px;color:rgba(237,232,216,.6);">${_begDesc[idx](i)}</div>
-            </div>
-          </div>`).join('')}
+        ${(()=>{
+          const _bgKeys=['ind-trend-direction','ind-momentum-gauge','ind-price-momentum','ind-market-activity','ind-price-range','ind-price-swing','ind-htf-trend','ind-signal-agreement'];
+          return indicators.map((i,idx)=>{
+            const gk = i._isSmc ? 'smc-' + (i.n||'').toLowerCase().replace(/\s+/g,'-') : (_bgKeys[idx]||'ind-smc');
+            return `<div class="beg-ind-row" data-guide="${gk}">
+              <div class="beg-dot" style="background:${i.ok===true?'rgba(93,232,160,.85)':(i.ok==='info'?'rgba(201,168,76,.8)':'rgba(232,112,110,.65)')};box-shadow:0 0 5px ${i.ok===true?'rgba(93,232,160,.3)':(i.ok==='info'?'rgba(201,168,76,.3)':'rgba(232,112,110,.25)')}"></div>
+              <div style="flex:1">
+                <div style="font-size:11px;font-weight:500;color:rgba(237,232,216,.85);margin-bottom:1px;">${_begNames[idx]||i.n}</div>
+                <div style="font-size:11.5px;color:rgba(237,232,216,.6);">${(_begDesc[idx]||function(){return i.sub;})(i)}</div>
+              </div>
+            </div>`;
+          }).join('');
+        })()}
       </div>
     </div>`;
   // ── ADVANCED indicator grid ──────────────────────────────────────────────
-  const indHtml = `<div data-tier="trader">${indicators.map((i,idx)=>`
-    <div class="und-ind" data-guide="${['ind-adv-ema','ind-adv-rsi','ind-adv-macd','ind-adv-volume','ind-adv-bollinger','ind-adv-atr-volatility','ind-adv-htf-trend','ind-adv-confluence'][idx]}">
-      <div class="und-ind-dot" style="background:${i.ok?'rgba(93,232,160,.8)':'rgba(232,112,110,.6)'}; box-shadow:0 0 6px ${i.ok?'rgba(93,232,160,.3)':'rgba(232,112,110,.25)'}"></div>
+  const _advGuideKeys = ['ind-adv-ema','ind-adv-rsi','ind-adv-macd','ind-adv-volume','ind-adv-bollinger','ind-adv-atr-volatility','ind-adv-htf-trend','ind-adv-confluence'];
+  const indHtml = `<div data-tier="trader">${indicators.map((i,idx)=>{
+    const gk = i._isSmc ? 'smc-' + i.n.toLowerCase().replace(/\s+/g,'-') : (_advGuideKeys[idx]||'ind-adv-smc');
+    const dotCol = i.ok===true ? 'rgba(93,232,160,.8)'  : (i.ok==='info' ? 'rgba(201,168,76,.8)'  : 'rgba(232,112,110,.6)');
+    const dotGlow= i.ok===true ? 'rgba(93,232,160,.3)'  : (i.ok==='info' ? 'rgba(201,168,76,.3)'  : 'rgba(232,112,110,.25)');
+    const valCol = i.ok===true ? 'rgba(93,232,160,.85)' : (i.ok==='info' ? 'rgba(201,168,76,.85)' : 'rgba(232,112,110,.8)');
+    return `<div class="und-ind" data-guide="${gk}">
+      <div class="und-ind-dot" style="background:${dotCol}; box-shadow:0 0 6px ${dotGlow}"></div>
       <div class="und-ind-body">
         <div class="und-ind-name">${i.n}</div>
         <div class="und-ind-sub">${i.sub}</div>
       </div>
-      <div class="und-ind-val" style="color:${i.ok?'rgba(93,232,160,.85)':'rgba(232,112,110,.8)'}">${i.v}</div>
-    </div>`).join('')}</div>`;
+      <div class="und-ind-val" style="color:${valCol}">${i.v}</div>
+    </div>`;
+  }).join('')}</div>`;
 
   // ── Real MTF from API ────────────────────────────────────────────────────────
   const mtfRaw=sig.mtf||{};
@@ -12829,15 +12924,8 @@ function showUnderstand(){
           </div>
         </div>
       </div>
-      <!-- SMC-FE: Smart Money Concepts — after RSI gauge, last substantive card before Watchlist -->
-      <div class="und-card" id="undSmcCard" style="margin-top:12px;">
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.75)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-          <span class="und-card-title" style="margin:0;cursor:help;" data-guide="smc-title">Smart Money Structures <span style="font-size:9px;color:rgba(201,168,76,.5);font-family:var(--mono);">ⓘ</span></span>
-          <span id="undSmcBadge" style="font-family:var(--mono);font-size:9px;color:rgba(201,168,76,.7);margin-left:auto;letter-spacing:.05em;"></span>
-        </div>
-        <div id="undSmcBody" style="font-size:10.5px;color:rgba(237,232,216,.5);line-height:1.55;"></div>
-      </div>
+      <!-- SMC card removed — patterns now appear as vote rows inside the indicator confluence grid -->
+      <div id="undSmcCard" style="display:none;"><span id="undSmcBadge"></span><div id="undSmcBody"></div></div>
       <div class="und-card" data-guide="watchlist-row" style="margin-top:12px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <span class="und-card-title" style="margin:0">Watchlist</span>
@@ -12900,44 +12988,20 @@ function showUnderstand(){
       <button class="flow-btn-next btn-pipeline" onclick="setNav('size');showSize();">Size Position → SIZE</button>
     </div>
   </div>`;
-  // ── SMC card populate — runs after innerHTML is set so #undSmcCard exists ──
+  // ── SMC async re-fetch — fires only when smcStructures is missing/all-False (TV path) ──
+  // Standalone SMC card removed. Patterns now live in the indicator confluence grid above.
+  // This block's sole job: get real smc_structures from backend, then re-render the grid.
   (function(){
-    var smcCard = document.getElementById('undSmcBody');
-    var smcBadge = document.getElementById('undSmcBadge');
-    if (!smcCard) return;
     var _smc = (window._activeSignal && window._activeSignal.smcStructures) || null;
-    var _smcDefs = [
-      { key: 'fvg_bullish',         label: 'Bullish Fair Value Gap',        col: '#5de8a0',
-        body: 'The market moved up so fast it skipped over this price level. It will likely come back here briefly before going higher. This is normal — it actually confirms the upward move.' },
-      { key: 'fvg_bearish',         label: 'Bearish Fair Value Gap',         col: '#e8706e',
-        body: 'The market moved down so fast it skipped over this price level. It will likely come back here briefly before going lower. This is normal — it actually confirms the downward move.' },
-      { key: 'liquidity_grab_bull', label: 'Bullish Liquidity Grab',         col: '#5de8a0',
-        body: 'Price dropped lower than expected, then immediately shot back up. This was a trap — it shook out nervous traders before the real move upward started. This bullish pattern shows institutional buyers stepped in at that level to absorb the selling pressure.' },
-      { key: 'liquidity_grab_bear', label: 'Bearish Liquidity Grab',         col: '#e8706e',
-        body: 'Price rose higher than expected, then immediately dropped back down. This was a trap — it got excited traders to buy before the real move downward started. This bearish pattern shows institutional sellers stepped in at that level to absorb the buying pressure.' },
-      { key: 'displacement_bull',   label: 'Bullish Displacement Candle',    col: '#5de8a0',
-        body: 'One bar on the chart is much taller than all the others around it — a massive upward move in a single moment. When price moves this fast and this far upward, it usually keeps going in the same direction.' },
-      { key: 'displacement_bear',   label: 'Bearish Displacement Candle',    col: '#e8706e',
-        body: 'One bar on the chart is much taller than all the others around it — a massive downward move in a single moment. When price moves this fast and this far downward, it usually keeps going in the same direction.' },
-      { key: 'choch_bull',          label: 'Change of Character — Bullish',  col: '#5de8a0',
-        body: 'The market was falling. It just showed the first sign it might turn around and go up instead. This is not confirmed yet — but DotVerse flagged it because it is the earliest possible warning that the fall may be ending.' },
-      { key: 'choch_bear',          label: 'Change of Character — Bearish',  col: '#e8706e',
-        body: 'The market was rising. It just showed the first sign it might turn around and go down instead. This is not confirmed yet — but DotVerse flagged it because it is the earliest possible warning that the rise may be ending.' },
-    ];
     var _smcAllFalse = _smc && typeof _smc === 'object' && Object.keys(_smc).length > 0 && Object.values(_smc).every(function(v){ return v === false; });
     if (!_smc || _smcAllFalse) {
-      // Auto-fetch analyze to get smc_structures — mirrors C3b VIX fallback pattern.
-      // Also fires when smcStructures is all-False (scanner card path gives stale all-False dict).
-      // Four failure modes guarded: infinite-loop, stale-write, wrong-flag-clear, hung-fetch.
       var _sig = window._activeSignal;
       if (_sig && _sig.sym && !_sig._smc_fetching) {
         _sig._smc_fetching = true;
-        smcCard.innerHTML = '';
         dvFetchT('/api/analyze', {method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ticker: _sig.sym, asset_type: _sig.asset||_sig.asset_type||'crypto', timeframe: _sig.tf||'1h'})
         }, 30000).then(function(r) {
-          _sig._smc_fetching = false; // clear on captured object, not current _activeSignal
-          // Always write {} if smc_structures missing — prevents infinite re-fetch loop
+          _sig._smc_fetching = false;
           if (window._activeSignal && window._activeSignal.sym === _sig.sym) {
             window._activeSignal.smcStructures = (r && r.smc_structures) || {};
           }
@@ -12945,7 +13009,6 @@ function showUnderstand(){
           if (nb && nb.dataset.nav === 'understand') showUnderstand();
         }).catch(function(){
           _sig._smc_fetching = false;
-          // On error, set {} so IIFE shows NONE DETECTED instead of looping
           if (window._activeSignal && window._activeSignal.sym === _sig.sym) {
             window._activeSignal.smcStructures = {};
           }
@@ -12953,57 +13016,8 @@ function showUnderstand(){
       }
       return;
     }
-    var _active = _smcDefs.filter(function(d){ return _smc[d.key] === true; });
-    if (_active.length === 0) {
-      smcBadge.textContent = 'NONE DETECTED';
-      smcCard.innerHTML = 'No hidden price patterns found in the last 10 candles. That is fine — DotVerse\'s signal is still based on its other indicators. These patterns are a bonus when they appear, not a requirement.';
-      return;
-    }
-    smcBadge.style.color = '#5de8a0';
-    smcBadge.textContent = _active.length + ' PATTERN' + (_active.length > 1 ? 'S' : '') + ' DETECTED';
-    // SMC verdict: count aligned vs opposing patterns vs current signal
-    var _bullKeys = ['fvg_bullish','liquidity_grab_bull','displacement_bull','choch_bull'];
-    var _bearKeys = ['fvg_bearish','liquidity_grab_bear','displacement_bear','choch_bear'];
-    var _activeBull = _active.filter(function(d){ return _bullKeys.indexOf(d.key) !== -1; }).length;
-    var _activeBear = _active.filter(function(d){ return _bearKeys.indexOf(d.key) !== -1; }).length;
-    var _curSig = (window._activeSignal && window._activeSignal.sig) ? window._activeSignal.sig.toUpperCase() : 'HOLD';
-    var _verdictText = '', _verdictCol = '', _verdictBg = '';
-    if (_active.length === 1) {
-      var _onlyBull = _activeBull === 1;
-      var _matchesSig = (_onlyBull && _curSig === 'BUY') || (!_onlyBull && _curSig === 'SELL');
-      if (_matchesSig) { _verdictText = 'This pattern supports your ' + _curSig + '. Big player activity is aligned with your trade.'; _verdictCol = '#5de8a0'; _verdictBg = 'rgba(93,232,160,.07)'; }
-      else if (_curSig === 'HOLD') { _verdictText = 'DotVerse detected a pattern but the overall signal is HOLD — conditions are not clear enough yet.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)'; }
-      else { _verdictText = 'This pattern does not align with your ' + _curSig + '. DotVerse weighed this alongside its other indicators — its verdict stands, but be aware of the conflict.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)'; }
-    } else if (_activeBull > 0 && _activeBear === 0 && _curSig === 'BUY') {
-      _verdictText = 'All ' + _active.length + ' patterns support your BUY. Multiple big-player footprints confirm the upward direction — this is a high-conviction setup.'; _verdictCol = '#5de8a0'; _verdictBg = 'rgba(93,232,160,.07)';
-    } else if (_activeBear > 0 && _activeBull === 0 && _curSig === 'SELL') {
-      _verdictText = 'All ' + _active.length + ' patterns support your SELL. Multiple big-player footprints confirm the downward direction — this is a high-conviction setup.'; _verdictCol = '#e8706e'; _verdictBg = 'rgba(232,112,110,.07)';
-    } else if (_activeBull > _activeBear && _curSig === 'BUY') {
-      _verdictText = _activeBull + ' of ' + _active.length + ' patterns support your BUY. The balance favours upward movement — proceed with your normal position size.'; _verdictCol = '#5de8a0'; _verdictBg = 'rgba(93,232,160,.07)';
-    } else if (_activeBear > _activeBull && _curSig === 'SELL') {
-      _verdictText = _activeBear + ' of ' + _active.length + ' patterns support your SELL. The balance favours downward movement — proceed with your normal position size.'; _verdictCol = '#e8706e'; _verdictBg = 'rgba(232,112,110,.07)';
-    } else if (_curSig === 'HOLD') {
-      _verdictText = 'Mixed big-player signals detected — this is one reason DotVerse said HOLD. Wait for a cleaner setup where patterns and indicators agree.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)';
-    } else {
-      _verdictText = 'DotVerse weighed all patterns alongside its indicators. The confidence score reflects the full picture — size this trade accordingly.'; _verdictCol = 'rgba(201,168,76,.8)'; _verdictBg = 'rgba(201,168,76,.07)';
-    }
-    var _verdictHtml = '<div style="margin-top:10px;padding:9px 12px;border-radius:6px;background:'+_verdictBg+';border:1px solid '+_verdictCol.replace(')',', .25)').replace('rgb','rgba')+';display:flex;gap:9px;align-items:flex-start;">'
-      + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="'+_verdictCol+'" stroke-width="2.2" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>'
-      + '<div><div style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:'+_verdictCol+';margin-bottom:3px;">DOTVERSE VERDICT</div>'
-      + '<div style="font-size:10.5px;color:rgba(237,232,216,.8);line-height:1.55;">'+_verdictText+'</div></div>'
-      + '</div>';
-    smcCard.innerHTML = _active.map(function(d){
-      var guideKey = 'smc-' + d.key.replace(/_/g, '-');
-      return '<div style="display:flex;flex-direction:column;gap:4px;padding:9px 0;border-bottom:1px solid rgba(237,232,216,.07);">'
-        + '<div style="display:flex;align-items:center;gap:8px;">'
-        + '<span style="width:7px;height:7px;border-radius:50%;background:'+d.col+';flex-shrink:0;"></span>'
-        + '<span data-guide="'+guideKey+'" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;color:'+d.col+';cursor:help;">'+d.label+' <span style="font-size:8px;opacity:.5;">ⓘ</span></span>'
-        + '</div>'
-        + '<div style="font-size:10.5px;color:rgba(237,232,216,.7);line-height:1.55;padding-left:15px;">'+d.body+'</div>'
-        + '</div>';
-    }).join('').replace(/border-bottom:[^;]+;(<\/div><\/div>)$/, '$1')
-      + _verdictHtml
-      + '<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:8px;line-height:1.5;">DotVerse scanned the last 10 candles for these patterns. They show hidden activity that is normally invisible to regular traders. Hover any pattern name to learn more.</div>';
+    // smcStructures are real and available — showUnderstand() already injected them
+    // into the indicator confluence grid above. Nothing more to do here.
   })();
   // ── C3b: VIX badge async fallback ─────────────────────────────────────────
   // When the signal was loaded via loadScannerSignal() (signal feed cards),

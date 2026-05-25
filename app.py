@@ -3141,6 +3141,11 @@ def detect_smc_structures(df):
         "liquidity_grab_bull": False, "liquidity_grab_bear": False,
         "displacement_bull": False, "displacement_bear": False,
         "choch_bull": False, "choch_bear": False,
+        # Price levels — set to actual price when pattern fires, None otherwise
+        "fvg_bullish_level": None, "fvg_bearish_level": None,
+        "liquidity_grab_bull_level": None, "liquidity_grab_bear_level": None,
+        "displacement_bull_level": None, "displacement_bear_level": None,
+        "choch_bull_level": None, "choch_bear_level": None,
     }
     try:
         import pandas as pd, numpy as np
@@ -3170,8 +3175,10 @@ def detect_smc_structures(df):
         for i in range(max(2, n-10), n):
             if lo[i] > hi[i-2]:           # gap between c[i-2] top and c[i] bottom
                 result["fvg_bullish"] = True
+                result["fvg_bullish_level"] = round(float((hi[i-2] + lo[i]) / 2), 6)
             if hi[i] < lo[i-2]:           # gap between c[i-2] bottom and c[i] top
                 result["fvg_bearish"] = True
+                result["fvg_bearish_level"] = round(float((lo[i-2] + hi[i]) / 2), 6)
 
         # ── 2. Liquidity Grab ───────────────────────────────────────────────
         # Find equal highs/lows in recent 20 bars (within 0.1% tolerance).
@@ -3186,6 +3193,7 @@ def detect_smc_structures(df):
                 sweep_level = eq_lo.min()
                 if lo[i] < sweep_level and cl[i] > sweep_level:
                     result["liquidity_grab_bull"] = True
+                    result["liquidity_grab_bull_level"] = round(float(sweep_level), 6)
             # equal highs in [i-5 .. i-1]
             ref_hi = hi[i-5:i]
             eq_hi  = ref_hi[np.abs(ref_hi - ref_hi.max()) / max(ref_hi.max(), 1e-9) < tol]
@@ -3193,6 +3201,7 @@ def detect_smc_structures(df):
                 sweep_level = eq_hi.max()
                 if hi[i] > sweep_level and cl[i] < sweep_level:
                     result["liquidity_grab_bear"] = True
+                    result["liquidity_grab_bear_level"] = round(float(sweep_level), 6)
 
         # ── 3. Displacement candle ──────────────────────────────────────────
         # Body > 2× ATR in the last 5 bars = institutional order flow entering.
@@ -3201,8 +3210,10 @@ def detect_smc_structures(df):
             if body > 2 * atr:
                 if cl[i] > op[i]:
                     result["displacement_bull"] = True
+                    result["displacement_bull_level"] = round(float(cl[i]), 6)
                 else:
                     result["displacement_bear"] = True
+                    result["displacement_bear_level"] = round(float(cl[i]), 6)
 
         # ── 4. Change of Character (CHOCH) ──────────────────────────────────
         # Detect the FIRST break of a swing high after a series of lower-highs
@@ -3232,6 +3243,7 @@ def detect_smc_structures(df):
                 last_sh = hi_w[swing_highs[-1]]
                 if cl_w[-1] > last_sh:              # price now breaks above it → CHOCH bull
                     result["choch_bull"] = True
+                    result["choch_bull_level"] = round(float(last_sh), 6)
 
         # CHOCH bearish: after 2+ higher-lows, last bar closes below the last swing low
         if len(swing_lows) >= 2:
@@ -3240,6 +3252,7 @@ def detect_smc_structures(df):
                 last_sl = lo_w[swing_lows[-1]]
                 if cl_w[-1] < last_sl:              # price now breaks below it → CHOCH bear
                     result["choch_bear"] = True
+                    result["choch_bear_level"] = round(float(last_sl), 6)
 
     except Exception as e:
         print(f"[smc] detect_smc_structures error: {e}")
@@ -9070,6 +9083,22 @@ def analyze():
         cfg    = TIMEFRAME_CONFIG[timeframe]
         _t0    = time.time()
 
+        # K4: Free-tier gate — 5 signals/day per user
+        _k4_uid  = session.get("user_id")
+        _k4_tier = session.get("user_tier", "free")
+        if _k4_tier == "free" and _redis_client and _k4_uid:
+            _k4_key = f"daily_signals:{_k4_uid}:{datetime.utcnow().strftime('%Y%m%d')}"
+            try:
+                _k4_count = int(_redis_client.get(_k4_key) or 0)
+                if _k4_count >= 5:
+                    return jsonify({"error": "free_tier_limit",
+                                    "message": "You have used your 5 free signals for today. Upgrade to Pro for unlimited signals.",
+                                    "limit": 5, "used": _k4_count}), 429
+                _redis_client.incr(_k4_key)
+                _redis_client.expire(_k4_key, 86400)
+            except Exception:
+                pass
+
         # ── STEP 1: TradingView — preferred signal source ─────────────────
         # TV gives real-time RSI, EMA, MACD, BB, ATR for any timeframe.
         # For most asset types we fall through to yfinance/Stooq if TV fails,
@@ -12707,6 +12736,106 @@ def signal_stats():
             "losses":       len(losses),
             "breakevens":   len(bes),
             "total_closed": sample_size,
+        })
+    finally:
+        db.close()
+
+
+@app.route("/api/signals/cost-analysis", methods=["GET"])
+@login_required
+def signals_cost_analysis():
+    """J1: Per-trade fee drag analysis across closed trades."""
+    db = SessionLocal()
+    try:
+        uid  = session["user_id"]
+        rows = db.query(SignalHistory).filter(
+            SignalHistory.user_id == uid,
+            SignalHistory.outcome.in_(["WIN","LOSS","BE"]),
+            SignalHistory.actual_pnl_r.isnot(None),
+            SignalHistory.entry.isnot(None),
+            SignalHistory.stop_loss.isnot(None)
+        ).all()
+        if not rows:
+            return jsonify({"ready": False, "message": "No closed trades yet."})
+        fee_drags = []
+        for r in rows:
+            try:
+                sl_dist = abs(float(r.entry) - float(r.stop_loss))
+                if sl_dist > 0:
+                    fee = float(r.entry) * 0.002  # 0.2% round-trip
+                    cost_r = round(fee / sl_dist, 3)
+                    fee_drags.append(cost_r)
+            except Exception:
+                pass
+        if not fee_drags:
+            return jsonify({"ready": False, "message": "Insufficient data."})
+        avg_drag = round(sum(fee_drags) / len(fee_drags), 3)
+        warning  = avg_drag > 0.1
+        return jsonify({
+            "ready": True,
+            "trades_analysed": len(fee_drags),
+            "avg_fee_drag_r":  avg_drag,
+            "warning": warning,
+            "message": (
+                f"Your broker costs are reducing your edge by an average of {avg_drag}R per trade. "
+                f"Consider tighter spreads or fewer trades." if warning else
+                f"Fee drag is acceptable at {avg_drag}R per trade."
+            )
+        })
+    finally:
+        db.close()
+
+
+@app.route("/api/validate/montecarlo", methods=["GET"])
+@login_required
+def validate_montecarlo():
+    """J2: Monte Carlo simulation on historical R-multiples."""
+    import random
+    db = SessionLocal()
+    try:
+        uid  = session["user_id"]
+        rows = db.query(SignalHistory).filter(
+            SignalHistory.user_id == uid,
+            SignalHistory.actual_pnl_r.isnot(None)
+        ).all()
+        r_vals = [float(r.actual_pnl_r) for r in rows if r.actual_pnl_r is not None]
+        GATE = 10
+        if len(r_vals) < GATE:
+            return jsonify({"ready": False, "message": f"Monte Carlo needs {GATE} closed trades — you have {len(r_vals)}."})
+        SIMS      = 1000
+        drawdowns = []
+        final_eqs = []
+        for _ in range(SIMS):
+            seq    = random.sample(r_vals, len(r_vals))
+            equity = 1.0
+            peak   = 1.0
+            max_dd = 0.0
+            for r in seq:
+                equity = max(0.0, equity + r * 0.01)
+                peak   = max(peak, equity)
+                dd     = (peak - equity) / peak if peak > 0 else 0
+                max_dd = max(max_dd, dd)
+            drawdowns.append(max_dd)
+            final_eqs.append(equity)
+        drawdowns.sort()
+        final_eqs.sort()
+        p5_dd  = round(drawdowns[int(0.05 * SIMS)] * 100, 1)
+        p95_dd = round(drawdowns[int(0.95 * SIMS)] * 100, 1)
+        median_eq = round(final_eqs[SIMS // 2] * 100, 1)
+        prob_20dd  = round(sum(1 for d in drawdowns if d >= 0.20) / SIMS * 100, 1)
+        return jsonify({
+            "ready": True,
+            "trades_used": len(r_vals),
+            "simulations": SIMS,
+            "p5_drawdown_pct":   p5_dd,
+            "p95_drawdown_pct":  p95_dd,
+            "median_equity_pct": median_eq,
+            "prob_20pct_drawdown": prob_20dd,
+            "message": (
+                f"Based on {len(r_vals)} trades across {SIMS} simulations: "
+                f"worst expected drawdown {p5_dd}%–{p95_dd}%. "
+                f"Probability of a 20%+ drawdown: {prob_20dd}%."
+            )
         })
     finally:
         db.close()
