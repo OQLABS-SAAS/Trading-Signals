@@ -12642,10 +12642,22 @@ function showUnderstand(){
             ${_dvBuildExplain(sig)}
           </div>
         </div>
-        <div style="margin-bottom:12px;padding:10px 14px;border-radius:7px;${sig.sig!=='HOLD'&&(sig.conf||0)>=70?'background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.2);':sig.sig!=='HOLD'?'background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);':'background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);'}">
-          <div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;${sig.sig!=='HOLD'&&(sig.conf||0)>=70?'color:#5de8a0;':sig.sig!=='HOLD'?'color:rgba(201,168,76,.85);':'color:rgba(201,168,76,.7);'}">${sig.sig!=='HOLD'&&(sig.conf||0)>=70?'DOTVERSE RECOMMENDS THIS TRADE':sig.sig!=='HOLD'?'LOW CONFIDENCE — WAIT FOR BETTER SETUP':'HOLD — CONDITIONS NOT CLEAR ENOUGH TO TRADE'}</div>
-          <div style="font-size:11px;color:var(--t3);margin-top:4px;line-height:1.5;">${sig.sig!=='HOLD'&&(sig.conf||0)>=70?'Confidence is above the minimum threshold. The indicators are in agreement. Size this trade and execute when ready.':sig.sig!=='HOLD'?'Confidence is below 65% — DotVerse indicators do not fully agree. Consider waiting for a stronger setup or use a smaller position.':'The market is not showing a clear enough setup to trade right now. Wait for conditions to improve before committing money.'}</div>
-        </div>
+        ${(function(){
+          // SMC-5: RECOMMENDS gate checks for SMC pattern conflict with signal direction.
+          // A green RECOMMENDS banner contradicted by active bearish SMC on a BUY (or vice versa)
+          // is THE DOOR PROBLEM — the entrance says YES while the room says WAIT.
+          var _conf = (sig.conf||0) >= 65;
+          var _notHold = sig.sig !== 'HOLD';
+          var _smc = (sig.smcStructures) || {};
+          var _smcConflict = false;
+          if (_notHold && sig.sig === 'BUY')  _smcConflict = !!(_smc.fvg_bearish || _smc.liquidity_grab_bear || _smc.displacement_bear || _smc.choch_bear);
+          if (_notHold && sig.sig === 'SELL') _smcConflict = !!(_smc.fvg_bullish || _smc.liquidity_grab_bull || _smc.displacement_bull || _smc.choch_bull);
+          var _bg    = _notHold&&_conf&&!_smcConflict?'background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.2);':_notHold&&_conf&&_smcConflict?'background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.35);':_notHold?'background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);':'background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);';
+          var _col   = _notHold&&_conf&&!_smcConflict?'color:#5de8a0;':_notHold&&_conf&&_smcConflict?'color:rgba(201,168,76,1);':_notHold?'color:rgba(201,168,76,.85);':'color:rgba(201,168,76,.7);';
+          var _title = _notHold&&_conf&&!_smcConflict?'DOTVERSE RECOMMENDS THIS TRADE':_notHold&&_conf&&_smcConflict?'SIGNALS MIXED — CHART PATTERNS CONFLICT':_notHold?'LOW CONFIDENCE — WAIT FOR BETTER SETUP':'HOLD — CONDITIONS NOT CLEAR ENOUGH TO TRADE';
+          var _body  = _notHold&&_conf&&!_smcConflict?'Confidence is above the minimum threshold. The indicators are in agreement. Size this trade and execute when ready.':_notHold&&_conf&&_smcConflict?'DotVerse indicators agree on the direction, but one or more chart patterns are pointing the opposite way. This does not cancel the signal — it means the trade carries more risk than usual. Use a smaller position size and keep your stop loss tight.':_notHold?'Confidence is below 65% — DotVerse indicators do not fully agree. Consider waiting for a stronger setup or use a smaller position.':'The market is not showing a clear enough setup to trade right now. Wait for conditions to improve before committing money.';
+          return '<div style="margin-bottom:12px;padding:10px 14px;border-radius:7px;'+_bg+'"><div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;'+_col+'">'+_title+'</div><div style="font-size:11px;color:var(--t3);margin-top:4px;line-height:1.5;">'+_body+'</div></div>';
+        })()}
         <div class="und-action-row">
           <button class="btn-amber btn-pipeline" style="width:100%;font-size:13px;padding:12px;" onclick="setNav('size');showSize()">Size this trade →</button>
         </div>
@@ -12907,9 +12919,9 @@ function showUnderstand(){
       { key: 'fvg_bearish',         label: 'Bearish Fair Value Gap',         col: '#e8706e',
         body: 'The market moved down so fast it skipped over this price level. It will likely come back here briefly before going lower. This is normal — it actually confirms the downward move.' },
       { key: 'liquidity_grab_bull', label: 'Bullish Liquidity Grab',         col: '#5de8a0',
-        body: 'Price dropped lower than expected, then immediately shot back up. This was a trap — it shook out nervous traders before the real move upward started. Your BUY signal is supported by this.' },
+        body: 'Price dropped lower than expected, then immediately shot back up. This was a trap — it shook out nervous traders before the real move upward started. This bullish pattern shows institutional buyers stepped in at that level to absorb the selling pressure.' },
       { key: 'liquidity_grab_bear', label: 'Bearish Liquidity Grab',         col: '#e8706e',
-        body: 'Price rose higher than expected, then immediately dropped back down. This was a trap — it got excited traders to buy before the real move downward started. Your SELL signal is supported by this.' },
+        body: 'Price rose higher than expected, then immediately dropped back down. This was a trap — it got excited traders to buy before the real move downward started. This bearish pattern shows institutional sellers stepped in at that level to absorb the buying pressure.' },
       { key: 'displacement_bull',   label: 'Bullish Displacement Candle',    col: '#5de8a0',
         body: 'One bar on the chart is much taller than all the others around it — a massive upward move in a single moment. When price moves this fast and this far upward, it usually keeps going in the same direction.' },
       { key: 'displacement_bear',   label: 'Bearish Displacement Candle',    col: '#e8706e',
