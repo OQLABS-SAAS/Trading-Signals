@@ -12771,75 +12771,15 @@ function showUnderstand(){
 
     <!-- RIGHT: MTF + reason -->
     <div class="und-right">
-      <!-- SMC-FE: Smart Money Concepts structures card -->
-      ${(()=>{
-        const _smc = sig.smcStructures;
-        // Show card only when backend provided structure data
-        if (!_smc) return '';
-        // Build list of active structures with plain-English descriptions
-        const _smcDefs = [
-          { key: 'fvg_bullish',        label: 'Bullish Fair Value Gap',       col: '#5de8a0',
-            beg: 'A gap where buyers jumped in hard. Price may return to fill this gap before continuing up — a potential entry zone.',
-            adv: 'Bullish FVG in last 10 bars. Candle 3 high does not overlap candle 1 low — institutional demand imbalance.' },
-          { key: 'fvg_bearish',        label: 'Bearish Fair Value Gap',        col: '#e8706e',
-            beg: 'A gap where sellers pushed hard. Price may return to fill this gap before continuing down — a potential short entry zone.',
-            adv: 'Bearish FVG in last 10 bars. Candle 3 low does not overlap candle 1 high — institutional supply imbalance.' },
-          { key: 'liquidity_grab_bull',label: 'Bullish Liquidity Grab',        col: '#5de8a0',
-            beg: 'Price swept below a recent low (triggering stop-losses), then rejected sharply upward. Big players collected cheap positions.',
-            adv: 'Swing-low sweep + bullish rejection within same/next candle. Equal-low stop hunt confirmed.' },
-          { key: 'liquidity_grab_bear',label: 'Bearish Liquidity Grab',        col: '#e8706e',
-            beg: 'Price swept above a recent high (triggering buy-stops), then rejected sharply downward. Big players distributed into retail buyers.',
-            adv: 'Swing-high sweep + bearish rejection within same/next candle. Equal-high stop hunt confirmed.' },
-          { key: 'displacement_bull',  label: 'Bullish Displacement Candle',   col: '#5de8a0',
-            beg: 'An unusually large bullish candle — far bigger than normal. This is institutional order flow, not retail. Signals strong directional intent.',
-            adv: 'Bullish candle body > 2× ATR. Strong institutional momentum candle.' },
-          { key: 'displacement_bear',  label: 'Bearish Displacement Candle',   col: '#e8706e',
-            beg: 'An unusually large bearish candle — far bigger than normal. Institutions sold aggressively. Signals strong downside intent.',
-            adv: 'Bearish candle body > 2× ATR. Strong institutional momentum candle.' },
-          { key: 'choch_bull',         label: 'Change of Character (Bullish)', col: '#5de8a0',
-            beg: 'After a downtrend, price has broken its first swing high. This is the earliest signal that the trend may be reversing upward.',
-            adv: 'First higher swing-high break after a series of lower highs. CHOCH bullish — structure shift.' },
-          { key: 'choch_bear',         label: 'Change of Character (Bearish)', col: '#e8706e',
-            beg: 'After an uptrend, price has broken its first swing low. This is the earliest signal that the trend may be reversing downward.',
-            adv: 'First lower swing-low break after a series of higher lows. CHOCH bearish — structure shift.' },
-        ];
-        const _active = _smcDefs.filter(d => _smc[d.key] === true);
-        if (_active.length === 0) {
-          // Show collapsed "no structures" state — still educational
-          return '<div style="background:rgba(20,25,38,.95);border:1px solid rgba(201,168,76,.2);border-radius:12px;padding:14px 18px;margin-top:12px;">'
-            + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">'
-            + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,.7)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
-            + '<span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:rgba(237,232,216,.75);margin:0;">Smart Money Structures</span>'
-            + '<span style="font-family:var(--mono);font-size:9px;color:rgba(201,168,76,.6);margin-left:auto;letter-spacing:.05em;">NONE DETECTED</span>'
-            + '</div>'
-            + '<div style="font-size:10.5px;color:rgba(237,232,216,.5);line-height:1.55;">No institutional structure patterns detected on the last 10 bars. This is normal in trending or quiet markets — SMC patterns appear at turning points and after liquidity sweeps.</div>'
-            + '</div>';
-        }
-        // Show detected structures
-        const _isBeg = (typeof window._dvTier === 'string' && window._dvTier === 'beginner') || document.querySelector('[data-tier="beginner"]')?.style.display !== 'none';
-        const _rows = _active.map(d => {
-          return '<div data-guide="smc-' + d.key.replace(/_/g,'-') + '" style="display:flex;flex-direction:column;gap:4px;padding:10px 0;border-bottom:1px solid rgba(237,232,216,.07);">'
-            + '<div style="display:flex;align-items:center;gap:8px;">'
-            + '<span style="width:6px;height:6px;border-radius:50%;background:' + d.col + ';flex-shrink:0;"></span>'
-            + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;color:' + d.col + ';">' + d.label + '</span>'
-            + '</div>'
-            + '<div style="font-size:10.5px;color:rgba(237,232,216,.65);line-height:1.55;padding-left:14px;">' + d.beg + '</div>'
-            + '<div style="font-size:9.5px;font-family:var(--mono);color:rgba(237,232,216,.3);line-height:1.45;padding-left:14px;">' + d.adv + '</div>'
-            + '</div>';
-        }).join('');
-        const _alignBadge = _active.some(d => (isBuy && d.col === '#5de8a0') || (!isBuy && d.col === '#e8706e'))
-          ? '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:' + (isBuy ? 'rgba(93,232,160,.12)' : 'rgba(232,112,110,.12)') + ';color:' + (isBuy ? '#5de8a0' : '#e8706e') + ';margin-left:auto;">ALIGNED</span>'
-          : '<span style="font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);color:rgba(201,168,76,.8);margin-left:auto;">MIXED</span>';
-        return '<div style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:12px;padding:16px 18px;margin-top:12px;">'
-          + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:12px;">'
-          + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.75)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
-          + '<span class="und-card-title" style="margin:0;">Smart Money Structures</span>'
-          + _alignBadge
-          + '</div>'
-          + _rows.replace(/border-bottom[^;]+;(?=<\/div><\/div>$)/,'')
-          + '<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:10px;line-height:1.5;">Smart Money Concepts: institutional patterns detected in the last 10 bars. These show where large players are accumulating or distributing positions.</div>'
-          + '</div>';
-      })()}
+      <!-- SMC-FE: Smart Money Concepts structures card — static div, always in DOM -->
+      <div class="und-card" id="undSmcCard">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,232,216,.75)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          <span class="und-card-title" style="margin:0;">Smart Money Structures</span>
+          <span id="undSmcBadge" style="font-family:var(--mono);font-size:9px;color:rgba(201,168,76,.7);margin-left:auto;letter-spacing:.05em;"></span>
+        </div>
+        <div id="undSmcBody" style="font-size:10.5px;color:rgba(237,232,216,.5);line-height:1.55;">Scanning for institutional patterns…</div>
+      </div>
       <div class="und-card" data-guide="mtf-row">
         <div class="und-card-title">Multi-Timeframe Alignment</div>
         <div class="und-mtf-row" data-guide="mtf-alignment">${mtfHtml}</div>
@@ -12952,6 +12892,54 @@ function showUnderstand(){
       <button class="flow-btn-next btn-pipeline" onclick="setNav('size');showSize();">Size Position → SIZE</button>
     </div>
   </div>`;
+  // ── SMC card populate — runs after innerHTML is set so #undSmcCard exists ──
+  (function(){
+    var smcCard = document.getElementById('undSmcBody');
+    var smcBadge = document.getElementById('undSmcBadge');
+    if (!smcCard) return;
+    var _smc = (window._activeSignal && window._activeSignal.smcStructures) || null;
+    var _smcDefs = [
+      { key: 'fvg_bullish',         label: 'Bullish Fair Value Gap',        col: '#5de8a0',
+        body: 'A gap where buyers jumped in hard — price may return here before continuing up. A potential entry zone for bullish traders.' },
+      { key: 'fvg_bearish',         label: 'Bearish Fair Value Gap',         col: '#e8706e',
+        body: 'A gap where sellers pushed hard — price may return here before continuing down. A potential entry zone for bearish traders.' },
+      { key: 'liquidity_grab_bull', label: 'Bullish Liquidity Grab',         col: '#5de8a0',
+        body: 'Price swept below a recent low (triggering stop-losses), then rejected sharply upward. Big players collected cheap positions.' },
+      { key: 'liquidity_grab_bear', label: 'Bearish Liquidity Grab',         col: '#e8706e',
+        body: 'Price swept above a recent high (triggering buy-stops), then rejected downward. Big players distributed into retail buyers.' },
+      { key: 'displacement_bull',   label: 'Bullish Displacement Candle',    col: '#5de8a0',
+        body: 'An unusually large bullish candle — far bigger than normal. This is institutional order flow. Signals strong upside intent.' },
+      { key: 'displacement_bear',   label: 'Bearish Displacement Candle',    col: '#e8706e',
+        body: 'An unusually large bearish candle — institutions sold aggressively. Signals strong downside intent.' },
+      { key: 'choch_bull',          label: 'Change of Character (Bullish)',  col: '#5de8a0',
+        body: 'After a downtrend, price broke its first swing high. Earliest signal the trend may be reversing upward.' },
+      { key: 'choch_bear',          label: 'Change of Character (Bearish)',  col: '#e8706e',
+        body: 'After an uptrend, price broke its first swing low. Earliest signal the trend may be reversing downward.' },
+    ];
+    if (!_smc) {
+      smcBadge.textContent = 'NO DATA';
+      smcCard.innerHTML = '<span style="color:rgba(237,232,216,.4);">Run Analyse to detect institutional structure patterns.</span>';
+      return;
+    }
+    var _active = _smcDefs.filter(function(d){ return _smc[d.key] === true; });
+    if (_active.length === 0) {
+      smcBadge.textContent = 'NONE DETECTED';
+      smcCard.innerHTML = 'No institutional structure patterns detected on the last 10 bars. This is normal in trending markets — SMC patterns appear at turning points and after liquidity sweeps.';
+      return;
+    }
+    smcBadge.style.color = '#5de8a0';
+    smcBadge.textContent = _active.length + ' PATTERN' + (_active.length > 1 ? 'S' : '') + ' DETECTED';
+    smcCard.innerHTML = _active.map(function(d){
+      return '<div style="display:flex;flex-direction:column;gap:4px;padding:9px 0;border-bottom:1px solid rgba(237,232,216,.07);">'
+        + '<div style="display:flex;align-items:center;gap:8px;">'
+        + '<span style="width:7px;height:7px;border-radius:50%;background:'+d.col+';flex-shrink:0;"></span>'
+        + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;color:'+d.col+';">'+d.label+'</span>'
+        + '</div>'
+        + '<div style="font-size:10.5px;color:rgba(237,232,216,.7);line-height:1.55;padding-left:15px;">'+d.body+'</div>'
+        + '</div>';
+    }).join('').replace(/border-bottom:[^;]+;(<\/div><\/div>)$/, '$1')
+      + '<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:8px;line-height:1.5;">Institutional patterns detected in the last 10 bars. These show where large players are positioning.</div>';
+  })();
   // ── C3b: VIX badge async fallback ─────────────────────────────────────────
   // When the signal was loaded via loadScannerSignal() (signal feed cards),
   // _activeSignal.macro_context is not set and vixBadgeHtml above is empty.
