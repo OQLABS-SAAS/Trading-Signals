@@ -2131,6 +2131,13 @@ Before writing any plan, identify every behaviour question — *"when X happens,
 
 ## CORE RULES — NON-NEGOTIABLE
 
+### NO PLACEHOLDER OR MOCK DATA — NON-NEGOTIABLE
+- **DotVerse must never display placeholder, mock, hardcoded, or fake data to the user.** Every number, label, price, percentage, news headline, fear/greed reading, sector value, or chart shown to a user must come from a real live or cached data source.
+- If a data source is not yet built, the UI shows an explicit "Coming soon" or "Not available" state — never a fake number that looks real.
+- Before every commit involving any data display: grep for hardcoded numbers, static arrays of fake values, `Math.random()`, `lorem ipsum`, placeholder tickers, or demo/mock variable names. If any are found, the commit is blocked until replaced with real data or an honest empty state.
+- This rule was added after a session where fake Fear & Greed, fake sector strength, fake S&P heatmap, fake economic calendar, and fake trending tickers were all live in production, making DotVerse appear to have data it did not actually have.
+- **Exception:** Unit tests and sandbox PATH A verification scripts may use synthetic data — but only in test files, never in the production HTML or app.py response paths.
+
 ### UI Integrity — NON-NEGOTIABLE
 - **The UI must never be broken, damaged, or visually degraded by any change.**
 - Before every commit: grep for all new/changed element IDs and confirm each one exists in BOTH the HTML and the JS that writes to it.
@@ -2316,6 +2323,30 @@ RESIDUAL RISK:        [specific risk + browser test that catches it]
 ```
 
 **Gate:** Success criteria written BEFORE the failure brainstorm are invalid. Rewrite them.
+
+---
+
+### LENS 4 — BEGINNER TRADER (mandatory — DotVerse is a beginners-first app)
+
+Before writing ANY feature description, tooltip, coaching message, error state, recommendation, warning, or UI copy, answer these questions:
+
+1. **"Is my trade still good?"** — Does every output answer this question directly? Numbers alone are not enough. Every signal card, every automation toggle result, every calculator output must say in plain English what it means for the trade.
+2. **"What do I do right now?"** — Does the output give a specific, actionable instruction? Never say "watch", "monitor", "check back", or "pay attention to". DotVerse watches the chart. The beginner just needs to know: hold, close, adjust size, or do nothing.
+3. **"Am I more or less confident?"** — When a new pattern or indicator fires, does the UI tell the beginner whether their confidence should go up, stay the same, or trigger caution?
+4. **Zero jargon test** — Read every word of copy out loud as if you are a person who has never traded before. Replace every term that requires prior trading knowledge: "RSI" → "momentum gauge", "ATR" → "how much this asset typically moves", "confluence" → "how many indicators agree", "invalidation" → "the point where this trade thesis is wrong". The explanation should work for someone who found DotVerse through a Google search and has never opened a trading platform.
+5. **No chart-watching instructions** — If any copy says "watch whether price stays above X", "monitor for a higher low", "wait for confirmation", or any equivalent — delete it and replace with what DotVerse will do automatically. DotVerse is the watcher. The beginner acts only when DotVerse tells them to.
+6. **Survival math on risk** — Any feature involving a percentage, dollar amount, or risk level must show the real-world consequence: "$100 at risk on a $10,000 account. If you lose 10 trades in a row, you still have $902 left (90% of account)." Abstract percentages without dollar examples are not beginner-friendly.
+7. **Progressive disclosure** — Advanced options (Kelly criterion, ATR multipliers, indicator weights, manual automation overrides) are hidden by default behind a "Show advanced" toggle. The default surface only shows what a beginner needs to take their first trade safely.
+
+**Output format — every new feature must include:**
+```
+BEGINNER READS AS:    [what a first-time trader understands from this copy]
+JARGON REMOVED:       [list of terms replaced and what they were replaced with]
+CHART-WATCHING TEST:  [confirmed — no "watch/monitor" instructions]
+TRADE IMPLICATION:    [copy explicitly answers "is my trade still good?" and "what do I do?"]
+```
+
+**Gate:** If the copy tells a beginner to monitor the chart, the gate does not open. Rewrite first.
 
 ---
 

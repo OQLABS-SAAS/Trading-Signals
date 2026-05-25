@@ -8415,7 +8415,7 @@ async function _sfFetchSignals(){
       + ''
       + (o.sig !== 'HOLD' && o.entry ? '<div id="lp-' + o.sym.replace(/[^a-zA-Z0-9]/g,'') + '-' + i + '" style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);">'
         + '<span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.2);flex-shrink:0;"></span>loading live price…</div>' : '')
-      + (o.sig!=='HOLD'?((o.conf||0)>=70?'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>':'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>')
+      + (function(){var _os=(o.smc_structures)||{};var _oC=o.sig==='BUY'?!!(_os.fvg_bearish||_os.liquidity_grab_bear||_os.displacement_bear||_os.choch_bear):o.sig==='SELL'?!!(_os.fvg_bullish||_os.liquidity_grab_bull||_os.displacement_bull||_os.choch_bull):false;return o.sig!=='HOLD'?((o.conf||0)>=65?(!_oC?'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>':'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,1);background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.35);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">SIGNALS MIXED — CHART PATTERNS CONFLICT</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>';})())
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
       + '</div></div>';
@@ -12931,8 +12931,10 @@ function showUnderstand(){
       { key: 'choch_bear',          label: 'Change of Character — Bearish',  col: '#e8706e',
         body: 'The market was rising. It just showed the first sign it might turn around and go down instead. This is not confirmed yet — but DotVerse flagged it because it is the earliest possible warning that the rise may be ending.' },
     ];
-    if (!_smc) {
+    var _smcAllFalse = _smc && typeof _smc === 'object' && Object.keys(_smc).length > 0 && Object.values(_smc).every(function(v){ return v === false; });
+    if (!_smc || _smcAllFalse) {
       // Auto-fetch analyze to get smc_structures — mirrors C3b VIX fallback pattern.
+      // Also fires when smcStructures is all-False (scanner card path gives stale all-False dict).
       // Four failure modes guarded: infinite-loop, stale-write, wrong-flag-clear, hung-fetch.
       var _sig = window._activeSignal;
       if (_sig && _sig.sym && !_sig._smc_fetching) {
