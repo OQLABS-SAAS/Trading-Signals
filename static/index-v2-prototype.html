@@ -10515,6 +10515,41 @@ async function showPortfolio(){
         <tbody>${posRows}</tbody>
       </table></div>
     </div></div>
+    <!-- J1/J2: Validation cards -->
+    <div id="pfValidationWrap" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:24px;">
+      <div id="pfCostCard" style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:8px;padding:16px;min-height:120px;">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:rgba(237,232,216,.45);margin-bottom:10px;">What Your Broker Costs</div>
+        <div id="pfCostBody" style="font-size:12px;color:rgba(237,232,216,.4);">Loading cost analysis…</div>
+      </div>
+      <div id="pfMonteCarloCard" style="background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:8px;padding:16px;min-height:120px;">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:rgba(237,232,216,.45);margin-bottom:10px;">Worst-Case Scenario</div>
+        <div id="pfMonteCarloBody" style="font-size:12px;color:rgba(237,232,216,.4);">Loading simulation…</div>
+      </div>
+    </div>
+    <script>(function(){
+      dvFetch('/api/signals/cost-analysis').then(function(d){
+        var el=document.getElementById('pfCostBody');
+        if(!el)return;
+        if(!d.ready){el.innerHTML='<span style=color:rgba(237,232,216,.4)>'+d.message+'</span>';return;}
+        var col=d.warning?'rgba(224,85,85,.85)':'rgba(93,232,160,.85)';
+        el.innerHTML='<div style=margin-bottom:8px><span style=font-family:var(--mono);font-size:22px;font-weight:700;color:'+col+'>'+d.avg_fee_drag_r+'R</span><span style=font-size:10px;color:rgba(237,232,216,.35);margin-left:6px>per trade</span></div>'+
+          '<div style=font-size:11px;color:'+col+';line-height:1.5>'+d.message+'</div>'+
+          '<div style=font-size:9px;color:rgba(237,232,216,.25);margin-top:6px>Based on '+d.trades_analysed+' closed trades</div>';
+      }).catch(function(){var el=document.getElementById('pfCostBody');if(el)el.innerHTML='<span style=color:rgba(237,232,216,.3)>Cost data unavailable</span>';});
+      dvFetch('/api/validate/montecarlo').then(function(d){
+        var el=document.getElementById('pfMonteCarloBody');
+        if(!el)return;
+        if(!d.ready){el.innerHTML='<span style=color:rgba(237,232,216,.4)>'+d.message+'</span>';return;}
+        el.innerHTML='<div style=display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px>'+
+          '<div><div style=font-family:var(--mono);font-size:18px;font-weight:700;color:rgba(237,232,216,.85)>'+d.p5_drawdown_pct+'%</div><div style=font-size:9px;color:rgba(237,232,216,.35)>Best-case drawdown</div></div>'+
+          '<div><div style=font-family:var(--mono);font-size:18px;font-weight:700;color:rgba(224,85,85,.85)>'+d.p95_drawdown_pct+'%</div><div style=font-size:9px;color:rgba(237,232,216,.35)>Worst-case drawdown</div></div>'+
+          '<div><div style=font-family:var(--mono);font-size:18px;font-weight:700;color:rgba(93,232,160,.85)>'+d.median_equity_pct+'%</div><div style=font-size:9px;color:rgba(237,232,216,.35)>Median equity</div></div>'+
+          '<div><div style=font-family:var(--mono);font-size:18px;font-weight:700;color:'+(d.prob_20pct_drawdown>20?'rgba(224,85,85,.85)':'rgba(237,232,216,.85)')+'>'+d.prob_20pct_drawdown+'%</div><div style=font-size:9px;color:rgba(237,232,216,.35)>Chance of 20%+ DD</div></div>'+
+          '</div>'+
+          '<div style=font-size:11px;color:rgba(237,232,216,.55);line-height:1.5>'+d.message+'</div>'+
+          '<div style=font-size:9px;color:rgba(237,232,216,.25);margin-top:6px>'+d.simulations+' simulations · '+d.trades_used+' trades</div>';
+      }).catch(function(){var el=document.getElementById('pfMonteCarloBody');if(el)el.innerHTML='<span style=color:rgba(237,232,216,.3)>Simulation unavailable</span>';});
+    })();</script>
     <div style="margin-top:24px;border:1px solid rgba(237,232,216,.14);border-radius:8px;background:rgba(18,22,30,.85);overflow:hidden">
       <div onclick="var b=document.getElementById('pfHistBody');var ch=this.querySelector('.chev');b.style.display=b.style.display==='none'?'block':'none';ch.style.transform=b.style.display==='none'?'rotate(0deg)':'rotate(180deg)';if(b.style.display==='block'&&!window._pfHistLoaded){pfLoadHistory();window._pfHistLoaded=true}" style="padding:12px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(237,232,216,.07);user-select:none">
         <span style="color:rgba(237,232,216,.82);font-weight:600;font-size:13px;font-family:var(--mono)">Trade History</span>
