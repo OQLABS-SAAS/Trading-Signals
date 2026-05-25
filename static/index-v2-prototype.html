@@ -8381,6 +8381,15 @@ async function _sfFetchSignals(){
     }
 
     var _tt = _tradeTypeLabel(o.tf, window._stratMode);
+    // Weakened-signal detection — divergence in reason text OR opposing SMC patterns present
+    var _hasDivergence = !!(o.reason && (o.reason.toLowerCase().indexOf('divergence') !== -1 || o.reason.toLowerCase().indexOf('weakens') !== -1));
+    var _oppBullKeys = ['fvg_bullish','liquidity_grab_bull','displacement_bull','choch_bull'];
+    var _oppBearKeys = ['fvg_bearish','liquidity_grab_bear','displacement_bear','choch_bear'];
+    var _smcOpp = !!(o.smc_structures && (
+      (sig === 'BUY'  && _oppBearKeys.some(function(k){ return o.smc_structures[k] === true; })) ||
+      (sig === 'SELL' && _oppBullKeys.some(function(k){ return o.smc_structures[k] === true; }))
+    ));
+    var _isWeakened = _hasDivergence || _smcOpp;
     return '<div class="opp-card ' + cardCls + '" onclick="loadSignalContext(' + oJson + ')">'
       + '<div class="opp-card-header">'
       + '<div class="opp-card-rank">' + String(i+1).padStart(2,'0') + '</div>'
@@ -8420,22 +8429,41 @@ async function _sfFetchSignals(){
           var _bullKeys = {fvg_bullish:1,liquidity_grab_bull:1,displacement_bull:1,choch_bull:1};
           var detected = _keys.filter(function(k){ return _smc[k] === true; });
           if (!detected.length) return '';
+          var _entryNum = parseFloat(_entry) || 0;
           var badges = detected.map(function(k){
             var isBullPat = !!_bullKeys[k];
             var aligned = (_sig==='BUY'&&isBullPat)||(_sig==='SELL'&&!isBullPat);
             var lvl = _smc[_lvlKeys[k]];
+            var lvlNum = lvl != null ? parseFloat(lvl) : null;
             var lvlTxt = lvl != null ? ' $'+lvl : '';
             var col = aligned ? 'rgba(93,232,160,.9)' : 'rgba(201,168,76,.85)';
             var bg  = aligned ? 'rgba(93,232,160,.06)' : 'rgba(201,168,76,.06)';
             var bdr = aligned ? 'rgba(93,232,160,.18)' : 'rgba(201,168,76,.2)';
-            var tag = aligned ? '' : ' <span style="font-size:7.5px;opacity:.65;">(context)</span>';
-            return '<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:3px;background:'+bg+';border:1px solid '+bdr+';color:'+col+';font-family:var(--mono);font-size:8.5px;font-weight:600;white-space:nowrap;">'+_short[k]+lvlTxt+tag+'</span>';
+            var contextTag;
+            if (aligned) {
+              contextTag = '';
+            } else if (lvlNum !== null && _entryNum > 0) {
+              // Position-aware label: is this level above or below entry?
+              var isBelow = (_sig==='BUY'  && lvlNum < _entryNum) || (_sig==='SELL' && lvlNum > _entryNum);
+              contextTag = isBelow
+                ? ' <span style="font-size:7.5px;opacity:.65;">(support)</span>'
+                : ' <span style="font-size:7.5px;opacity:.65;">(resistance)</span>';
+            } else {
+              contextTag = ' <span style="font-size:7.5px;opacity:.65;">(context)</span>';
+            }
+            return '<span style="display:inline-flex;align-items:center;padding:2px 6px;border-radius:3px;background:'+bg+';border:1px solid '+bdr+';color:'+col+';font-family:var(--mono);font-size:8.5px;font-weight:600;white-space:nowrap;">'+_short[k]+lvlTxt+contextTag+'</span>';
           }).join('');
           return '<div style="padding:4px 14px 5px;border-top:1px solid rgba(255,255,255,.04);display:flex;flex-wrap:wrap;gap:4px;align-items:center;"><span style="font-size:8px;color:rgba(237,232,216,.3);font-family:var(--mono);letter-spacing:.05em;margin-right:2px;">SMC</span>'+badges+'</div>';
         })(o.smc_structures, o.sig, o.entry)
       + (o.sig !== 'HOLD' && o.entry ? '<div id="lp-' + o.sym.replace(/[^a-zA-Z0-9]/g,'') + '-' + i + '" style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);">'
         + '<span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.2);flex-shrink:0;"></span>loading live price…</div>' : '')
-      + (o.sig!=='HOLD'?((o.conf||0)>=65?'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>':'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>'):'<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>')
+      + (o.sig!=='HOLD'
+          ? ((o.conf||0)>=65 && !_isWeakened
+              ? '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>'
+              : (o.conf||0)>=65 && _isWeakened
+              ? '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.9);background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.25);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">WEAKENED SIGNAL — TRADE WITH CAUTION</span></div>'
+              : '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>')
+          : '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>')
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
       + '</div></div>';
@@ -12206,18 +12234,18 @@ function showUnderstand(){
   // Beginner plain-English: opposing variant (amber) — actionable context, not a contradiction
   var _smcBegOpposing = {
     fvg_bullish:         function(l){ return 'A bullish gap'+(l?' at '+l:'')+' sits below your entry. This acts as a support floor — if price dips here it will likely bounce. Your SELL is not invalidated. If price reverses sharply'+(l?' at '+l:' at this level')+', tighten your stop.'; },
-    fvg_bearish:         function(l){ return 'A bearish gap'+(l?' at '+l:'')+' sits above your entry. If price reaches this level it may stall temporarily. If it stalls and reverses'+(l?' at '+l:' there')+', tighten your stop. Otherwise, hold your BUY.'; },
-    liquidity_grab_bull: function(l){ return 'Bears were swept'+(l?' at '+l:'')+' — that level is now strong support below your trade. It is unlikely to break on a first test, which actually protects your SELL from below.'; },
-    liquidity_grab_bear: function(l){ return 'Bulls were swept'+(l?' at '+l:'')+' — that level is now resistance above your trade. If price reaches'+(l?' '+l:' that zone')+' and fails to break through, tighten your stop loss immediately.'; },
-    displacement_bull:   function(l){ return 'A strong buy candle printed'+(l?' near '+l:'')+'. This area is a support zone. If price re-tests here it is likely to hold — do not exit your SELL early on a brief dip to this level.'; },
-    displacement_bear:   function(l){ return 'A strong sell candle printed'+(l?' near '+l:'')+'. This area is a resistance zone. If price reaches this level and shows signs of rejection, that confirms your BUY is stalling — tighten your stop.'; },
-    choch_bull:          function(l){ return 'A prior downtrend broke'+(l?' at '+l:'')+' — this is now structure support. As long as price stays above'+(l?' '+l:' this level')+', your SELL can still work. If price pushes back above it, close the trade.'; },
-    choch_bear:          function(l){ return 'A prior uptrend broke'+(l?' at '+l:'')+'. This is resistance above your BUY entry. If price pushes back ABOVE'+(l?' '+l:' this level')+', your BUY signal is invalidated — close the trade immediately.'; },
+    fvg_bearish:         function(l){ var _e=parseFloat(window._activeSignal&&window._activeSignal.entry)||0; var _below=l&&_e>0&&parseFloat(l)<_e; return _below?'A bearish gap at '+l+' sits BELOW your entry — this is a support floor, not a threat. If price dips here it is likely to bounce. Do not exit early on a dip to this zone. Hold your BUY.':'A bearish gap'+(l?' at '+l:'')+' sits above your entry. If price reaches this level it may stall. If price stalls and reverses there, tighten your stop. Otherwise hold your BUY.'; },
+    liquidity_grab_bull: function(l){ var _e=parseFloat(window._activeSignal&&window._activeSignal.entry)||0; var _below=l&&_e>0&&parseFloat(l)<_e; return _below?'Bears were swept at '+l+' — that level is strong support below your SELL trade. Unlikely to break easily on first test.':'Bulls were swept at '+l+' — that level is now resistance above your trade. If price fails to break through, tighten your stop.'; },
+    liquidity_grab_bear: function(l){ var _e=parseFloat(window._activeSignal&&window._activeSignal.entry)||0; var _above=l&&_e>0&&parseFloat(l)>_e; return _above?'Bulls were swept at '+l+' — that level is now resistance above your BUY entry. If price reaches there and fails to break through, tighten your stop immediately.':'Bulls were swept at '+l+' — this is a support zone below your BUY. If price dips here it is likely to hold. Do not exit early on a dip to this level.'; },
+    displacement_bull:   function(l){ var _e=parseFloat(window._activeSignal&&window._activeSignal.entry)||0; var _below=l&&_e>0&&parseFloat(l)<_e; return _below?'A strong buy candle at '+l+' is a support zone below your trade. Price is likely to bounce here if it pulls back — do not panic-exit on a dip to this level.':'A strong buy candle near '+l+' is near your entry. This area may attract price back — if rejected, it validates the SELL direction.'; },
+    displacement_bear:   function(l){ var _e=parseFloat(window._activeSignal&&window._activeSignal.entry)||0; var _above=l&&_e>0&&parseFloat(l)>_e; return _above?'A strong sell candle at '+l+' is above your BUY entry — resistance zone. If price reaches there and shows rejection signs, tighten your stop before it reverses.':'A strong sell candle at '+l+' is below your entry — this is a support level. If price dips to this zone, it is likely to bounce. Do not exit your BUY early.'; },
+    choch_bull:          function(l){ var _e=parseFloat(window._activeSignal&&window._activeSignal.entry)||0; var _below=l&&_e>0&&parseFloat(l)<_e; return _below?'A prior downtrend broke at '+l+' — this is now structure support below your SELL. As long as price stays below this level your SELL is intact. If price breaks above it, close the trade.':'Structure break at '+l+' — this level is now resistance above your entry. If price pushes above it, your original signal is invalidated. Close the trade.'; },
+    choch_bear:          function(l){ var _e=parseFloat(window._activeSignal&&window._activeSignal.entry)||0; var _above=l&&_e>0&&parseFloat(l)>_e; return _above?'A prior uptrend broke at '+l+' above your BUY entry — this is now resistance. If price pushes back ABOVE this level, your BUY is invalidated. Close the trade immediately.':'A prior uptrend broke at '+l+' below your entry — this is now structure support. Price is unlikely to fall through here on first test. Hold your BUY.'; },
   };
   // Advanced sub-line text
   var _smcAdvSub = {
     fvg_bullish:         function(l,al){ return 'Bullish FVG'+(l?' at $'+l:'')+' — '+(al?'demand zone, institutions defend.':'support floor below price.'); },
-    fvg_bearish:         function(l,al){ return 'Bearish FVG'+(l?' at $'+l:'')+' — '+(al?'supply zone, institutions defend.':'resistance ceiling above price.'); },
+    fvg_bearish:         function(l,al){ var _e=parseFloat(window._activeSignal&&window._activeSignal.entry)||0; var _pos=l&&_e>0?(parseFloat(l)<_e?'support floor below price.':'resistance ceiling above price.'):'context level.'; return 'Bearish FVG'+(l?' at $'+l:'')+' — '+(al?'supply zone, institutions defend.':_pos); },
     liquidity_grab_bull: function(l,al){ return 'Swept lows'+(l?' at $'+l:'')+' — '+(al?'trapped bears add buying fuel.':'support zone, unlikely to break easily.'); },
     liquidity_grab_bear: function(l,al){ return 'Swept highs'+(l?' at $'+l:'')+' — '+(al?'trapped bulls add selling fuel.':'resistance zone, tighten stop if price fails here.'); },
     displacement_bull:   function(l,al){ return 'Inst. buy candle'+(l?' at $'+l:'')+', body > 2× ATR — '+(al?'confirms order flow.':'support on re-test.'); },
