@@ -12732,7 +12732,7 @@ def portfolio_reset():
 def signals_cost_analysis():
     """J1: Per-trade fee drag analysis across closed trades."""
     if not _DBSession:
-        return jsonify({"ready": False, "message": "Database not available"}), 503
+        return jsonify({"ready": False, "message": "Database not available"})
     db = _DBSession()
     try:
         uid  = session["user_id"]
@@ -12772,7 +12772,7 @@ def signals_cost_analysis():
         })
     except Exception as e:
         if _DBSession is None:
-            return jsonify({"error": "Database session factory not available"}), 503
+            return jsonify({"error": "Database session factory not available"})
         db.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
@@ -12785,7 +12785,7 @@ def validate_montecarlo():
     """J2: Monte Carlo simulation on historical R-multiples."""
     import random
     if not _DBSession:
-        return jsonify({"ready": False, "message": "Database not available"}), 503
+        return jsonify({"ready": False, "message": "Database not available"})
     db = _DBSession()
     try:
         uid  = session["user_id"]
@@ -12834,7 +12834,7 @@ def validate_montecarlo():
         })
     except Exception as e:
         if _DBSession is None:
-            return jsonify({"error": "Database session factory not available"}), 503
+            return jsonify({"error": "Database session factory not available"})
         db.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
