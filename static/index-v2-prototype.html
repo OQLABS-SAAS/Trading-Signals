@@ -10415,7 +10415,7 @@ async function showPortfolio(){
       </div>
       <div id="pfHealthTs" style="font-size:11px;color:rgba(237,232,216,.5);"></div>
     </div>
-    <div class="pg-hd"><div class="pg-hd-left"><div class="pg-hd-title">Portfolio</div><div class="pg-hd-sub">Track your open positions, P&L, and risk metrics. Positions are saved to your account.</div></div><div class="pg-hd-right" style="display:flex;align-items:center;gap:10px;"><button id="pfResetBtn" onclick="pfMasterReset()" style="background:transparent;border:1px solid rgba(237,232,216,.06);border-radius:4px;color:rgba(237,232,216,.18);font-size:9.5px;font-family:var(--mono);padding:2px 7px;cursor:pointer;transition:all .25s;letter-spacing:.03em;" onmouseover="this.style.borderColor='rgba(224,85,85,.25)';this.style.color='rgba(224,85,85,.45)'" onmouseout="this.style.borderColor='rgba(237,232,216,.06)';this.style.color='rgba(237,232,216,.18)'" title="Delete all positions, signal history, and equity snapshots">Reset</button><span class="pg-tag live">Live</span></div></div>
+    <div class="pg-hd"><div class="pg-hd-left"><div class="pg-hd-title">Portfolio</div><div class="pg-hd-sub">Track your open positions, P&L, and risk metrics. Positions are saved to your account.</div></div><div class="pg-hd-right" style="display:flex;align-items:center;gap:10px;"><button id="pfResetBtn" onclick="pfMasterReset()" style="background:transparent;border:1px solid rgba(224,85,85,.2);border-radius:4px;color:rgba(224,85,85,.6);font-size:9.5px;font-family:var(--mono);padding:2px 7px;cursor:pointer;transition:all .25s;letter-spacing:.03em;" onmouseover="this.style.background='rgba(224,85,85,.1)';this.style.color='rgba(224,85,85,.9)'" onmouseout="this.style.background='transparent';this.style.color='rgba(224,85,85,.6)'" title="Delete all positions, signal history, and equity snapshots">Reset All Data</button><span class="pg-tag live">Live</span></div></div>
     <div style="background:${hBg};border:1px solid ${hBd};border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;margin-bottom:${_corrBanner?'10':'16'}px;" data-guide="portfolio-var">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${hTxt}" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <span style="font-size:12px;color:${hTxt};font-weight:500">${hMsg}</span>
@@ -10538,20 +10538,20 @@ async function showPortfolio(){
     pfUpdateHealth(positions, varData);
   })([positions, varData, corrRisk, ddData]);
   // J1/J2: async fetch validation cards (outside innerHTML so they actually fire)
-  dvFetchT('/api/signals/cost-analysis',{},10000).then(function(d){
+  dvFetch('/api/signals/cost-analysis').then(function(d){
     var el=document.getElementById('pfCostBody');
     if(!el)return;
-    if(!d){el.innerHTML='<span style=color:rgba(237,232,216,.3)>Sign in to see cost data</span>';return;}
+    if(!d || d.error){el.innerHTML='<span style=color:rgba(237,232,216,.3)>'+((d&&d.message)||'Could not load cost data')+'</span>';return;}
     if(!d.ready){el.innerHTML='<span style=color:rgba(237,232,216,.4)>'+d.message+'</span>';return;}
     var col=d.warning?'var(--red)':'var(--grn)';
     el.innerHTML='<div style=margin-bottom:8px><span style=font-family:var(--mono);font-size:22px;font-weight:700;color:'+col+'>'+d.avg_fee_drag_r+'R</span><span style=font-size:10px;color:rgba(237,232,216,.35);margin-left:6px>per trade</span></div>'+
       '<div style=font-size:11px;color:'+col+';line-height:1.5>'+d.message+'</div>'+
       '<div style=font-size:9px;color:rgba(237,232,216,.25);margin-top:6px>Based on '+d.trades_analysed+' closed trades</div>';
-  }).catch(function(){var el=document.getElementById('pfCostBody');if(el)el.innerHTML='<span style=color:rgba(237,232,216,.3)>Cost data unavailable</span>';});
-  dvFetchT('/api/validate/montecarlo',{},10000).then(function(d){
+  }).catch(function(e){console.warn('J1 fetch failed',e);var el=document.getElementById('pfCostBody');if(el)el.innerHTML='<span style=color:rgba(237,232,216,.3)>Cost data unavailable</span>';});
+  dvFetch('/api/validate/montecarlo').then(function(d){
     var el=document.getElementById('pfMonteCarloBody');
     if(!el)return;
-    if(!d){el.innerHTML='<span style=color:rgba(237,232,216,.3)>Sign in to see stress test</span>';return;}
+    if(!d || d.error){el.innerHTML='<span style=color:rgba(237,232,216,.3)>'+((d&&d.message)||'Could not load stress test')+'</span>';return;}
     if(!d.ready){el.innerHTML='<span style=color:rgba(237,232,216,.4)>'+d.message+'</span>';return;}
     var ddCol=d.prob_20pct_drawdown>20?'var(--red)':'var(--t1)';
     el.innerHTML='<div style=display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px>'+
@@ -10562,7 +10562,7 @@ async function showPortfolio(){
       '</div>'+
       '<div style=font-size:11px;color:rgba(237,232,216,.55);line-height:1.5>'+d.message+'</div>'+
       '<div style=font-size:10px;color:rgba(237,232,216,.35);margin-top:6px>'+d.simulations+' simulations · '+d.trades_used+' trades</div>';
-  }).catch(function(){var el=document.getElementById('pfMonteCarloBody');if(el)el.innerHTML='<span style=color:rgba(237,232,216,.3)>Simulation unavailable</span>';});
+  }).catch(function(e){console.warn('J2 fetch failed',e);var el=document.getElementById('pfMonteCarloBody');if(el)el.innerHTML='<span style=color:rgba(237,232,216,.3)>Simulation unavailable</span>';});
 }
 async function pfMasterReset(){
   if(!confirm('Master Reset \u2014 this will permanently delete ALL your positions, trade history, signal history, and equity snapshots. This action cannot be undone.\n\nClick OK only if you are absolutely sure.')) return;
