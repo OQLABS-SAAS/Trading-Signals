@@ -12768,6 +12768,11 @@ def signals_cost_analysis():
                 f"Fee drag is acceptable at {avg_drag}R per trade."
             )
         })
+    except Exception as e:
+        if _DBSession is None:
+            return jsonify({"error": "Database session factory not available"}), 503
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
     finally:
         db.close()
 
@@ -12823,6 +12828,11 @@ def validate_montecarlo():
                 f"Probability of a 20%+ drawdown: {prob_20dd}%."
             )
         })
+    except Exception as e:
+        if _DBSession is None:
+            return jsonify({"error": "Database session factory not available"}), 503
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
     finally:
         db.close()
 
