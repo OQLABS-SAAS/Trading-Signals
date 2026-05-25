@@ -10146,6 +10146,7 @@ def scan_list():
                         "reason": analysis.get("summary",""), "bull_score": analysis.get("bullish_count",0),
                         "bear_score": analysis.get("bearish_count",0), "counter_trade": ct["counter_trade"],
                         "confidence": analysis.get("confidence","LOW"),
+                        "confidence_pct": analysis.get("confidence_pct"),
                         "confidence_label": analysis.get("confidence_label","HYPOTHESIS"),
                         "spread_cost":    analysis.get("spread_cost"),
                         "spread_quality": analysis.get("spread_quality","fair"),
