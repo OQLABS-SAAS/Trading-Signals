@@ -10132,6 +10132,8 @@ def scan_list():
                         # G2: Session context — so scanner-loaded signals show off-hours warning
                         "session_context": analysis.get("session_context",
                             {"session":"—","off_hours":False,"warning_level":None,"message":""}),
+                        # SMC-FE: forward structures so scanner-loaded signals show real SMC data
+                        "smc_structures": analysis.get("smc_structures", {}),
                     }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
