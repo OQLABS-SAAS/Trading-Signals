@@ -12707,9 +12707,11 @@ def portfolio_reset():
     uid = str(session.get("user_id", "default"))
     db = _DBSession()
     try:
-        deleted_positions = db.query(Position).filter(Position.user_id == uid).delete()
-        deleted_signals   = db.query(SignalHistory).filter(SignalHistory.user_id == uid).delete()
-        deleted_equity    = db.query(EquitySnapshot).filter(EquitySnapshot.user_id == uid).delete()
+        # Delete by session user_id AND "default" (catches pre-OAuth demo trades)
+        from sqlalchemy import or_
+        deleted_positions = db.query(Position).filter(or_(Position.user_id == uid, Position.user_id == "default")).delete()
+        deleted_signals   = db.query(SignalHistory).filter(or_(SignalHistory.user_id == uid, SignalHistory.user_id == "default")).delete()
+        deleted_equity    = db.query(EquitySnapshot).filter(or_(EquitySnapshot.user_id == uid, EquitySnapshot.user_id == "default")).delete()
         db.commit()
         return jsonify({
             "status": "ok",
