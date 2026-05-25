@@ -3714,36 +3714,19 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
             signal = "HOLD"; confidence = "LOW"
             gate_note = f"DotVerse blocked this BUY. {seller_pct}% of recent candles closed with more sellers than buyers — the market is being pushed down right now. Wait for selling pressure to ease before entering a buy trade."
 
-    # ══════════════════════════════════════════════════════════════
-    # SIG-4 2026-05-24: RSI Divergence confidence penalty
-    # rsi_divergence is computed in calculate_indicators() and stored in ind.
-    # When divergence contradicts the signal direction, drop confidence one
-    # level. This does not block the signal — it adjusts the label so the
-    # trader sees "LIKELY" or "HYPOTHESIS" instead of a false "CONFIRMED".
-    # TV path: divergence is computed via safety-net in analyze() endpoint
-    # so ind["rsi_divergence"] is always present on the analyze path.
-    # ══════════════════════════════════════════════════════════════
+# ── SIG-4: RSI Divergence — silent confidence penalty ──────────────────
+    # Divergence is real: price going one way, momentum going the other.
+    # It drops confidence one level so the label reflects true conviction.
+    # No text injected — the beginner sees the adjusted verdict, not the
+    # internal math debate. A BUY at MEDIUM is still a BUY. No contradiction.
     _rsi_div = ind.get("rsi_divergence") or {}
     _div_type = (_rsi_div.get("type") or "none").lower()
-    _div_note = ""
     if signal == "BUY" and "bearish" in _div_type:
-        # Bearish divergence on a BUY: price making higher highs, RSI lower highs
-        # Momentum is weakening — reduce confidence one step
-        if confidence == "HIGH":
-            confidence = "MEDIUM"
-        elif confidence == "MEDIUM":
-            confidence = "LOW"
-        _div_note = "RSI bearish divergence detected — price is rising but momentum is falling. This weakens the BUY signal."
-        gate_note = gate_note or _div_note
+        if   confidence == "HIGH":   confidence = "MEDIUM"
+        elif confidence == "MEDIUM": confidence = "LOW"
     elif signal == "SELL" and "bullish" in _div_type:
-        # Bullish divergence on a SELL: price making lower lows, RSI higher lows
-        # Momentum is recovering — reduce confidence one step
-        if confidence == "HIGH":
-            confidence = "MEDIUM"
-        elif confidence == "MEDIUM":
-            confidence = "LOW"
-        _div_note = "RSI bullish divergence detected — price is falling but momentum is recovering. This weakens the SELL signal."
-        gate_note = gate_note or _div_note
+        if   confidence == "HIGH":   confidence = "MEDIUM"
+        elif confidence == "MEDIUM": confidence = "LOW"
 
     # ══════════════════════════════════════════════════════════════
     # GATE 3: Minimum votes (refactored 2026-04-29 from confidence floor)
