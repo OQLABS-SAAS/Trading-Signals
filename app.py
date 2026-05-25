@@ -3688,15 +3688,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     htf_bias = _htf_trend_bias(mtf, timeframe)
     gate_note = ""
     if signal == "SELL" and htf_bias == "BULLISH":
-        print(f"[gate1] HTF trend BULLISH — counter-trend SELL warning on {ticker} {timeframe}")
-        if confidence == "HIGH":
-            confidence = "MEDIUM"
-        gate_note = "Counter-trend caution: the higher timeframe trend is bullish. Use smaller size and a tighter stop loss than usual."
+        print(f"[gate1] HTF trend BULLISH — blocking counter-trend SELL on {ticker} {timeframe}")
+        signal = "HOLD"; confidence = "LOW"
+        gate_note = "DotVerse blocked this SELL — the higher timeframe trend is bullish. Trading against the major trend has a low probability of success. Wait for the trend to shift before selling."
     elif signal == "BUY" and htf_bias == "BEARISH":
-        print(f"[gate1] HTF trend BEARISH — counter-trend BUY warning on {ticker} {timeframe}")
-        if confidence == "HIGH":
-            confidence = "MEDIUM"
-        gate_note = "Counter-trend caution: the higher timeframe trend is bearish. Use smaller size and a tighter stop loss than usual."
+        print(f"[gate1] HTF trend BEARISH — blocking counter-trend BUY on {ticker} {timeframe}")
+        signal = "HOLD"; confidence = "LOW"
+        gate_note = "DotVerse blocked this BUY — the higher timeframe trend is bearish. Trading against the major trend has a low probability of success. Wait for the trend to shift before buying."
 
     # ══════════════════════════════════════════════════════════════
     # GATE 2: Candle footprint sanity check (SIG-1 2026-05-24)
@@ -3711,15 +3709,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     buyer_pct, seller_pct = _compute_footprint_dominance(ind)
     if buyer_pct is not None:
         if signal == "SELL" and buyer_pct >= 70:
-            print(f"[gate2] footprint shows {buyer_pct}% buyers — SELL warning on {ticker}")
-            if confidence == "HIGH":
-                confidence = "MEDIUM"
-            gate_note = gate_note or f"Order flow caution: {buyer_pct}% of recent candles show buying pressure. This SELL is against current flow — use smaller size."
+            print(f"[gate2] footprint shows {buyer_pct}% buyers — SELL blocked to HOLD on {ticker}")
+            signal = "HOLD"; confidence = "LOW"
+            gate_note = f"DotVerse blocked this SELL. {buyer_pct}% of recent candles closed with more buyers than sellers — the market is pushing up, not down. Wait for the buying to ease off before entering a sell trade."
         elif signal == "BUY" and seller_pct >= 70:
-            print(f"[gate2] footprint shows {seller_pct}% sellers — BUY warning on {ticker}")
-            if confidence == "HIGH":
-                confidence = "MEDIUM"
-            gate_note = gate_note or f"Order flow caution: {seller_pct}% of recent candles show selling pressure. This BUY is against current flow — use smaller size."
+            print(f"[gate2] footprint shows {seller_pct}% sellers — BUY blocked to HOLD on {ticker}")
+            signal = "HOLD"; confidence = "LOW"
+            gate_note = f"DotVerse blocked this BUY. {seller_pct}% of recent candles closed with more sellers than buyers — the market is being pushed down right now. Wait for selling pressure to ease before entering a buy trade."
 
     # ══════════════════════════════════════════════════════════════
     # SIG-4 2026-05-24: RSI Divergence confidence penalty
