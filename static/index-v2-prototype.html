@@ -8159,7 +8159,10 @@ async function _sfFetchSignals(){
             spreadPips:  r.spread_pips  != null ? r.spread_pips  : null,
             spreadSrc:     r.spread_source  || null,
             spreadQuality: r.spread_quality || 'fair',
-            rr1Raw:        r.rr1_raw      != null ? r.rr1_raw      : null
+            rr1Raw:        r.rr1_raw      != null ? r.rr1_raw      : null,
+            // SMC-FE root fix: backend already computed smc_structures in _scan_one —
+            // forward it here so loadSignalContext gets real data, not undefined.
+            smc_structures: r.smc_structures || null
           };
         });
       // Multi-TF scan — keep all timeframes so users can compare
@@ -12917,8 +12920,30 @@ function showUnderstand(){
         body: 'After an uptrend, price broke its first swing low. Earliest signal the trend may be reversing downward.' },
     ];
     if (!_smc) {
-      smcBadge.textContent = 'NO DATA';
-      smcCard.innerHTML = '<span style="color:rgba(237,232,216,.4);">Run Analyse to detect institutional structure patterns.</span>';
+      // Auto-fetch analyze to get smc_structures — mirrors C3b VIX fallback pattern.
+      // Four failure modes guarded: infinite-loop, stale-write, wrong-flag-clear, hung-fetch.
+      var _sig = window._activeSignal;
+      if (_sig && _sig.sym && !_sig._smc_fetching) {
+        _sig._smc_fetching = true;
+        smcCard.innerHTML = '';
+        dvFetchT('/api/analyze', {method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ticker: _sig.sym, asset_type: _sig.asset||_sig.asset_type||'crypto', timeframe: _sig.tf||'1h'})
+        }, 30000).then(function(r) {
+          _sig._smc_fetching = false; // clear on captured object, not current _activeSignal
+          // Always write {} if smc_structures missing — prevents infinite re-fetch loop
+          if (window._activeSignal && window._activeSignal.sym === _sig.sym) {
+            window._activeSignal.smcStructures = (r && r.smc_structures) || {};
+          }
+          var nb = document.querySelector('.nav-item.active');
+          if (nb && nb.dataset.nav === 'understand') showUnderstand();
+        }).catch(function(){
+          _sig._smc_fetching = false;
+          // On error, set {} so IIFE shows NONE DETECTED instead of looping
+          if (window._activeSignal && window._activeSignal.sym === _sig.sym) {
+            window._activeSignal.smcStructures = {};
+          }
+        });
+      }
       return;
     }
     var _active = _smcDefs.filter(function(d){ return _smc[d.key] === true; });
