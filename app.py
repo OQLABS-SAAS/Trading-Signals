@@ -3398,45 +3398,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     else:
         neutral_count += 1  # Mid-band = no BB conviction signal
 
-    # ── Smart Money Concepts (SMC) — 4 additional votes ────────────────────────
-    # Each SMC structure that aligns with the signal direction adds 1 bullish or
-    # bearish vote. Structures that are present but opposite add a bearish/bullish
-    # vote. Structures that are absent or neutral add to neutral_count so they
-    # still widen the denominator (harder to reach threshold without SMC alignment).
-    #
-    # This means a TV STRONG BUY + 4 local bullish + 2 SMC bullish structures
-    # = (4+3+2) / (4+3+2+0) = 9/9 = 100% CONFIRMED. Real institutional alignment.
-    # A TV BUY + 3 local bullish + NO SMC = (3+2) / (3+2+4) = 5/9 = 56% → HOLD.
-    # SMC absence genuinely weakens signals that lack structural backing.
+    # ── Smart Money Concepts (SMC) — stored for post-gate confidence boost ──
+    # SMC no longer votes in the confluence gate. The signal must pass on its
+    # own merit through core indicators (RSI, EMA, MACD, Volume, Supertrend,
+    # Bollinger, VP, OF). SMC acts only as an accelerator: if 2+ structures
+    # align with the signal direction AFTER the gate, confidence bumps one
+    # level (LOW→MEDIUM, MEDIUM→HIGH). Absent or opposing SMC has zero effect.
     _smc = ind.get("smc_structures") or {}
-    # FVG: bullish FVG present → +1 bull. Bearish FVG → +1 bear. Neither → neutral.
-    if _smc.get("fvg_bullish"):
-        bullish_count += 1
-    elif _smc.get("fvg_bearish"):
-        bearish_count += 1
-    else:
-        neutral_count += 1
-    # Liquidity grab: bull grab (sweep of lows, rejection up) → +1 bull. Bear grab → +1 bear.
-    if _smc.get("liquidity_grab_bull"):
-        bullish_count += 1
-    elif _smc.get("liquidity_grab_bear"):
-        bearish_count += 1
-    else:
-        neutral_count += 1
-    # Displacement: bullish displacement (large bull candle) → +1 bull. Bear → +1 bear.
-    if _smc.get("displacement_bull"):
-        bullish_count += 1
-    elif _smc.get("displacement_bear"):
-        bearish_count += 1
-    else:
-        neutral_count += 1
-    # CHOCH: Change of Character bullish → +1 bull. Bearish → +1 bear.
-    if _smc.get("choch_bull"):
-        bullish_count += 1
-    elif _smc.get("choch_bear"):
-        bearish_count += 1
-    else:
-        neutral_count += 1
 
     # ── Volume Profile vote ───────────────────────────────────────────────────
     # VPOC above price = overhead supply (bearish). VPOC below = support (bullish).
@@ -3619,21 +3587,21 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     else:
         confidence = "LOW"
 
-    # SMC opposing-pattern penalty: 2+ active opposing patterns → drop confidence
-    # one level so signal card and Understand tab stay coherent. No UI warning needed.
-    _smc_pen = ind.get("smc_structures") or {}
+    # ── SMC aligned-pattern confidence boost: additive only ──────────────────
+    # SMC is an accelerator pedal, not a brake. If 2+ SMC structures align
+    # with the final signal direction, bump confidence one level. No SMC or
+    # misaligned SMC = zero effect. The signal stands on its own merit.
+    _smc_boost = 0
     if signal == "BUY":
-        _opp = sum(1 for k in ("fvg_bearish","liquidity_grab_bear","displacement_bear","choch_bear") if _smc_pen.get(k))
-        if _opp >= 2:
-            if   confidence == "HIGH":   confidence = "MEDIUM"
-            elif confidence == "MEDIUM": confidence = "LOW"
-            else:                        signal = "HOLD"
+        _smc_boost = sum(1 for k in ("fvg_bullish","liquidity_grab_bull",
+            "displacement_bull","choch_bull") if _smc.get(k))
     elif signal == "SELL":
-        _opp = sum(1 for k in ("fvg_bullish","liquidity_grab_bull","displacement_bull","choch_bull") if _smc_pen.get(k))
-        if _opp >= 2:
-            if   confidence == "HIGH":   confidence = "MEDIUM"
-            elif confidence == "MEDIUM": confidence = "LOW"
-            else:                        signal = "HOLD"
+        _smc_boost = sum(1 for k in ("fvg_bearish","liquidity_grab_bear",
+            "displacement_bear","choch_bear") if _smc.get(k))
+    if _smc_boost >= 2:
+        if   confidence == "LOW":    confidence = "MEDIUM"
+        elif confidence == "MEDIUM": confidence = "HIGH"
+    # HIGH stays HIGH — SMC confirms what was already strong.
 
     # ══════════════════════════════════════════════════════════════
     # TRADINGVIEW VOTES — integrated into the unified confluence pool

@@ -8381,15 +8381,10 @@ async function _sfFetchSignals(){
     }
 
     var _tt = _tradeTypeLabel(o.tf, window._stratMode);
-    // Weakened-signal detection — divergence in reason text OR opposing SMC patterns present
+    // Weakened-signal detection — divergence in reason text only.
+    // SMC no longer weakens signals — it only confirms (additive-only architecture).
     var _hasDivergence = !!(o.reason && (o.reason.toLowerCase().indexOf('divergence') !== -1 || o.reason.toLowerCase().indexOf('weakens') !== -1));
-    var _oppBullKeys = ['fvg_bullish','liquidity_grab_bull','displacement_bull','choch_bull'];
-    var _oppBearKeys = ['fvg_bearish','liquidity_grab_bear','displacement_bear','choch_bear'];
-    var _smcOpp = !!(o.smc_structures && (
-      (sig === 'BUY'  && _oppBearKeys.some(function(k){ return o.smc_structures[k] === true; })) ||
-      (sig === 'SELL' && _oppBullKeys.some(function(k){ return o.smc_structures[k] === true; }))
-    ));
-    var _isWeakened = _hasDivergence || _smcOpp;
+    var _isWeakened = _hasDivergence;
     return '<div class="opp-card ' + cardCls + '" onclick="loadSignalContext(' + oJson + ')">'
       + '<div class="opp-card-header">'
       + '<div class="opp-card-rank">' + String(i+1).padStart(2,'0') + '</div>'
@@ -8427,7 +8422,7 @@ async function _sfFetchSignals(){
           var _short = {fvg_bullish:'FVG ↑',fvg_bearish:'FVG ↓',liquidity_grab_bull:'Liq. Grab ↑',liquidity_grab_bear:'Liq. Grab ↓',displacement_bull:'Displacement ↑',displacement_bear:'Displacement ↓',choch_bull:'CHOCH ↑',choch_bear:'CHOCH ↓'};
           var _lvlKeys = {fvg_bullish:'fvg_bullish_level',fvg_bearish:'fvg_bearish_level',liquidity_grab_bull:'liquidity_grab_bull_level',liquidity_grab_bear:'liquidity_grab_bear_level',displacement_bull:'displacement_bull_level',displacement_bear:'displacement_bear_level',choch_bull:'choch_bull_level',choch_bear:'choch_bear_level'};
           var _bullKeys = {fvg_bullish:1,liquidity_grab_bull:1,displacement_bull:1,choch_bull:1};
-          var detected = _keys.filter(function(k){ return _smc[k] === true; });
+          var detected = _keys.filter(function(k){ return _smc[k] === true && ((_sig==='BUY'&&!!_bullKeys[k])||(_sig==='SELL'&&!_bullKeys[k])); });
           if (!detected.length) return '';
           var _entryNum = parseFloat(_entry) || 0;
           var badges = detected.map(function(k){
@@ -12255,9 +12250,10 @@ function showUnderstand(){
   };
   _smcDefs.forEach(function(def) {
     if (!_smcStructures[def.k]) return;
+    var aligned = (_curSmcSig === 'BUY' && def.d === 'bull') || (_curSmcSig === 'SELL' && def.d === 'bear');
+    if (!aligned) return; // SMC additive-only: show only confirming patterns
     var lvl    = _smcStructures[def.lk];
     var lvlStr = lvl != null ? lvl.toString() : null;
-    var aligned = (_curSmcSig === 'BUY' && def.d === 'bull') || (_curSmcSig === 'SELL' && def.d === 'bear');
     var dirLabel = def.d === 'bull' ? 'Bullish' : 'Bearish';
     var begFn  = aligned ? _smcBegAligned[def.k] : _smcBegOpposing[def.k];
     var begTxt = begFn ? begFn(lvlStr) : (dirLabel + ' ' + def.lbl + (lvlStr ? ' at ' + lvlStr : '') + '.');
