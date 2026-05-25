@@ -4035,7 +4035,6 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # automatically reduces all three when it drops confidence HIGH→MEDIUM.
         "confidence_pct": round(
             (lambda _r: (
-                0.0 if signal == "HOLD" else
                 _r if confidence == "HIGH" else
                 min(_r, 79.0) if confidence == "MEDIUM" else
                 min(_r, 64.0)
