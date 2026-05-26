@@ -10390,6 +10390,7 @@ def scan_list():
                         # G1: Market regime — so scanner-loaded signals show regime chip + warning
                         "regime":         analysis.get("regime","NORMAL"),
                         "regime_warning": analysis.get("regime_warning",""),
+                        "regime_context": analysis.get("regime_context",""),
                         # G2: Session context — so scanner-loaded signals show off-hours warning
                         "session_context": analysis.get("session_context",
                             {"session":"—","off_hours":False,"warning_level":None,"message":""}),
