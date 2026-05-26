@@ -7205,6 +7205,22 @@ def mt5_confirm_order():
                         send_telegram(tg_msg)
                 except Exception:
                     pass
+        # Auto-log outcome to SignalHistory when EA reports a closed trade with P&L
+        if pnl is not None and order and order.action in ("close", "partial_close"):
+            try:
+                outcome = "WIN" if float(pnl) > 0 else ("LOSS" if float(pnl) < 0 else "BE")
+                uid = order.user_id
+                sig_row = db.query(SignalHistory).filter(
+                    SignalHistory.user_id == uid,
+                    SignalHistory.ticker.ilike(order.symbol),
+                    SignalHistory.signal.ilike(order.order_type),
+                    SignalHistory.outcome.is_(None),
+                ).order_by(SignalHistory.fired_at.desc()).first()
+                if sig_row:
+                    sig_row.outcome = outcome
+                    sig_row.actual_exit_price = fill_price
+            except Exception:
+                pass
         db.commit()
         # Cache tp2/tp3/timeframe in mt5_state so state endpoint can enrich instantly
         if status == "filled" and ticket and order:
