@@ -10525,6 +10525,11 @@ async function showPortfolio(){
         rows +
         '</div>';
     })()}
+    <div class="pf-card" id="pfPerfSummary" data-guide="portfolio-performance" style="margin-bottom:18px;padding:14px 16px;">
+      <div class="pf-pos-title" style="font-size:11px;font-family:var(--mono);letter-spacing:.06em;color:rgba(237,232,216,.75);margin-bottom:3px;">Performance Summary</div>
+      <div style="font-size:11px;color:rgba(237,232,216,.45);margin-bottom:10px;">How your closed trades are performing overall</div>
+      <div id="pfPerfBody" style="font-size:12px;color:rgba(237,232,216,.4);">Loading performance data...</div>
+    </div>
     <div class="pf-body"><div class="pf-pos-card">
       <div class="pf-pos-head"><span class="pf-pos-title">Open Positions</span></div>
       <div style="overflow-x:auto;"><table class="pf-pos-table" data-guide="portfolio-position-table">
@@ -10578,6 +10583,28 @@ async function showPortfolio(){
       '</div>'+
       '<div style=font-size:11px;color:rgba(237,232,216,.55);line-height:1.5>'+d.message+'</div>'+
       '<div style=font-size:10px;color:rgba(237,232,216,.35);margin-top:6px>'+d.simulations+' simulations · '+d.trades_used+' trades</div>';
+  });
+  // ── Performance Summary (from /api/signals/stats) ──
+  dvFetch('/api/signals/stats').then(function(r){
+    var el=document.getElementById('pfPerfBody');
+    if(!el)return;
+    if(!r || r.error){el.innerHTML='<div style="color:rgba(237,232,216,.5);font-size:12px;">Sign in to see your performance summary.</div>';return;}
+    if(!r.ready){el.innerHTML='<div style="color:rgba(237,232,216,.5);font-size:12px;">'+r.message+'</div>';return;}
+    var wrCls=r.win_rate>=50?'green':'red';
+    var rr=r.avg_win_r!=null&&r.avg_loss_r!=null?(r.avg_win_r/Math.abs(r.avg_loss_r)).toFixed(2):'\u2014';
+    var shCls=r.sharpe_ratio>=1?'green':'';
+    var ddPct=r.max_drawdown!=null?(r.max_drawdown*100).toFixed(1)+'%':'\u2014';
+    var aw=r.avg_win_r!=null?'+'+r.avg_win_r.toFixed(2)+'R':'\u2014';
+    var al=r.avg_loss_r!=null?r.avg_loss_r.toFixed(2)+'R':'\u2014';
+    var exp=r.expectancy!=null?(r.expectancy>=0?'+':'')+r.expectancy.toFixed(2)+'R':'\u2014';
+    el.innerHTML='<div class="und-data-row"><span class="und-data-label">Total Signals <span class="und-data-hint">(closed trades)</span></span><span class="und-data-val">'+r.total_closed+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Win Rate <span class="und-data-hint">(% winners)</span></span><span class="und-data-val '+wrCls+'">'+r.win_rate.toFixed(1)+'%</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Avg R:R <span class="und-data-hint">(profit per win vs loss)</span></span><span class="und-data-val">'+rr+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Avg Win R <span class="und-data-hint">(avg gain on winners)</span></span><span class="und-data-val green">'+aw+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Avg Loss R <span class="und-data-hint">(avg loss on losers)</span></span><span class="und-data-val red">'+al+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Expectancy <span class="und-data-hint">(expected R per trade, positive=profitable)</span></span><span class="und-data-val '+(r.expectancy>=0?'green':'red')+'">'+exp+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Sharpe Ratio <span class="und-data-hint">(return vs risk, >1 is good)</span></span><span class="und-data-val '+shCls+'">'+r.sharpe_ratio+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Max Drawdown <span class="und-data-hint">(worst account drop)</span></span><span class="und-data-val red">'+ddPct+'</span></div>';
   });
 }
 async function pfMasterReset(){
@@ -16735,6 +16762,39 @@ function szRoRUpdate(){
 // ══════════════════════════════════════════════════════════════
 let _actTimers=[];
 
+// MT5 Account Summary card — populates the actMt5AcctBody div on the ACT tab.
+// Called from showAct() once on render, then live-updated by mt5Poll/mt5LoadTab every 5 seconds.
+function _actPopulateMt5Summary(data) {
+  var el = document.getElementById('actMt5AcctBody');
+  if (!el) return;
+  if (!data || !data.connected) {
+    el.innerHTML = '<span style="color:rgba(232,112,110,.7);">● Disconnected</span> &mdash; Connect in Settings → Connections to link your MT5 account.';
+    return;
+  }
+  var a = data.account || {};
+  var bal        = parseFloat(a.balance) || 0;
+  var eq         = parseFloat(a.equity) || 0;
+  var margin     = parseFloat(a.margin) || 0;
+  var marginFree = parseFloat(a.margin_free) || 0;
+  var marginLvl  = parseFloat(a.margin_level) || 0;
+  var profit     = parseFloat(a.profit) || 0;
+  var profitSign = profit >= 0 ? '+' : '';
+  var profitColor = profit >= 0 ? '#5de8a0' : '#e8706e';
+  el.innerHTML =
+    '<span style="color:#5de8a0;">● Connected</span> &nbsp;·&nbsp; ' +
+    '<span style="color:var(--t2);">Balance </span><span style="color:var(--t1);font-weight:600;">$' + bal.toFixed(2) + '</span>' +
+    ' &nbsp;·&nbsp; ' +
+    '<span style="color:var(--t2);">Equity </span><span style="color:var(--t1);font-weight:600;">$' + eq.toFixed(2) + '</span>' +
+    ' &nbsp;·&nbsp; ' +
+    '<span style="color:var(--t2);">Margin </span><span style="color:var(--t1);font-weight:600;">$' + margin.toFixed(2) + '</span>' +
+    ' &nbsp;·&nbsp; ' +
+    '<span style="color:var(--t2);">Free Margin </span><span style="color:var(--t1);font-weight:600;">$' + marginFree.toFixed(2) + '</span>' +
+    ' &nbsp;·&nbsp; ' +
+    '<span style="color:var(--t2);">Margin Level </span><span style="color:var(--t1);font-weight:600;">' + marginLvl.toFixed(1) + '%</span>' +
+    ' &nbsp;·&nbsp; ' +
+    '<span style="color:var(--t2);">Open P&amp;L </span><span style="color:' + profitColor + ';font-weight:600;">' + profitSign + '$' + Math.abs(profit).toFixed(2) + '</span>';
+}
+
 function showAct(){
   const el=document.getElementById('dashContent'); if(!el) return;
   _actTimers.forEach(clearInterval); _actTimers=[];
@@ -16749,6 +16809,14 @@ function showAct(){
     <div class="sf-page-title">Act</div>
     <div class="sf-breadcrumb">MARKET › SIGNAL › UNDERSTAND › VERDICT › SIZE › <em>ACT</em></div>
     <div style="font-size:11px;color:rgba(237,232,216,.45);margin-top:6px;line-height:1.5;">Execute your trade — send it to MT5 for live execution, log it to your portfolio, or copy details to your broker manually.</div>
+  </div>
+
+  <!-- MT5 Account Summary — live-updates every 5 seconds -->
+  <div id="actMt5Summary" style="margin-bottom:16px;border-radius:10px;border:1px solid rgba(237,232,216,.12);background:var(--s2);padding:14px 16px;">
+    <div style="font-size:9px;font-weight:700;color:rgba(237,232,216,.35);letter-spacing:.08em;font-family:var(--mono);margin-bottom:8px;">MT5 ACCOUNT SUMMARY</div>
+    <div id="actMt5AcctBody" style="font-family:var(--mono);font-size:11px;color:var(--t3);line-height:1.7;">
+      <span style="color:rgba(232,112,110,.7);">● Disconnected</span> &mdash; Connect in Settings → Connections to link your MT5 account.
+    </div>
   </div>
 
   <!-- Verdict multi-position plan (shown only when user came through Verdict → Size → Act) -->
@@ -17036,6 +17104,9 @@ function showAct(){
       </button>
     </div>
   </div>`;
+
+  // Populate MT5 Account Summary card from live state
+  dvFetch('/api/mt5/state').then(_actPopulateMt5Summary).catch(function(){});
 
   // Show demo trades immediately — replaced by live data when EA connects
   _mt5RenderPositions([]);
@@ -17916,6 +17987,7 @@ function mt5Poll() {
       window._mt5AccountBalance = (d.account && d.account.balance) ? parseFloat(d.account.balance) : 0;
     }
     _mt5RenderPositions(d.connected ? (d.positions || []) : []);
+    _actPopulateMt5Summary(d);
   }).catch(function(){});
 }
 
@@ -17933,6 +18005,7 @@ function mt5LoadTab() {
     _mt5LevelHits = d.level_hits || {};
     window._mt5AccountBalance = (d.account && d.account.balance) ? parseFloat(d.account.balance) : 0;
     _mt5RenderPositions(d.positions || []);
+    _actPopulateMt5Summary(d);
     if (d.account) {
       // Update execution block lots from account balance
       var lotsInp = document.getElementById('actLots');
