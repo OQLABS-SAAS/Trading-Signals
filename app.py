@@ -518,7 +518,34 @@ def fetch_binance_ohlcv(ticker, interval="1d", period="1y"):
         return pd.DataFrame()
 
 
-def safe_download(ticker, period="1y", interval="1d", **kwargs):
+def _interval_to_timeframe(interval):
+    """Map yfinance interval to fetch_chart_direct timeframe."""
+    mapping = {
+        "1d": "1d", "1wk": "1w", "1mo": "1d",
+        "1h": "1h", "60m": "1h",
+        "4h": "4h", "30m": "30m", "15m": "15m", "5m": "5m", "1m": "1m",
+    }
+    return mapping.get(interval, "1d")
+
+
+def _chart_output_to_df(chart_output):
+    """Convert fetch_chart_direct 8-tuple to safe_download DataFrame format.
+    
+    _build_chart_output returns: (dates, prices, vols, ema20, ema50, opens, highs, lows)
+    """
+    if chart_output is None:
+        return pd.DataFrame()
+    dates, prices, vols, ema20, ema50, opens, highs, lows = chart_output
+    if not dates or not opens:
+        return pd.DataFrame()
+    df = pd.DataFrame({
+        "Open": opens, "High": highs, "Low": lows,
+        "Close": prices, "Volume": vols,
+    }, index=pd.to_datetime(dates))
+    return df.dropna(how="all")
+
+
+def safe_download(ticker, period="1y", interval="1d", asset_type=None, **kwargs):
     """Fetch OHLCV data directly from Yahoo Finance chart API using browser headers.
 
     Bypasses yfinance session/cookie authentication issues on cloud server IPs.
@@ -598,9 +625,6 @@ def safe_download(ticker, period="1y", interval="1d", **kwargs):
         cache_set(cache_key, df)
     else:
         print(f"[yahoo] No data for {ticker} period={period} interval={interval}")
-        # ── Binance fallback for crypto tickers ──────────────────
-        # Yahoo Finance often blocks cloud server IPs for crypto OHLCV.
-        # Try Binance public API instead (no auth required, very reliable).
         print(f"[binance-fallback] Attempting fallback for {ticker} after Yahoo Finance failed")
         b_df = fetch_binance_ohlcv(ticker, interval=interval, period=period)
         if not b_df.empty:
@@ -609,6 +633,27 @@ def safe_download(ticker, period="1y", interval="1d", **kwargs):
             return b_df
         else:
             print(f"[binance-fallback] FAILED — Binance also returned no data for {ticker}")
+
+    # ── Multi-source fallback (Twelve Data → Stooq → FMP → Yahoo v8) ──
+    if df.empty:
+        timeframe = _interval_to_timeframe(interval)
+        _at = asset_type
+        if _at is None:
+            upper = ticker.upper()
+            if upper.endswith(('USDT', 'BTC', 'ETH', 'BUSD')) or 'BINANCE' in upper:
+                _at = 'crypto'
+            elif ticker.endswith('=X'):
+                _at = 'forex'
+            else:
+                _at = 'stock'
+        chart_out = fetch_chart_direct(ticker, _at, timeframe)
+        cf_df = _chart_output_to_df(chart_out)
+        if not cf_df.empty:
+            print(f"[multi-source] SUCCESS — {len(cf_df)} bars for {ticker} via chart fallback ({_at}/{timeframe})")
+            cache_set(cache_key, cf_df)
+            return cf_df
+        else:
+            print(f"[multi-source] ALL fallbacks exhausted for {ticker}")
 
     return df
 
@@ -1651,21 +1696,21 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
         if result:
             return result
 
-    # 2. Stooq — works for stocks, indices, some forex (daily only)
-    if asset_type in ("stock", "index", "forex", "commodity"):
-        print(f"[chart] trying Stooq for {ticker} ({asset_type}) {timeframe}")
-        result = _fetch_stooq(ticker, asset_type, timeframe)
-        if result:
-            return result
-        print(f"[chart] Stooq failed for {ticker}")
-
-    # 3. Twelve Data — primary for stocks/forex intraday on Railway (Yahoo v8 is 429-blocked)
+    # 2. Twelve Data — primary for stocks/forex intraday on Railway
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying Twelve Data for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_twelvedata(ticker, asset_type, timeframe)
         if result:
             return result
         print(f"[chart] Twelve Data failed for {ticker}")
+
+    # 3. Stooq — works for stocks, indices, some forex (daily only)
+    if asset_type in ("stock", "index", "forex", "commodity"):
+        print(f"[chart] trying Stooq for {ticker} ({asset_type}) {timeframe}")
+        result = _fetch_stooq(ticker, asset_type, timeframe)
+        if result:
+            return result
+        print(f"[chart] Stooq failed for {ticker}")
 
     # 4. FMP — alternative when TD key missing or quota hit
     if asset_type in ("stock", "index", "forex", "commodity"):
