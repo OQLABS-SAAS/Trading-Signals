@@ -1887,7 +1887,13 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[cmc] FAILED for {ticker}")
 
-    # 2. Twelve Data — primary for stocks/forex intraday on Railway
+    # 2. Yahoo Finance v8 — works on Railway (proven - logs show OK response)
+    print(f"[chart] trying Yahoo v8 for {ticker} ({asset_type}) {timeframe}")
+    result = _fetch_yahoo_v8(ticker, asset_type, timeframe)
+    if result:
+        return result
+
+    # 3. Twelve Data — secondary, often quota-exhausted on Railway
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying Twelve Data for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_twelvedata(ticker, asset_type, timeframe)
@@ -1895,7 +1901,7 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[chart] Twelve Data failed for {ticker}")
 
-    # 3. Stooq — works for stocks, indices, some forex (daily only)
+    # 4. Stooq — rarely works from Railway
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying Stooq for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_stooq(ticker, asset_type, timeframe)
@@ -1903,7 +1909,7 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[chart] Stooq failed for {ticker}")
 
-    # 4. FMP — alternative when TD key missing or quota hit
+    # 5. FMP — always 403 on Railway (no API key)
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying FMP for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_fmp(ticker, asset_type, timeframe)
@@ -1911,11 +1917,7 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[chart] FMP failed for {ticker}")
 
-    # 5. Yahoo Finance v8 — last resort (likely 429 on Railway)
-    print(f"[chart] trying Yahoo v8 for {ticker} ({asset_type}) {timeframe}")
-    result = _fetch_yahoo_v8(ticker, asset_type, timeframe)
-    if result:
-        return result
+    # 5. Yahoo v8 also tried above — deduplicated
 
     print(f"[chart] ALL sources failed for {ticker} {timeframe}")
     return None
@@ -11750,9 +11752,10 @@ def scan_list():
                     results.append(row)
 
         # Run all tickers in parallel — 6 tickers in ~5s instead of ~30s
+        # 90s timeout to handle Railway cold start + Yahoo v8 data download
         threads = [_threading.Thread(target=_scan_one, args=(t,)) for t in tickers]
         for th in threads: th.start()
-        for th in threads: th.join(timeout=25)
+        for th in threads: th.join(timeout=90)
 
         def sort_key(r):
             if r.get("error"): return 99
