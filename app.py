@@ -1887,13 +1887,7 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[cmc] FAILED for {ticker}")
 
-    # 3. Yahoo Finance v8 — actually works on Railway (proven in logs)
-    print(f"[chart] trying Yahoo v8 for {ticker} ({asset_type}) {timeframe}")
-    result = _fetch_yahoo_v8(ticker, asset_type, timeframe)
-    if result:
-        return result
-
-    # 4. Twelve Data — primary for stocks/forex intraday on Railway (often quota-exhausted)
+    # 2. Twelve Data — primary for stocks/forex intraday on Railway
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying Twelve Data for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_twelvedata(ticker, asset_type, timeframe)
@@ -1901,7 +1895,7 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[chart] Twelve Data failed for {ticker}")
 
-    # 5. Stooq — rarely works from Railway (connect timeout), kept for last resort
+    # 3. Stooq — works for stocks, indices, some forex (daily only)
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying Stooq for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_stooq(ticker, asset_type, timeframe)
@@ -1909,7 +1903,7 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[chart] Stooq failed for {ticker}")
 
-    # 6. FMP — always 403 on Railway (no API key), kept as placeholder
+    # 4. FMP — alternative when TD key missing or quota hit
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying FMP for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_fmp(ticker, asset_type, timeframe)
