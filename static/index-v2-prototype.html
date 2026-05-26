@@ -7590,6 +7590,8 @@ function qpAssetChanged() {
 // Init on page load — populate the default Crypto list
 document.addEventListener('DOMContentLoaded', qpAssetChanged);
 setTimeout(qpAssetChanged, 200);  // fallback if load fired earlier
+// Ensure _dvTF has a default so 'Analyse' without clicking a TF button doesn't send undefined
+window._dvTF = window._dvTF || '4h';
 function qpSetTF(tf, btn) {
   window._dvTF = tf;
   document.querySelectorAll('.qp-tf').forEach(b => {
@@ -9432,7 +9434,7 @@ function _sfRender(){
   return `
     <div class="sf-page-head">
       <div class="sf-page-title">Signal</div>
-      <div class="sf-breadcrumb"><span>MARKET</span> › <em>SIGNAL</em> › UNDERSTAND › VERDICT › SIZE › ACT</div>
+      <div class="sf-breadcrumb"><span style="color:var(--t3)">MARKET → </span><span style="color:var(--gold)">SIGNAL</span><span style="color:var(--t3)"> → UNDERSTAND → VERDICT → SIZE → ACT</span></div>
     </div>
 
     <!-- Metric strip -->
@@ -9519,7 +9521,8 @@ function _sfRender(){
         <div class="flow-footer-step">Step 2 of 6 &middot; SIGNAL</div>
       </div>
       <div class="flow-footer-right">
-        <button class="flow-btn-back btn-pipeline" aria-label="Go back" onclick="setNav('market');showMarket();">← MARKET</button>
+        <button class="flow-btn-back btn-pipeline" aria-label="Go back" onclick="setNav('market');showMarket();">← Market</button>
+        <button class="flow-btn-next btn-pipeline" onclick="setNav('understand');showUnderstand();">View in Understand →</button>
       </div>
     </div>
 
@@ -15769,9 +15772,13 @@ function _vRenderLive(sig, verdict, structured){
     + autoReviewHtml
     // Agent chat box
     + chatHtml
-    + '</div>'
-    + '<button onclick="_vPreloadSize()" style="padding:10px 20px;border-radius:6px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:var(--mono);background:#5de8a0;color:#07080c;display:inline-flex;align-items:center;gap:6px">'
-    + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Open in Size</button>';
+    + '</div>';
+
+  // ── Update persistent flow-footer for post-analysis state
+  var ff = document.getElementById('verdictFlowFooter');
+  if (ff) {
+    ff.innerHTML = '<div class="flow-footer-left"><div class="flow-footer-step">Step 4 of 6 · VERDICT</div><div class="flow-footer-msg">Analysis complete — review the verdict or continue to size your position</div></div><div class="flow-footer-right"><button class="flow-btn-back" onclick="_vGoUnderstand()">\u2190 Understand</button><button class="flow-btn-next" onclick="_vPreloadSize()">Size Position \u2192 SIZE</button></div>';
+  }
 
   // Restore chat history after innerHTML (innerHTML wipes the DOM)
   var _chatMsgs = document.getElementById('verdictChatMsgs');
@@ -16065,12 +16072,14 @@ function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy)
     </button>
   </div>
 
-  <div id="verdictResults" style="display:none"></div>
+  <div id="verdictResults" style="display:none"></div>`;
 
-  <div class="flow-footer">
-    <div class="flow-footer-left"><div class="flow-footer-step">Step 4 of 6 · VERDICT</div><div class="flow-footer-msg">Run the deep analysis or skip to size your position</div></div>
-    <div class="flow-footer-right"><button class="flow-btn-next btn-pipeline" onclick="_vPreloadSize()">Skip to Size →</button></div>
-  </div>`;
+  // ── Persistent flow-footer (outside the replaceable region)
+  var ff = document.createElement('div');
+  ff.className = 'flow-footer';
+  ff.id = 'verdictFlowFooter';
+  ff.innerHTML = '<div class="flow-footer-left"><div class="flow-footer-step">Step 4 of 6 · VERDICT</div><div class="flow-footer-msg">Run the deep analysis or skip to size your position</div></div><div class="flow-footer-right"><button class="flow-btn-next btn-pipeline" onclick="_vPreloadSize()">Skip to Size →</button></div>';
+  el.appendChild(ff);
 }
 
 function _vCard(name,vote,conf,cls,w,reason,isBuy,wonCol,tag){
@@ -16095,6 +16104,9 @@ function _vBuildLadder(){
     html += '<div class="verdict-trade-card"><div style="font-size:8px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">TRADE '+(i+1)+'</div><div style="font-family:var(--mono);font-size:16px;font-weight:600;color:var(--gold);margin-bottom:3px">'+risks[i].toFixed(1)+'%</div><div style="font-size:8px;color:var(--red);font-family:var(--mono)">-\$'+loss+'</div><div style="font-size:8px;color:var(--grn);font-family:var(--mono);margin-top:2px">+\$'+gain+'</div></div>';
   }
   el.innerHTML = html;
+}
+function _vGoUnderstand(){
+  setNav('understand'); showUnderstand();
 }
 function _vPreloadSize(){
   var sig = window._activeSignal || {};
