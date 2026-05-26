@@ -10588,23 +10588,30 @@ async function showPortfolio(){
   dvFetch('/api/signals/stats').then(function(r){
     var el=document.getElementById('pfPerfBody');
     if(!el)return;
-    if(!r || r.error){el.innerHTML='<div style="color:rgba(237,232,216,.5);font-size:12px;">Sign in to see your performance summary.</div>';return;}
-    if(!r.ready){el.innerHTML='<div style="color:rgba(237,232,216,.5);font-size:12px;">'+r.message+'</div>';return;}
-    var wrCls=r.win_rate>=50?'green':'red';
-    var rr=r.avg_win_r!=null&&r.avg_loss_r!=null?(r.avg_win_r/Math.abs(r.avg_loss_r)).toFixed(2):'\u2014';
-    var shCls=r.sharpe_ratio>=1?'green':'';
-    var ddPct=r.max_drawdown!=null?(r.max_drawdown*100).toFixed(1)+'%':'\u2014';
-    var aw=r.avg_win_r!=null?'+'+r.avg_win_r.toFixed(2)+'R':'\u2014';
-    var al=r.avg_loss_r!=null?r.avg_loss_r.toFixed(2)+'R':'\u2014';
-    var exp=r.expectancy!=null?(r.expectancy>=0?'+':'')+r.expectancy.toFixed(2)+'R':'\u2014';
-    el.innerHTML='<div class="und-data-row"><span class="und-data-label">Total Signals <span class="und-data-hint">(closed trades)</span></span><span class="und-data-val">'+r.total_closed+'</span></div>'+
-      '<div class="und-data-row"><span class="und-data-label">Win Rate <span class="und-data-hint">(% winners)</span></span><span class="und-data-val '+wrCls+'">'+r.win_rate.toFixed(1)+'%</span></div>'+
+    if(!r || r.error){el.innerHTML='<div class="und-data-row"><span class="und-data-label">Total Signals <span class="und-data-hint">(closed trades)</span></span><span class="und-data-val">0</span></div><div style="padding:6px 0;font-size:11px;color:rgba(237,232,216,.4);">Sign in to track your trading performance.</div>';return;}
+    var sc = r.sample_size || 0;
+    var wr = r.win_rate != null ? r.win_rate.toFixed(1)+'%' : '\u2014';
+    var wrCls = r.win_rate != null ? (r.win_rate>=50?'green':'red') : '';
+    var rr = (r.avg_win_r != null && r.avg_loss_r != null) ? (r.avg_win_r / Math.abs(r.avg_loss_r)).toFixed(2) : '\u2014';
+    var aw = r.avg_win_r != null ? '+'+r.avg_win_r.toFixed(2)+'R' : '\u2014';
+    var al = r.avg_loss_r != null ? r.avg_loss_r.toFixed(2)+'R' : '\u2014';
+    var exp = r.expectancy != null ? (r.expectancy>=0?'+':'')+r.expectancy.toFixed(2)+'R' : '\u2014';
+    var expCls = r.expectancy != null ? (r.expectancy>=0?'green':'red') : '';
+    var sh = r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '\u2014';
+    var shCls = r.sharpe_ratio != null && r.sharpe_ratio>=1 ? 'green' : '';
+    var dd = r.max_drawdown != null ? (r.max_drawdown*100).toFixed(1)+'%' : '\u2014';
+    el.innerHTML=
+      '<div class="und-data-row"><span class="und-data-label">Total Signals <span class="und-data-hint">(closed trades)</span></span><span class="und-data-val">'+sc+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Win Rate <span class="und-data-hint">(% winners)</span></span><span class="und-data-val '+wrCls+'">'+wr+'</span></div>'+
       '<div class="und-data-row"><span class="und-data-label">Avg R:R <span class="und-data-hint">(profit per win vs loss)</span></span><span class="und-data-val">'+rr+'</span></div>'+
       '<div class="und-data-row"><span class="und-data-label">Avg Win R <span class="und-data-hint">(avg gain on winners)</span></span><span class="und-data-val green">'+aw+'</span></div>'+
       '<div class="und-data-row"><span class="und-data-label">Avg Loss R <span class="und-data-hint">(avg loss on losers)</span></span><span class="und-data-val red">'+al+'</span></div>'+
-      '<div class="und-data-row"><span class="und-data-label">Expectancy <span class="und-data-hint">(expected R per trade, positive=profitable)</span></span><span class="und-data-val '+(r.expectancy>=0?'green':'red')+'">'+exp+'</span></div>'+
-      '<div class="und-data-row"><span class="und-data-label">Sharpe Ratio <span class="und-data-hint">(return vs risk, >1 is good)</span></span><span class="und-data-val '+shCls+'">'+r.sharpe_ratio+'</span></div>'+
-      '<div class="und-data-row"><span class="und-data-label">Max Drawdown <span class="und-data-hint">(worst account drop)</span></span><span class="und-data-val red">'+ddPct+'</span></div>';
+      '<div class="und-data-row"><span class="und-data-label">Expectancy <span class="und-data-hint">(expected R per trade, positive=profitable)</span></span><span class="und-data-val '+expCls+'">'+exp+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Sharpe Ratio <span class="und-data-hint">(return vs risk, >1 is good)</span></span><span class="und-data-val '+shCls+'">'+sh+'</span></div>'+
+      '<div class="und-data-row"><span class="und-data-label">Max Drawdown <span class="und-data-hint">(worst account drop)</span></span><span class="und-data-val red">'+dd+'</span></div>';
+    if(!r.ready && r.message){
+      el.innerHTML+='<div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:8px;padding-top:8px;border-top:1px solid rgba(237,232,216,.08);">'+r.message+'</div>';
+    }
   });
 }
 async function pfMasterReset(){
@@ -16812,7 +16819,7 @@ function showAct(){
   </div>
 
   <!-- MT5 Account Summary — live-updates every 5 seconds -->
-  <div id="actMt5Summary" style="margin-bottom:16px;border-radius:10px;border:1px solid rgba(237,232,216,.12);background:var(--s2);padding:14px 16px;">
+  <div id="actMt5Summary" style="margin-bottom:16px;border-radius:10px;border:1px solid rgba(237,232,216,.12);background:rgba(18,22,30,.85);padding:14px 16px;">
     <div style="font-size:9px;font-weight:700;color:rgba(237,232,216,.35);letter-spacing:.08em;font-family:var(--mono);margin-bottom:8px;">MT5 ACCOUNT SUMMARY</div>
     <div id="actMt5AcctBody" style="font-family:var(--mono);font-size:11px;color:var(--t3);line-height:1.7;">
       <span style="color:rgba(232,112,110,.7);">● Disconnected</span> &mdash; Connect in Settings → Connections to link your MT5 account.
