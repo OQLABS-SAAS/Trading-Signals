@@ -2151,6 +2151,80 @@ hr, .divider, [class*="-sep"], [class*="-divider"] {
   flex-shrink: 0;
 }
 
+/* ── Rings Row: confidence + quality side by side ── */
+.rings-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* ── Quality Score Ring wrapper ── */
+.qual-wrap-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  position: relative;
+}
+.qual-ring {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qual-center {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qual-pct {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+.qual-ring-lbl {
+  font-size: 9.5px;
+  color: var(--t3);
+  letter-spacing: .03em;
+}
+
+/* ── Quality tooltip (hover breakdown) ── */
+.qual-tip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 10px;
+  background: rgba(10, 12, 16, .96);
+  border: 1px solid var(--bd2);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+  z-index: 20;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5);
+}
+.qual-ring:hover .qual-tip {
+  display: block;
+}
+.qual-tip .qt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+.qual-tip .qt-lbl { color: var(--t3); }
+.qual-tip .qt-val { color: var(--t1); text-align: right; }
+.qual-tip .qt-max { color: var(--t3); font-size: 9px; }
+
 /* The badge itself */
 .wr-pat-badge {
   display: inline-flex;
@@ -2273,6 +2347,16 @@ hr, .divider, [class*="-sep"], [class*="-divider"] {
     font-size: 10px;
     padding: 2px 6px;
     max-width: 100px;
+  }
+
+  .rings-row {
+    gap: 6px;
+  }
+  .qual-ring-lbl {
+    font-size: 8px;
+  }
+  .qual-pct {
+    font-size: 9px;
   }
 }
 .opp-card-right{flex:1;min-width:0;}
@@ -7331,6 +7415,8 @@ async function dvRunAnalyze(){
       rr3Raw:       data.rr3_raw,
       // SMC-FE: Smart Money Concepts structures from backend detect_smc_structures()
       smcStructures: data.smc_structures || null,
+      // Phase 2.2: Signal Quality Score
+      quality: data.quality || null,
     };
     // Clear any stale verdict pre-warm from a previous signal
     window._verdictPrewarmJobId = null;
@@ -8236,6 +8322,9 @@ async function _sfFetchSignals(){
 
   const confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
 
+  const qualColor = function(score){ if(score==null)return null;if(score>=80)return'#5de8a0';if(score>=60)return'#a3e635';if(score>=40)return'#c9a84c';return'#e8706e'; };
+  const qualLabel = function(score){ if(score==null)return null;if(score>=80)return'EXCELLENT';if(score>=60)return'GOOD';if(score>=40)return'FAIR';return'POOR'; };
+
   /* ── Phase 1: Scan for live signals ── */
   // Always use getElementById here — sfBtFill/sfBtLbl are now outside sfOppsList
   // and therefore survive any list.innerHTML replacement below.
@@ -8315,7 +8404,9 @@ async function _sfFetchSignals(){
             rr1Raw:        r.rr1_raw      != null ? r.rr1_raw      : null,
             // SMC-FE root fix: backend already computed smc_structures in _scan_one —
             // forward it here so loadSignalContext gets real data, not undefined.
-            smc_structures: r.smc_structures || null
+            smc_structures: r.smc_structures || null,
+            // Phase 2.2: Signal Quality Score
+            quality: r.quality || null
           };
         });
       // Multi-TF scan — keep all timeframes so users can compare
@@ -8553,6 +8644,7 @@ async function _sfFetchSignals(){
       + '<span class="opp-badge ' + sig.toLowerCase() + '" data-guide="signal-' + sig.toLowerCase() + '">' + sig + '</span>'
       + '</div>'
       + '<div class="opp-card-mid">'
+      + '<div class="rings-row">'
       + '<div class="wr-pat-conf-col">'
       + '<div class="opp-conf-wrap">'
       + '<svg width="52" height="52" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" fill="none" stroke="rgba(237,232,216,.07)" stroke-width="3"/>'
@@ -8560,6 +8652,29 @@ async function _sfFetchSignals(){
       + '</svg><div class="opp-conf-center"><span class="opp-conf-pct" style="color:' + cc + '">' + o.conf + '</span></div>'
       + '</div>'
       + '<div class="wr-pat-badge wr-pat-loading" id="wr-pat-' + i + '"><span class="wr-pat-label">WR ...</span></div>'
+      + '</div>'
+      + (o.quality != null ? (function(){
+          var qs = o.quality.score != null ? o.quality.score : o.quality;
+          var qc = qualColor(qs);
+          if(!qc) return '';
+          var qcirc = Math.round((qs || 0) / 100 * 144.5);
+          var qbd = o.quality.breakdown || {};
+          return '<div class="qual-wrap-col">'
+          + '<div class="qual-ring">'
+          + '<svg width="52" height="52" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" fill="none" stroke="rgba(237,232,216,.07)" stroke-width="3"/>'
+          + '<circle cx="26" cy="26" r="23" fill="none" stroke="' + qc + '" stroke-width="3" stroke-dasharray="' + qcirc + ' 144.5" stroke-linecap="round" transform="rotate(-90 26 26)" style="filter:drop-shadow(0 0 5px ' + qc + ')"/>'
+          + '</svg><div class="qual-center"><span class="qual-pct" style="color:' + qc + '">' + Math.round(qs) + '</span></div>'
+          + '<div class="qual-tip">'
+          + '<div class="qt-row"><span class="qt-lbl">confidence</span><span class="qt-val">'+(qbd.confidence!=null?qbd.confidence:'--')+'</span><span class="qt-max">/35</span></div>'
+          + '<div class="qt-row"><span class="qt-lbl">regime</span><span class="qt-val">'+(qbd.regime!=null?qbd.regime:'--')+'</span><span class="qt-max">/20</span></div>'
+          + '<div class="qt-row"><span class="qt-lbl">smc</span><span class="qt-val">'+(qbd.smc!=null?qbd.smc:'--')+'</span><span class="qt-max">/20</span></div>'
+          + '<div class="qt-row"><span class="qt-lbl">spread</span><span class="qt-val">'+(qbd.spread!=null?qbd.spread:'--')+'</span><span class="qt-max">/15</span></div>'
+          + '<div class="qt-row"><span class="qt-lbl">volume</span><span class="qt-val">'+(qbd.volume!=null?qbd.volume:'--')+'</span><span class="qt-max">/10</span></div>'
+          + '</div>'
+          + '</div>'
+          + '<div class="qual-ring-lbl">quality</div>'
+          + '</div>';
+        })() : '')
       + '</div>'
       + '<div class="opp-card-right">'
       + '<div class="opp-rr-big">1:' + o.rr + '</div>'
@@ -9520,6 +9635,23 @@ function _sfCard(s){
         </svg>
         <div class="conf-ring-lbl">conf.</div>
       </div>
+      ${s.quality != null ? (function(){
+        var qs = s.quality.score != null ? s.quality.score : s.quality;
+        var qlbl = qs >= 80 ? 'EXCELLENT' : qs >= 60 ? 'GOOD' : qs >= 35 ? 'FAIR' : 'POOR';
+        var qc  = qlbl === 'EXCELLENT' ? '#5de8a0' : qlbl === 'GOOD' ? '#a3e635' : qlbl === 'FAIR' ? '#c9a84c' : '#e8706e';
+        var qr = 22, qcirc = 2*Math.PI*qr;
+        var qdash = qcirc*(1-qs/100);
+        return '<div class="conf-ring">'
+        + '<svg width="50" height="50" viewBox="0 0 50 50">'
+        + '<circle cx="25" cy="25" r="' + qr + '" fill="none" stroke="rgba(255,255,255,.04)" stroke-width="3.5"/>'
+        + '<circle cx="25" cy="25" r="' + qr + '" fill="none" stroke="' + qc + '" stroke-width="3.5"'
+        + ' stroke-dasharray="' + qcirc.toFixed(1) + '" stroke-dashoffset="' + qdash.toFixed(1) + '"'
+        + ' transform="rotate(-90 25 25)" stroke-linecap="round"/>'
+        + '<text x="25" y="30" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="12" font-weight="600" fill="' + qc + '">' + Math.round(qs) + '</text>'
+        + '</svg>'
+        + '<div class="conf-ring-lbl">quality</div>'
+        + '</div>';
+      })() : ''}
     </div>
     <div class="sig-levels">
       <div class="sig-lv"><div class="sig-lv-lbl">Entry</div><div class="sig-lv-val entry">${s.entry}</div></div>

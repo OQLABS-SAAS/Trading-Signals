@@ -3977,6 +3977,146 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     else:
         _regime_warning = ""
 
+    # ── Pre-compute confidence_pct for quality score ────────────────────
+    _raw_pct = ((bearish_count if signal == "SELL" else bullish_count)
+                / max(bullish_count + bearish_count, 1)) * 100
+    if confidence == "HIGH":
+        confidence_pct = _raw_pct
+    elif confidence == "MEDIUM":
+        confidence_pct = min(_raw_pct, 79.0)
+    else:
+        confidence_pct = min(_raw_pct, 64.0)
+
+    # ── Phase 2.2: Signal Quality Score ───────────────────────────────
+    def compute_quality_score(
+        signal="HOLD",
+        confidence_pct=None,
+        htf_bias="NEUTRAL",
+        smc=None,
+        spread_cost=None,
+        rr1=None,
+        rr1_raw=None,
+        vol_ratio=None,
+        of=None,
+    ):
+        """Compute a composite quality score (0–100) for the signal.
+
+        Components (weighted):
+          - Confidence      35 %   raw percentage-of-indicators alignment
+          - Regime alignment 20 %   signal direction vs higher-timeframe bias
+          - SMC alignment    20 %   supporting Smart Money structures ratio
+          - Spread efficiency 15 %  R:R degradation from spread costs
+          - Volume confirmation 10% relative volume vs average
+        """
+        smc = smc or {}
+        of  = of  or {}
+
+        # ── 1. Confidence (35 %) ──────────────────────────────────────
+        if not confidence_pct or signal == "HOLD":
+            conf_score = 0.0
+        else:
+            conf_score = min(float(confidence_pct), 100.0) * 0.35
+
+        # ── 2. Regime alignment (20 %) ─────────────────────────────────
+        regime_score = 0.0
+        if signal == "HOLD":
+            regime_score = 0.0
+        elif htf_bias == "NEUTRAL":
+            regime_score = 10.0
+        elif (signal == "BUY" and htf_bias == "BULLISH") or \
+             (signal == "SELL" and htf_bias == "BEARISH"):
+            regime_score = 20.0
+        # else counter-trend → 0
+
+        # ── 3. SMC alignment (20 %) ────────────────────────────────────
+        if signal == "HOLD":
+            smc_score = 0.0
+        else:
+            # Count supporting structures per side
+            if signal == "BUY":
+                supporting = int(smc.get("fvg_bullish", 0) or 0) + \
+                             int(smc.get("liquidity_grab_bull", 0) or 0) + \
+                             int(smc.get("displacement_bull", 0) or 0) + \
+                             int(smc.get("choch_bull", 0) or 0)
+            else:  # SELL
+                supporting = int(smc.get("fvg_bearish", 0) or 0) + \
+                             int(smc.get("liquidity_grab_bear", 0) or 0) + \
+                             int(smc.get("displacement_bear", 0) or 0) + \
+                             int(smc.get("choch_bear", 0) or 0)
+
+            total_detected = int(smc.get("fvg_bullish", 0) or 0) + \
+                             int(smc.get("fvg_bearish", 0) or 0) + \
+                             int(smc.get("liquidity_grab_bull", 0) or 0) + \
+                             int(smc.get("liquidity_grab_bear", 0) or 0) + \
+                             int(smc.get("displacement_bull", 0) or 0) + \
+                             int(smc.get("displacement_bear", 0) or 0) + \
+                             int(smc.get("choch_bull", 0) or 0) + \
+                             int(smc.get("choch_bear", 0) or 0)
+
+            if total_detected == 0:
+                smc_score = 10.0  # no SMC data → neutral
+            else:
+                smc_score = (supporting / max(1, total_detected)) * 20.0
+
+        # ── 4. Spread efficiency (15 %) ────────────────────────────────
+        spread_score = 0.0
+        if signal != "HOLD":
+            if (rr1 is not None and rr1 > 0) and (rr1_raw is not None and rr1_raw > 0):
+                efficiency = max(0.0, min(1.0, float(rr1) / max(0.01, float(rr1_raw))))
+                spread_score = efficiency * 15.0
+            elif rr1 is not None and spread_cost is not None and isinstance(spread_cost, (int, float)):
+                # Fallback: use spread_cost relative to entry
+                # entry_price isn't passed, so estimate: assume spread_cost is already
+                # meaningful and simply rate it.
+                # If spread_cost is > 0: efficiency = max(0, 1 - spread_cost_pct*10)
+                # capped so reasonable spreads aren't overly penalised.
+                efficiency = max(0.0, min(1.0, 1.0 - (float(spread_cost) * 10.0)))
+                spread_score = efficiency * 15.0
+            # else: no R:R data → 0
+
+        # ── 5. Volume confirmation (10 %) ──────────────────────────────
+        vol_score = 3.0   # default
+        if vol_ratio is not None:
+            try:
+                vr = float(vol_ratio)
+            except (TypeError, ValueError):
+                vr = 1.0
+            if vr > 1.5:
+                vol_score = 10.0
+            elif vr > 1.2:
+                vol_score = 7.0
+            elif vr > 1.0:
+                vol_score = 5.0
+
+        # Order-flow bonus (capped at 10)
+        if of.get("conviction") == "HIGH":
+            vol_score = min(vol_score + 2.0, 10.0)
+
+        # ── Total & label ──────────────────────────────────────────────
+        total = conf_score + regime_score + smc_score + spread_score + vol_score
+        total = max(0.0, min(100.0, total))
+
+        if total < 40:
+            label = "POOR"
+        elif total < 60:
+            label = "FAIR"
+        elif total < 80:
+            label = "GOOD"
+        else:
+            label = "EXCELLENT"
+
+        return {
+            "score": int(round(total)),
+            "label": label,
+            "breakdown": {
+                "confidence": int(round(conf_score)),
+                "regime":    int(round(regime_score)),
+                "smc":       int(round(smc_score)),
+                "spread":    int(round(spread_score)),
+                "volume":    int(round(vol_score)),
+            }
+        }
+
     result = {
         "signal": signal,
         "confidence": confidence,
@@ -4033,17 +4173,7 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # This means "100 LIKELY" and "100 HYPOTHESIS" are impossible — the number
         # always reflects the same strength as the label. SIG-4 divergence penalty
         # automatically reduces all three when it drops confidence HIGH→MEDIUM.
-        "confidence_pct": round(
-            (lambda _r: (
-                _r if confidence == "HIGH" else
-                min(_r, 79.0) if confidence == "MEDIUM" else
-                min(_r, 64.0)
-            ))(
-                (bearish_count if signal == "SELL" else bullish_count)
-                / max(bullish_count + bearish_count, 1)
-                * 100
-            ), 1
-        ),
+        "confidence_pct": round(confidence_pct, 1),
         "net_score": net,
         "tv_signal_used": tv_signal_used,
         "tv_rec_label": tv.get("tv_rec_label") if tv else None,
@@ -4084,6 +4214,22 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # _smc is already computed at voting time (line ~3357).
         "smc_structures": _smc,
     }
+
+    # ── Phase 2.2: Signal Quality Score ───────────────────────────────────
+    try:
+        result["quality"] = compute_quality_score(
+            signal=signal,
+            confidence_pct=confidence_pct,
+            htf_bias=htf_bias,
+            smc=_smc,
+            spread_cost=spread_cost,
+            rr1=rr1,
+            rr1_raw=rr1_raw,
+            vol_ratio=vol_ratio,
+            of=_of,
+        )
+    except Exception:
+        result["quality"] = {"score": 0, "label": "POOR", "breakdown": {"confidence": 0, "regime": 0, "smc": 0, "spread": 0, "volume": 0}}
 
     # Call OpenAI to narrate data if API key is configured
     result = _narrate_data_openai(result, ticker, asset_type, ind, timeframe)
@@ -10179,6 +10325,8 @@ def scan_list():
                             {"session":"—","off_hours":False,"warning_level":None,"message":""}),
                         # SMC-FE: forward structures so scanner-loaded signals show real SMC data
                         "smc_structures": analysis.get("smc_structures", {}),
+                        # Phase 2.2: Signal Quality Score
+                        "quality": analysis.get("quality"),
                     }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
