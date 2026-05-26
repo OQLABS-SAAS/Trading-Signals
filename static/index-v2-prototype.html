@@ -13099,26 +13099,31 @@ function showUnderstand(){
       <button class="flow-btn-next btn-pipeline" onclick="setNav('size');showSize();">Size Position → SIZE</button>
     </div>
   </div>`;
-  // ── Cost Review async fetch ──
+  // ── Trade Stats (from /api/signals/stats) ──
   (function(){
-    dvFetch('/api/signals/cost-analysis').then(function(r){
+    dvFetch('/api/signals/stats').then(function(r){
       var el = document.getElementById('undCostReview');
       if (!el) return;
-      if (!r) { el.innerHTML = '<div class="und-data-card-title">Cost Review</div><div class="und-data-empty">No data available</div>'; return; }
-      var winRate = r.win_rate != null ? (r.win_rate*100).toFixed(1)+'%' : '\u2014';
-      var rr = r.avg_rr != null ? r.avg_rr.toFixed(2) : '\u2014';
-      var sharpe = r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '\u2014';
-      var dd = r.max_drawdown != null ? (r.max_drawdown*100).toFixed(1)+'%' : '\u2014';
-      var fmt = function(v){return v!=null?(v>=0?'+':'')+v.toFixed(2):'\u2014';};
-      var cls = function(v){return v>=0?'green':'red';};
-      el.innerHTML = '<div class="und-data-card-title">Cost Review</div>'+
-        '<div class="und-data-row"><span class="und-data-label">Total Signals</span><span class="und-data-val">'+(r.total_signals||0)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Win Rate</span><span class="und-data-val">'+winRate+'</span></div>'+
+      if (!r) { el.innerHTML = '<div class="und-data-card-title">Performance Stats</div><div class="und-data-empty">Sign in and close some trades to see your stats here.</div>'; return; }
+      if (!r.ready) {
+        el.innerHTML = '<div class="und-data-card-title">Performance Stats</div><div class="und-data-empty">'+(r.message||'Building track record \u2014 need at least 30 closed trades')+'<br><span style="font-size:10px;color:var(--t3)">Keep trading and logging outcomes \u2014 stats appear once you have enough data.</span></div>';
+        return;
+      }
+      var winRate   = r.win_rate != null ? r.win_rate.toFixed(1)+'%' : '\u2014';
+      var rr        = (r.avg_win_r != null && r.avg_loss_r != null) ? (r.avg_win_r / Math.abs(r.avg_loss_r)).toFixed(2) : '\u2014';
+      var sharpe    = r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '\u2014';
+      var dd        = r.max_drawdown != null ? (r.max_drawdown*100).toFixed(1)+'%' : '\u2014';
+      var avgWinR   = r.avg_win_r != null ? (r.avg_win_r>=0?'+':'')+r.avg_win_r.toFixed(2)+'R' : '\u2014';
+      var avgLossR  = r.avg_loss_r != null ? r.avg_loss_r.toFixed(2)+'R' : '\u2014';
+      var expR      = r.expectancy != null ? (r.expectancy>=0?'+':'')+r.expectancy.toFixed(2)+'R' : '\u2014';
+      el.innerHTML = '<div class="und-data-card-title">Performance Stats</div>'+
+        '<div class="und-data-row"><span class="und-data-label">Total Signals</span><span class="und-data-val">'+r.sample_size+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Win Rate</span><span class="und-data-val '+(r.win_rate>=50?'green':'red')+'">'+winRate+'</span></div>'+
         '<div class="und-data-row"><span class="und-data-label">Avg R:R</span><span class="und-data-val">'+rr+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Win PnL</span><span class="und-data-val '+cls(r.win_pnl)+'">'+fmt(r.win_pnl)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Loss PnL</span><span class="und-data-val '+cls(r.loss_pnl)+'">'+fmt(r.loss_pnl)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Net PnL</span><span class="und-data-val '+cls(r.net_pnl)+'">'+fmt(r.net_pnl)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Sharpe Ratio</span><span class="und-data-val">'+sharpe+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Avg Win R</span><span class="und-data-val green">'+avgWinR+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Avg Loss R</span><span class="und-data-val red">'+avgLossR+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Expectancy (R)</span><span class="und-data-val '+(r.expectancy>=0?'green':'red')+'">'+expR+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Sharpe Ratio</span><span class="und-data-val '+(r.sharpe_ratio>=1?'green':'')+'">'+sharpe+'</span></div>'+
         '<div class="und-data-row"><span class="und-data-label">Max Drawdown</span><span class="und-data-val red">'+dd+'</span></div>';
     }).catch(function(){});
   })();
@@ -13127,19 +13132,20 @@ function showUnderstand(){
     dvFetch('/api/validate/montecarlo').then(function(r){
       var el = document.getElementById('undMonteCarlo');
       if (!el) return;
-      if (!r) { el.innerHTML = '<div class="und-data-card-title">Monte Carlo</div><div class="und-data-empty">No data available</div>'; return; }
+      if (!r) { el.innerHTML = '<div class="und-data-card-title">Monte Carlo</div><div class="und-data-empty">Sign in and close some trades to see Monte Carlo projections here.</div>'; return; }
+      if (!r.ready) {
+        el.innerHTML = '<div class="und-data-card-title">Monte Carlo</div><div class="und-data-empty">'+(r.message||'Need at least 10 closed trades')+'<br><span style="font-size:10px;color:var(--t3)">Monte Carlo runs 1,000+ simulations of your actual trade outcomes to estimate risk of ruin, best/worst cases, and drawdown probability.</span></div>';
+        return;
+      }
       var f2p = function(v){return v!=null?(v*100).toFixed(1)+'%':'\u2014';};
-      var f2 = function(v){return v!=null?v.toFixed(2):'\u2014';};
+      var probProfit = r.prob_20pct_drawdown != null ? (100 - r.prob_20pct_drawdown*100).toFixed(1)+'%' : '\u2014';
       el.innerHTML = '<div class="und-data-card-title">Monte Carlo</div>'+
-        '<div class="und-data-row"><span class="und-data-label">Simulations</span><span class="und-data-val">'+(r.num_simulations||1000)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Mean Return</span><span class="und-data-val">'+f2p(r.mean_return)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Median Return</span><span class="und-data-val">'+f2p(r.median_return)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Std Deviation</span><span class="und-data-val">'+f2p(r.std_deviation)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">VaR 95%</span><span class="und-data-val red">'+f2p(r.var_95)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">CVaR 95%</span><span class="und-data-val red">'+f2p(r.cvar_95)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Prob of Profit</span><span class="und-data-val">'+f2p(r.probability_of_profit)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Worst Case</span><span class="und-data-val red">'+f2p(r.worst_case)+'</span></div>'+
-        '<div class="und-data-row"><span class="und-data-label">Best Case</span><span class="und-data-val green">'+f2p(r.best_case)+'</span></div>';
+        '<div class="und-data-row"><span class="und-data-label">Simulations</span><span class="und-data-val">'+(r.simulations||1000)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Median Return</span><span class="und-data-val '+(r.median_equity_pct>=0?'green':'red')+'">'+f2p(r.median_equity_pct)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">VaR 95%</span><span class="und-data-val red">'+f2p(r.p5_drawdown_pct)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Best Case</span><span class="und-data-val green">'+f2p(r.p95_drawdown_pct)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Prob of Profit</span><span class="und-data-val '+(parseFloat(probProfit)>=50?'green':'red')+'">'+probProfit+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Prob 20% DD</span><span class="und-data-val red">'+(r.prob_20pct_drawdown!=null?(r.prob_20pct_drawdown*100).toFixed(1)+'%':'\u2014')+'</span></div>';
     }).catch(function(){});
   })();
   // ── MT5 Positions async fetch ──
@@ -13147,7 +13153,7 @@ function showUnderstand(){
     dvFetch('/api/mt5/state').then(function(r){
       var el = document.getElementById('undMt5Positions');
       if (!el) return;
-      if (!r || !r.positions || !r.positions.length) { el.innerHTML = '<div class="und-data-card-title">MT5 Positions</div><div class="und-data-empty">No positions</div>'; return; }
+      if (!r || !r.positions || !r.positions.length) { el.innerHTML = '<div class="und-data-card-title">MT5 Positions</div><div class="und-data-empty">No open positions<br><span style="font-size:10px;color:var(--t3)">Connect your MT5 account in Settings → Connections to see your live positions here. Open trades from your broker appear automatically once connected.</span></div>'; return; }
       var rows = '';
       for (var i=0;i<r.positions.length;i++){
         var p = r.positions[i];

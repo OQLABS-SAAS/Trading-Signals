@@ -12675,6 +12675,34 @@ def signal_stats():
             wr = win_rate / 100
             expectancy = round(wr * avg_win_r + (1 - wr) * avg_loss_r, 2)
 
+        # --- Sharpe Ratio ---
+        sharpe_ratio = None
+        all_r_vals = [r.actual_pnl_r for r in rows if r.actual_pnl_r is not None]
+        if len(all_r_vals) >= 3:
+            mean_r = sum(all_r_vals) / len(all_r_vals)
+            variance = sum((x - mean_r) ** 2 for x in all_r_vals) / len(all_r_vals)
+            std_r = variance ** 0.5
+            if std_r > 0:
+                sharpe_ratio = round((mean_r / std_r) * (252 ** 0.5), 2)
+
+        # --- Max Drawdown from equity_snapshots ---
+        max_drawdown = None
+        eq_snaps = (db.query(EquitySnapshot)
+                      .filter(EquitySnapshot.user_id == uid)
+                      .order_by(EquitySnapshot.snapshotted_at.asc())
+                      .all())
+        if len(eq_snaps) >= 2:
+            peak = eq_snaps[0].equity_index
+            worst_dd = 0.0
+            for snap in eq_snaps:
+                ei = snap.equity_index
+                if ei > peak:
+                    peak = ei
+                dd = (peak - ei) / peak if peak > 0 else 0.0
+                if dd > worst_dd:
+                    worst_dd = dd
+            max_drawdown = round(worst_dd, 4)
+
         return jsonify({
             "sample_size":  sample_size,
             "ready":        sample_size >= GATE,
@@ -12683,6 +12711,8 @@ def signal_stats():
             "avg_win_r":    avg_win_r,
             "avg_loss_r":   avg_loss_r,
             "expectancy":   expectancy,
+            "sharpe_ratio": sharpe_ratio,
+            "max_drawdown": max_drawdown,
             "wins":         len(wins),
             "losses":       len(losses),
             "breakevens":   len(bes),
