@@ -7234,32 +7234,32 @@ def index():
 
 @app.route("/manifest.json")
 def pwa_manifest():
-    resp = send_from_directory("quantverse-pwa", "manifest.json")
+    resp = send_from_directory("dotverse-pwa", "manifest.json")
     resp.headers["Cache-Control"] = "public, max-age=3600"
     return resp
 
 @app.route("/sw.js")
 def service_worker():
-    resp = send_from_directory("quantverse-pwa", "sw.js")
+    resp = send_from_directory("dotverse-pwa", "sw.js")
     resp.headers["Cache-Control"] = "no-cache"
     resp.headers["Service-Worker-Allowed"] = "/"
     return resp
 
 @app.route("/icon-192.png")
 def pwa_icon_192():
-    resp = send_from_directory("quantverse-pwa", "icon-192.png")
+    resp = send_from_directory("dotverse-pwa", "icon-192.png")
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
 @app.route("/icon-512.png")
 def pwa_icon_512():
-    resp = send_from_directory("quantverse-pwa", "icon-512.png")
+    resp = send_from_directory("dotverse-pwa", "icon-512.png")
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
 @app.route("/apple-touch-icon.png")
 def pwa_apple_icon():
-    resp = send_from_directory("quantverse-pwa", "apple-touch-icon.png")
+    resp = send_from_directory("dotverse-pwa", "apple-touch-icon.png")
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
