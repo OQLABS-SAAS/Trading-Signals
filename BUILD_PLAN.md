@@ -26,11 +26,10 @@ Strengthen signals by feeding live MT5 data back into the engine, and give every
 
 ## PHASE 2 — Signal Quality
 
-### 2.1 Historical WR Per Pattern (audit item 1)
-**File**: app.py — new endpoint GET /api/signals/winrate-by-pattern
+### 2.1 Historical WR Per Pattern ✅ DONE + VERIFIED
+**File**: app.py — GET /api/signals/winrate-by-pattern (line 12741)
 **What**: Query SignalHistory WHERE outcome IS NOT NULL. Group by (ticker, timeframe, signal, trade_type). Compute win_rate, sample_size, avg_r. Minimum 5 samples. Skip BE from WR calc.
-**Response**: `{patterns: [{ticker, timeframe, signal, trade_type, wr_pct, sample_size, avg_r}]}`
-**Frontend**: Small badge on signal card: "BTC 1h BUY: 65% WR (17 trades)"
+**Status**: Backend committed (14592f0) + frontend badge (Phase 2.5) implemented. Trade_type normalization added. Final Verifier approved.
 **Depends on**: Phase 1.1 (needs outcomes logged)
 
 ### 2.2 Signal Quality Score (audit item 4)
@@ -57,9 +56,10 @@ Strengthen signals by feeding live MT5 data back into the engine, and give every
 **Changes**: ~30 lines in the confidence vote-counting section
 **Depends on**: 2.3 (regime detection)
 
-### 2.5 WR Per Pattern Frontend Badge
-**File**: static/index-v2-prototype.html — signal card rendering
-**What**: After signal card renders, call /api/signals/winrate-by-pattern?ticker=X&timeframe=Y&signal=Z. Display badge: "WR: 65% (17)"
+### 2.5 WR Per Pattern Frontend Badge ✅ DONE + VERIFIED
+**File**: static/index-v2-prototype.html — _sfFetchPatternWR function (line 8646)
+**What**: dvFetchT call to winrate-by-pattern, caches all patterns, matches locally by key. Badge shows "WR: 65% (17)" with color thresholding. HOLD fallback, error handling, loading state, mobile responsive.
+**Status**: Implemented. Final Verifier approved.
 **Depends on**: 2.1 (backend endpoint)
 
 ## PHASE 3 — Adaptive + Optimization

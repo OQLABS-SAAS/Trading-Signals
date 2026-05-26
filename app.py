@@ -12744,7 +12744,7 @@ def signal_winrate_by_pattern():
     """Return per-pattern win rate grouped by (ticker, timeframe, signal, trade_type).
     Minimum 5 decided samples (WIN + LOSS) per group. BE excluded from WR."""
     if not _DBSession:
-        return jsonify({"patterns": [], "message": "Database not available"}), 503
+        return jsonify({"patterns": [], "ready": False, "message": "Database not available"}), 200
     MIN_SAMPLES = 5
     db = _DBSession()
     try:
@@ -12765,6 +12765,11 @@ def signal_winrate_by_pattern():
         if signal_f:
             q = q.filter(SignalHistory.signal == signal_f.upper())
         if trade_type:
+            tt = trade_type.lower()
+            if "scalp" in tt: trade_type = "scalp"
+            elif "day" in tt: trade_type = "day"
+            elif "swing" in tt: trade_type = "swing"
+            elif "position" in tt: trade_type = "position"
             q = q.filter(SignalHistory.trade_type == trade_type)
         rows = q.all()
         from collections import defaultdict
@@ -12789,7 +12794,7 @@ def signal_winrate_by_pattern():
                 "losses": len(losses), "avg_r": avg_r,
             })
         patterns.sort(key=lambda p: (-p["wr_pct"], -p["sample_size"]))
-        return jsonify({"patterns": patterns})
+        return jsonify({"patterns": patterns, "ready": True})
     finally:
         db.close()
 
