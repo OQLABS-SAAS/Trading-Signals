@@ -11750,10 +11750,9 @@ def scan_list():
                     results.append(row)
 
         # Run all tickers in parallel — 6 tickers in ~5s instead of ~30s
-        # Increased timeout from 25s→90s to handle Railway cold start (58s)
         threads = [_threading.Thread(target=_scan_one, args=(t,)) for t in tickers]
         for th in threads: th.start()
-        for th in threads: th.join(timeout=90)
+        for th in threads: th.join(timeout=25)
 
         def sort_key(r):
             if r.get("error"): return 99
