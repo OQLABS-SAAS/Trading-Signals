@@ -17,7 +17,8 @@ import ta.trend as _ta_trend
 import ta.momentum as _ta_momentum
 import ta.volume as _ta_volume
 import ta.volatility as _ta_volatility
-import os, json, threading, time, math
+import os, json, threading, time, math, hmac, hashlib, queue, uuid
+from urllib.parse import urlencode
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
@@ -70,6 +71,25 @@ def _sanitize(obj):
 
 app = Flask(__name__, static_folder="static")
 CORS(app, supports_credentials=True)
+
+# ─── SSE BROADCAST INFRASTRUCTURE ─────────────────────────────
+# Each subscribed client gets its own thread-safe queue.
+# _push_notification writes to all queues; the SSE endpoint blocks on get().
+_sse_subscribers       = {}       # {client_id: queue.Queue}
+_sse_subscribers_lock  = threading.Lock()
+
+def _sse_broadcast(event_type, data_dict):
+    """Push a JSON event to every connected SSE client."""
+    payload = json.dumps({"type": event_type, "data": data_dict}, default=str)
+    with _sse_subscribers_lock:
+        dead = []
+        for cid, q in _sse_subscribers.items():
+            try:
+                q.put_nowait(payload)
+            except queue.Full:
+                dead.append(cid)
+        for cid in dead:
+            del _sse_subscribers[cid]
 
 # ─── GLOBAL ERROR HANDLERS ────────────────────────────────────
 # Ensures ALL unhandled exceptions return JSON, never Flask's HTML error page.
@@ -175,6 +195,69 @@ def require_tier(minimum):
             return f(*args, **kwargs)
         return decorated
     return decorator
+
+# ─── Tier Cap Helpers (7.2) ─────────────────────────────────────
+TIER_RANK = {"free": 0, "pro": 1, "elite": 2}
+
+def _check_tier_cap(cap_name, max_count, message, uid=None, tier=None):
+    """Redis-based daily rate-limit cap for free-tier users.
+    Uses key pattern: caps:{user_id}:{cap_name}:{YYYYMMDD}
+    Returns (allowed: bool, error_tuple|None).
+    """
+    if tier is None:
+        tier = session.get("user_tier", "free")
+    if tier != "free":
+        return True, None
+    if uid is None:
+        uid = session.get("user_id")
+    if not uid or not _redis_client:
+        return True, None
+    today = datetime.utcnow().strftime("%Y%m%d")
+    key = f"caps:{uid}:{cap_name}:{today}"
+    try:
+        count = int(_redis_client.get(key) or 0)
+        if count >= max_count:
+            return False, (
+                jsonify({"error": f"{cap_name}_limit",
+                         "message": message,
+                         "limit": max_count, "used": count}),
+                429
+            )
+        _redis_client.incr(key)
+        _redis_client.expire(key, 86400)
+        return True, None
+    except Exception:
+        return True, None
+
+def _check_active_count(model_name, user_id, max_count, cap_name):
+    """DB-based cap check for active items (watches/positions).
+    Returns (allowed: bool, error_tuple|None).
+    """
+    if not _DBSession:
+        return True, None
+    db = _DBSession()
+    try:
+        if model_name == "position":
+            count = db.query(Position).filter(
+                Position.user_id == user_id,
+                Position.closed_at == None
+            ).count()
+        elif model_name == "watch":
+            count = db.query(Watch).filter_by(user_id=user_id).count()
+        else:
+            return True, None
+        if count >= max_count:
+            return False, (
+                jsonify({"error": f"{cap_name}_limit",
+                         "message": f"You have reached the maximum of {max_count} active {cap_name}. Upgrade to Pro for unlimited.",
+                         "limit": max_count, "used": count}),
+                429
+            )
+        return True, None
+    except Exception:
+        return True, None
+    finally:
+        db.close()
 
 def _get_current_user():
     """Return the current User ORM object from session, or None."""
@@ -6198,8 +6281,217 @@ def run_watch_job():
 
 # ─── AUTOMATION HELPERS ────────────────────────────────────────
 
+# ─── WEB PUSH INFRASTRUCTURE ─────────────────────────────────
+
+def _get_vapid_keys():
+    """Generate or retrieve VAPID keys for Web Push.
+    Uses cryptography (already a dependency) for key generation.
+    Returns (private_key_pem, public_key_pem)."""
+    vapid_priv_path = os.path.join(os.path.dirname(__file__), ".vapid_private.pem")
+    vapid_pub_path  = os.path.join(os.path.dirname(__file__), ".vapid_public.pem")
+    if os.path.exists(vapid_priv_path) and os.path.exists(vapid_pub_path):
+        with open(vapid_priv_path, "rb") as f:
+            priv = f.read()
+        with open(vapid_pub_path, "rb") as f:
+            pub = f.read()
+        return priv, pub
+    # Generate new VAPID keys
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    priv_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    pub_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    # Persist so keys don't change on restart (would invalidate existing subscriptions)
+    with open(vapid_priv_path, "wb") as f:
+        f.write(priv_pem)
+    with open(vapid_pub_path, "wb") as f:
+        f.write(pub_pem)
+    os.chmod(vapid_priv_path, 0o600)
+    print("[vapid] Generated new VAPID key pair")
+    return priv_pem, pub_pem
+
+def _vapid_sign(jwt_header, jwt_payload):
+    """Sign a JWT with the VAPID private key using ES256."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    import base64
+
+    priv_pem, _ = _get_vapid_keys()
+    private_key = load_pem_private_key(priv_pem, password=None)
+
+    header_b64  = base64.urlsafe_b64encode(json.dumps(jwt_header).encode()).rstrip(b"=")
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(jwt_payload).encode()).rstrip(b"=")
+    signing_input = header_b64 + b"." + payload_b64
+
+    signature = private_key.sign(signing_input, ec.ECDSA(hashes.SHA256()))
+    sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=")
+
+    return (signing_input + b"." + sig_b64).decode()
+
+def _send_web_push(ntype, title, body, data=None):
+    """Send a Web Push notification to all subscribed browsers.
+    This runs in a background thread to avoid blocking the caller."""
+    if not _DBSession:
+        return
+    try:
+        db = _DBSession()
+        subs = db.query(PushSubscription).all()
+        db.close()
+        if not subs:
+            return
+
+        priv_pem, _ = _get_vapid_keys()
+        vapid_claim = os.environ.get("VAPID_CLAIM_EMAIL", "admin@dotverse.app").strip()
+        vapid_sub   = "mailto:" + vapid_claim
+
+        import base64
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
+        from cryptography.hazmat.primitives import hashes
+
+        for sub in subs:
+            try:
+                # Build the notification payload
+                payload = json.dumps({
+                    "title": title,
+                    "body": body,
+                    "tag": ntype,
+                    "url": data.get("url", "/") if isinstance(data, dict) else "/",
+                })
+
+                # Encrypt payload using the subscription's p256dh + auth
+                # We need the client public key, auth secret, and our private key
+                # Using ECDH key agreement + AES-GCM for Web Push encryption
+                encrypted = _encrypt_web_push_payload(payload, sub.p256dh, sub.auth)
+
+                # Build VAPID JWT
+                jwt_header  = {"typ": "JWT", "alg": "ES256"}
+                jwt_payload = {
+                    "aud": sub.endpoint,
+                    "exp": int(time.time()) + 86400,
+                    "sub": vapid_sub,
+                }
+                vapid_jwt = _vapid_sign(jwt_header, jwt_payload)
+
+                # Send the push
+                resp = requests.post(
+                    sub.endpoint,
+                    data=encrypted,
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Encoding": "aes128gcm",
+                        "TTL": "86400",
+                        "Authorization": "vapid t=" + vapid_jwt + ", k=" + _vapid_public_key_b64(),
+                    },
+                    timeout=10,
+                )
+                # Remove expired/invalid subscriptions (HTTP 404/410)
+                if resp.status_code in (404, 410):
+                    db2 = _DBSession()
+                    db2.query(PushSubscription).filter_by(id=sub.id).delete()
+                    db2.commit()
+                    db2.close()
+            except Exception as e:
+                print(f"[web-push] Failed for subscription {sub.id}: {e}")
+    except Exception as e:
+        print(f"[web-push] Error: {e}")
+
+def _vapid_public_key_b64():
+    """Return the base64url-encoded (unpadded) VAPID public key for the frontend."""
+    import base64
+    from cryptography.hazmat.primitives.serialization import load_pem_public_key
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    _, pub_pem = _get_vapid_keys()
+    pub_key = load_pem_public_key(pub_pem)
+    # Get the raw uncompressed point bytes and encode as base64url
+    raw = pub_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+def _encrypt_web_push_payload(payload_str, client_p256dh_b64, client_auth_b64):
+    """Encrypt a string payload for Web Push using aes128gcm.
+    Returns the encrypted bytes ready to send as the request body."""
+    import base64
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    import os as _os
+
+    # Decode the client's public key and auth
+    client_pub_raw = base64.urlsafe_b64decode(client_p256dh_b64 + "===")
+    client_auth    = base64.urlsafe_b64decode(client_auth_b64 + "===")
+
+    # Generate our ephemeral key pair for ECDH
+    eph_key = ec.generate_private_key(ec.SECP256R1())
+    eph_pub_raw = eph_key.public_key().public_bytes(
+        Encoding.X962, PublicFormat.UncompressedPoint
+    )
+
+    # Parse client public key
+    client_pub = EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), client_pub_raw)
+
+    # ECDH shared secret
+    shared_secret = eph_key.exchange(ec.ECDH(), client_pub)
+
+    # HKDF to derive the encryption key
+    salt = _os.urandom(16)
+    info = b"WebPush: info\x00" + client_pub_raw + eph_pub_raw
+
+    # PRK = HKDF-Extract(salt, shared_secret)
+    hkdf_extract = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"",
+    )
+    prk = hkdf_extract.derive(shared_secret)
+
+    # CEK = HKDF-Expand(PRK, "Content-Encoding: aes128gcm" || 0x01, 16)
+    cek_info = b"Content-Encoding: aes128gcm\x01"
+    hkdf_expand_cek = HKDF(
+        algorithm=hashes.SHA256(),
+        length=16,
+        salt=prk,
+        info=cek_info,
+    )
+    cek = hkdf_expand_cek.derive(client_auth)
+
+    # NONCE = HKDF-Expand(PRK, "Content-Encoding: nonce" || 0x01, 12)
+    nonce_info = b"Content-Encoding: nonce\x01"
+    hkdf_expand_nonce = HKDF(
+        algorithm=hashes.SHA256(),
+        length=12,
+        salt=prk,
+        info=nonce_info,
+    )
+    nonce = hkdf_expand_nonce.derive(client_auth)
+
+    # Encrypt
+    aesgcm = AESGCM(cek)
+    encrypted = aesgcm.encrypt(nonce, payload_str.encode(), None)
+
+    # Build the response body
+    # Format: salt (16) | record_size (4 bytes = 4096) | pubkey_len (1) | eph_pub | encrypted
+    record_size = (4096).to_bytes(4, "big")
+    pubkey_len  = len(eph_pub_raw).to_bytes(1, "big")
+
+    return salt + record_size + pubkey_len + eph_pub_raw + encrypted
+
+# ──────────────────────────────────────────────────────────────
+
 def _push_notification(user_id, ntype, title, body, data=None):
-    """Save an in-app notification to DB so the frontend bell can fetch it."""
+    """Save an in-app notification to DB so the frontend bell can fetch it.
+    Also broadcasts via SSE to all connected clients so the bell updates in real-time."""
     if not _DBSession:
         return
     try:
@@ -6212,6 +6504,12 @@ def _push_notification(user_id, ntype, title, body, data=None):
         db.add(notif)
         db.commit()
         db.close()
+        # Broadcast to all SSE-connected clients
+        _sse_broadcast("notification", {
+            "ntype": ntype, "title": title, "body": body, "data": data
+        })
+        # Also try to send as browser push notification via Web Push API
+        _send_web_push(ntype, title, body, data)
     except Exception as e:
         print(f"[notify] DB error: {e}")
 
@@ -6932,6 +7230,39 @@ def index():
     resp.headers["Expires"] = "0"
     return resp
 
+# ─── PWA / SERVICE WORKER STATIC FILES ────────────────────────
+
+@app.route("/manifest.json")
+def pwa_manifest():
+    resp = send_from_directory("quantverse-pwa", "manifest.json")
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+@app.route("/sw.js")
+def service_worker():
+    resp = send_from_directory("quantverse-pwa", "sw.js")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["Service-Worker-Allowed"] = "/"
+    return resp
+
+@app.route("/icon-192.png")
+def pwa_icon_192():
+    resp = send_from_directory("quantverse-pwa", "icon-192.png")
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+@app.route("/icon-512.png")
+def pwa_icon_512():
+    resp = send_from_directory("quantverse-pwa", "icon-512.png")
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+@app.route("/apple-touch-icon.png")
+def pwa_apple_icon():
+    resp = send_from_directory("quantverse-pwa", "apple-touch-icon.png")
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
 # ─── AUTH ROUTES (no login_required) ─────────────────────────
 
 @app.route("/api/register", methods=["POST"])
@@ -7043,6 +7374,29 @@ def auth_check():
     if not APP_PASSWORD and not _DBSession:
         return jsonify({"authenticated": True, "password_required": False})
     return jsonify({"authenticated": False, "password_required": True})
+
+# ─── FEATURE FLAGS (7.3) ───────────────────────────────────────
+
+@app.route("/api/user/features", methods=["GET"])
+@login_required
+def user_features():
+    """Centralised feature-flag endpoint. Frontend reads on load to show/hide
+    tier-gated UI elements. Returns a dict of boolean flags per feature."""
+    tier = session.get("user_tier", "free")
+    flags = {
+        "multi_timeframe":   tier in ("pro", "elite"),
+        "indicator_layers":  tier in ("pro", "elite"),
+        "risk_manager":      tier in ("pro", "elite"),
+        "pine_export":       tier in ("pro", "elite"),
+        "ea_access":         tier in ("pro", "elite"),
+        "backtest":          tier in ("pro", "elite"),       # unlimited backtests
+        "unlimited_signals": tier in ("pro", "elite"),
+        "unlimited_watches": tier in ("pro", "elite"),
+        "unlimited_positions": tier in ("pro", "elite"),
+        "all_asset_classes": tier in ("pro", "elite"),
+        "all_timeframes":    tier in ("pro", "elite"),
+    }
+    return jsonify({"tier": tier, "features": flags})
 
 # ─── ADMIN ROUTES ──────────────────────────────────────────────
 
@@ -8072,6 +8426,716 @@ def mt5_set_trailing():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ═══════════════════════════════════════════════════════════════
+# BINANCE SPOT TRADING
+# ═══════════════════════════════════════════════════════════════
+
+_BINANCE_BASE = "https://api.binance.com"
+
+def _binance_signed_request(key_id, method, path, params=None):
+    """Make a signed Binance REST API call using user's stored ExchangeKey.
+    key_id: ExchangeKey.id — used to look up + decrypt API credentials.
+    Returns (response_json, error_string). Error string is None on success."""
+    if not _DBSession:
+        return None, "Database not available"
+    db = _DBSession()
+    try:
+        ek = db.query(ExchangeKey).filter(
+            ExchangeKey.id == key_id,
+            ExchangeKey.exchange == "binance"
+        ).first()
+        if not ek:
+            return None, "Exchange key not found"
+        api_key = _dec(ek.api_key_enc)
+        api_secret = _dec(ek.api_secret_enc)
+    except Exception as e:
+        return None, f"Failed to decrypt key: {e}"
+    finally:
+        db.close()
+
+    if params is None:
+        params = {}
+    params["timestamp"] = int(time.time() * 1000)
+    qs = urlencode(params)
+    signature = hmac.new(
+        api_secret.encode("utf-8"),
+        qs.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    url = f"{_BINANCE_BASE}{path}?{qs}&signature={signature}"
+    headers = {"X-MBX-APIKEY": api_key}
+    try:
+        if method.upper() == "GET":
+            r = requests.get(url, headers=headers, timeout=15)
+        elif method.upper() == "POST":
+            r = requests.post(url, headers=headers, timeout=15)
+        elif method.upper() == "DELETE":
+            r = requests.delete(url, headers=headers, timeout=15)
+        else:
+            return None, f"Unsupported method: {method}"
+        data = r.json()
+        if r.status_code >= 400:
+            return None, data.get("msg", f"Binance error {r.status_code}")
+        return data, None
+    except Exception as e:
+        return None, str(e)
+
+
+@app.route("/api/exchange/binance/order", methods=["POST"])
+@require_tier('pro')
+@login_required
+def binance_place_order():
+    """Place a spot order on Binance. User must have stored API keys via /api/keys."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+
+    body = request.json or {}
+    user_id = str(session.get("user_id"))
+    exchange_key_id = body.get("exchange_key_id")
+    symbol = body.get("symbol", "").upper().strip()
+    side = body.get("side", "").upper().strip()
+    order_type = body.get("order_type", "market").lower().strip()
+    quantity = body.get("quantity")
+    price = body.get("price")
+    stop_loss = body.get("stop_loss")
+    take_profit = body.get("take_profit")
+
+    # Validate
+    if not exchange_key_id:
+        return jsonify({"error": "exchange_key_id required"}), 400
+    if not symbol:
+        return jsonify({"error": "symbol required (e.g. BTCUSDT)"}), 400
+    if side not in ("BUY", "SELL"):
+        return jsonify({"error": "side must be BUY or SELL"}), 400
+    if order_type not in ("market", "limit"):
+        return jsonify({"error": "order_type must be market or limit"}), 400
+    if not quantity or float(quantity) <= 0:
+        return jsonify({"error": "quantity must be positive"}), 400
+    if order_type == "limit" and not price:
+        return jsonify({"error": "price required for limit orders"}), 400
+
+    quantity = float(quantity)
+    price = float(price) if price else None
+    stop_loss = float(stop_loss) if stop_loss else None
+    take_profit = float(take_profit) if take_profit else None
+
+    # Verify the key belongs to the user
+    db = _DBSession()
+    try:
+        ek = db.query(ExchangeKey).filter(
+            ExchangeKey.id == exchange_key_id,
+            ExchangeKey.user_id == int(user_id),
+            ExchangeKey.exchange == "binance"
+        ).first()
+        if not ek:
+            return jsonify({"error": "Exchange key not found or not yours"}), 403
+    finally:
+        db.close()
+
+    # Build Binance params
+    binance_params = {
+        "symbol": symbol,
+        "side": side,
+        "type": order_type.upper(),
+        "quantity": quantity,
+    }
+    if order_type == "limit":
+        binance_params["price"] = price
+        binance_params["timeInForce"] = "GTC"
+
+    # Send to Binance
+    result, error = _binance_signed_request(
+        exchange_key_id,
+        "POST",
+        "/api/v3/order",
+        binance_params
+    )
+    if error:
+        # Save failed attempt
+        db = _DBSession()
+        try:
+            order = ExchangeOrder(
+                user_id=user_id,
+                exchange_key_id=exchange_key_id,
+                exchange="binance",
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                quantity=quantity,
+                price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                status="failed",
+            )
+            db.add(order)
+            db.commit()
+            db.refresh(order)
+            order_id = order.id
+        except Exception as e:
+            db.rollback()
+            order_id = None
+        finally:
+            db.close()
+        return jsonify({
+            "error": error,
+            "order_id": order_id,
+            "status": "failed"
+        }), 502
+
+    # Success — save to DB
+    exchange_order_id = str(result.get("orderId", ""))
+    db = _DBSession()
+    try:
+        order = ExchangeOrder(
+            user_id=user_id,
+            exchange_key_id=exchange_key_id,
+            exchange="binance",
+            symbol=symbol,
+            side=side,
+            order_type=order_type,
+            quantity=quantity,
+            price=price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            exchange_order_id=exchange_order_id,
+            status=result.get("status", "filled").lower(),
+            fill_price=float(result.get("fills", [{}])[0].get("price", 0)) if result.get("fills") else float(result.get("price", 0)) if result.get("price") else None,
+            filled_qty=float(result.get("executedQty", 0)) if result.get("executedQty") else None,
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        return jsonify({
+            "order_id": order.id,
+            "exchange_order_id": exchange_order_id,
+            "status": order.status,
+        })
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": f"Order placed on exchange but save failed: {e}"}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/exchange/binance/orders", methods=["GET"])
+@require_tier('pro')
+@login_required
+def binance_list_orders():
+    """List user's exchange orders from the DB."""
+    if not _DBSession:
+        return jsonify({"orders": []})
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        orders = db.query(ExchangeOrder).filter(
+            ExchangeOrder.user_id == user_id
+        ).order_by(ExchangeOrder.created_at.desc()).limit(50).all()
+        return jsonify({"orders": [{
+            "id":                o.id,
+            "exchange_key_id":   o.exchange_key_id,
+            "exchange":          o.exchange,
+            "symbol":            o.symbol,
+            "side":              o.side,
+            "order_type":        o.order_type,
+            "quantity":          o.quantity,
+            "price":             o.price,
+            "stop_loss":         o.stop_loss,
+            "take_profit":       o.take_profit,
+            "exchange_order_id": o.exchange_order_id,
+            "status":            o.status,
+            "fill_price":        o.fill_price,
+            "filled_qty":        o.filled_qty,
+            "created_at":        o.created_at.strftime("%Y-%m-%d %H:%M UTC"),
+            "closed_at":         o.closed_at.strftime("%Y-%m-%d %H:%M UTC") if o.closed_at else None,
+        } for o in orders]})
+    except Exception as e:
+        return jsonify({"orders": []})
+    finally:
+        db.close()
+
+
+@app.route("/api/exchange/binance/order/<int:order_id>", methods=["DELETE"])
+@require_tier('pro')
+@login_required
+def binance_cancel_order(order_id):
+    """Cancel a Binance spot order. Only pending/open orders can be cancelled."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        order = db.query(ExchangeOrder).filter(
+            ExchangeOrder.id == order_id,
+            ExchangeOrder.user_id == user_id,
+            ExchangeOrder.status.in_(["pending", "open"])
+        ).first()
+        if not order:
+            return jsonify({"error": "Order not found or not cancellable"}), 404
+
+        if order.exchange_order_id:
+            # Cancel on Binance
+            result, error = _binance_signed_request(
+                order.exchange_key_id,
+                "DELETE",
+                "/api/v3/order",
+                {"symbol": order.symbol, "orderId": int(order.exchange_order_id)}
+            )
+            if error:
+                return jsonify({"error": f"Binance cancel failed: {error}"}), 502
+
+        order.status = "cancelled"
+        order.closed_at = datetime.utcnow()
+        db.commit()
+        return jsonify({"status": "cancelled", "order_id": order.id})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/exchange/binance/balance", methods=["GET"])
+@require_tier('pro')
+@login_required
+def binance_balance():
+    """Fetch account balances from Binance API."""
+    exchange_key_id = request.args.get("exchange_key_id", type=int)
+    if not exchange_key_id:
+        return jsonify({"error": "exchange_key_id query param required"}), 400
+
+    # Verify ownership
+    user_id = str(session.get("user_id"))
+    if _DBSession:
+        db = _DBSession()
+        try:
+            ek = db.query(ExchangeKey).filter(
+                ExchangeKey.id == exchange_key_id,
+                ExchangeKey.user_id == int(user_id),
+                ExchangeKey.exchange == "binance"
+            ).first()
+            if not ek:
+                return jsonify({"error": "Exchange key not found or not yours"}), 403
+        finally:
+            db.close()
+
+    result, error = _binance_signed_request(exchange_key_id, "GET", "/api/v3/account")
+    if error:
+        return jsonify({"error": error}), 502
+
+    # Filter non-zero balances
+    balances = []
+    for b in result.get("balances", []):
+        free = float(b.get("free", 0))
+        locked = float(b.get("locked", 0))
+        if free > 0 or locked > 0:
+            balances.append({
+                "asset":  b["asset"],
+                "free":   free,
+                "locked": locked,
+            })
+
+    return jsonify({
+        "balances": balances,
+        "can_trade": result.get("canTrade", False),
+    })
+
+# ═══════════════════════════════════════════════════════════════
+# COINBASE ADVANCED TRADE
+# ═══════════════════════════════════════════════════════════════
+
+_COINBASE_BASE = "https://api.coinbase.com/api/v3/brokerage"
+
+def _coinbase_signed_request(key_id, method, path, body=None):
+    """Make a signed Coinbase Advanced Trade API call using user's stored ExchangeKey.
+    
+    Coinbase uses HMAC-SHA256 signature with headers:
+      CB-ACCESS-KEY: API key name
+      CB-ACCESS-SIGN: Base64(HMAC-SHA256(secret, timestamp + method + path + body))
+      CB-ACCESS-TIMESTAMP: Unix timestamp in seconds
+      CB-ACCESS-PASSPHRASE: Passphrase
+    
+    key_id: ExchangeKey.id — used to look up + decrypt API credentials.
+    Returns (response_json, error_string). Error string is None on success.
+    """
+    if not _DBSession:
+        return None, "Database not available"
+    db = _DBSession()
+    try:
+        ek = db.query(ExchangeKey).filter(
+            ExchangeKey.id == key_id,
+            ExchangeKey.exchange == "coinbase"
+        ).first()
+        if not ek:
+            return None, "Coinbase exchange key not found"
+        api_key = _dec(ek.api_key_enc)
+        api_secret = _dec(ek.api_secret_enc)
+        api_passphrase = _dec(ek.api_passphrase_enc) if ek.api_passphrase_enc else ""
+    except Exception as e:
+        return None, f"Failed to decrypt key: {e}"
+    finally:
+        db.close()
+
+    import hmac as _hmac, hashlib as _hashlib, base64 as _base64
+
+    timestamp = str(int(time.time()))
+    body_str = json.dumps(body) if body else ""
+    message = timestamp + method.upper() + path + body_str
+
+    signature = _base64.b64encode(
+        _hmac.new(
+            api_secret.encode("utf-8"),
+            message.encode("utf-8"),
+            _hashlib.sha256
+        ).digest()
+    ).decode()
+
+    headers = {
+        "CB-ACCESS-KEY": api_key,
+        "CB-ACCESS-SIGN": signature,
+        "CB-ACCESS-TIMESTAMP": timestamp,
+        "CB-ACCESS-PASSPHRASE": api_passphrase,
+        "Content-Type": "application/json",
+    }
+
+    url = f"{_COINBASE_BASE}{path}"
+    try:
+        if method.upper() == "GET":
+            r = requests.get(url, headers=headers, timeout=15)
+        elif method.upper() == "POST":
+            r = requests.post(url, headers=headers, json=body, timeout=15)
+        elif method.upper() == "DELETE":
+            r = requests.delete(url, headers=headers, json=body, timeout=15)
+        else:
+            return None, f"Unsupported method: {method}"
+        data = r.json() if r.text else {}
+        if r.status_code >= 400:
+            err_msg = data.get("message") or data.get("error") or data.get("error_description") or f"Coinbase error {r.status_code}"
+            return None, err_msg
+        return data, None
+    except Exception as e:
+        return None, str(e)
+
+
+@app.route("/api/exchange/coinbase/order", methods=["POST"])
+@require_tier('pro')
+@login_required
+def coinbase_place_order():
+    """Place a spot order on Coinbase Advanced Trade."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+
+    body = request.json or {}
+    user_id = str(session.get("user_id"))
+    exchange_key_id = body.get("exchange_key_id")
+    symbol = body.get("symbol", "").upper().strip()
+    side = body.get("side", "").upper().strip()
+    order_type = body.get("order_type", "market").lower().strip()
+    quantity = body.get("quantity")
+    price = body.get("price")
+    stop_loss = body.get("stop_loss")
+    take_profit = body.get("take_profit")
+
+    if not exchange_key_id:
+        return jsonify({"error": "exchange_key_id required"}), 400
+    if not symbol:
+        return jsonify({"error": "symbol required (e.g. BTC-USD)"}), 400
+    if side not in ("BUY", "SELL"):
+        return jsonify({"error": "side must be BUY or SELL"}), 400
+    if order_type not in ("market", "limit", "limit_gtc", "limit_gtd", "stop_limit_gtc", "stop_limit_gtd"):
+        return jsonify({"error": "order_type must be market, limit, limit_gtc, limit_gtd, stop_limit_gtc, or stop_limit_gtd"}), 400
+    if not quantity or float(quantity) <= 0:
+        return jsonify({"error": "quantity must be positive"}), 400
+    if order_type in ("limit", "limit_gtc", "limit_gtd", "stop_limit_gtc", "stop_limit_gtd") and not price:
+        return jsonify({"error": "price required for limit orders"}), 400
+
+    quantity = float(quantity)
+    price = float(price) if price else None
+    stop_loss = float(stop_loss) if stop_loss else None
+    take_profit = float(take_profit) if take_profit else None
+
+    # Verify the key belongs to the user
+    db = _DBSession()
+    try:
+        ek = db.query(ExchangeKey).filter(
+            ExchangeKey.id == exchange_key_id,
+            ExchangeKey.user_id == int(user_id),
+            ExchangeKey.exchange == "coinbase"
+        ).first()
+        if not ek:
+            return jsonify({"error": "Coinbase exchange key not found or not yours"}), 403
+    finally:
+        db.close()
+
+    # Map DotVerse order type to Coinbase Advanced Trade order configuration
+    # Coinbase uses: order_configuration with one of: market_market_ioc, limit_limit_gtc, etc.
+    if order_type == "market":
+        order_config = {
+            "market_market_ioc": {
+                "quote_size": str(quantity)  # base_size or quote_size
+            }
+        }
+        # For BUY, use quote_size; for SELL, use base_size
+        # Actually, let's use base_size for simplicity — user specifies token amount
+        if side == "BUY":
+            order_config = {
+                "market_market_ioc": {
+                    "quote_size": str(quantity)
+                }
+            }
+        else:
+            order_config = {
+                "market_market_ioc": {
+                    "base_size": str(quantity)
+                }
+            }
+    elif order_type in ("limit", "limit_gtc"):
+        order_config = {
+            "limit_limit_gtc": {
+                "base_size": str(quantity),
+                "limit_price": str(price),
+                "post_only": False
+            }
+        }
+    elif order_type == "limit_gtd":
+        order_config = {
+            "limit_limit_gtd": {
+                "base_size": str(quantity),
+                "limit_price": str(price),
+                "end_time": datetime.utcnow().isoformat() + "Z",
+                "post_only": False
+            }
+        }
+    elif order_type in ("stop_limit_gtc", "stop_limit_gtd"):
+        gtc = order_type == "stop_limit_gtc"
+        order_config = {
+            ("stop_limit_stop_limit_gtc" if gtc else "stop_limit_stop_limit_gtd"): {
+                "base_size": str(quantity),
+                "limit_price": str(price),
+                "stop_price": str(stop_loss or 0),
+                "stop_direction": "STOP_DIRECTION_STOP_UP" if side == "BUY" else "STOP_DIRECTION_STOP_DOWN"
+            }
+        }
+    else:
+        return jsonify({"error": f"Unsupported order type: {order_type}"}), 400
+
+    coinbase_body = {
+        "client_order_id": f"dotverse_{int(time.time()*1000)}",
+        "product_id": symbol,
+        "side": side,
+        "order_configuration": order_config,
+    }
+
+    result, error = _coinbase_signed_request(
+        exchange_key_id,
+        "POST",
+        "/orders",
+        coinbase_body
+    )
+
+    if error:
+        # Save failed attempt
+        db = _DBSession()
+        try:
+            order = ExchangeOrder(
+                user_id=user_id,
+                exchange_key_id=exchange_key_id,
+                exchange="coinbase",
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                quantity=quantity,
+                price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                status="failed",
+                raw_response=json.dumps({"error": error}),
+            )
+            db.add(order)
+            db.commit()
+            db.refresh(order)
+            order_id = order.id
+        except Exception as e:
+            db.rollback()
+            order_id = None
+        finally:
+            db.close()
+        return jsonify({
+            "error": error,
+            "order_id": order_id,
+            "status": "failed"
+        }), 502
+
+    # Success — save to DB
+    db = _DBSession()
+    try:
+        success_resp = result.get("success_response", result.get("order_id", result)) if isinstance(result, dict) else {}
+        exchange_order_id = str(success_resp.get("order_id", "")) if isinstance(success_resp, dict) else str(result.get("order_id", ""))
+
+        order = ExchangeOrder(
+            user_id=user_id,
+            exchange_key_id=exchange_key_id,
+            exchange="coinbase",
+            symbol=symbol,
+            side=side,
+            order_type=order_type,
+            quantity=quantity,
+            price=price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            exchange_order_id=exchange_order_id,
+            status="filled" if not result.get("success", True) else "open",
+            fill_price=float(success_resp.get("average_filled_price", 0)) if isinstance(success_resp, dict) and success_resp.get("average_filled_price") else None,
+            filled_qty=float(success_resp.get("filled_size", 0)) if isinstance(success_resp, dict) and success_resp.get("filled_size") else None,
+            commission=float(success_resp.get("total_fees", 0)) if isinstance(success_resp, dict) and success_resp.get("total_fees") else None,
+            commission_ccy=success_resp.get("total_fees_currency") if isinstance(success_resp, dict) else None,
+            raw_response=json.dumps(result),
+            assigned_at=datetime.utcnow(),
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        return jsonify({
+            "order_id": order.id,
+            "exchange_order_id": exchange_order_id,
+            "status": order.status,
+        })
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": f"Order placed on exchange but save failed: {e}"}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/exchange/coinbase/orders", methods=["GET"])
+@require_tier('pro')
+@login_required
+def coinbase_list_orders():
+    """List Coinbase orders from the DB."""
+    if not _DBSession:
+        return jsonify({"orders": []})
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        orders = db.query(ExchangeOrder).filter(
+            ExchangeOrder.user_id == user_id,
+            ExchangeOrder.exchange == "coinbase"
+        ).order_by(ExchangeOrder.created_at.desc()).limit(50).all()
+        return jsonify({"orders": [{
+            "id":                o.id,
+            "exchange_key_id":   o.exchange_key_id,
+            "exchange":          o.exchange,
+            "symbol":            o.symbol,
+            "side":              o.side,
+            "order_type":        o.order_type,
+            "quantity":          o.quantity,
+            "price":             o.price,
+            "stop_loss":         o.stop_loss,
+            "take_profit":       o.take_profit,
+            "exchange_order_id": o.exchange_order_id,
+            "status":            o.status,
+            "fill_price":        o.fill_price,
+            "filled_qty":        o.filled_qty,
+            "commission":        o.commission,
+            "commission_ccy":    o.commission_ccy,
+            "created_at":        o.created_at.strftime("%Y-%m-%d %H:%M UTC"),
+            "closed_at":         o.closed_at.strftime("%Y-%m-%d %H:%M UTC") if o.closed_at else None,
+        } for o in orders]})
+    except Exception as e:
+        return jsonify({"orders": []})
+    finally:
+        db.close()
+
+
+@app.route("/api/exchange/coinbase/order/<int:order_id>", methods=["DELETE"])
+@require_tier('pro')
+@login_required
+def coinbase_cancel_order(order_id):
+    """Cancel a Coinbase order. Uses batch_cancel endpoint."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        order = db.query(ExchangeOrder).filter(
+            ExchangeOrder.id == order_id,
+            ExchangeOrder.user_id == user_id,
+            ExchangeOrder.exchange == "coinbase",
+            ExchangeOrder.status.in_(["pending", "open"])
+        ).first()
+        if not order:
+            return jsonify({"error": "Order not found or not cancellable"}), 404
+
+        if order.exchange_order_id:
+            cancel_body = {
+                "order_ids": [order.exchange_order_id]
+            }
+            result, error = _coinbase_signed_request(
+                order.exchange_key_id,
+                "POST",
+                "/orders/batch_cancel",
+                cancel_body
+            )
+            if error:
+                return jsonify({"error": f"Coinbase cancel failed: {error}"}), 502
+
+        order.status = "cancelled"
+        order.closed_at = datetime.utcnow()
+        db.commit()
+        return jsonify({"status": "cancelled", "order_id": order.id})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/exchange/coinbase/balance", methods=["GET"])
+@require_tier('pro')
+@login_required
+def coinbase_balance():
+    """Fetch account balances from Coinbase Advanced Trade API."""
+    exchange_key_id = request.args.get("exchange_key_id", type=int)
+    if not exchange_key_id:
+        return jsonify({"error": "exchange_key_id query param required"}), 400
+
+    # Verify ownership
+    user_id = str(session.get("user_id"))
+    if _DBSession:
+        db = _DBSession()
+        try:
+            ek = db.query(ExchangeKey).filter(
+                ExchangeKey.id == exchange_key_id,
+                ExchangeKey.user_id == int(user_id),
+                ExchangeKey.exchange == "coinbase"
+            ).first()
+            if not ek:
+                return jsonify({"error": "Coinbase exchange key not found or not yours"}), 403
+        finally:
+            db.close()
+
+    result, error = _coinbase_signed_request(exchange_key_id, "GET", "/accounts")
+    if error:
+        return jsonify({"error": error}), 502
+
+    # Filter non-zero balances
+    balances = []
+    for acct in result.get("accounts", []):
+        available = float(acct.get("available_balance", {}).get("value", 0))
+        hold = float(acct.get("hold", {}).get("value", 0))
+        if available > 0 or hold > 0:
+            balances.append({
+                "asset":    acct.get("currency", ""),
+                "free":     available,
+                "locked":   hold,
+                "account_id": acct.get("uuid", ""),
+            })
+
+    return jsonify({
+        "balances": balances,
+    })
+
 # ─── AUTOMATION SETTINGS ─────────────────────────────────────
 
 @app.route("/api/automation/settings", methods=["GET"])
@@ -8879,6 +9943,104 @@ def mark_notifications_read():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ─── WEB PUSH SUBSCRIPTION ENDPOINTS ──────────────────────────
+
+@app.route("/api/push/vapid-public-key", methods=["GET"])
+def push_vapid_public_key():
+    """Return the VAPID public key so the browser can create a push subscription."""
+    try:
+        key = _vapid_public_key_b64()
+        return jsonify({"publicKey": key})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/push/subscribe", methods=["POST"])
+def push_subscribe():
+    """Store a browser push subscription."""
+    if not _DBSession:
+        return jsonify({"status": "error", "message": "Database not available"}), 503
+    body = request.json or {}
+    endpoint = body.get("endpoint", "").strip()
+    p256dh   = body.get("keys", {}).get("p256dh", "").strip()
+    auth     = body.get("keys", {}).get("auth", "").strip()
+    user_id  = str(session.get("user_id", "default"))
+    if not endpoint or not p256dh or not auth:
+        return jsonify({"status": "error", "message": "endpoint, keys.p256dh, and keys.auth required"}), 400
+    try:
+        db = _DBSession()
+        # Check for duplicate
+        existing = db.query(PushSubscription).filter_by(endpoint=endpoint).first()
+        if existing:
+            existing.p256dh = p256dh
+            existing.auth   = auth
+            existing.user_id = user_id
+        else:
+            sub = PushSubscription(user_id=user_id, endpoint=endpoint, p256dh=p256dh, auth=auth)
+            db.add(sub)
+        db.commit()
+        db.close()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/push/unsubscribe", methods=["POST"])
+def push_unsubscribe():
+    """Remove a browser push subscription."""
+    if not _DBSession:
+        return jsonify({"status": "ok"})
+    body = request.json or {}
+    endpoint = body.get("endpoint", "").strip()
+    if not endpoint:
+        return jsonify({"status": "error", "message": "endpoint required"}), 400
+    try:
+        db = _DBSession()
+        db.query(PushSubscription).filter_by(endpoint=endpoint).delete()
+        db.commit()
+        db.close()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# ─── SSE REAL-TIME EVENT STREAM ────────────────────────────────
+
+@app.route("/api/events/stream", methods=["GET"])
+def sse_stream():
+    """Server-Sent Events endpoint. Clients connect and receive real-time
+    notification events (and price updates) as they happen.
+
+    The connection stays open indefinitely. The browser auto-reconnects on
+    drop via EventSource's built-in retry.
+    """
+    # Build a fresh queue for this client
+    client_q = queue.Queue(maxsize=256)
+    client_id = str(uuid.uuid4())[:8]
+
+    with _sse_subscribers_lock:
+        _sse_subscribers[client_id] = client_q
+
+    def generate():
+        # Send initial connection event
+        yield "id: " + str(int(time.time())) + "\nevent: connected\ndata: {\"client_id\":\"" + client_id + "\"}\n\n"
+        try:
+            while True:
+                try:
+                    msg = client_q.get(timeout=30)  # heartbeat every 30s
+                    yield "id: " + str(int(time.time())) + "\ndata: " + msg + "\n\n"
+                except queue.Empty:
+                    # Heartbeat to keep connection alive and detect dead clients
+                    yield ": heartbeat\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            with _sse_subscribers_lock:
+                _sse_subscribers.pop(client_id, None)
+
+    resp = Response(generate(), mimetype="text/event-stream")
+    resp.headers["Cache-Control"]  = "no-cache"
+    resp.headers["Connection"]     = "keep-alive"
+    resp.headers["X-Accel-Buffering"] = "no"  # nginx: don't buffer
+    return resp
+
 # ─── SETTINGS — PROFILE ──────────────────────────────────────
 
 @app.route("/api/profile", methods=["POST"])
@@ -8963,16 +10125,18 @@ def keys_add():
     label      = body.get("label", "").strip()
     api_key    = body.get("api_key", "").strip()
     api_secret = body.get("api_secret", "").strip()
+    api_passphrase = body.get("api_passphrase", "").strip()  # Coinbase-specific
     if not exchange or not api_key or not api_secret:
         return jsonify({"status": "error", "message": "Exchange, API key, and secret are required"}), 400
     db = _DBSession()
     try:
         row = ExchangeKey(
-            user_id        = user.id,
-            exchange       = exchange,
-            label          = label or exchange.capitalize(),
-            api_key_enc    = _enc(api_key),
-            api_secret_enc = _enc(api_secret),
+            user_id            = user.id,
+            exchange           = exchange,
+            label              = label or exchange.capitalize(),
+            api_key_enc        = _enc(api_key),
+            api_secret_enc     = _enc(api_secret),
+            api_passphrase_enc = _enc(api_passphrase) if api_passphrase else None,
         )
         db.add(row)
         db.commit()
@@ -9418,21 +10582,36 @@ def analyze():
         cfg    = TIMEFRAME_CONFIG[timeframe]
         _t0    = time.time()
 
-        # K4: Free-tier gate — 5 signals/day per user
+        # K4/K7.2: Free-tier gate — signals cap, asset-class cap, timeframe lock
         _k4_uid  = session.get("user_id")
         _k4_tier = session.get("user_tier", "free")
-        if _k4_tier == "free" and _redis_client and _k4_uid:
-            _k4_key = f"daily_signals:{_k4_uid}:{datetime.utcnow().strftime('%Y%m%d')}"
-            try:
-                _k4_count = int(_redis_client.get(_k4_key) or 0)
-                if _k4_count >= 5:
-                    return jsonify({"error": "free_tier_limit",
-                                    "message": "You have used your 5 free signals for today. Upgrade to Pro for unlimited signals.",
-                                    "limit": 5, "used": _k4_count}), 429
-                _redis_client.incr(_k4_key)
-                _redis_client.expire(_k4_key, 86400)
-            except Exception:
-                pass
+        if _k4_tier == "free":
+            # 5 signals/day cap
+            _sig_ok, _sig_err = _check_tier_cap(
+                "signals", 5,
+                "You have used your 5 free signals for today. Upgrade to Pro for unlimited signals."
+            )
+            if not _sig_ok:
+                return _sig_err
+            # 1h timeframe only for free tier
+            if timeframe not in ("1h",):
+                return jsonify({"error": "timeframe_locked",
+                                "message": "Free tier is limited to the 1-hour timeframe. Upgrade to Pro for all timeframes.",
+                                "current_tier": "free"}), 402
+            # 1 asset class cap for free tier
+            if _redis_client and _k4_uid:
+                try:
+                    _ac_key = f"caps:{_k4_uid}:asset_class"
+                    _stored_ac = _redis_client.get(_ac_key)
+                    if _stored_ac:
+                        if _stored_ac != asset_type:
+                            return jsonify({"error": "asset_class_locked",
+                                            "message": f"Free tier is limited to one asset class. You chose {_stored_ac}. Upgrade to Pro for all asset classes.",
+                                            "locked_to": _stored_ac, "requested": asset_type}), 402
+                    else:
+                        _redis_client.set(_ac_key, asset_type)
+                except Exception:
+                    pass
 
         # ── STEP 1: TradingView — preferred signal source ─────────────────
         # TV gives real-time RSI, EMA, MACD, BB, ATR for any timeframe.
@@ -10151,6 +11330,15 @@ def add_watch():
     """Register a ticker for 24/7 server-side watching with multi-channel alerts."""
     try:
         body          = request.json or {}
+
+        # K7.2: Free-tier active watches cap — 2 max
+        _w_uid = str(session.get('user_id', 'anon'))
+        _w_tier = session.get('user_tier', 'free')
+        if _w_tier == 'free':
+            _w_ok, _w_err = _check_active_count("watch", _w_uid, 2, "watches")
+            if not _w_ok:
+                return _w_err
+
         ticker        = body.get("ticker", "").upper().strip()
         asset_type    = body.get("asset_type", "stock")
         timeframe     = body.get("timeframe", "1d").lower()
@@ -11219,13 +12407,21 @@ def send_sms_on_demand():
 
 # ─── STRATEGY BACKTEST ───────────────────────────────────────
 @app.route("/api/backtest", methods=["POST"])
-@require_tier('pro')
 @login_required
 def backtest_route():
     """Simulate the current signal's TP/SL strategy on historical price data.
     Uses the same RSI-based entry condition as the main analysis.
     Returns metrics comparable to TradingView's Strategy Tester."""
     body       = request.get_json(force=True) or {}
+
+    # K7.2: Free-tier backtest cap — 3/day
+    _bt_ok, _bt_err = _check_tier_cap(
+        "backtest", 3,
+        "You have used your 3 free backtests for today. Upgrade to Pro for unlimited backtests."
+    )
+    if not _bt_ok:
+        return _bt_err
+
     ticker     = body.get("ticker", "").upper().strip()
     asset_type = body.get("asset_type", "stock")
     timeframe  = body.get("timeframe", "1d")
@@ -12078,6 +13274,26 @@ class SignalHistory(_Base):
     actual_exit_price = Column(Float,       nullable=True)
     actual_pnl_r      = Column(Float,       nullable=True)   # R-multiples: positive=profit, negative=loss
 
+class CalibrationLabel(_Base):
+    """P2.1 — Per-user labeled dataset for isotonic regression calibration.
+    One row per closed trade with a known outcome. Feature vector stored as JSON.
+    Minimum 50 labels before calibration is statistically meaningful."""
+    __tablename__ = "calibration_labels"
+    id              = Column(Integer,    primary_key=True, autoincrement=True)
+    user_id         = Column(String(64), nullable=False, default="default")
+    signal_id       = Column(Integer,    nullable=True)   # FK to signal_history.id
+    ticker          = Column(String(32), nullable=False)
+    timeframe       = Column(String(8),  nullable=False)
+    signal          = Column(String(8),  nullable=False)  # BUY / SELL
+    trade_type      = Column(String(16), nullable=True)
+    confidence_raw  = Column(Float,      nullable=False)  # 0–100 as originally emitted
+    outcome         = Column(String(10), nullable=False)  # WIN / LOSS (BE = excluded)
+    actual_pnl_r    = Column(Float,      nullable=True)
+    features_json   = Column(Text,       nullable=True)   # JSON blob: {rsi, macd, atr_pct, bb_position, ...}
+    regime          = Column(String(16), nullable=True)   # trend / range / volatile
+    spread_cost_pct = Column(Float,      nullable=True)
+    created_at      = Column(DateTime,   nullable=False, default=datetime.utcnow)
+
 class EquitySnapshot(_Base):
     """H3 — Equity index snapshot written on every position close.
     Starts at 100.0. Each closed trade adjusts proportionally by trade P&L %.
@@ -12091,13 +13307,15 @@ class EquitySnapshot(_Base):
 class ExchangeKey(_Base):
     """Exchange API keys — Fernet-encrypted, one row per connected exchange per user."""
     __tablename__ = "exchange_keys"
-    id             = Column(Integer,     primary_key=True, autoincrement=True)
-    user_id        = Column(Integer,     nullable=False)
-    exchange       = Column(String(32),  nullable=False)
-    label          = Column(String(64),  nullable=True)
-    api_key_enc    = Column(String(512), nullable=False)
-    api_secret_enc = Column(String(512), nullable=False)
-    created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    id                = Column(Integer,     primary_key=True, autoincrement=True)
+    user_id           = Column(Integer,     nullable=False)
+    exchange          = Column(String(32),  nullable=False)
+    label             = Column(String(64),  nullable=True)
+    api_key_enc       = Column(String(512), nullable=False)
+    api_secret_enc    = Column(String(2048), nullable=True)  # widened for Coinbase private keys (PEM)
+    api_passphrase_enc = Column(String(512), nullable=True)  # Coinbase-specific
+    created_at        = Column(DateTime,    nullable=False, default=datetime.utcnow)
+
 
 class AdminInvite(_Base):
     """Pre-approved emails — role + tier granted automatically on signup."""
@@ -12135,6 +13353,31 @@ class MT5Order(_Base):
     created_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
     filled_at   = Column(DateTime,   nullable=True)
 
+class ExchangeOrder(_Base):
+    """Orders submitted from DotVerse to be executed on Binance Spot or Coinbase Advanced Trade via REST API."""
+    __tablename__ = "exchange_orders"
+    id                = Column(Integer,  primary_key=True, autoincrement=True)
+    user_id           = Column(String(64), nullable=False)
+    exchange_key_id   = Column(Integer,    nullable=False)
+    exchange          = Column(String(32), nullable=False, default="binance")
+    symbol            = Column(String(32), nullable=False)
+    side              = Column(String(8),  nullable=False)   # BUY | SELL
+    order_type        = Column(String(16), nullable=False)   # market | limit
+    quantity          = Column(Float,      nullable=False)
+    price             = Column(Float,      nullable=True)    # null for market orders
+    stop_loss         = Column(Float,      nullable=True)
+    take_profit       = Column(Float,      nullable=True)
+    exchange_order_id = Column(String(64), nullable=True)   # returned by exchange
+    status            = Column(String(16), nullable=False, default="pending")
+    fill_price        = Column(Float,      nullable=True)
+    filled_qty        = Column(Float,      nullable=True)
+    commission        = Column(Float,      nullable=True)   # Coinbase fill fee
+    commission_ccy    = Column(String(8),  nullable=True)   # Coinbase fee currency
+    raw_response      = Column(Text,       nullable=True)   # JSON blob of exchange response
+    assigned_at       = Column(DateTime,   nullable=True)   # when exchange accepted
+    created_at        = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    closed_at         = Column(DateTime,   nullable=True)
+
 class Watch(_Base):
     """Persistent alert watches — survive server restarts, removed only after confirmed delivery."""
     __tablename__ = "watches"
@@ -12169,6 +13412,16 @@ class Notification(_Base):
     data       = Column(Text, nullable=True)           # JSON blob — entry/sl/tp etc.
     read       = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class PushSubscription(_Base):
+    """Web Push API subscriptions for browser notifications."""
+    __tablename__ = "push_subscriptions"
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    user_id     = Column(String(64), nullable=False, default="default")
+    endpoint    = Column(Text, nullable=False)
+    p256dh      = Column(Text, nullable=False)   # client public key
+    auth        = Column(Text, nullable=False)   # auth secret
+    created_at  = Column(DateTime, default=datetime.utcnow)
 
 class AutomationSettings(_Base):
     """Per-user automation preferences stored in DB."""
@@ -12498,6 +13751,14 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS outcome VARCHAR(10)"))
                 _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS actual_exit_price FLOAT"))
                 _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS actual_pnl_r FLOAT"))
+                # Coinbase: api_passphrase_enc on exchange_keys
+                _conn.execute(text("ALTER TABLE exchange_keys ADD COLUMN IF NOT EXISTS api_passphrase_enc VARCHAR(512)"))
+                _conn.execute(text("ALTER TABLE exchange_keys ALTER COLUMN api_secret_enc TYPE VARCHAR(2048)"))
+                # Coinbase: additional ExchangeOrder columns
+                _conn.execute(text("ALTER TABLE exchange_orders ADD COLUMN IF NOT EXISTS commission FLOAT"))
+                _conn.execute(text("ALTER TABLE exchange_orders ADD COLUMN IF NOT EXISTS commission_ccy VARCHAR(8)"))
+                _conn.execute(text("ALTER TABLE exchange_orders ADD COLUMN IF NOT EXISTS raw_response TEXT"))
+                _conn.execute(text("ALTER TABLE exchange_orders ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMP"))
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")
@@ -12560,6 +13821,15 @@ def positions_get():
 def positions_add():
     if not _DBSession:
         return jsonify({"error": "Database not configured"}), 503
+
+    # K7.2: Free-tier open positions cap — 3 max
+    _p_uid = str(session.get("user_id", "default"))
+    _p_tier = session.get("user_tier", "free")
+    if _p_tier == "free":
+        _p_ok, _p_err = _check_active_count("position", _p_uid, 3, "positions")
+        if not _p_ok:
+            return _p_err
+
     data = request.get_json(force=True)
     required = ("ticker", "entry_price", "size")
     if not all(data.get(k) for k in required):
@@ -13105,6 +14375,530 @@ def signal_stats():
             "losses":       len(losses),
             "breakevens":   len(bes),
             "total_closed": sample_size,
+        })
+    finally:
+        db.close()
+
+
+# ─── P2.1-P2.2: Calibration Label Sync + Isotonic Regression ───
+
+@app.route("/api/calibration/sync", methods=["POST"])
+@login_required
+def calibration_sync():
+    """P2.1 — Sync CalibrationLabel rows from SignalHistory for the current user.
+    Queries all closed outcomes (WIN/LOSS) and inserts missing labels.
+    BE outcomes are excluded from calibration (no edge signal).
+    Returns count of new labels synced."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+
+        # Existing label signal_ids to avoid duplicates
+        existing_ids = set(
+            r[0] for r in db.query(CalibrationLabel.signal_id)
+            .filter(CalibrationLabel.user_id == uid)
+            .all()
+        )
+
+        # Fetch closed trades with WIN/LOSS outcomes
+        rows = (db.query(SignalHistory)
+                  .filter(SignalHistory.user_id == uid,
+                          SignalHistory.outcome.in_(["WIN", "LOSS"]),
+                          SignalHistory.signal.in_(["BUY", "SELL"]))
+                  .all())
+
+        inserted = 0
+        for sh in rows:
+            if sh.id in existing_ids:
+                continue
+            label = CalibrationLabel(
+                user_id        = uid,
+                signal_id      = sh.id,
+                ticker         = sh.ticker,
+                timeframe      = sh.timeframe,
+                signal         = sh.signal,
+                trade_type     = sh.trade_type,
+                confidence_raw = sh.confidence or 0,
+                outcome        = sh.outcome,
+                actual_pnl_r   = sh.actual_pnl_r,
+                regime         = _guess_regime(sh.ticker, sh.timeframe) if sh.ticker else None,
+            )
+            db.add(label)
+            inserted += 1
+
+        db.commit()
+        total = db.query(CalibrationLabel).filter(CalibrationLabel.user_id == uid).count()
+        return jsonify({
+            "synced":       inserted,
+            "total_labels": total,
+            "ready":        total >= 50,
+            "message":      f"{total}/50 labels ready — calibration meaningful" if total >= 50
+                       else f"{total}/50 labels — need {50-total} more closed trades",
+        })
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/calibration/isotonic", methods=["GET"])
+@login_required
+def calibration_isotonic():
+    """P2.2 — Fit an isotonic regression on the user's CalibrationLabel data.
+    Maps raw confidence score → calibrated win probability.
+    Requires >= 50 labeled samples for meaningful calibration.
+    Returns calibration curve, calibration error (ECE), sample size."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available", "ready": False, "sample_size": 0}), 503
+
+    GATE = 50
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        labels = (db.query(CalibrationLabel)
+                    .filter(CalibrationLabel.user_id == uid)
+                    .all())
+
+        sample_size = len(labels)
+        if sample_size < GATE:
+            return jsonify({
+                "ready":       False,
+                "sample_size": sample_size,
+                "message":     f"Need {GATE - sample_size} more labeled trades for calibration. "
+                               f"Click 'Sync Labels' to populate from your trade history.",
+                "curve":       [],
+                "ece":         None,
+            })
+
+        # Build (X=confidence_raw, y=is_win) arrays
+        X_raw = np.array([l.confidence_raw for l in labels], dtype=float)
+        y     = np.array([1.0 if l.outcome == "WIN" else 0.0 for l in labels], dtype=float)
+
+        # Fit isotonic regression
+        import sklearn.isotonic as _iso
+        ir = _iso.IsotonicRegression(out_of_bounds="clip", increasing="auto")
+        y_pred = ir.fit_transform(X_raw, y)
+
+        # Build calibration curve: 10 equally-spaced confidence bins
+        n_bins = 10
+        bins = np.linspace(X_raw.min(), X_raw.max(), n_bins + 1)
+        curve = []
+        bin_empirical = []
+        bin_predicted = []
+        bin_counts = []
+        for i in range(n_bins):
+            lo, hi = bins[i], bins[i + 1]
+            if i == n_bins - 1:
+                mask = (X_raw >= lo) & (X_raw <= hi)
+            else:
+                mask = (X_raw >= lo) & (X_raw < hi)
+            count = int(mask.sum())
+            if count > 0:
+                emp_wr = float(y[mask].mean() * 100)
+                pred_wr = float(y_pred[mask].mean() * 100)
+            else:
+                emp_wr = 0
+                pred_wr = 0
+            curve.append({
+                "bin_low":   round(float(lo), 1),
+                "bin_high":  round(float(hi), 1),
+                "empirical": round(emp_wr, 1),
+                "calibrated": round(pred_wr, 1),
+                "count":     count,
+            })
+            if count > 0:
+                bin_empirical.append(emp_wr / 100)
+                bin_predicted.append(pred_wr / 100)
+                bin_counts.append(count)
+
+        # Expected Calibration Error (ECE) — weighted by bin count
+        total = sum(bin_counts)
+        ece = sum((abs(e - p) * c) for e, p, c in
+                  zip(bin_empirical, bin_predicted, bin_counts)) / total if total > 0 else 0
+
+        # Overall stats
+        overall_wr = round(float(y.mean() * 100), 1)
+
+        return jsonify({
+            "ready":        True,
+            "sample_size":  sample_size,
+            "message":      None,
+            "curve":        curve,
+            "ece":          round(ece, 4),
+            "overall_wr":   overall_wr,
+            "wins":         int(y.sum()),
+            "losses":       sample_size - int(y.sum()),
+            "calibrated_fn": _build_calibrated_lookup(ir, X_raw.min(), X_raw.max()),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "ready": False, "sample_size": 0}), 500
+    finally:
+        db.close()
+
+
+def _build_calibrated_lookup(ir, x_min, x_max):
+    """Build a lookup table: raw confidence → calibrated win prob.
+    Returns list of {raw: int, calibrated: float} for every 5% step."""
+    lookup = []
+    for raw in range(5, 101, 5):
+        predicted = float(ir.transform([float(raw)])[0])
+        lookup.append({"raw": raw, "calibrated": round(predicted * 100, 1)})
+    return lookup
+
+
+def _guess_regime(ticker, timeframe):
+    """Quick regime guess based on recent ATR relative to price.
+    Returns 'trend', 'range', or 'volatile'. Best-effort, non-blocking."""
+    try:
+        tf_map = {"15m":"15m","1h":"1h","4h":"1h","1d":"1d","1w":"1wk","1mo":"1mo"}
+        yf_tf = tf_map.get(timeframe, "1d")
+        t = yf.Ticker(ticker)
+        hist = t.history(period="60d", interval=yf_tf)
+        if hist.empty or len(hist) < 20:
+            return None
+        atr_pcts = ((hist["High"] - hist["Low"]) / hist["Close"] * 100).dropna()
+        avg_atr = atr_pcts.mean()
+        if avg_atr > 4:
+            return "volatile"
+        elif avg_atr < 1:
+            return "range"
+        else:
+            return "trend"
+    except Exception:
+        return None
+
+
+# ─── P2.3: Qwen Signal Quality Review ─────────────────────────
+
+@app.route("/api/calibration/review", methods=["POST"])
+@login_required
+def calibration_review():
+    """P2.3 — Qwen 3.5 Plus reviews a signal for quality.
+    Body: { signal_id: int } or { ticker, signal, confidence, timeframe, trade_type }
+    Returns structured review: quality_score (1-10), flags, explanation.
+
+    Uses Qwen 3.5 Plus via custom:qwen provider (OpenAI-compatible API).
+    Result is cached for 1 hour per (user_id, signal_id) in app memory.
+    """
+    body   = request.get_json(force=True) or {}
+    sig_id = body.get("signal_id")
+
+    if not sig_id and not body.get("ticker"):
+        return jsonify({"error": "signal_id or ticker required"}), 400
+
+    uid = str(session.get("user_id", "default"))
+
+    # ── Build signal context ──
+    signal_ctx = {}
+    if sig_id and _DBSession:
+        db = _DBSession()
+        try:
+            sh = (db.query(SignalHistory)
+                    .filter(SignalHistory.id == sig_id, SignalHistory.user_id == uid)
+                    .first())
+            if sh:
+                signal_ctx = {
+                    "ticker":     sh.ticker,
+                    "signal":     sh.signal,
+                    "confidence": sh.confidence,
+                    "timeframe":  sh.timeframe,
+                    "trade_type": sh.trade_type,
+                    "entry":      sh.entry,
+                    "stop_loss":  sh.stop_loss,
+                    "tp1":        sh.tp1,
+                    "fired_at":   sh.fired_at.isoformat() if sh.fired_at else None,
+                }
+            db.close()
+        except Exception:
+            pass
+    else:
+        signal_ctx = {
+            "ticker":     body.get("ticker"),
+            "signal":     body.get("signal"),
+            "confidence": body.get("confidence"),
+            "timeframe":  body.get("timeframe"),
+            "trade_type": body.get("trade_type"),
+        }
+
+    if not signal_ctx.get("ticker"):
+        return jsonify({"error": "Could not resolve signal data"}), 404
+
+    # ── Check cache ──
+    cache_key = f"qwen_review_{uid}_{sig_id or signal_ctx['ticker']}_{signal_ctx.get('timeframe','')}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+
+    # ── Build prompt ──
+    prompt = f"""You are a trading signal quality auditor. Review this signal and rate its quality.
+
+SIGNAL:
+- Ticker: {signal_ctx.get('ticker')}
+- Direction: {signal_ctx.get('signal')}
+- DotVerse Confidence: {signal_ctx.get('confidence', '?')}%
+- Timeframe: {signal_ctx.get('timeframe', '?')}
+- Trade Type: {signal_ctx.get('trade_type', '?')}
+- Entry: {signal_ctx.get('entry', '?')}
+- Stop Loss: {signal_ctx.get('stop_loss', '?')}
+- Take Profit 1: {signal_ctx.get('tp1', '?')}
+
+Evaluate:
+1. Is the R:R ratio reasonable (>1:1)?
+2. Does the trade type match the timeframe?
+3. Is the confidence score plausible for this setup?
+4. Any red flags (e.g., wide spread, news event, overnight gap risk)?
+
+RETURN ONLY this JSON (no markdown):
+{{"quality_score": 1-10, "summary": "1 sentence verdict", "strengths": ["bullet1","bullet2"], "weaknesses": ["bullet1","bullet2"], "flags": [], "recommendation": "take"/"review"/"skip"}}"""
+
+    # ── Call Qwen via custom:qwen provider ──
+    api_key = os.environ.get("QWEN_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+    if not api_key:
+        return jsonify({"quality_score": None, "summary": "Qwen not configured",
+                        "strengths": [], "weaknesses": [], "flags": [],
+                        "recommendation": "review", "error": "API key missing"}), 200
+
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type":  "application/json",
+            },
+            json={
+                "model":       "qwen-plus",
+                "messages":    [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens":  400,
+            },
+            timeout=20,
+        )
+
+        if response.status_code != 200:
+            return jsonify({"error": f"Qwen API error {response.status_code}",
+                            "quality_score": None, "summary": "API unavailable",
+                            "strengths": [], "weaknesses": [], "flags": [],
+                            "recommendation": "review"}), 200
+
+        data = response.json()
+        raw_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        # Parse JSON from response
+        try:
+            result = json.loads(raw_content)
+        except json.JSONDecodeError:
+            # Try to extract JSON from markdown code blocks
+            import re
+            match = re.search(r'\{[^}]+\}', raw_content, re.DOTALL)
+            if match:
+                try:
+                    result = json.loads(match.group(0))
+                except Exception:
+                    result = {"quality_score": 5, "summary": raw_content[:200],
+                              "strengths": [], "weaknesses": [], "flags": [],
+                              "recommendation": "review"}
+            else:
+                result = {"quality_score": 5, "summary": raw_content[:200],
+                          "strengths": [], "weaknesses": [], "flags": [],
+                          "recommendation": "review"}
+
+        # Normalize fields
+        result.setdefault("quality_score", 5)
+        result.setdefault("summary", "")
+        result.setdefault("strengths", [])
+        result.setdefault("weaknesses", [])
+        result.setdefault("flags", [])
+        result.setdefault("recommendation", "review")
+        result["signal_id"] = sig_id
+        result["calibrated_review"] = True
+
+        cache_set(cache_key, result)
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e), "quality_score": None,
+                        "summary": "Review unavailable",
+                        "strengths": [], "weaknesses": [], "flags": [],
+                        "recommendation": "review"}), 200
+
+
+# ─── Performance Dashboard ────────────────────────────────────
+
+@app.route("/api/performance/pnl", methods=["GET"])
+@login_required
+def performance_pnl():
+    """PnL/Equity Curve — time-series of cumulative PnL from SignalHistory.
+    Groups closed trades (outcome IS NOT NULL) by day, computes cumulative PnL,
+    running peak equity, and drawdown series."""
+    if not _DBSession:
+        return jsonify({"dates": [], "pnl": [], "peak": [], "drawdown": []})
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        rows = (db.query(SignalHistory)
+                  .filter(SignalHistory.user_id == uid,
+                          SignalHistory.outcome.isnot(None),
+                          SignalHistory.actual_pnl_r.isnot(None),
+                          SignalHistory.signal.in_(["BUY", "SELL"]))
+                  .order_by(SignalHistory.fired_at.asc())
+                  .all())
+        if not rows:
+            return jsonify({"dates": [], "pnl": [], "peak": [], "drawdown": []})
+
+        # Group by day: accumulate actual_pnl_r per day
+        from collections import OrderedDict
+        daily = OrderedDict()
+        for r in rows:
+            day_key = r.fired_at.strftime("%Y-%m-%d") if r.fired_at else "unknown"
+            daily[day_key] = daily.get(day_key, 0.0) + (r.actual_pnl_r or 0.0)
+
+        dates = list(daily.keys())
+        # Cumulative PnL (starting from 0, each day adds its R)
+        cum = 0.0
+        pnl_series = []
+        peak_series = []
+        dd_series = []
+        running_peak = 0.0
+        for day_pnl in daily.values():
+            cum += day_pnl
+            pnl_series.append(round(cum, 4))
+            if cum > running_peak:
+                running_peak = cum
+            peak_series.append(round(running_peak, 4))
+            dd = (running_peak - cum) / running_peak * 100.0 if running_peak > 0 else 0.0
+            dd_series.append(round(dd, 2))
+
+        return jsonify({
+            "dates": dates,
+            "pnl": pnl_series,
+            "peak": peak_series,
+            "drawdown": dd_series,
+            "total_trades": len(rows),
+            "total_days": len(dates),
+        })
+    finally:
+        db.close()
+
+
+@app.route("/api/performance/stats", methods=["GET"])
+@login_required
+def performance_stats():
+    """Performance stats: Sharpe ratio, win rate, profit factor, averages,
+    expectancy, total trades. Reuses same query logic as /api/signals/stats."""
+    if not _DBSession:
+        return jsonify({"sharpe_ratio": None, "win_rate": None,
+                        "profit_factor": None, "avg_win": None, "avg_loss": None,
+                        "expectancy": None, "total_trades": 0, "sample_size": 0})
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        rows = (db.query(SignalHistory)
+                  .filter(SignalHistory.user_id == uid,
+                          SignalHistory.outcome.isnot(None),
+                          SignalHistory.signal.in_(["BUY", "SELL"]))
+                  .all())
+        sample_size = len(rows)
+        if sample_size == 0:
+            return jsonify({"sharpe_ratio": None, "win_rate": None,
+                            "profit_factor": None, "avg_win": None,
+                            "avg_loss": None, "expectancy": None,
+                            "total_trades": 0, "sample_size": 0})
+
+        wins    = [r for r in rows if r.outcome == "WIN"]
+        losses  = [r for r in rows if r.outcome == "LOSS"]
+        decided = len(wins) + len(losses)
+
+        win_vals  = [r.actual_pnl_r for r in wins   if r.actual_pnl_r is not None]
+        loss_vals = [r.actual_pnl_r for r in losses if r.actual_pnl_r is not None]
+
+        win_rate = round(len(wins) / decided * 100, 1) if decided > 0 else None
+        avg_win  = round(sum(win_vals)  / len(win_vals),  2) if win_vals  else None
+        avg_loss = round(sum(loss_vals) / len(loss_vals), 2) if loss_vals else None
+
+        # Profit factor: gross profit / gross loss
+        gross_profit = sum(w for w in win_vals if w > 0) if win_vals else 0.0
+        gross_loss   = abs(sum(l for l in loss_vals if l < 0)) if loss_vals else 0.0
+        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else None
+
+        # Expectancy
+        expectancy = None
+        if avg_win is not None and avg_loss is not None and decided > 0:
+            wr = win_rate / 100.0 if win_rate is not None else 0.5
+            expectancy = round(wr * avg_win + (1 - wr) * avg_loss, 2)
+
+        # Sharpe Ratio (annualized, assuming daily returns proxy via R-multiples)
+        sharpe_ratio = None
+        all_r_vals = [r.actual_pnl_r for r in rows if r.actual_pnl_r is not None]
+        if len(all_r_vals) >= 3:
+            mean_r = sum(all_r_vals) / len(all_r_vals)
+            variance = sum((x - mean_r) ** 2 for x in all_r_vals) / len(all_r_vals)
+            std_r = variance ** 0.5
+            if std_r > 0:
+                sharpe_ratio = round((mean_r / std_r) * (252 ** 0.5), 2)
+
+        return jsonify({
+            "sharpe_ratio":  sharpe_ratio,
+            "win_rate":      win_rate,
+            "profit_factor": profit_factor,
+            "avg_win":       avg_win,
+            "avg_loss":      avg_loss,
+            "expectancy":    expectancy,
+            "total_trades":  sample_size,
+            "sample_size":   sample_size,
+            "wins":          len(wins),
+            "losses":        len(losses),
+        })
+    finally:
+        db.close()
+
+
+@app.route("/api/performance/monthly-heatmap", methods=["GET"])
+@login_required
+def performance_monthly_heatmap():
+    """Monthly returns heatmap — aggregate SignalHistory.actual_pnl_r
+    by year+month. Returns matrix: {years, months, values}."""
+    if not _DBSession:
+        return jsonify({"years": [], "months": [], "values": []})
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        rows = (db.query(SignalHistory)
+                  .filter(SignalHistory.user_id == uid,
+                          SignalHistory.outcome.isnot(None),
+                          SignalHistory.actual_pnl_r.isnot(None),
+                          SignalHistory.signal.in_(["BUY", "SELL"]))
+                  .all())
+        if not rows:
+            return jsonify({"years": [], "months": [], "values": []})
+
+        # Aggregate by year+month
+        from collections import defaultdict
+        monthly = defaultdict(float)
+        for r in rows:
+            if r.fired_at:
+                key = r.fired_at.strftime("%Y-%m")
+                monthly[key] += (r.actual_pnl_r or 0.0)
+
+        # Build the matrix
+        all_years = sorted(set(k[:4] for k in monthly.keys()))
+        all_months = ["Jan","Feb","Mar","Apr","May","Jun",
+                      "Jul","Aug","Sep","Oct","Nov","Dec"]
+
+        values = []
+        for year in all_years:
+            row = []
+            for mi, month_name in enumerate(all_months):
+                key = f"{year}-{mi+1:02d}"
+                row.append(round(monthly.get(key, 0.0), 2))
+            values.append(row)
+
+        return jsonify({
+            "years": all_years,
+            "months": all_months,
+            "values": values
         })
     finally:
         db.close()
@@ -14612,6 +16406,275 @@ def verdict_chat():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# ══════════════════════════════════════════════════════════════
+# PUBLIC API (9.3) — Read-Only REST with Personal API Keys
+# ══════════════════════════════════════════════════════════════
+
+class ApiKey(_Base):
+    """Personal API keys for public REST API access."""
+    __tablename__ = "api_keys"
+    id         = Column(Integer,     primary_key=True, autoincrement=True)
+    user_id    = Column(Integer,     nullable=False, index=True)
+    key_prefix = Column(String(12),  nullable=False)   # first 8 chars for display
+    key_hash   = Column(String(128), nullable=False, unique=True)  # SHA-256 of full key
+    label      = Column(String(64),  nullable=True)
+    last_used  = Column(DateTime,    nullable=True)
+    created_at = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    revoked    = Column(Boolean,     nullable=False, default=False)
+
+# Tier-based rate limits (requests per minute)
+API_RATE_LIMITS = {"free": 10, "pro": 60, "elite": 300}
+
+def _api_key_auth(f):
+    """Decorator: authenticate via X-API-Key header, inject user+tier into request."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get("X-API-Key", "").strip()
+        if not api_key:
+            return jsonify({"error": "Missing X-API-Key header"}), 401
+        if not _DBSession:
+            return jsonify({"error": "Database unavailable"}), 503
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        db = _DBSession()
+        try:
+            ak = db.query(ApiKey).filter(
+                ApiKey.key_hash == key_hash,
+                ApiKey.revoked == False
+            ).first()
+            if not ak:
+                return jsonify({"error": "Invalid or revoked API key"}), 403
+            user = db.query(User).filter(User.id == ak.user_id).first()
+            if not user:
+                return jsonify({"error": "User not found"}), 403
+            ak.last_used = datetime.utcnow()
+            db.commit()
+            # Rate limit check
+            tier = user.tier or "free"
+            limit = API_RATE_LIMITS.get(tier, 10)
+            if _redis_client:
+                try:
+                    window_key = f"apirate:{ak.id}:{int(time.time() // 60)}"
+                    count = int(_redis_client.get(window_key) or 0)
+                    if count >= limit:
+                        return jsonify({
+                            "error": "Rate limit exceeded",
+                            "limit": limit,
+                            "tier": tier,
+                            "retry_after_seconds": 60 - (int(time.time()) % 60)
+                        }), 429
+                    _redis_client.incr(window_key)
+                    _redis_client.expire(window_key, 120)
+                except Exception:
+                    pass
+            request.api_user = user
+            request.api_tier = tier
+            return f(*args, **kwargs)
+        finally:
+            db.close()
+    return decorated
+
+# ── API Key Management (authenticated via session) ────────────
+@app.route("/api/public/keys", methods=["GET"])
+@login_required
+def public_keys_list():
+    if not _DBSession: return jsonify({"error": "DB unavailable"}), 503
+    user = _get_current_user()
+    if not user: return jsonify({"error": "User not found"}), 404
+    db = _DBSession()
+    try:
+        rows = db.query(ApiKey).filter(
+            ApiKey.user_id == user.id,
+            ApiKey.revoked == False
+        ).all()
+        return jsonify([{
+            "id": r.id, "key_prefix": r.key_prefix, "label": r.label,
+            "last_used": r.last_used.isoformat() if r.last_used else None,
+            "created_at": r.created_at.isoformat()
+        } for r in rows])
+    finally:
+        db.close()
+
+@app.route("/api/public/keys", methods=["POST"])
+@login_required
+def public_keys_create():
+    if not _DBSession: return jsonify({"error": "DB unavailable"}), 503
+    user = _get_current_user()
+    if not user: return jsonify({"error": "User not found"}), 404
+    body = request.json or {}
+    label = body.get("label", "").strip()[:64]
+    # Generate API key
+    import secrets as _sec
+    raw_key = "dv_" + _sec.token_hex(20)  # dv_ prefix + 40 hex chars
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_prefix = raw_key[:10]
+    db = _DBSession()
+    try:
+        ak = ApiKey(user_id=user.id, key_prefix=key_prefix, key_hash=key_hash, label=label)
+        db.add(ak)
+        db.commit()
+        return jsonify({
+            "id": ak.id,
+            "api_key": raw_key,
+            "key_prefix": key_prefix,
+            "label": label,
+            "message": "Store this key safely — it will not be shown again."
+        }), 201
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/public/keys/<int:key_id>", methods=["DELETE"])
+@login_required
+def public_keys_delete(key_id):
+    if not _DBSession: return jsonify({"error": "DB unavailable"}), 503
+    user = _get_current_user()
+    if not user: return jsonify({"error": "User not found"}), 404
+    db = _DBSession()
+    try:
+        ak = db.query(ApiKey).filter_by(id=key_id, user_id=user.id).first()
+        if not ak: return jsonify({"error": "Key not found"}), 404
+        ak.revoked = True
+        db.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+# ── Public Read-Only Endpoints ─────────────────────────────────
+@app.route("/api/public/signals", methods=["GET"])
+@_api_key_auth
+def public_signals():
+    """Return recent signals for the authenticated user."""
+    ticker = request.args.get("ticker", "").strip().upper()
+    timeframe = request.args.get("timeframe", "1h").lower()
+    limit = min(int(request.args.get("limit", 20)), 100)
+    if not _DBSession:
+        return jsonify({"error": "DB unavailable"}), 503
+    db = _DBSession()
+    try:
+        q = db.query(SignalHistory).filter(SignalHistory.user_id == str(request.api_user.id))
+        if ticker:
+            q = q.filter(SignalHistory.ticker.ilike(f"%{ticker}%"))
+        if timeframe:
+            q = q.filter(SignalHistory.timeframe == timeframe)
+        rows = q.order_by(SignalHistory.created_at.desc()).limit(limit).all()
+        return jsonify([{
+            "id": r.id, "ticker": r.ticker, "timeframe": r.timeframe,
+            "signal": r.signal, "entry": r.entry, "stop_loss": r.stop_loss,
+            "take_profit": r.take_profit, "confidence": r.confidence,
+            "rr": r.rr, "created_at": r.created_at.isoformat()
+        } for r in rows])
+    finally:
+        db.close()
+
+@app.route("/api/public/market", methods=["GET"])
+@_api_key_auth
+def public_market():
+    """Quick market data for common tickers (cached)."""
+    ticker = request.args.get("ticker", "").strip().upper()
+    asset_type = request.args.get("asset_type", "crypto").lower()
+    if not ticker:
+        return jsonify({"error": "ticker parameter required"}), 400
+    try:
+        ticker = normalise_ticker(ticker, asset_type)
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        info = t.info or {}
+        hist = t.history(period="1d")
+        price = float(hist["Close"].iloc[-1]) if not hist.empty else (info.get("regularMarketPrice") or info.get("previousClose"))
+        return jsonify({
+            "ticker": ticker,
+            "price": price,
+            "currency": info.get("currency", "USD"),
+            "name": info.get("shortName") or info.get("longName", ticker),
+            "day_change_pct": float(hist["Close"].pct_change().iloc[-1] * 100) if len(hist) > 1 else None
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── OpenAPI Spec (public, no auth) ─────────────────────────────
+_OPENAPI_SPEC = {
+    "openapi": "3.0.3",
+    "info": {
+        "title": "DotVerse Public API",
+        "version": "1.0.0",
+        "description": "Read-only REST API for DotVerse trading signals. Authenticate with a personal API key via the X-API-Key header."
+    },
+    "servers": [{"url": "https://dot-verse.up.railway.app", "description": "Production"}],
+    "security": [{"ApiKeyAuth": []}],
+    "components": {
+        "securitySchemes": {
+            "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+        }
+    },
+    "paths": {
+        "/api/public/signals": {
+            "get": {
+                "summary": "List recent signals",
+                "parameters": [
+                    {"name": "ticker", "in": "query", "schema": {"type": "string"}, "description": "Filter by ticker symbol"},
+                    {"name": "timeframe", "in": "query", "schema": {"type": "string", "default": "1h"}, "description": "Filter by timeframe"},
+                    {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "maximum": 100}}
+                ],
+                "responses": {"200": {"description": "List of signals"}}
+            }
+        },
+        "/api/public/market": {
+            "get": {
+                "summary": "Get market data for a ticker",
+                "parameters": [
+                    {"name": "ticker", "in": "query", "required": True, "schema": {"type": "string"}},
+                    {"name": "asset_type", "in": "query", "schema": {"type": "string", "default": "crypto"}}
+                ],
+                "responses": {"200": {"description": "Market data"}}
+            }
+        }
+    }
+}
+
+@app.route("/api/docs")
+def api_docs():
+    return jsonify(_OPENAPI_SPEC)
+
+@app.route("/api/docs/swagger")
+def api_docs_swagger():
+    return """<!DOCTYPE html>
+<html><head><title>DotVerse API Docs</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>SwaggerUIBundle({url:'/api/docs',dom_id:'#swagger-ui'})</script>
+</body></html>"""
+
+# ── Ensure api_keys table exists ─────────────────────────────────
+try:
+    if _db_engine:
+        with _db_engine.begin() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    key_prefix VARCHAR(12) NOT NULL,
+                    key_hash VARCHAR(128) NOT NULL UNIQUE,
+                    label VARCHAR(64),
+                    last_used TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    revoked BOOLEAN NOT NULL DEFAULT FALSE
+                )
+            """))
+            try:
+                _conn.execute(text("CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)"))
+                _conn.execute(text("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)"))
+            except Exception:
+                pass
+except Exception:
+    pass
 
 # NOTE on the RQ worker:
 # The previous in-process daemon-thread approach (running rq Worker.work() as a
