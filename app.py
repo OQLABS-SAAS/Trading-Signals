@@ -518,6 +518,106 @@ def fetch_binance_ohlcv(ticker, interval="1d", period="1y"):
         return pd.DataFrame()
 
 
+def _fetch_coinmarketcap(ticker, timeframe="1d"):
+    """Fetch crypto OHLCV from CoinMarketCap — fallback when Binance blocked.
+
+    CMC historical is daily only; intraday timeframes fall through to other sources.
+    Returns DataFrame with Open/High/Low/Close/Volume and DatetimeIndex,
+    or empty DataFrame on any failure.
+    """
+    # Only daily — CMC historical OHLCV is daily resolution
+    if timeframe not in ("1d", "daily", "day", "1wk", "1w", "1mo"):
+        return pd.DataFrame()
+
+    api_key = os.getenv("COINMARKETCAP_API_KEY")
+    if not api_key:
+        print("[cmc] COINMARKETCAP_API_KEY not set")
+        return pd.DataFrame()
+
+    # Map ticker (BTC-USD, ETH/USD, BTCUSDT, etc.) to CMC symbol (BTC, ETH)
+    raw = ticker.upper().replace("-", "/").replace("USDT", "USD")
+    if "/" in raw:
+        parts = raw.split("/")
+        symbol = parts[0]
+    else:
+        symbol = raw[:3]
+
+    # Map known tickers to CMC symbols
+    CMC_SYMBOL_MAP = {
+        "BTCUSD": "BTC", "ETHUSD": "ETH", "SOLUSD": "SOL",
+        "XRPUSD": "XRP", "DOGEUSD": "DOGE", "ADAUSD": "ADA",
+        "DOTUSD": "DOT", "LINKUSD": "LINK", "LTCUSD": "LTC",
+        "BNBUSD": "BNB", "AVAXUSD": "AVAX", "MATICUSD": "MATIC",
+        "UNIUSD": "UNI", "ATOMUSD": "ATOM", "ARBUSD": "ARB",
+    }
+    # Also try with "/" format
+    symbol = CMC_SYMBOL_MAP.get(symbol, symbol)
+
+    # Determine CMC time_period
+    period = "daily"
+    limit = 200
+    if timeframe in ("1wk", "1w"):
+        period = "weekly"
+        limit = 52
+    elif timeframe == "1mo":
+        period = "monthly"
+        limit = 24
+
+    try:
+        url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/ohlcv/historical"
+        params = {
+            "symbol": symbol,
+            "convert": "USD",
+            "time_period": period,
+            "interval": period,
+            "limit": limit,
+        }
+        headers = {"X-CMC_PRO_API_KEY": api_key}
+        print(f"[cmc] Fetching {symbol} {period} (limit={limit})")
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"[cmc] HTTP {resp.status_code} for {symbol}")
+            return pd.DataFrame()
+        data = resp.json()
+        quotes = data.get("data", {}).get("quotes", [])
+        if not quotes:
+            print(f"[cmc] No quotes in response for {symbol}")
+            return pd.DataFrame()
+
+        dates, opens, highs, lows, closes, volumes = [], [], [], [], [], []
+        for q in quotes:
+            try:
+                ts = q.get("timestamp", "")
+                quote = q.get("quote", {}).get("USD", {})
+                if not ts or not quote:
+                    continue
+                dates.append(ts)
+                opens.append(float(quote.get("open", 0) or 0))
+                highs.append(float(quote.get("high", 0) or 0))
+                lows.append(float(quote.get("low", 0) or 0))
+                closes.append(float(quote.get("close", 0) or 0))
+                volumes.append(float(quote.get("volume", 0) or 0))
+            except (ValueError, TypeError, KeyError):
+                continue
+
+        if not dates:
+            print(f"[cmc] No parsed data for {symbol}")
+            return pd.DataFrame()
+
+        df = pd.DataFrame({
+            "Open": opens, "High": highs, "Low": lows,
+            "Close": closes, "Volume": volumes,
+        }, index=pd.to_datetime(dates))
+        df = df.sort_index()
+        df = df.astype(float)
+        df = df.dropna(how="all")
+        print(f"[cmc] SUCCESS — fetched {len(df)} bars for {symbol} ({period})")
+        return df
+    except Exception as e:
+        print(f"[cmc] Error for {symbol}: {e}")
+        return pd.DataFrame()
+
+
 def _interval_to_timeframe(interval):
     """Map yfinance interval to fetch_chart_direct timeframe."""
     mapping = {
@@ -1695,6 +1795,14 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
         result = _fetch_binance(ticker, timeframe)
         if result:
             return result
+
+    # 1b. CoinMarketCap — crypto fallback when Binance blocked on Railway
+    if asset_type == "crypto":
+        result = _fetch_coinmarketcap(ticker, timeframe)
+        if result is not None and not result.empty:
+            print(f"[cmc] SUCCESS — {len(result)} bars for {ticker}")
+            return result
+        print(f"[cmc] FAILED for {ticker}")
 
     # 2. Twelve Data — primary for stocks/forex intraday on Railway
     if asset_type in ("stock", "index", "forex", "commodity"):
