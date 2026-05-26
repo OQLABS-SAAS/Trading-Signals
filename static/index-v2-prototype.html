@@ -2405,6 +2405,20 @@ body.tier-trader [data-tier="pro"]{display:none!important;}
 .und-step-title{font-size:12px;color:var(--t1);}
 .und-step-sub{font-size:10.5px;color:var(--t3);margin-top:1px;}
 
+/* ── Data cards (Cost Review, Monte Carlo, MT5) ── */
+.und-data-card{background:rgba(18,22,30,.85);border:1px solid rgba(237,232,216,.14);border-radius:12px;padding:16px 18px;margin-top:12px;}
+.und-data-card-title{font-size:11px;font-family:var(--mono);letter-spacing:.06em;color:rgba(237,232,216,.75);margin-bottom:10px;}
+.und-data-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px;font-family:var(--mono);color:var(--t2);}
+.und-data-label{color:rgba(237,232,216,.55);}
+.und-data-val{font-weight:500;}
+.und-data-val.green{color:#5de8a0;}
+.und-data-val.red{color:#e8706e;}
+.und-data-loading{font-size:11px;color:rgba(237,232,216,.4);font-family:var(--mono);padding:4px 0;}
+.und-data-empty{font-size:11px;color:rgba(237,232,216,.3);font-family:var(--mono);padding:4px 0;}
+.und-positions-table{width:100%;border-collapse:collapse;font-size:10px;font-family:var(--mono);margin-top:6px;}
+.und-positions-table th{text-align:left;color:rgba(237,232,216,.45);font-weight:500;padding:3px 5px;border-bottom:1px solid rgba(237,232,216,.08);font-size:9px;letter-spacing:.04em;}
+.und-positions-table td{padding:4px 5px;color:rgba(237,232,216,.75);border-bottom:1px solid rgba(237,232,216,.04);}
+
 /* ── SIZE page ── */
 .sz-ref-row{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
 .sz-ref-chip{font-family:var(--mono);font-size:13px;font-weight:700;padding:5px 10px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);}
@@ -13053,6 +13067,23 @@ function showUnderstand(){
           </div>
         </div>
       </div>
+      <!-- Data cards: Cost Review, Monte Carlo, MT5 Positions, MT5 Account -->
+      <div class="und-data-card" id="undCostReview">
+        <div class="und-data-card-title">Cost Review</div>
+        <div class="und-data-loading">Loading...</div>
+      </div>
+      <div class="und-data-card" id="undMonteCarlo">
+        <div class="und-data-card-title">Monte Carlo</div>
+        <div class="und-data-loading">Loading...</div>
+      </div>
+      <div class="und-data-card" id="undMt5Positions">
+        <div class="und-data-card-title">MT5 Positions</div>
+        <div class="und-data-loading">Loading...</div>
+      </div>
+      <div class="und-data-card" id="undMt5Account">
+        <div class="und-data-card-title">MT5 Account</div>
+        <div class="und-data-loading">Loading...</div>
+      </div>
     </div>
   </div>
   </div>
@@ -13068,6 +13099,96 @@ function showUnderstand(){
       <button class="flow-btn-next btn-pipeline" onclick="setNav('size');showSize();">Size Position → SIZE</button>
     </div>
   </div>`;
+  // ── Cost Review async fetch ──
+  (function(){
+    dvFetch('/api/signals/cost-analysis').then(function(r){
+      var el = document.getElementById('undCostReview');
+      if (!el) return;
+      if (!r) { el.innerHTML = '<div class="und-data-card-title">Cost Review</div><div class="und-data-empty">No data available</div>'; return; }
+      var winRate = r.win_rate != null ? (r.win_rate*100).toFixed(1)+'%' : '\u2014';
+      var rr = r.avg_rr != null ? r.avg_rr.toFixed(2) : '\u2014';
+      var sharpe = r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '\u2014';
+      var dd = r.max_drawdown != null ? (r.max_drawdown*100).toFixed(1)+'%' : '\u2014';
+      var fmt = function(v){return v!=null?(v>=0?'+':'')+v.toFixed(2):'\u2014';};
+      var cls = function(v){return v>=0?'green':'red';};
+      el.innerHTML = '<div class="und-data-card-title">Cost Review</div>'+
+        '<div class="und-data-row"><span class="und-data-label">Total Signals</span><span class="und-data-val">'+(r.total_signals||0)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Win Rate</span><span class="und-data-val">'+winRate+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Avg R:R</span><span class="und-data-val">'+rr+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Win PnL</span><span class="und-data-val '+cls(r.win_pnl)+'">'+fmt(r.win_pnl)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Loss PnL</span><span class="und-data-val '+cls(r.loss_pnl)+'">'+fmt(r.loss_pnl)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Net PnL</span><span class="und-data-val '+cls(r.net_pnl)+'">'+fmt(r.net_pnl)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Sharpe Ratio</span><span class="und-data-val">'+sharpe+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Max Drawdown</span><span class="und-data-val red">'+dd+'</span></div>';
+    }).catch(function(){});
+  })();
+  // ── Monte Carlo async fetch ──
+  (function(){
+    dvFetch('/api/validate/montecarlo').then(function(r){
+      var el = document.getElementById('undMonteCarlo');
+      if (!el) return;
+      if (!r) { el.innerHTML = '<div class="und-data-card-title">Monte Carlo</div><div class="und-data-empty">No data available</div>'; return; }
+      var f2p = function(v){return v!=null?(v*100).toFixed(1)+'%':'\u2014';};
+      var f2 = function(v){return v!=null?v.toFixed(2):'\u2014';};
+      el.innerHTML = '<div class="und-data-card-title">Monte Carlo</div>'+
+        '<div class="und-data-row"><span class="und-data-label">Simulations</span><span class="und-data-val">'+(r.num_simulations||1000)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Mean Return</span><span class="und-data-val">'+f2p(r.mean_return)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Median Return</span><span class="und-data-val">'+f2p(r.median_return)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Std Deviation</span><span class="und-data-val">'+f2p(r.std_deviation)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">VaR 95%</span><span class="und-data-val red">'+f2p(r.var_95)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">CVaR 95%</span><span class="und-data-val red">'+f2p(r.cvar_95)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Prob of Profit</span><span class="und-data-val">'+f2p(r.probability_of_profit)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Worst Case</span><span class="und-data-val red">'+f2p(r.worst_case)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Best Case</span><span class="und-data-val green">'+f2p(r.best_case)+'</span></div>';
+    }).catch(function(){});
+  })();
+  // ── MT5 Positions async fetch ──
+  (function(){
+    dvFetch('/api/mt5/state').then(function(r){
+      var el = document.getElementById('undMt5Positions');
+      if (!el) return;
+      if (!r || !r.positions || !r.positions.length) { el.innerHTML = '<div class="und-data-card-title">MT5 Positions</div><div class="und-data-empty">No positions</div>'; return; }
+      var rows = '';
+      for (var i=0;i<r.positions.length;i++){
+        var p = r.positions[i];
+        var pCls = p.profit>=0?'green':'red';
+        var pf = p.profit!=null?(p.profit>=0?'+':'')+p.profit.toFixed(2):'\u2014';
+        rows += '<tr>'+
+          '<td>'+(p.symbol||'\u2014')+'</td>'+
+          '<td style="color:'+(p.type==='BUY'?'#5de8a0':'#e8706e')+'">'+(p.type||'\u2014')+'</td>'+
+          '<td>'+(p.volume||'\u2014')+'</td>'+
+          '<td>'+(p.open_price!=null?p.open_price:'\u2014')+'</td>'+
+          '<td>'+(p.current_price!=null?p.current_price:'\u2014')+'</td>'+
+          '<td class="'+pCls+'">'+pf+'</td>'+
+          '<td>'+(p.stop_loss!=null?p.stop_loss:'\u2014')+'</td>'+
+          '<td>'+(p.take_profit!=null?p.take_profit:'\u2014')+'</td>'+
+          '</tr>';
+      }
+      el.innerHTML = '<div class="und-data-card-title">MT5 Positions</div>'+
+        '<table class="und-positions-table"><thead><tr><th>Sym</th><th>Type</th><th>Vol</th><th>Open</th><th>Now</th><th>P&amp;L</th><th>SL</th><th>TP</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    }).catch(function(){});
+  })();
+  // ── MT5 Account async fetch ──
+  (function(){
+    dvFetch('/api/mt5/state').then(function(r){
+      var el = document.getElementById('undMt5Account');
+      if (!el) return;
+      if (!r || !r.account) { el.innerHTML = '<div class="und-data-card-title">MT5 Account</div><div class="und-data-empty">No data available</div>'; return; }
+      var a = r.account;
+      var f2 = function(v){return v!=null?v.toFixed(2):'\u2014';};
+      var totalProfit = a.total_profit != null ? a.total_profit : 0;
+      var tCls = totalProfit>=0?'green':'red';
+      var tPf = totalProfit!=null?(totalProfit>=0?'+':'')+totalProfit.toFixed(2):'\u2014';
+      el.innerHTML = '<div class="und-data-card-title">MT5 Account</div>'+
+        '<div class="und-data-row"><span class="und-data-label">Balance</span><span class="und-data-val">'+f2(a.balance)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Equity</span><span class="und-data-val">'+f2(a.equity)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Margin</span><span class="und-data-val">'+f2(a.margin)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Free Margin</span><span class="und-data-val">'+f2(a.free_margin)+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Margin Level</span><span class="und-data-val">'+(a.margin_level!=null?a.margin_level.toFixed(1)+'%':'\u2014')+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Open P&amp;L</span><span class="und-data-val '+tCls+'">'+tPf+'</span></div>'+
+        '<div class="und-data-row"><span class="und-data-label">Spread</span><span class="und-data-val">'+(a.spread_info||'\u2014')+'</span></div>';
+    }).catch(function(){});
+  })();
   // ── SMC async re-fetch — fires only when smcStructures is missing/all-False (TV path) ──
   // Standalone SMC card removed. Patterns now live in the indicator confluence grid above.
   // This block's sole job: get real smc_structures from backend, then re-render the grid.
