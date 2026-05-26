@@ -2225,6 +2225,7 @@ hr, .divider, [class*="-sep"], [class*="-divider"] {
 .qual-tip .qt-lbl { color: var(--t3); }
 .qual-tip .qt-val { color: var(--t1); text-align: right; }
 .qual-tip .qt-max { color: var(--t3); font-size: 9px; }
+.qual-tip .qt-hint { font-size: 9px; font-weight: 500; white-space: nowrap; }
 
 /* The badge itself */
 .wr-pat-badge {
@@ -8327,6 +8328,21 @@ async function _sfFetchSignals(){
   const qualColor = function(score){ if(score==null)return null;if(score>=80)return'#5de8a0';if(score>=60)return'#a3e635';if(score>=40)return'#c9a84c';return'#e8706e'; };
   const qualLabel = function(score){ if(score==null)return null;if(score>=80)return'EXCELLENT';if(score>=60)return'GOOD';if(score>=40)return'FAIR';return'POOR'; };
 
+  /* Plain-English hint for each quality sub-score so beginners know what it means */
+  const getQualHint = function(key, val, max){
+    if(val==null||max==null||max===0) return {text:'--',color:'var(--t3)'};
+    var pct = val/max;
+    var color = pct>=0.8?'#5de8a0':pct>=0.5?'#a3e635':pct>=0.3?'#c9a84c':'#e8706e';
+    var hints = {
+      confidence: pct>=0.8?'most agree':pct>=0.5?'many agree':pct>=0.3?'some agree':'few agree',
+      regime:     pct>=0.8?'with trend':pct>=0.5?'mostly with':pct>=0.3?'mixed':'against trend',
+      smc:        pct>=0.8?'strong backing':pct>=0.5?'some support':pct>=0.3?'limited':'weak',
+      spread:     pct>=0.8?'cheap to enter':pct>=0.5?'reasonable':pct>=0.3?'a bit high':'expensive',
+      volume:     pct>=0.8?'active':pct>=0.5?'moderate':pct>=0.3?'light':'thin'
+    };
+    return {text: hints[key]||'--', color: color};
+  };
+
   /* ── Phase 1: Scan for live signals ── */
   // Always use getElementById here — sfBtFill/sfBtLbl are now outside sfOppsList
   // and therefore survive any list.innerHTML replacement below.
@@ -8668,11 +8684,11 @@ async function _sfFetchSignals(){
           + '<circle cx="26" cy="26" r="23" fill="none" stroke="' + qc + '" stroke-width="3" stroke-dasharray="' + qcirc + ' 144.5" stroke-linecap="round" transform="rotate(-90 26 26)" style="filter:drop-shadow(0 0 5px ' + qc + ')"/>'
           + '</svg><div class="qual-center"><span class="qual-pct" style="color:' + qc + '">' + Math.round(qs) + '</span></div>'
           + '<div class="qual-tip">'
-          + '<div class="qt-row"><span class="qt-lbl">indicators agree</span><span class="qt-val">'+(qbd.confidence!=null?qbd.confidence:'--')+'</span><span class="qt-max">/35</span></div>'
-          + '<div class="qt-row"><span class="qt-lbl">trend follows</span><span class="qt-val">'+(qbd.regime!=null?qbd.regime:'--')+'</span><span class="qt-max">/20</span></div>'
-          + '<div class="qt-row"><span class="qt-lbl">big money</span><span class="qt-val">'+(qbd.smc!=null?qbd.smc:'--')+'</span><span class="qt-max">/20</span></div>'
-          + '<div class="qt-row"><span class="qt-lbl">entry cost</span><span class="qt-val">'+(qbd.spread!=null?qbd.spread:'--')+'</span><span class="qt-max">/15</span></div>'
-          + '<div class="qt-row"><span class="qt-lbl">market active</span><span class="qt-val">'+(qbd.volume!=null?qbd.volume:'--')+'</span><span class="qt-max">/10</span></div>'
+          + '<div class="qt-row"><span class="qt-lbl">indicators agree</span><span class="qt-val">'+(qbd.confidence!=null?qbd.confidence:'--')+'</span><span class="qt-max">/35</span>' + (function(){var h=getQualHint('confidence',qbd.confidence,35);return '<span class="qt-hint" style="color:'+h.color+'">'+h.text+'</span>';})() + '</div>'
+          + '<div class="qt-row"><span class="qt-lbl">trend follows</span><span class="qt-val">'+(qbd.regime!=null?qbd.regime:'--')+'</span><span class="qt-max">/20</span>' + (function(){var h=getQualHint('regime',qbd.regime,20);return '<span class="qt-hint" style="color:'+h.color+'">'+h.text+'</span>';})() + '</div>'
+          + '<div class="qt-row"><span class="qt-lbl">big money</span><span class="qt-val">'+(qbd.smc!=null?qbd.smc:'--')+'</span><span class="qt-max">/20</span>' + (function(){var h=getQualHint('smc',qbd.smc,20);return '<span class="qt-hint" style="color:'+h.color+'">'+h.text+'</span>';})() + '</div>'
+          + '<div class="qt-row"><span class="qt-lbl">entry cost</span><span class="qt-val">'+(qbd.spread!=null?qbd.spread:'--')+'</span><span class="qt-max">/15</span>' + (function(){var h=getQualHint('spread',qbd.spread,15);return '<span class="qt-hint" style="color:'+h.color+'">'+h.text+'</span>';})() + '</div>'
+          + '<div class="qt-row"><span class="qt-lbl">market active</span><span class="qt-val">'+(qbd.volume!=null?qbd.volume:'--')+'</span><span class="qt-max">/10</span>' + (function(){var h=getQualHint('volume',qbd.volume,10);return '<span class="qt-hint" style="color:'+h.color+'">'+h.text+'</span>';})() + '</div>'
           + '</div>'
           + '</div>'
           + '<div class="qual-ring-lbl">quality</div>'
