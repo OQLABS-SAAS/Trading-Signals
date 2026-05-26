@@ -1870,6 +1870,94 @@ def _fetch_twelvedata(ticker, asset_type, timeframe):
         return None
 
 
+def _fetch_eodhd(ticker, asset_type, timeframe):
+    """EODHD — free tier: 20 req/day. Set EODHD_API_KEY env var to enable.
+    EOD endpoint for daily, /api/intraday for intraday timeframes."""
+    eodhd_key = os.environ.get("EODHD_API_KEY", "").strip()
+    if not eodhd_key:
+        return None
+
+    # Map DotVerse timeframes to EODHD intervals (1d uses the EOD endpoint)
+    eodhd_iv_map = {"5m": "5m", "15m": "15m", "30m": "30m",
+                    "1h": "1h", "4h": "4h"}
+    is_daily = timeframe == "1d"
+
+    # Build the symbol — stock: TICKER.US, forex: raw pair, crypto: TICKER-USD
+    sym_raw = ticker.upper().replace("=X", "").replace("=F", "")
+    if asset_type == "stock":
+        sym = f"{sym_raw.replace('-','')}.US"
+    elif asset_type == "forex":
+        sym = sym_raw.replace("-", "").replace("/", "")
+    elif asset_type == "crypto":
+        # normalise_ticker already produces XXX-USD format
+        base = sym_raw.replace("-USD", "").replace("-USDT", "").replace("-USDC", "").strip("-")
+        sym = base + "-USD"
+    elif asset_type == "index":
+        sym = sym_raw.replace("-", "")
+    elif asset_type == "commodity":
+        sym = sym_raw
+    else:
+        sym = sym_raw
+
+    try:
+        from datetime import datetime as dt_cls, timedelta
+
+        if is_daily:
+            # Daily: use EOD endpoint with from/to date range
+            to_date = dt_cls.now().strftime("%Y-%m-%d")
+            from_date = (dt_cls.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            url = "https://eodhd.com/api/eod/" + sym
+            params = {"api_key": eodhd_key, "fmt": "json",
+                      "from": from_date, "to": to_date}
+        else:
+            # Intraday: use intraday endpoint
+            eodhd_iv = eodhd_iv_map.get(timeframe, "5m")
+            url = "https://eodhd.com/api/intraday/" + sym
+            params = {"api_key": eodhd_key, "fmt": "json",
+                      "interval": eodhd_iv}
+
+        r = requests.get(url, params=params, timeout=(5, 12))
+        if r.status_code != 200:
+            print(f"[eodhd] HTTP {r.status_code} for {sym} {timeframe}")
+            return None
+
+        data = r.json()
+        if not data or not isinstance(data, list) or len(data) < 10:
+            bar_count = len(data) if isinstance(data, list) else 0
+            print(f"[eodhd] insufficient data for {sym}: {bar_count} bars")
+            return None
+
+        # EODHD JSON: [{"date": "2026-05-26", "open": ..., "high": ..., "low": ..., "close": ..., "volume": ...}, ...]
+        dt_fmt = "%Y-%m-%d %H:%M" if not is_daily else "%Y-%m-%d"
+        dates, opens, highs, lows, prices, vols = [], [], [], [], [], []
+        for bar in data:
+            try:
+                d_raw = bar.get("date", "")
+                if " " in d_raw:
+                    d_parsed = dt_cls.strptime(d_raw, "%Y-%m-%d %H:%M:%S")
+                else:
+                    d_parsed = dt_cls.strptime(d_raw, "%Y-%m-%d")
+                dates.append(d_parsed.strftime(dt_fmt))
+                opens.append(round(float(bar["open"]), 6))
+                highs.append(round(float(bar["high"]), 6))
+                lows.append(round(float(bar["low"]), 6))
+                prices.append(round(float(bar["close"]), 6))
+                vols.append(int(float(bar.get("volume", 0) or 0)))
+            except (ValueError, KeyError):
+                continue
+
+        if len(prices) < 10:
+            return None
+
+        df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows,
+                           "Close": prices, "Volume": vols}, index=pd.to_datetime(dates))
+        print(f"[eodhd] OK — {sym} {timeframe}: {len(df)} bars")
+        return _build_chart_output(df, timeframe)
+    except Exception as e:
+        print(f"[eodhd] error {sym}: {e}")
+        return None
+
+
 def fetch_chart_direct(ticker, asset_type, timeframe):
     """Try multiple free data sources in priority order.
     Returns (dates, prices, vols, ema20, ema50) or None if all fail."""
@@ -1887,7 +1975,15 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
             return result
         print(f"[cmc] FAILED for {ticker}")
 
-    # 2. Twelve Data — primary for stocks/forex intraday on Railway
+    # 2. EODHD — primary for stocks/indices/forex/commodities, also crypto (#3)
+    if asset_type in ("stock", "index", "forex", "commodity", "crypto"):
+        print(f"[chart] trying EODHD for {ticker} ({asset_type}) {timeframe}")
+        result = _fetch_eodhd(ticker, asset_type, timeframe)
+        if result:
+            return result
+        print(f"[chart] EODHD failed for {ticker}")
+
+    # 3. Twelve Data — fallback for stocks/forex intraday on Railway
     if asset_type in ("stock", "index", "forex", "commodity"):
         print(f"[chart] trying Twelve Data for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_twelvedata(ticker, asset_type, timeframe)
@@ -7066,6 +7162,7 @@ def normalise_ticker(ticker, asset_type):
 
     if asset_type == "crypto":
         # Normalise crypto ticker into yfinance/TV-friendly BASE-USD form.
+        # Handles rebrands: MATIC→POL (Sep 2024), FTM→S (Jan 2025)
         # Handles every realistic input shape:
         #   BTC-USD / BTC-USDT / BTC-USDC  → passthrough (already dashed)
         #   BTC/USD                          → BTC-USD (slash → dash)
@@ -7077,6 +7174,12 @@ def normalise_ticker(ticker, asset_type):
         # BTCUSD-USD (invalid for both TV and yfinance) — silently filtered by
         # the frontend and shown as an empty Signals tab.
         clean = ticker.replace("/", "-").replace("=X", "").upper()
+        # Apply crypto rebrands first
+        REBRANDS = {"MATIC": "POL", "FTM": "S"}
+        for old, new in REBRANDS.items():
+            if clean.startswith(old):
+                clean = new + clean[len(old):]
+                break
         if "-" in clean:
             # Already dashed (BTC-USD, BTC-USDT, BTC-USDC) — leave as is.
             ticker = clean
@@ -7098,7 +7201,9 @@ def normalise_ticker(ticker, asset_type):
         m = {"GOLD":"GC=F","XAUUSD":"GC=F","SILVER":"SI=F","XAGUSD":"SI=F",
              "OIL":"CL=F","WTI":"CL=F","CRUDE":"CL=F","CRUDEOIL":"CL=F",
              "NATGAS":"NG=F","GAS":"NG=F","COPPER":"HG=F",
-             "WHEAT":"ZW=F","CORN":"ZC=F","PLATINUM":"PL=F"}
+             "WHEAT":"ZW=F","CORN":"ZC=F",
+             "PLATINUM":"PL=F","XPTUSD":"PL=F","PALLADIUM":"PA=F","XPDUSD":"PA=F",
+             "BRENT":"BZ=F","BRENTOIL":"BZ=F"}
         ticker = m.get(ticker, ticker)
     elif asset_type == "index":
         m = {
