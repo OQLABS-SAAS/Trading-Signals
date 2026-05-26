@@ -1609,7 +1609,7 @@ def _fetch_stooq(ticker, asset_type, timeframe):
 
     url = f"https://stooq.com/q/d/l/?s={sym}&i={iv}"
     try:
-        r = requests.get(url, timeout=(5, 12),
+        r = requests.get(url, timeout=(1, 8),
                          headers={"User-Agent": "Mozilla/5.0 (compatible)"})
         if r.status_code != 200 or "No data" in r.text or len(r.text) < 50:
             return None
