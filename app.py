@@ -12738,6 +12738,61 @@ def signal_stats():
         db.close()
 
 
+@app.route("/api/signals/winrate-by-pattern", methods=["GET"])
+@login_required
+def signal_winrate_by_pattern():
+    """Return per-pattern win rate grouped by (ticker, timeframe, signal, trade_type).
+    Minimum 5 decided samples (WIN + LOSS) per group. BE excluded from WR."""
+    if not _DBSession:
+        return jsonify({"patterns": [], "message": "Database not available"}), 503
+    MIN_SAMPLES = 5
+    db = _DBSession()
+    try:
+        uid = str(session.get("user_id", "default"))
+        q = db.query(SignalHistory).filter(
+            SignalHistory.user_id == uid,
+            SignalHistory.outcome.isnot(None),
+            SignalHistory.signal.in_(["BUY", "SELL"]),
+        )
+        ticker    = request.args.get("ticker")
+        timeframe = request.args.get("timeframe")
+        signal_f  = request.args.get("signal")
+        trade_type = request.args.get("trade_type")
+        if ticker:
+            q = q.filter(SignalHistory.ticker == ticker)
+        if timeframe:
+            q = q.filter(SignalHistory.timeframe == timeframe)
+        if signal_f:
+            q = q.filter(SignalHistory.signal == signal_f.upper())
+        if trade_type:
+            q = q.filter(SignalHistory.trade_type == trade_type)
+        rows = q.all()
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for r in rows:
+            key = (r.ticker, r.timeframe, r.signal, r.trade_type or "unknown")
+            groups[key].append(r)
+        patterns = []
+        for (tk, tf, sig, tt), recs in groups.items():
+            wins   = [r for r in recs if r.outcome == "WIN"]
+            losses = [r for r in recs if r.outcome == "LOSS"]
+            decided = len(wins) + len(losses)
+            if decided < MIN_SAMPLES:
+                continue
+            wr_pct = round(len(wins) / decided * 100, 1) if decided > 0 else 0.0
+            r_vals = [r.actual_pnl_r for r in recs if r.actual_pnl_r is not None]
+            avg_r = round(sum(r_vals) / len(r_vals), 2) if r_vals else None
+            patterns.append({
+                "ticker": tk, "timeframe": tf, "signal": sig,
+                "trade_type": tt, "wr_pct": wr_pct,
+                "sample_size": decided, "wins": len(wins),
+                "losses": len(losses), "avg_r": avg_r,
+            })
+        patterns.sort(key=lambda p: (-p["wr_pct"], -p["sample_size"]))
+        return jsonify({"patterns": patterns})
+    finally:
+        db.close()
+
 
 @app.route("/api/portfolio/reset", methods=["POST"])
 @login_required
