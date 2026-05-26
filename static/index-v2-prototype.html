@@ -1096,6 +1096,7 @@ button:focus-visible,a:focus-visible,[onclick]:focus-visible{
 .dsb.collapsed .nav-item{justify-content:center;padding:7px;}
 .dsb.collapsed .dsb-user{justify-content:center;}
 .dsb.collapsed .dsb-btn-collapse{width:36px;padding:6px;margin:0 8px 6px;}
+.dsb.collapsed #collapseChevron{transform:rotate(180deg);}
 
 /* ═══════════════════════════════════════════════
    SIGNAL FEED
@@ -4577,7 +4578,7 @@ button { font-weight: 400 !important; }
 <div class="view" id="vDash">
 
   <!-- sidebar -->
-  <aside class="dsb">
+  <aside class="dsb" id="dvSidebar">
     <div class="dsb-logo">
       <svg width="20" height="20" viewBox="0 0 28 28" fill="none">
         <circle cx="5" cy="5" r="2.5" fill="#b8814a" opacity=".9"/>
@@ -7400,6 +7401,7 @@ async function dvRunAnalyze(){
       // ── G1: Market Regime ──
       regime:              data.regime          || 'NORMAL',
       regime_warning:      data.regime_warning  || '',
+      regime_context:      data.regime_context  || '',
       // ── G2: Session Context ──
       session_context:     data.session_context || null,
       // ── News sentiment (GAP 5 — Finnhub headlines) ──
@@ -8639,6 +8641,7 @@ async function _sfFetchSignals(){
       +     '<span style="color:rgba(237,232,216,.55);">' + o.tf + ' · ' + o.asset + '</span>'
       +     '<div style="font-size:9.5px;color:rgba(237,232,216,.4);margin-top:2px;font-style:italic;">Holding period: ' + _tt.hold + '</div>'
       +     (_tt.tip?'<div style="font-size:9px;color:rgba(237,232,216,.35);margin-top:2px;">' + _tt.tip + '</div>':'')
+      +     (o.regime_context ? '<div style="font-size:9px;color:rgba(201,168,76,.65);margin-top:2px;font-style:italic;">' + o.regime_context + '</div>' : '')
       +   '</div>'
       + '</div>'
       + '<span class="opp-badge ' + sig.toLowerCase() + '" data-guide="signal-' + sig.toLowerCase() + '">' + sig + '</span>'
@@ -8646,7 +8649,7 @@ async function _sfFetchSignals(){
       + '<div class="opp-card-mid">'
       + '<div class="rings-row">'
       + '<div class="wr-pat-conf-col">'
-      + '<div class="opp-conf-wrap">'
+      + '<div class="opp-conf-wrap" data-guide="confidence-ring">'
       + '<svg width="52" height="52" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" fill="none" stroke="rgba(237,232,216,.07)" stroke-width="3"/>'
       + '<circle cx="26" cy="26" r="23" fill="none" stroke="' + cc + '" stroke-width="3" stroke-dasharray="' + circ + ' 144.5" stroke-linecap="round" transform="rotate(-90 26 26)" style="filter:drop-shadow(0 0 5px ' + cc + ')"/>'
       + '</svg><div class="opp-conf-center"><span class="opp-conf-pct" style="color:' + cc + '">' + o.conf + '</span></div>'
@@ -8659,7 +8662,7 @@ async function _sfFetchSignals(){
           if(!qc) return '';
           var qcirc = Math.round((qs || 0) / 100 * 144.5);
           var qbd = o.quality.breakdown || {};
-          return '<div class="qual-wrap-col">'
+          return '<div class="qual-wrap-col" data-guide="quality-score">'
           + '<div class="qual-ring">'
           + '<svg width="52" height="52" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" fill="none" stroke="rgba(237,232,216,.07)" stroke-width="3"/>'
           + '<circle cx="26" cy="26" r="23" fill="none" stroke="' + qc + '" stroke-width="3" stroke-dasharray="' + qcirc + ' 144.5" stroke-linecap="round" transform="rotate(-90 26 26)" style="filter:drop-shadow(0 0 5px ' + qc + ')"/>'
@@ -9377,6 +9380,7 @@ function _scRenderLive(results,tf){
       bullCount:bs,bearCount:be,
       trade_type:r.trade_type||'day',htf_bias:r.htf_bias||'NEUTRAL',
       regime:r.regime||'NORMAL',regime_warning:r.regime_warning||'',
+      regime_context:r.regime_context||'',
       session_context:r.session_context||null}).replace(/"/g,'&quot;');
     return `<tr class="sc-row" data-rr="${rr}" data-conf="${bp}" data-s15="${sig}" data-s1h="${sig}" data-s4h="${sig}" data-s1d="${sig}" onclick="loadScannerSignal(JSON.parse(this.dataset.payload))" data-payload="${pl}">
       <td class="sc-sym-cell"><span class="sc-sym">${r.ticker}</span><span class="sc-cls">${r.asset_type||''}</span></td>
@@ -9580,8 +9584,9 @@ function loadScannerSignal(a){
     trade_type:a.trade_type||_dvDeriveTradeType(a.tf||'1h'),
     htf_bias:a.htf_bias||'NEUTRAL',
     // G1: regime from scanner response
-    regime:       a.regime        || 'NORMAL',
-    regime_warning: a.regime_warning || '',
+    regime:         a.regime          || 'NORMAL',
+    regime_warning: a.regime_warning  || '',
+    regime_context: a.regime_context  || '',
     // G2: session context from scanner response
     session_context: a.session_context || null,
     // SMC-FE: scanner path includes smc_structures from full get_analysis()
@@ -9641,7 +9646,7 @@ function _sfCard(s){
         var qc  = qlbl === 'EXCELLENT' ? '#5de8a0' : qlbl === 'GOOD' ? '#a3e635' : qlbl === 'FAIR' ? '#c9a84c' : '#e8706e';
         var qr = 22, qcirc = 2*Math.PI*qr;
         var qdash = qcirc*(1-qs/100);
-        return '<div class="conf-ring">'
+        return '<div class="conf-ring" data-guide="quality-score">'
         + '<svg width="50" height="50" viewBox="0 0 50 50">'
         + '<circle cx="25" cy="25" r="' + qr + '" fill="none" stroke="rgba(255,255,255,.04)" stroke-width="3.5"/>'
         + '<circle cx="25" cy="25" r="' + qr + '" fill="none" stroke="' + qc + '" stroke-width="3.5"'
@@ -12703,7 +12708,7 @@ function showUnderstand(){
     var subFn  = _smcAdvSub[def.k];
     var advSub = subFn ? subFn(lvlStr, aligned) : (dirLabel + ' ' + def.lbl + '.');
     var advVal = dirLabel + (aligned ? ' · confirms' : ' · context');
-    indicators.push({n: def.lbl+' '+(def.d==='bull'?'↑':'↓'), v: advVal, ok: aligned ? true : 'info', sub: advSub, _isSmc: true});
+    indicators.push({n: def.lbl+' '+(def.d==='bull'?'↑':'↓'), v: advVal, ok: aligned ? true : 'info', sub: advSub, _isSmc: true, _smcKey: 'smc-' + def.k.replace(/_/g,'-').toLowerCase()});
     _begNames.push(def.lbl + ' (Smart Money)');
     _begDesc.push((function(_t){ return function(){ return _t; }; })(begTxt));
   });
@@ -12720,7 +12725,7 @@ function showUnderstand(){
         ${(()=>{
           const _bgKeys=['ind-trend-direction','ind-momentum-gauge','ind-price-momentum','ind-market-activity','ind-price-range','ind-price-swing','ind-htf-trend','ind-signal-agreement'];
           return indicators.map((i,idx)=>{
-            const gk = i._isSmc ? 'smc-' + (i.n||'').toLowerCase().replace(/\s+/g,'-') : (_bgKeys[idx]||'ind-smc');
+            const gk = i._isSmc ? (i._smcKey || 'smc-' + (i.n||'').toLowerCase().replace(/\s+/g,'-')) : (_bgKeys[idx]||'ind-smc');
             return `<div class="beg-ind-row" data-guide="${gk}">
               <div class="beg-dot" style="background:${i.ok===true?'rgba(93,232,160,.85)':(i.ok==='info'?'rgba(201,168,76,.8)':'rgba(232,112,110,.65)')};box-shadow:0 0 5px ${i.ok===true?'rgba(93,232,160,.3)':(i.ok==='info'?'rgba(201,168,76,.3)':'rgba(232,112,110,.25)')}"></div>
               <div style="flex:1">
@@ -12735,7 +12740,7 @@ function showUnderstand(){
   // ── ADVANCED indicator grid ──────────────────────────────────────────────
   const _advGuideKeys = ['ind-adv-ema','ind-adv-rsi','ind-adv-macd','ind-adv-volume','ind-adv-bollinger','ind-adv-atr-volatility','ind-adv-htf-trend','ind-adv-confluence'];
   const indHtml = `<div data-tier="trader">${indicators.map((i,idx)=>{
-    const gk = i._isSmc ? 'smc-' + i.n.toLowerCase().replace(/\s+/g,'-') : (_advGuideKeys[idx]||'ind-adv-smc');
+    const gk = i._isSmc ? (i._smcKey || 'smc-' + i.n.toLowerCase().replace(/\s+/g,'-')) : (_advGuideKeys[idx]||'ind-adv-smc');
     const dotCol = i.ok===true ? 'rgba(93,232,160,.8)'  : (i.ok==='info' ? 'rgba(201,168,76,.8)'  : 'rgba(232,112,110,.6)');
     const dotGlow= i.ok===true ? 'rgba(93,232,160,.3)'  : (i.ok==='info' ? 'rgba(201,168,76,.3)'  : 'rgba(232,112,110,.25)');
     const valCol = i.ok===true ? 'rgba(93,232,160,.85)' : (i.ok==='info' ? 'rgba(201,168,76,.85)' : 'rgba(232,112,110,.8)');
@@ -13500,12 +13505,12 @@ function showUnderstand(){
         var aligned = (sigDir === 'BUY' && d.isBull) || (sigDir === 'SELL' && !d.isBull);
         var dotColor = aligned ? '#5de8a0' : '#d4b87a';
         var dotTitle = aligned ? 'Aligns with signal' : 'Opposite direction';
-        patterns.push({label:d.label, dir:d.dir, dirColor:dirColor, lvlStr:lvlStr, dotColor:dotColor, dotTitle:dotTitle});
+        patterns.push({label:d.label, dir:d.dir, dirColor:dirColor, lvlStr:lvlStr, dotColor:dotColor, dotTitle:dotTitle, guideKey: 'smc-' + d.k.replace(/_/g,'-').toLowerCase()});
       }
       smcObj = patterns.length > 0;
     }
     if (!smcObj) {
-      el.innerHTML = '<div class="und-data-card-title">SMC Structures Detected</div>'+
+      el.innerHTML = '<div class="und-data-card-title" data-guide="smc-title">SMC Structures Detected</div>'+
         '<div class="und-data-subtitle">Institutional supply/demand patterns on this asset</div>'+
         '<div class="und-data-empty">No SMC structures detected. These patterns require enough OHLCV history — try analyzing a different timeframe or asset.</div>';
       return;
@@ -13513,7 +13518,7 @@ function showUnderstand(){
     var rows = '';
     for (var j = 0; j < patterns.length; j++) {
       var p = patterns[j];
-      rows += '<div class="und-data-row">'+
+      rows += '<div class="und-data-row" data-guide="' + p.guideKey + '">'+
         '<span class="und-data-label">' + p.label + '</span>'+
         '<span class="und-data-val" style="display:flex;align-items:center;gap:6px;">'+
           '<span style="color:' + p.dirColor + '">' + p.dir + '</span>'+
@@ -13522,7 +13527,7 @@ function showUnderstand(){
         '</span>'+
       '</div>';
     }
-    el.innerHTML = '<div class="und-data-card-title">SMC Structures Detected</div>'+
+    el.innerHTML = '<div class="und-data-card-title" data-guide="smc-title">SMC Structures Detected</div>'+
       '<div class="und-data-subtitle">Institutional supply/demand patterns on this asset</div>'+
       rows;
   })();
@@ -20075,6 +20080,13 @@ window._dvGuide = {
     example: 'DotVerse: 67% confluence, RSI overbought, volume low → HYPOTHESIS — proceed with caution.'
   },
 
+  // ── QUALITY SCORE ──────────────────────────────────────────────────────────
+  'quality-score': {
+    title: 'Quality Score',
+    body: 'A single number that tells you how strong this signal setup is out of 100.<br><br>It looks at 5 things:<br><br>· Indicators agree /35 — how many technical indicators point the same way<br>· Trend follows /20 — does the signal go with the overall market direction?<br>· Big money /20 — do institutional trading patterns support the move?<br>· Entry cost /15 — is the spread small enough to not eat your profit?<br>· Market active /10 — is enough trading happening to trust the signal?<br><br>POOR=under 40, FAIR=40-59, GOOD=60-79, EXCELLENT=80+',
+    example: 'A score of 72/100 (GOOD) means most checks passed — solid setup but check the breakdown to see what dragged it down.'
+  },
+
   // ── WIN RATE ─────────────────────────────────────────────────────────────
   'win-rate': {
     title: 'Win Rate — Historical Performance',
@@ -20925,7 +20937,12 @@ window._dvGuide = {
     title: 'Portfolio Summary',
     body: 'Four numbers that summarise your entire portfolio at a glance. Portfolio Value = total notional across all positions. VaR = worst expected daily loss (95% confidence). Daily Std = how much your portfolio value typically moves each day. Positions = count of open trades. Together these tell you size, risk, volatility, and activity level.',
     example: 'Portfolio Value $12,500 · VaR $250 (2%) · Daily Std 1.8% · Positions 4 → you have $12.5k at work, expect to lose no more than $250 on a normal bad day, and each day your value swings about $225 up or down.'
-  }
+  },
+  'portfolio-performance': {
+    title: 'Portfolio Performance',
+    body: 'A look at how your trading account is doing overall — balance, equity, daily P&L, and total returns. Balance = cash + closed trade profits. Equity = balance + current value of open positions (floating P&L). If equity is below balance, your open trades are losing money right now. If it\'s above, they\'re winning.',
+    example: 'Balance $10,000 · Equity $10,350 · Today -$120 → your account is worth $10,350 total. Your open trades are up $350, but you lost $120 on closed trades today. The equity number is what matters most — it\'s your true net worth in the market.'
+  },
 };
 // ─────────────────────────────────────────────────────────────────────────────
 

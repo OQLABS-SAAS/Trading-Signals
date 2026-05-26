@@ -3281,6 +3281,17 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     # G1: read market regime from calculate_indicators(). Defaults to NORMAL when
     # build_ind_from_tv() path is used (TV dict never includes atr_regime).
     atr_regime = ind.get("atr_regime", "NORMAL") or "NORMAL"
+    # ── Phase 2.4: Regime-Switching Weights ──────────────────────────────────
+    _rw = {"ema": 1.0, "htf": 1.0, "rsi": 1.0, "bb": 1.0, "stochrsi": 1.0, "smc": 1.0}
+    if atr_regime == "TRENDING":
+        _rw["ema"] = 1.5
+        _rw["htf"] = 1.5
+    elif atr_regime == "RANGING":
+        _rw["rsi"] = 1.5
+        _rw["stochrsi"] = 1.5
+        _rw["bb"] = 1.5
+    if vol_ratio > 1.5:
+        _rw["smc"] = 1.5
     supertrend = ind.get("supertrend", "neutral") or "neutral"
     support = ind.get("support", price * 0.98)
     resistance = ind.get("resistance", price * 1.02)
@@ -3307,19 +3318,19 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     _rsi_os  = _rsi_zones["oversold"]
 
     if rsi >= _rsi_ob:
-        bearish_count += 1
+        bearish_count += _rw["rsi"]
         rsi_assessment = f"RSI at {rsi} — overbought for this asset's volatility (threshold {_rsi_ob}). Pullback risk elevated."
     elif _rsi_nh <= rsi < _rsi_ob:
-        bullish_count += 1
+        bullish_count += _rw["rsi"]
         rsi_assessment = f"RSI at {rsi} shows bullish momentum in the continuation zone (above {_rsi_nh})."
     elif _rsi_nl <= rsi < _rsi_nh:
-        neutral_count += 1
+        neutral_count += _rw["rsi"]
         rsi_assessment = f"RSI at {rsi} is neutral — no clear directional momentum."
     elif _rsi_os < rsi < _rsi_nl:
-        bearish_count += 1
+        bearish_count += _rw["rsi"]
         rsi_assessment = f"RSI at {rsi} shows bearish momentum below midline (below {_rsi_nl})."
     else:  # rsi <= _rsi_os
-        bullish_count += 1
+        bullish_count += _rw["rsi"]
         rsi_assessment = f"RSI at {rsi} — oversold for this asset's volatility (threshold {_rsi_os}). Bounce potential."
 
     # ── EMA Trend logic (higher weight: counts as 2-3) ──
@@ -3338,19 +3349,19 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     # distinction is preserved in trend_assessment text only.
     _emat = (ema_trend or "").upper()
     if _emat == "STRONG BULL":
-        bullish_count += 1
+        bullish_count += _rw["ema"]
         trend_assessment = "EMA stack is strongly bullish — price is above all key moving averages with macro alignment."
     elif _emat == "BULL":
-        bullish_count += 1
+        bullish_count += _rw["ema"]
         trend_assessment = "EMA stack is bullish; uptrend structure is intact and price is above key moving averages."
     elif _emat == "STRONG BEAR":
-        bearish_count += 1
+        bearish_count += _rw["ema"]
         trend_assessment = "EMA stack is strongly bearish — price is below all key moving averages with macro alignment."
     elif _emat == "BEAR":
-        bearish_count += 1
+        bearish_count += _rw["ema"]
         trend_assessment = "EMA stack is bearish; downtrend structure dominates and price remains below key MAs."
     else:
-        neutral_count += 1
+        neutral_count += _rw["ema"]
         trend_assessment = "EMAs are mixed; trend definition is unclear at current price."
 
     # ── MACD logic ──
@@ -3392,11 +3403,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
 
     # ── Bollinger Bands (FIXED — overbought is bearish, oversold is bullish) ──
     if bb_pos > 0.85:
-        bearish_count += 1  # Near upper band = overbought, mean reversion risk
+        bearish_count += _rw["bb"]  # Near upper band = overbought, mean reversion risk
     elif bb_pos < 0.15:
-        bullish_count += 1  # Near lower band = oversold, bounce potential
+        bullish_count += _rw["bb"]  # Near lower band = oversold, bounce potential
     else:
-        neutral_count += 1  # Mid-band = no BB conviction signal
+        neutral_count += _rw["bb"]  # Mid-band = no BB conviction signal
 
     # ── Smart Money Concepts (SMC) — stored for post-gate confidence boost ──
     # SMC no longer votes in the confluence gate. The signal must pass on its
@@ -3499,11 +3510,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     _srsi_k    = _srsi.get("k")
     if _srsi_k is not None:
         if _srsi_sig == "BULLISH":
-            bullish_count += 1
+            bullish_count += _rw["stochrsi"]
         elif _srsi_sig == "BEARISH":
-            bearish_count += 1
+            bearish_count += _rw["stochrsi"]
         else:
-            neutral_count += 1
+            neutral_count += _rw["stochrsi"]
 
     # ── HTF Structural Confluence vote ───────────────────────────────────────
     # Beyond "HTF is bullish": checks actual swing structure alignment across
@@ -3512,15 +3523,15 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     _htf_struct = _compute_htf_structural_confluence(mtf, "BUY")  # evaluate direction after gate
     _htf_bias_struct = _htf_struct.get("structural_bias", "NEUTRAL")
     if _htf_bias_struct == "STRONG_BULL":
-        bullish_count += 1
+        bullish_count += _rw["htf"]
     elif _htf_bias_struct == "STRONG_BEAR":
-        bearish_count += 1
+        bearish_count += _rw["htf"]
     elif _htf_bias_struct == "BULL":
-        bullish_count += 1
+        bullish_count += _rw["htf"]
     elif _htf_bias_struct == "BEAR":
-        bearish_count += 1
+        bearish_count += _rw["htf"]
     else:
-        neutral_count += 1  # NEUTRAL or RANGE — no structural edge
+        neutral_count += _rw["htf"]  # NEUTRAL or RANGE — no structural edge
 
     # ── Net score (kept for reference) ──
     net = bullish_count - bearish_count
@@ -3598,7 +3609,8 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     elif signal == "SELL":
         _smc_boost = sum(1 for k in ("fvg_bearish","liquidity_grab_bear",
             "displacement_bear","choch_bear") if _smc.get(k))
-    if _smc_boost >= 2:
+    _smc_min = 1 if _rw["smc"] > 1.0 else 2  # HIGH_VOL: only 1 aligned SMC structure needed
+    if _smc_boost >= _smc_min:
         if   confidence == "LOW":    confidence = "MEDIUM"
         elif confidence == "MEDIUM": confidence = "HIGH"
     # HIGH stays HIGH — SMC confirms what was already strong.
@@ -4190,6 +4202,10 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # Empty string when conditions are favourable (normal or trending with trend).
         "regime":         atr_regime,
         "regime_warning": _regime_warning,
+        # regime_context: one-sentence summary of what the regime means for traders.
+        # TRENDING / RANGING / NORMAL — each mapped to a plain-English context line
+        # shown below the signal card title on the frontend.
+        "regime_context": _get_regime_context(atr_regime),
         # ── G2: Session Context ────────────────────────────────────────────────
         # session_context: current trading session + off-hours warning for this asset.
         # off_hours=True → show amber/red warning card on UND tab.
@@ -4233,6 +4249,25 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
 
     # Call OpenAI to narrate data if API key is configured
     result = _narrate_data_openai(result, ticker, asset_type, ind, timeframe)
+
+    # ── Phase 1.3: MT5 Live Position Dedup ───────────────────────
+    if user_id and mt5_state:
+        try:
+            mt5_sym = _mt5_symbol(ticker, asset_type).upper()
+            uid_str = str(user_id)
+            with mt5_state_lock:
+                _dedup_state = mt5_state.get(uid_str) or mt5_state.get("default", {})
+            for pos in _dedup_state.get("positions", []):
+                if (pos.get("symbol", "") or "").upper() == mt5_sym:
+                    pos_type = (pos.get("type") or "buy").lower()
+                    result["existing_position"] = {
+                        "direction": "LONG" if "buy" in pos_type else "SHORT",
+                        "entry": float(pos.get("open_price") or pos.get("price_open") or 0),
+                        "pnl": float(pos.get("profit") or pos.get("pnl") or 0),
+                    }
+                    break
+        except Exception:
+            pass
 
     return result
 
@@ -7352,21 +7387,40 @@ def mt5_confirm_order():
                 except Exception:
                     pass
         # Auto-log outcome to SignalHistory when EA reports a closed trade with P&L
-        if pnl is not None and order and order.action in ("close", "partial_close"):
+        if pnl is not None and order and order.action == "close" and fill_price is not None:
             try:
                 outcome = "WIN" if float(pnl) > 0 else ("LOSS" if float(pnl) < 0 else "BE")
                 uid = order.user_id
+                # For close orders, find the original BUY/SELL order via close_ticket
+                orig_order = db.query(MT5Order).filter(
+                    MT5Order.mt5_ticket == order.close_ticket,
+                    MT5Order.user_id == uid,
+                    MT5Order.order_type.in_(["BUY", "SELL"])
+                ).first() if order.close_ticket else None
+                match_signal = (orig_order.order_type if orig_order else order.order_type)
+                match_symbol = (orig_order.symbol if orig_order else order.symbol)
                 sig_row = db.query(SignalHistory).filter(
                     SignalHistory.user_id == uid,
-                    SignalHistory.ticker.ilike(order.symbol),
-                    SignalHistory.signal.ilike(order.order_type),
+                    SignalHistory.ticker.ilike(match_symbol),
+                    SignalHistory.signal.ilike(match_signal),
                     SignalHistory.outcome.is_(None),
+                    SignalHistory.fired_at >= datetime.utcnow() - timedelta(days=7),
                 ).order_by(SignalHistory.fired_at.desc()).first()
                 if sig_row:
                     sig_row.outcome = outcome
-                    sig_row.actual_exit_price = fill_price
-            except Exception:
-                pass
+                    sig_row.actual_exit_price = float(fill_price)
+                    # Compute actual P&L in R multiples (same formula as manual PATCH)
+                    if sig_row.entry and sig_row.stop_loss and abs(float(sig_row.entry) - float(sig_row.stop_loss)) > 0:
+                        sl_dist = abs(float(sig_row.entry) - float(sig_row.stop_loss))
+                        fp = float(fill_price)
+                        if sig_row.signal == "BUY":
+                            sig_row.actual_pnl_r = round((fp - float(sig_row.entry)) / sl_dist, 2)
+                        elif sig_row.signal == "SELL":
+                            sig_row.actual_pnl_r = round((float(sig_row.entry) - fp) / sl_dist, 2)
+            except Exception as e:
+                import traceback
+                print(f"[mt5_confirm] outcome logging failed for order {order.id}: {e}")
+                traceback.print_exc()
         db.commit()
         # Cache tp2/tp3/timeframe in mt5_state so state endpoint can enrich instantly
         if status == "filled" and ticket and order:
@@ -7623,6 +7677,7 @@ def mt5_push_state():
     user_id   = body.get("user_id", "default")
     account   = body.get("account", {})
     positions = body.get("positions", [])
+    spreads   = body.get("spreads", {})     # Phase 1.2: live spread map {symbol: spread_pts}
     # Bug S fix: spread guard — if EA reports current spread per position,
     # compare against stored entry_atr (5× ATR threshold).
     # Sets spread_warning flag in mt5_state so watch job can pause auto-trades.
@@ -7662,6 +7717,7 @@ def mt5_push_state():
             "last_seen":      datetime.utcnow().isoformat(),
             "level_hits":     prev.get("level_hits", {}),  # preserve — set by mt5_level_alert
             "spread_warning": spread_warning,               # Bug S: high-spread guard flag
+            "spread":         spreads,                       # Phase 1.2: live spread map
         }
     return jsonify({"status": "ok"})
 
@@ -7969,6 +8025,20 @@ def _get_vix_score():
         pass
 
     return result
+
+
+def _get_regime_context(regime):
+    """G1: Return a one-sentence plain-English context string for the given ATR regime.
+
+    Shown below the signal card title on the frontend so traders instantly understand
+    what the market environment means for this signal.
+    """
+    if regime == "TRENDING":
+        return "Market is trending — signals in trend direction get extra weight"
+    if regime == "RANGING":
+        return "Market is ranging — mean-reversion bias applied"
+    # NORMAL or any unrecognised value → volatility context (Smart Money active)
+    return "High volatility — Smart Money patterns are most active"
 
 
 def _get_session_context(asset_type):
@@ -9509,7 +9579,7 @@ def analyze():
         # ── STEP 3: Claude analysis (always runs, uses best available ind) ───
         _t2 = time.time()
         print(f"[analyze] data ready [{_t2-_t1:.1f}s] — calling Claude...")
-        analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv, mtf=mtf)
+        analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv, mtf=mtf, user_id=session.get("user_id"))
         _t3 = time.time()
         print(f"[analyze] Claude done [{_t3-_t2:.1f}s] — returning response")
         counter  = detect_counter_trade(ind)
