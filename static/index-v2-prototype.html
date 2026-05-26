@@ -12106,7 +12106,7 @@ async function showPerformance(){
       <div class="perf-asset-bar-track"><div class="perf-asset-bar-fill" style="width:${Math.round(cnt/maxAsset*100)}%;background:${assetColors[at]||'var(--amb)'};"></div></div>
       <span class="perf-asset-stat" style="color:${assetColors[at]||'var(--amb)'};">${pct}% (${cnt})</span>
     </div>`;
-  }).join('')||'<div style="color:var(--t3);font-size:12px;padding:8px 0;">No signals yet — run your first analysis.</div>';
+  }).join('')||'<div style="padding:16px 0;text-align:center;color:rgba(237,232,216,.3);font-size:12px;line-height:1.8;">No signals yet — this breakdown will show where your trades are concentrated.<div style="margin-top:8px;"><strong style="color:rgba(201,168,76,.7);">To get started:</strong> run an analysis in the UNDERSTAND tab on any ticker.</div></div>';
 
   // Recent 8 signals as activity log
   const recent=data.slice(0,8);
@@ -12131,7 +12131,7 @@ async function showPerformance(){
       <span class="perf-log-date">${dt}</span>
       ${outcomeEl}
     </div>`;
-  }).join(''):'<div style="color:var(--t3);font-size:12px;padding:12px 0;">No signals yet. Run your first analysis in the UNDERSTAND tab.</div>';
+  }).join(''):'<div style="padding:20px 16px;text-align:center;color:rgba(237,232,216,.3);font-size:12px;line-height:1.8;"><div style="font-size:28px;margin-bottom:8px;">&#x1F50D;</div><div style="color:rgba(237,232,216,.5);font-size:13px;margin-bottom:8px;"><strong>No signals recorded yet.</strong></div><div>Signals appear here after you run an analysis on a ticker. Each signal includes the direction, entry price, stop loss, and confidence score.</div><div style="margin-top:10px;"><strong style="color:rgba(93,232,160,.6);">What to do:</strong> Go to the <strong style="color:rgba(201,168,76,.8);">UNDERSTAND tab</strong>, pick a ticker (e.g., BTCUSDT, AAPL), choose a timeframe, and click Analyse. Your signal will appear here when it fires.</div></div>';
 
   // F1.13 — compute actual values that CAN be compared to user's perf targets.
   // Win-rate and annual-return targets aren't computable without closed-trade
@@ -12165,7 +12165,7 @@ async function showPerformance(){
         +'<div style="height:4px;background:rgba(237,232,216,.1);border-radius:2px;margin-top:8px;overflow:hidden;">'
           +'<div style="height:4px;background:#c9a84c;border-radius:2px;width:'+_pct+'%;transition:width .4s;"></div>'
         +'</div>'
-        +'<div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:10px;line-height:1.7;">Log <strong style="color:rgba(201,168,76,.8);">'+(30-stats.sample_size)+' more trade outcomes</strong> using the Log Result buttons in Recent Signal Activity below. DotVerse will then calculate your real expectancy — the most important number in trading. Positive expectancy means your strategy makes money over time.</div>'
+        +'<div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:10px;line-height:1.7;">Log <strong style="color:rgba(201,168,76,.8);">'+(30-stats.sample_size)+' more trade outcomes</strong> using the Log Result buttons in Recent Signal Activity below. DotVerse will then calculate your real expectancy — the most important number in trading. <strong style="color:rgba(93,232,160,.65);">Positive expectancy</strong> means your strategy is predicted to make money over time, even if individual trades lose. Negative expectancy means you are expected to lose money long-term, regardless of recent wins. This is the single most important number in your trading career.</div>'
         +'</div>';
     }
     const _ec  = stats.expectancy>=0?'#5de8a0':'#e05555';
@@ -12240,7 +12240,37 @@ async function showPerformance(){
           <div style="font-size:10px;color:rgba(237,232,216,.4);margin-top:4px;">${_pexp!=null?(_pexp>0?'Positive edge — keep trading':_pexp<0?'Negative edge — refine strategy':'Breakeven'):''}</div>
         </div>
       </div>
-    </div>` : '';
+      <div style="padding:0 16px 12px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;">
+  <strong style="color:rgba(237,232,216,.55);">What are these?</strong>
+  These four numbers tell you if your strategy has a real edge.
+  <strong style="color:rgba(93,232,160,.65);">Sharpe</strong> = are your returns worth the risk?
+  <strong style="color:rgba(93,232,160,.65);">Win rate</strong> = how often do you win?
+  <strong style="color:rgba(93,232,160,.65);">Profit factor</strong> = how much bigger are your wins than losses?
+  <strong style="color:rgba(93,232,160,.65);">Expectancy</strong> = on average, how many R's do you make per trade?
+</div>
+    </div>` : `<div class="perf-card" style="margin-bottom:16px;">
+  <div class="perf-card-head">
+    <span class="perf-card-title">Performance Stats</span>
+    <span class="perf-card-sub">No closed trades yet</span>
+  </div>
+  <div style="padding:24px 16px;text-align:center;color:rgba(237,232,216,.3);font-size:12px;line-height:1.8;">
+    <div style="font-size:32px;margin-bottom:10px;">&#x1F4CA;</div>
+    <div style="color:rgba(237,232,216,.5);font-size:13px;margin-bottom:8px;">
+      <strong>Your performance dashboard is waiting for data.</strong>
+    </div>
+    <div>
+      These stats (Sharpe ratio, win rate, profit factor, expectancy) need
+      <strong style="color:rgba(201,168,76,.7);">closed trades with logged outcomes</strong>
+      to calculate real numbers.
+    </div>
+    <div style="margin-top:10px;">
+      <strong style="color:rgba(93,232,160,.6);">How to fix this:</strong>
+      Scroll to Recent Signal Activity below and click
+      <strong style="color:rgba(201,168,76,.8);">Log Result</strong>
+      on any signal that has completed. Once you log 30+ outcomes, these stats unlock.
+    </div>
+  </div>
+</div>`;
 
   // ── Pre-compute Drawdown Card ──
   const _dd = perfDrawdown || {};
@@ -12260,6 +12290,12 @@ async function showPerformance(){
         <div style="text-align:center;"><div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">PEAK EQ</div><div style="font-family:var(--mono);font-size:18px;color:#5de8a0;margin-top:4px;">${_ddPeak.toFixed(2)}</div></div>
         <div style="text-align:center;"><div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">CURRENT EQ</div><div style="font-family:var(--mono);font-size:18px;color:rgba(237,232,216,.8);margin-top:4px;">${_ddCurEq.toFixed(2)}</div></div>
       </div>
+      <div style="padding:0 16px 12px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;">
+  <strong style="color:rgba(237,232,216,.55);">Drawdown</strong> measures how far your account has fallen from its peak.
+  Think of it as the "pothole depth" on your trading road.
+  Under 5% is normal. Over 20% means your risk per trade may be too high.
+  The chart shows your equity (green) and the drawdown dips (red shaded areas).
+</div>
     </div>`;
 
   // ── Pre-compute Monthly Heatmap ──
@@ -12293,7 +12329,12 @@ async function showPerformance(){
       }
       _hmHtml += '</tr>';
     }
-    _hmHtml += '</table></div></div>';
+    _hmHtml += '</table><div style="padding:8px 12px 0;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;border-top:1px solid var(--bd);">'+
+      'Each cell is one month. <strong style="color:#5de8a0;">Green</strong> = profitable month. '+
+      '<strong style="color:#e05555;">Red</strong> = losing month. A dot (&middot;) means no trades that month. '+
+      'Look for patterns — do you lose money in the same months every year? '+
+      'That might tell you when to trade smaller or sit out.'+
+    '</div></div></div>';
   }
 
   el.innerHTML=`
@@ -12301,12 +12342,18 @@ async function showPerformance(){
     <div class="pg-hd-left"><div class="pg-hd-title">Performance</div><div class="pg-hd-sub">${total} signals evaluated &middot; ${_ptotal} closed trades</div></div>
     <div class="pg-hd-right"><span class="pg-tag live">Live</span></div>
   </div>
-  <div style="font-size:10px;color:rgba(237,232,216,.35);margin:-8px 0 12px;line-height:1.5;">Your trading track record · PnL curve, drawdown, stats, and monthly heatmap. Benchmark: ${_settBench==='spy'?'S&P 500':_settBench==='nq100'?'NASDAQ 100':_settBench==='btc'?'BTC':'Custom'}. Log trade outcomes below to populate real performance data.</div>
+  <div style="font-size:10px;color:rgba(237,232,216,.35);margin:-8px 0 12px;line-height:1.5;">
+  This is your trading report card. It answers three questions:
+  <strong style="color:rgba(237,232,216,.5);">Are you making money?</strong> (PnL curve, expectancy),
+  <strong style="color:rgba(237,232,216,.5);">How risky is your strategy?</strong> (drawdown, Sharpe),
+  and <strong style="color:rgba(237,232,216,.5);">Where do you trade most?</strong> (asset breakdown, monthly heatmap).
+  Benchmark: ${_settBench==='spy'?'S&P 500':_settBench==='nq100'?'NASDAQ 100':_settBench==='btc'?'BTC':'Custom'}.
+</div>
   <div class="perf-overview">
-    <div class="perf-mc"><div class="perf-mc-lbl">SIGNALS</div><div class="perf-mc-val">${total}</div><div class="perf-mc-trend up">${total?`${buyCount} BUY · ${sellCount} SELL · ${holdCount} HOLD`:'Run your first analysis to start tracking here'}</div></div>
-    <div class="perf-mc"><div class="perf-mc-lbl">AVG CONF</div><div class="perf-mc-val">${total?avgConf+'%':'—'}</div><div class="perf-mc-trend up">${total?'Across all signals':'Run your first analysis to start tracking here'}</div></div>
-    <div class="perf-mc"><div class="perf-mc-lbl">HIGH CONF</div><div class="perf-mc-val">${highConfCount}</div><div class="perf-mc-trend up">${total?'CONFIRMED signals':'Run your first analysis to start tracking here'}</div></div>
-    <div class="perf-mc"><div class="perf-mc-lbl">BUY BIAS</div><div class="perf-mc-val">${total?Math.round(buyCount/total*100)+'%':'—'}</div><div class="perf-mc-trend up">${total?'of directional signals':'Run your first analysis to start tracking here'}</div></div>
+    <div class="perf-mc"><div class="perf-mc-lbl">SIGNALS</div><div class="perf-mc-val">${total}</div><div class="perf-mc-trend up">${total?`${buyCount} BUY · ${sellCount} SELL · ${holdCount} HOLD`:'Go to UNDERSTAND tab → pick a ticker → click Analyse'}</div></div>
+    <div class="perf-mc"><div class="perf-mc-lbl">AVG CONF</div><div class="perf-mc-val">${total?avgConf+'%':'—'}</div><div class="perf-mc-trend up">${total?'Across all signals':'Confidence appears after you run your first analysis'}</div></div>
+    <div class="perf-mc"><div class="perf-mc-lbl">HIGH CONF</div><div class="perf-mc-val">${highConfCount}</div><div class="perf-mc-trend up">${total?'CONFIRMED signals':'CONFIRMED signals appear here after analysis'}</div></div>
+    <div class="perf-mc"><div class="perf-mc-lbl">BUY BIAS</div><div class="perf-mc-val">${total?Math.round(buyCount/total*100)+'%':'—'}</div><div class="perf-mc-trend up">${total?'of directional signals':'Your buy/sell ratio shows up after your first signal'}</div></div>
   </div>
   <!-- Performance Stats Card (Sharpe, Win Rate, Profit Factor, Expectancy) -->
   ${_statsCard}
@@ -12315,6 +12362,12 @@ async function showPerformance(){
     <div class="perf-card" data-guide="perf-pnl-curve">
       <div class="perf-card-head"><span class="perf-card-title">PnL / Equity Curve</span><span class="perf-card-sub">${perfPnl&&perfPnl.dates&&perfPnl.dates.length?perfPnl.total_trades+' trades over '+perfPnl.total_days+' days':'No closed trades yet — log outcomes below'}</span></div>
       <canvas id="perfEqChart" height="180" style="width:100%;display:block;padding:8px;"></canvas>
+      <div style="padding:0 16px 12px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;">
+  This chart shows your cumulative profit over time, measured in <strong style="color:rgba(237,232,216,.5);">R-multiples</strong>.
+  One "R" = your risk per trade. If you risk $100 per trade and the line reads +5.2R,
+  you are up $520. The green line is your actual PnL. The dashed gold line is your
+  all-time high watermark — drawdown is the distance below it.
+</div>
     </div>
     ${_ddCard}
   </div>
@@ -12323,14 +12376,26 @@ async function showPerformance(){
     <div class="perf-card" data-guide="perf-recent-activity">
       <div class="perf-card-head"><span class="perf-card-title">Recent Signal Activity</span><span class="perf-card-sub">Last ${recent.length} signals · click to re-analyse</span></div>
       ${tradeRows}
+      <div style="padding:0 16px 12px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;border-top:1px solid var(--bd);">
+  These are your most recent signals. For each one, click <strong style="color:rgba(201,168,76,.8);">Log Result</strong>
+  to record whether it was a WIN, LOSS, or breakeven. The more outcomes you log,
+  the more accurate your Performance Stats become. Expired signals are dimmed —
+  they can still be logged.
+</div>
     </div>
-    ${_hmHtml||'<div class="perf-card" data-guide="perf-heatmap"><div class="perf-card-head"><span class="perf-card-title">Monthly Returns Heatmap</span></div><div style="padding:20px;text-align:center;color:rgba(237,232,216,.3);font-size:12px;">No closed trades yet — monthly returns will populate as you log outcomes</div></div>'}
+    ${_hmHtml||'<div class="perf-card" data-guide="perf-heatmap"><div class="perf-card-head"><span class="perf-card-title">Monthly Returns Heatmap</span></div><div style="padding:24px 16px;text-align:center;color:rgba(237,232,216,.3);font-size:12px;line-height:1.8;"><div style="font-size:28px;margin-bottom:8px;">&#x1F4C5;</div><div style="color:rgba(237,232,216,.5);font-size:13px;margin-bottom:8px;"><strong>No monthly performance data yet.</strong></div><div>The heatmap builds as you log trade outcomes. Each closed trade contributes to the month it was taken. After a few months of active trading, you will see green and red patterns emerge.</div><div style="margin-top:10px;"><strong style="color:rgba(93,232,160,.6);">How to fix this:</strong> Log outcomes on your past signals using the Log Result buttons. Trades from previous months still count — they will appear in their correct month column.</div></div></div>'}
   </div>
   <!-- Asset Class breakdown + Trade Expectancy row -->
   <div class="perf-body" style="grid-template-columns:1fr 2fr;gap:14px;margin-bottom:14px;">
     <div class="perf-card" data-guide="perf-asset-breakdown">
-      <div class="perf-card-head"><span class="perf-card-title">Signals by Asset Class</span></div>
+      <div class="perf-card-head"><span class="perf-card-title">Signals by Asset Class</span><span class="perf-card-sub">Where your trades are concentrated</span></div>
       ${assetRows}
+      <div style="padding:0 16px 12px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;border-top:1px solid var(--bd);">
+  This shows what types of assets your signals target.
+  <strong style="color:rgba(237,232,216,.55);">Diversification reduces risk.</strong>
+  If one asset class dominates, a single market event can hurt your whole portfolio.
+  Aim to spread your signals across 2–3 different asset types.
+</div>
     </div>
     <div class="perf-card" data-guide="perf-expectancy-card">
       <div class="perf-card-head">
@@ -12338,6 +12403,12 @@ async function showPerformance(){
         <span class="perf-card-sub">${stats.ready?'Based on '+stats.total_closed+' closed trades — your real mathematical edge':'Log trade outcomes in Recent Activity below to unlock'}</span>
       </div>
       ${_expCard}
+      <div style="padding:0 16px 12px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;border-top:1px solid var(--bd);">
+  <strong style="color:rgba(237,232,216,.55);">Expectancy is the single most important number in trading.</strong>
+  It tells you how much you expect to earn (or lose) per trade, on average.
+  Positive = profitable strategy. Negative = losing strategy.
+  Even a 40% win rate can be profitable if your wins are 3x bigger than your losses.
+</div>
     </div>
   </div>
   <!-- F1.13 — Your Targets (compact, bottom) -->
@@ -12368,10 +12439,39 @@ async function showPerformance(){
         <div style="font-size:10px;color:rgba(237,232,216,.4);margin-top:4px;">target</div>
       </div>
     </div>
+    <div style="padding:0 16px 12px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;border-top:1px solid var(--bd);">
+  You set these goals in Settings → Performance. They are your personal benchmarks.
+  <strong style="color:#c9a84c;">Gold numbers</strong> are your targets.
+  <strong style="color:#5de8a0;">Green numbers</strong> mean you are hitting or beating them.
+  Adjust targets as your strategy improves.
+</div>
   </div>
   <!-- P2.4 — Confidence Calibration Card -->
   ${(()=>{
-    if(!calibData || calibData.error){ return ''; }
+    if(!calibData || calibData.error){ return '<div class="perf-card" style="margin-top:14px;">'
+  +'<div class="perf-card-head">'
+    +'<span class="perf-card-title">&#x1F4CA; Confidence Calibration</span>'
+    +'<span class="perf-card-sub">Isotonic regression — corrects overconfident signals</span>'
+  +'</div>'
+  +'<div style="padding:24px 16px;text-align:center;color:rgba(237,232,216,.3);font-size:12px;line-height:1.8;">'
+    +'<div style="font-size:28px;margin-bottom:8px;">&#x1F3AF;</div>'
+    +'<div style="color:rgba(237,232,216,.5);font-size:13px;margin-bottom:8px;">'
+      +'<strong>No calibration data available.</strong>'
+    +'</div>'
+    +'<div>'
+      +'Calibration corrects your confidence scores so that "80% confident" '
+      +'really means 80% of those signals win. It needs 50+ labeled trade '
+      +'outcomes to produce reliable corrections.'
+    +'</div>'
+    +'<div style="margin-top:10px;">'
+      +'<strong style="color:rgba(93,232,160,.6);">How to fix this:</strong> '
+      +'Log trade outcomes (WIN/LOSS/BE) using the Log Result buttons in '
+      +'Recent Signal Activity. When you have enough data, click '
+      +'<strong style="color:rgba(201,168,76,.8);">Sync Labels</strong> '
+      +'and your calibration will appear.'
+    +'</div>'
+  +'</div>'
++'</div>'; }
     if(!calibData.ready){
       const pct = Math.min(100, Math.round((calibData.sample_size||0)/50*100));
       return '<div class="perf-card" style="margin-top:14px;" data-guide="perf-calibration">'
@@ -12414,6 +12514,11 @@ async function showPerformance(){
         +'<span class="perf-card-sub">'+calibData.sample_size+' labeled trades &middot; isotonic regression &middot; overall WR '+calibData.overall_wr+'%</span>'
       +'</div>'
       +'<div style="display:grid;grid-template-columns:1fr 2fr;gap:14px;padding:6px 0;">'
+        +'<div style="grid-column:1/-1;padding:0 0 8px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;">'
+          +'<strong style="color:rgba(237,232,216,.55);">Calibration answers: "When DotVerse says 80% confident, does it really win 80% of the time?"</strong> '
+          +'If your signals say 80% but only win 55% of the time, they are overconfident — calibration fixes that. '
+          +'The green bars show actual win rates per confidence bin. The gold line is what they SHOULD be after correction.'
+        +'</div>'
         // ── Left: ECE + summary stats ──
         +'<div style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">'
           +'<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);">CALIBRATION ERROR</div>'
@@ -12549,9 +12654,9 @@ async function showPerformance(){
         ctx.fillText((lastVal>=0?'+':'')+lastVal.toFixed(2)+'R',W-pad.r-2,pad.t+12);
       } else {
         ctx.fillStyle='rgba(237,232,216,.25)';ctx.font='12px sans-serif';ctx.textAlign='center';
-        ctx.fillText('No PnL data yet — log trade outcomes below',W/2,H/2-6);
+        ctx.fillText('No profit data yet — log trade outcomes to build your curve',W/2,H/2-6);
         ctx.fillStyle='rgba(237,232,216,.15)';ctx.font='10px sans-serif';
-        ctx.fillText('Use Log Result buttons in Recent Signal Activity',W/2,H/2+12);
+        ctx.fillText('Click Log Result on completed signals in Recent Activity below',W/2,H/2+12);
       }
     }
     // ── Drawdown Chart from /api/portfolio/drawdown ──
@@ -12597,9 +12702,9 @@ async function showPerformance(){
       } else {
         ctx.fillStyle='rgba(237,232,216,.04)';ctx.fillRect(0,0,W,H);
         ctx.fillStyle='rgba(237,232,216,.25)';ctx.font='11px sans-serif';ctx.textAlign='center';
-        ctx.fillText('No equity snapshots yet',W/2,H/2-6);
+        ctx.fillText('Not enough data for a drawdown chart',W/2,H/2-6);
         ctx.fillStyle='rgba(237,232,216,.15)';ctx.font='9px sans-serif';
-        ctx.fillText('Snapshots populate as trades close',W/2,H/2+12);
+        ctx.fillText('Drawdown appears after your first few closed trades',W/2,H/2+12);
       }
     }
   });
