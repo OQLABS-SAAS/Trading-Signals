@@ -11396,6 +11396,34 @@ def diag():
     else:
         results["fmp"] = {"ok": False, "detail": "FMP_API_KEY not set"}
 
+    # 6. EODHD — primary data source
+    eodhd_key = os.environ.get("EODHD_API_KEY", "").strip()
+    results["eodhd"] = {"key_set": bool(eodhd_key)}
+    if eodhd_key:
+        for label, url_suffix in [
+            ("stock_eod", "/api/eod/AAPL.US"),
+            ("forex_eod", "/api/eod/EURUSD.FOREX"),
+            ("crypto_eod", "/api/eod/BTC"),
+            ("gold_eod", "/api/eod/XAUUSD.FOREX"),
+            ("index_eod", "/api/eod/SPY"),
+            ("oil_eod", "/api/eod/CL"),
+        ]:
+            try:
+                t0 = time.time()
+                r = requests.get(f"https://eodhd.com{url_suffix}",
+                                 params={"api_token": eodhd_key, "fmt": "json",
+                                         "from": "2026-05-20", "to": "2026-05-27"},
+                                 timeout=(8, 15))
+                dt = round(time.time() - t0, 2)
+                data = r.json() if r.status_code == 200 else []
+                bars = len(data) if isinstance(data, list) else 0
+                results["eodhd_" + label] = {"ok": r.status_code == 200 and bars > 0,
+                                             "status": r.status_code, "time_s": dt, "bars": bars}
+            except Exception as e:
+                results["eodhd_" + label] = {"ok": False, "error": str(e)[:100]}
+    else:
+        results["eodhd_note"] = "EODHD_API_KEY not set — add to Railway env vars"
+
     return jsonify(results)
 
 
