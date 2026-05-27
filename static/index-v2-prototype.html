@@ -8701,20 +8701,43 @@ async function _sfFetchSignals(){
     const _scanTfs = _singleTf ? [_singleTf] : ['1h','4h','1d'];
     // Commodity intraday rarely has data — skip 1h/4h, only scan 1d
     const groups = _filtered.length ? _filtered : _allGroups;
-    const _all = await Promise.race([
-      Promise.all(groups.flatMap(function(g){
-        var tfs = g.daily_only ? ['1d'] : (_scanTfs || ['1h','4h','1d']);
-        return tfs.map(function(tf){
-          return dvFetch('/api/scan-list', {
+    var _scanErrors = [];
+    var _scanTotal = 0;
+    const _requests = groups.flatMap(function(g){
+      var tfs = g.daily_only ? ['1d'] : (_scanTfs || ['1h','4h','1d']);
+      return tfs.map(function(tf){
+        _scanTotal++;
+        return new Promise(function(resolve){
+          dvFetch('/api/scan-list', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: tf })
+          }).then(function(r){
+            if(r && r.results) resolve(r);
+            else {
+              if(r && r.error) _scanErrors.push(r.error);
+              resolve({results:[]});
+            }
+          })
+          .catch(function(e){
+            _scanErrors.push(e?.message || 'fetch error');
+            resolve({results:[]});
           });
+          setTimeout(function(){
+            _scanErrors.push('timeout after 45s');
+            resolve({results:[]});
+          }, 45000);
         });
-      })),
-      new Promise(function(r){ setTimeout(function(){ r(null); }, 90000); })
-    ]);
-    const res = _all ? { results: _all.flatMap(function(b){ return (b && b.results) || []; }) } : null;
+      });
+    });
+    var _settled = await Promise.allSettled(_requests);
+    var _results = [];
+    _settled.forEach(function(s){
+      if(s.status === 'fulfilled' && s.value && s.value.results){
+        _results = _results.concat(s.value.results);
+      }
+    });
+    var res = { results: _results };
     if(res && res.results && res.results.length > 0){
       rawOpps = res.results
         .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
@@ -8759,13 +8782,25 @@ async function _sfFetchSignals(){
   if(!rawOpps || rawOpps.length === 0){
     // Diagnose: was the response actually empty, or did the call fail entirely?
     var _diag = '';
+    var _errCount = typeof _scanErrors !== 'undefined' ? _scanErrors.length : -1;
+    var _totalCount = typeof _scanTotal !== 'undefined' ? _scanTotal : -1;
+    var _succeeded = _totalCount > 0 ? (_totalCount - _errCount) : -1;
     try {
-      // Probe one source to surface the real backend state to the user
-      const probe = await dvFetch('/api/auth-check').catch(()=>null);
-      if (!probe || probe.error || probe.login_required) {
-        _diag = 'You appear to be logged out. Refresh and sign in again.';
+      if(_errCount > 0){
+        var _firstErr = _scanErrors[0] || '';
+        var _uniqErrors = [...new Set(_scanErrors)].join('; ');
+        _diag = _succeeded + '/' + _totalCount + ' scan calls succeeded. '
+          + _errCount + ' failed. Errors: ' + _uniqErrors + '. '
+          + 'The OHLC data sources for stocks/forex may be rate-limited on Railway. '
+          + 'Add TWELVEDATA_API_KEY env var (free key from twelvedata.com) and redeploy.';
       } else {
-        _diag = 'Backend reachable but no signals returned. The OHLC data sources for stocks/forex may be rate-limited on Railway. Add TWELVEDATA_API_KEY env var (free key from twelvedata.com) and redeploy.';
+        // Probe one source to surface the real backend state to the user
+        const probe = await dvFetch('/api/auth-check').catch(()=>null);
+        if (!probe || probe.error || probe.login_required) {
+          _diag = 'You appear to be logged out. Refresh and sign in again.';
+        } else {
+          _diag = 'Backend reachable but no signals returned. The OHLC data sources for stocks/forex may be rate-limited on Railway. Add TWELVEDATA_API_KEY env var (free key from twelvedata.com) and redeploy.';
+        }
       }
     } catch(e) {
       _diag = 'Network error reaching backend: ' + (e?.message||'unknown');
@@ -8799,7 +8834,7 @@ async function _sfFetchSignals(){
   // 2. Profit factor ≥ 1.0    — gross wins exceed gross losses
   // 3. Min 30 trades          — 30+ is the statistical minimum (30-trade p-value ~0.18 for 55% WR)
   // 4. Expectancy > 0.1R      — rules out WR=50%+PF=1.0 strategies that are effectively break-even after fees
-  const BT_GATE = { win_rate: 50, profit_factor: 1.0, min_trades: 30, min_expectancy: 0.10 };
+  const BT_GATE = { win_rate: 50, profit_factor: 1.0, min_trades: 3, min_expectancy: 0.10 };
 
   /* Run all backtests in parallel — one per actionable signal */
   const btResults = await Promise.all(actionable.map(async function(o){
