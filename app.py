@@ -11427,6 +11427,38 @@ def diag():
     return jsonify(results)
 
 
+@app.route("/api/diag-eodhd", methods=["GET"])
+def diag_eodhd():
+    """Quick EODHD-only diagnostic — no auth, returns fast."""
+    eodhd_key = os.environ.get("EODHD_API_KEY", "").strip()
+    results = {"key_set": bool(eodhd_key), "key_prefix": eodhd_key[:6] + "..." if eodhd_key else ""}
+    if not eodhd_key:
+        return jsonify({"error": "EODHD_API_KEY not set", **results})
+    for label, url_suffix in [
+        ("stock", "/api/eod/AAPL.US"),
+        ("forex", "/api/eod/EURUSD.FOREX"),
+        ("crypto", "/api/eod/BTC"),
+        ("gold", "/api/eod/XAUUSD.FOREX"),
+        ("oil", "/api/eod/CL"),
+        ("brent", "/api/eod/BZ"),
+    ]:
+        try:
+            import time as _t
+            t0 = _t.time()
+            r = __import__("requests").get(f"https://eodhd.com{url_suffix}",
+                params={"api_token": eodhd_key, "fmt": "json",
+                        "from": "2026-05-20", "to": "2026-05-27"},
+                timeout=(10, 20))
+            dt = round(_t.time() - t0, 2)
+            data = r.json() if r.status_code == 200 else []
+            bars = len(data) if isinstance(data, list) else 0
+            results[label] = {"ok": r.status_code == 200 and bars > 0,
+                              "status": r.status_code, "time_s": dt, "bars": bars}
+        except Exception as e:
+            results[label] = {"ok": False, "error": str(e)[:120]}
+    return jsonify(results)
+
+
 @app.route("/api/screen", methods=["POST"])
 @login_required
 def screen():
