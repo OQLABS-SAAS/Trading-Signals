@@ -15,7 +15,7 @@
 set -e
 
 PORT="${PORT:-5000}"
-WORKERS="${WEB_CONCURRENCY:-2}"
+WORKERS="${WEB_CONCURRENCY:-1}"
 TIMEOUT="${WEB_TIMEOUT:-300}"
 
 echo "[boot] DotVerse starting"
