@@ -8681,10 +8681,10 @@ async function _sfFetchSignals(){
     // single batch with one asset_type would mangle 4 of 6 tickers and the
     // errored rows get silently filtered, leaving an empty Signals tab.
     const _allGroups = [
-      { tickers: ['BTCUSD','ETHUSD'], asset_type: 'crypto'    },
-      { tickers: ['NVDA','AAPL'],     asset_type: 'stock'     },
-      { tickers: ['EURUSD'],          asset_type: 'forex'     },
-      { tickers: ['XAUUSD'],          asset_type: 'commodity' }
+      { tickers: ['BTCUSD','ETHUSD','SOLUSD'], asset_type: 'crypto'    },
+      { tickers: ['NVDA','AAPL'],              asset_type: 'stock'     },
+      { tickers: ['EURUSD'],                   asset_type: 'forex'     },
+      { tickers: ['XAUUSD'],                   asset_type: 'commodity', daily_only: true }
     ];
     // F1.2 — filter scan groups by user's Asset Preferences. The Settings UI uses
     // ids 'stocks','crypto','forex','macro'... map them to the scan asset_type values.
@@ -8700,9 +8700,12 @@ async function _sfFetchSignals(){
     var _modeToScanTf = {scalp:'15m', day:'1h', swing:'4h', position:'1d'};
     var _singleTf = _modeToScanTf[window._stratMode||'all'];
     const _scanTfs = _singleTf ? [_singleTf] : ['1h','4h','1d'];
-    const all = await Promise.race([
+    // Commodity intraday rarely has data — skip 1h/4h, only scan 1d
+    const groups = _filtered.length ? _filtered : _allGroups;
+    const _all = await Promise.race([
       Promise.all(groups.flatMap(function(g){
-        return _scanTfs.map(function(tf){
+        var tfs = g.daily_only ? ['1d'] : (_scanTfs || ['1h','4h','1d']);
+        return tfs.map(function(tf){
           return dvFetch('/api/scan-list', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
@@ -8712,7 +8715,7 @@ async function _sfFetchSignals(){
       })),
       new Promise(function(r){ setTimeout(function(){ r(null); }, 90000); })
     ]);
-    const res = all ? { results: all.flatMap(function(b){ return (b && b.results) || []; }) } : null;
+    const res = _all ? { results: _all.flatMap(function(b){ return (b && b.results) || []; }) } : null;
     if(res && res.results && res.results.length > 0){
       rawOpps = res.results
         .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
