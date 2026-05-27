@@ -11459,6 +11459,51 @@ def diag_eodhd():
     return jsonify(results)
 
 
+@app.route("/api/diag-scan", methods=["GET"])
+def diag_scan():
+    """Test the COMPLETE scan data path for one ticker."""
+    ticker = request.args.get("ticker", "AAPL").upper().strip()
+    tf = request.args.get("timeframe", "1d")
+    at = request.args.get("asset_type", "stock")
+    cfg = TIMEFRAME_CONFIG.get(tf, TIMEFRAME_CONFIG["1d"])
+    raw = normalise_ticker(ticker, at)
+    results = {"ticker": ticker, "raw": raw, "timeframe": tf, "asset_type": at}
+
+    # Test 1: safe_download
+    import time as _t2
+    try:
+        t0 = _t2.time()
+        df = safe_download(raw, period=cfg["period"], interval=cfg["interval"], asset_type=at)
+        dt = round(_t2.time() - t0, 2)
+        results["safe_download"] = {"ok": not df.empty, "bars": len(df) if not df.empty else 0, "time_s": dt}
+    except Exception as e:
+        results["safe_download"] = {"ok": False, "error": str(e)[:100]}
+
+    # Test 2: fetch_chart_direct (bypasses safe_download's cache)
+    try:
+        t0 = _t2.time()
+        ch = fetch_chart_direct(raw, at, tf)
+        dt = round(_t2.time() - t0, 2)
+        results["fetch_chart_direct"] = {"ok": ch is not None, "time_s": dt}
+    except Exception as e:
+        results["fetch_chart_direct"] = {"ok": False, "error": str(e)[:100]}
+
+    # Test 3: _fetch_eodhd directly
+    try:
+        t0 = _t2.time()
+        eodhd = _fetch_eodhd(raw, at, tf)
+        dt = round(_t2.time() - t0, 2)
+        if eodhd:
+            dates, prices, vols, ema20, ema50, opens, highs, lows = eodhd
+            results["_fetch_eodhd"] = {"ok": True, "bars": len(prices), "price": round(float(prices[-1]), 2) if prices else None, "time_s": dt}
+        else:
+            results["_fetch_eodhd"] = {"ok": False, "time_s": dt}
+    except Exception as e:
+        results["_fetch_eodhd"] = {"ok": False, "error": str(e)[:100]}
+
+    return jsonify(results)
+
+
 @app.route("/api/screen", methods=["POST"])
 @login_required
 def screen():
