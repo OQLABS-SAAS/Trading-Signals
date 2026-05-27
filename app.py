@@ -1887,15 +1887,23 @@ def _fetch_eodhd(ticker, asset_type, timeframe):
     if asset_type == "stock":
         sym = f"{sym_raw.replace('-','')}.US"
     elif asset_type == "forex":
-        sym = sym_raw.replace("-", "").replace("/", "")
+        # Forex: EURUSD.FOREX, GBPUSD.FOREX, XAUUSD.FOREX
+        sym = sym_raw.replace("-", "").replace("/", "") + ".FOREX"
     elif asset_type == "crypto":
-        # normalise_ticker already produces XXX-USD format
+        # Crypto: BTC, ETH (bare ticker, no suffix)
         base = sym_raw.replace("-USD", "").replace("-USDT", "").replace("-USDC", "").strip("-")
-        sym = base + "-USD"
+        sym = base
     elif asset_type == "index":
-        sym = sym_raw.replace("-", "")
+        # EODHD doesn't support raw indices — use ETF proxies
+        INDEX_EODHD_MAP = {"^GSPC": "SPY.US", "^VIX": "UVXY.US",
+                           "^NDX": "QQQ.US", "^DJI": "DIA.US",
+                           "^RUT": "IWM.US", "^IXIC": "QQQ.US"}
+        sym = INDEX_EODHD_MAP.get(sym_raw, sym_raw.replace("-", ""))
     elif asset_type == "commodity":
-        sym = sym_raw
+        # Gold/silver futures (GC, SI) don't work on EODHD — use forex symbols
+        COMMODITY_EODHD_MAP = {"GC": "XAUUSD.FOREX", "SI": "XAGUSD.FOREX",
+                                 "PL": "XPTUSD.FOREX", "PA": "XPDUSD.FOREX"}
+        sym = COMMODITY_EODHD_MAP.get(sym_raw, sym_raw)
     else:
         sym = sym_raw
 
@@ -1907,13 +1915,13 @@ def _fetch_eodhd(ticker, asset_type, timeframe):
             to_date = dt_cls.now().strftime("%Y-%m-%d")
             from_date = (dt_cls.now() - timedelta(days=365)).strftime("%Y-%m-%d")
             url = "https://eodhd.com/api/eod/" + sym
-            params = {"api_key": eodhd_key, "fmt": "json",
+            params = {"api_token": eodhd_key, "fmt": "json",
                       "from": from_date, "to": to_date}
         else:
             # Intraday: use intraday endpoint
             eodhd_iv = eodhd_iv_map.get(timeframe, "5m")
             url = "https://eodhd.com/api/intraday/" + sym
-            params = {"api_key": eodhd_key, "fmt": "json",
+            params = {"api_token": eodhd_key, "fmt": "json",
                       "interval": eodhd_iv}
 
         r = requests.get(url, params=params, timeout=(5, 12))
@@ -1932,7 +1940,8 @@ def _fetch_eodhd(ticker, asset_type, timeframe):
         dates, opens, highs, lows, prices, vols = [], [], [], [], [], []
         for bar in data:
             try:
-                d_raw = bar.get("date", "")
+                # Intraday bars use "datetime", daily bars use "date"
+                d_raw = bar.get("datetime", "") or bar.get("date", "")
                 if " " in d_raw:
                     d_parsed = dt_cls.strptime(d_raw, "%Y-%m-%d %H:%M:%S")
                 else:
