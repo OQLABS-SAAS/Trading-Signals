@@ -5086,6 +5086,20 @@ button { font-weight: 400 !important; }
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         Analyse
       </button>
+      <button id="qpScanAllBtn" onclick="qpScanAll()"
+        style="padding:6px 14px;font-family:var(--mono);font-size:11px;border-radius:5px;letter-spacing:.04em;display:inline-flex;align-items:center;gap:6px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.3);color:var(--gold);cursor:pointer;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg>
+        Scan All Markets
+      </button>
+    </div>
+
+    <!-- ── Inline Quick Analyse scan results ── -->
+    <div id="qpScanResults" style="flex-shrink:0;display:none;border-bottom:1px solid rgba(201,168,76,.08);background:rgba(8,9,14,.5);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 24px;">
+        <span id="qpScanStatus" style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.6);"></span>
+        <button id="qpScanClearBtn" onclick="qpScanClear()" style="display:none;font-family:var(--mono);font-size:9px;padding:4px 10px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);color:var(--t3);border-radius:4px;cursor:pointer;">Clear</button>
+      </div>
+      <div id="qpScanCards" style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:8px;padding:4px 24px 12px;scrollbar-width:thin;min-height:40px;"></div>
     </div>
 
     <!-- ── Global market sessions strip ── -->
@@ -7638,6 +7652,121 @@ async function qpAnalyse(presetTicker, presetTf) {
     if (typeof dvRunAnalyze === 'function') dvRunAnalyze();
   }, 80);
 }
+
+// ── Quick Analyse "Scan All Markets" ──────────────────────────
+// Scans ALL asset classes on ALL timeframes via the shared scan engine,
+// then renders compact signal cards inline below the Quick Analyse bar.
+var _qpScanAbort = false;
+async function qpScanAll() {
+  const btn = document.getElementById('qpScanAllBtn');
+  const resultsDiv = document.getElementById('qpScanResults');
+  const cardsDiv = document.getElementById('qpScanCards');
+  const statusEl = document.getElementById('qpScanStatus');
+  const clearBtn = document.getElementById('qpScanClearBtn');
+  if (!btn || !resultsDiv) return;
+  if (btn.disabled) return;  // already scanning
+
+  _qpScanAbort = false;
+  btn.disabled = true;
+  btn.innerHTML = '<div style="width:11px;height:11px;border-radius:50%;border:2px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .6s linear infinite;flex-shrink:0;"></div> Scanning…';
+  resultsDiv.style.display = '';
+  cardsDiv.innerHTML = '<div style="padding:12px 0;font-family:var(--mono);font-size:10px;color:var(--t3);">Launching scan requests across all asset classes and timeframes…</div>';
+  statusEl.textContent = 'Scanning 5 asset classes × 7 timeframes…';
+  clearBtn.style.display = 'none';
+
+  try {
+    const result = await _runScanBase(ALL_SCAN_GROUPS);
+    if (_qpScanAbort) return;
+
+    // Map raw results to uniform opp objects
+    const rawOpps = (result.results || [])
+      .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
+      .map(function(r){
+        return {
+          sym:     r.ticker || r.symbol || '',
+          tf:      (r.timeframe || '1d').toUpperCase(),
+          sig:     r.signal,
+          id:      (r.id) || (r.ticker||r.symbol)+':'+(r.timeframe||'1d').toUpperCase()+':'+r.signal+':'+Date.now(),
+          entry:   r.entry     || null,
+          sl:      r.stop_loss  || null,
+          tp:      r.tp1        || null,
+          tp2:     r.tp2        || null,
+          tp3:     r.tp3        || null,
+          rr:      r.rr1 || r.rr || '--',
+          conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
+          confLbl: r.confidence_label || r.confidence || 'LIKELY',
+          asset:   r.asset_type || 'equity',
+          reason:  r.reason || r.summary || 'Live DotVerse signal',
+          bullCount:   r.bull_score   || 0,
+          bearCount:   r.bear_score   || 0,
+          volRatio:    r.vol_ratio    || 1.0,
+          quality:     r.quality || null,
+          smc_structures: r.smc_structures || null,
+          regime_context: r.regime_context || ''
+        };
+      });
+
+    if (rawOpps.length === 0) {
+      statusEl.textContent = 'No signals found. ' + (result.errors.length || 0) + ' error(s).';
+      cardsDiv.innerHTML = '<div style="padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--t3);text-align:center;">No signals returned by scan.</div>';
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg> Scan All Markets';
+      clearBtn.style.display = '';
+      return;
+    }
+
+    statusEl.textContent = rawOpps.length + ' signal(s) found across all markets';
+    clearBtn.style.display = '';
+
+    // Render compact signal cards (no backtesting — pure scan results inline)
+    var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
+    const cards = rawOpps.map(function(o, i){
+      var cc = _confColor(o.sig);
+      var oJson = JSON.stringify(o).replace(/\"/g, '&quot;');
+      var assetIcon = {crypto:'⟠', stock:'⌂', forex:'$', commodity:'◆', index:'∏', equity:'⌂'}[o.asset] || '○';
+      return '<div onclick="loadSignalContext(' + oJson + ')" style="flex-shrink:0;width:240px;padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(237,232,216,.08);cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:4px;" onmouseover="this.style.borderColor=\'rgba(201,168,76,.3)\';this.style.background=\'rgba(201,168,76,.04)\';" onmouseout="this.style.borderColor=\'rgba(237,232,216,.08)\';this.style.background=\'rgba(255,255,255,.02)\';">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+        + '<div style="display:flex;align-items:center;gap:6px;">'
+        + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(237,232,216,.35);">' + String(i+1).padStart(2,'0') + '</span>'
+        + '<span style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t1);">' + o.sym + '</span>'
+        + '<span style="font-family:var(--mono);font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(237,232,216,.04);color:var(--t3);">' + o.tf + '</span>'
+        + '<span style="font-size:9px;color:var(--t3);">' + assetIcon + '</span>'
+        + '</div>'
+        + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:' + cc + '22;border:1px solid ' + cc + '44;color:' + cc + ';">' + o.sig + '</span>'
+        + '</div>'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-top:2px;">'
+        + '<span style="font-family:var(--mono);font-size:10px;color:' + cc + ';font-weight:600;">' + o.conf + '%</span>'
+        + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">R:' + o.rr + '</span>'
+        + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);" title="Entry / SL / TP">' + (o.entry||'--') + ' · ' + (o.sl||'--') + ' · ' + (o.tp||'--') + '</span>'
+        + '</div>'
+        + '<div style="font-size:8.5px;color:var(--t3);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (o.reason||'').substring(0,80) + '</div>'
+        + '</div>';
+    }).join('');
+
+    cardsDiv.innerHTML = cards;
+  } catch(e) {
+    statusEl.textContent = 'Scan error: ' + (e?.message||'unknown');
+    cardsDiv.innerHTML = '<div style="padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--t3);text-align:center;">Scan failed. Try again.</div>';
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg> Scan All Markets';
+}
+
+function qpScanClear() {
+  _qpScanAbort = true;
+  const resultsDiv = document.getElementById('qpScanResults');
+  const cardsDiv = document.getElementById('qpScanCards');
+  const statusEl = document.getElementById('qpScanStatus');
+  const clearBtn = document.getElementById('qpScanClearBtn');
+  const btn = document.getElementById('qpScanAllBtn');
+  if (resultsDiv) resultsDiv.style.display = 'none';
+  if (cardsDiv) cardsDiv.innerHTML = '';
+  if (statusEl) statusEl.textContent = '';
+  if (clearBtn) clearBtn.style.display = 'none';
+  if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg> Scan All Markets'; }
+}
+
 async function dvRunAnalyze(){
   const inp=document.getElementById('dvTickerInput');
   const qpInp=document.getElementById('qpTickerInput');
@@ -8629,6 +8758,57 @@ function _sfUpdateMetrics(opps){
   var bt=window._btScanCache?._global||null;
   set('sfMetricVal2', bt&&bt.win_rate!=null?bt.win_rate+'%':'—');
   set('sfMetricSub2', bt&&bt.win_rate!=null?(bt.total_trades||bt.sample_size||'?')+' signals evaluated':'run backtest for win rate');
+}
+
+// ── Scan group definitions — used by both Signal tab and Quick Analyse ──
+const ALL_SCAN_GROUPS = [
+  { tickers: ['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','ADAUSD','DOGEUSD','DOTUSD','AVAXUSD','LINKUSD'], asset_type: 'crypto' },
+  { tickers: ['NVDA','AAPL','TSLA','AMZN','MSFT','GOOGL','META','AMD','NFLX','JPM','COIN','SHOP'],          asset_type: 'stock' },
+  { tickers: ['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','USDCHF','NZDUSD','EURGBP','EURJPY','GBPJPY'],     asset_type: 'forex' },
+  { tickers: ['XAUUSD','XAGUSD','WTI','BRENT','NATGAS','COPPER','XPTUSD','XPDUSD'],                           asset_type: 'commodity', daily_only: true },
+  { tickers: ['SPX','NDX','DJI','RUT','DAX','FTSE','NIKKEI','HSI','VIX'],                                     asset_type: 'index', daily_only: true }
+];
+const ALL_SCAN_TFS = ['15m','30m','1h','4h','1d','1w','1mo'];
+
+// Shared scan engine — parallel POSTs to /api/scan-list for each group × timeframe
+async function _runScanBase(groups) {
+  var _scanErrors = [];
+  var _scanTotal = 0;
+  const _requests = groups.flatMap(function(g){
+    var tfs = g.daily_only ? ['1d'] : ALL_SCAN_TFS;
+    return tfs.map(function(tf){
+      _scanTotal++;
+      return new Promise(function(resolve){
+        dvFetch('/api/scan-list', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: tf })
+        }).then(function(r){
+          if(r && r.results) resolve(r);
+          else {
+            if(r && r.error) _scanErrors.push(r.error);
+            resolve({results:[]});
+          }
+        })
+        .catch(function(e){
+          _scanErrors.push(e?.message || 'fetch error');
+          resolve({results:[]});
+        });
+        setTimeout(function(){
+          _scanErrors.push('timeout after 45s');
+          resolve({results:[]});
+        }, 45000);
+      });
+    });
+  });
+  var _settled = await Promise.allSettled(_requests);
+  var _results = [];
+  _settled.forEach(function(s){
+    if(s.status === 'fulfilled' && s.value && s.value.results){
+      _results = _results.concat(s.value.results);
+    }
+  });
+  return { results: _results, errors: _scanErrors, total: _scanTotal };
 }
 
 async function _sfFetchSignals(){
