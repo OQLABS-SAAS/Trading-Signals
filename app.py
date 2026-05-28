@@ -10103,6 +10103,501 @@ def mark_notifications_read():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ─── TRADING ACCOUNT CRUD ENDPOINTS ──────────────────────────
+
+def _account_to_dict(a):
+    """Serialize a TradingAccount row for API responses. NEVER expose ea_secret."""
+    state = mt5_state.get(str(a.user_id), {})
+    acct_info = state.get("account", {})
+    last_seen_str = None
+    connected = False
+    if state.get("last_seen"):
+        try:
+            ls = datetime.fromisoformat(state["last_seen"])
+            secs_ago = (datetime.utcnow() - ls).total_seconds()
+            connected = secs_ago < 45
+            last_seen_str = ls.strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:
+            pass
+    return {
+        "id":              a.id,
+        "name":            a.name,
+        "broker":          a.broker or "",
+        "server":          a.server or "",
+        "account_number":  a.account_number or "",
+        "account_type":    a.account_type,
+        "currency":        a.currency,
+        "platform":        a.platform,
+        "status":          a.status,
+        "connected":       connected,
+        "last_seen":       last_seen_str,
+        "error_message":   a.error_message,
+        "color":           a.color,
+        "sort_order":      a.sort_order,
+        "is_active":       a.is_active,
+        "balance":         acct_info.get("balance"),
+        "equity":          acct_info.get("equity"),
+        "margin":          acct_info.get("margin"),
+        "margin_free":     acct_info.get("margin_free"),
+        "margin_level":    acct_info.get("margin_level"),
+        "created_at":      a.created_at.strftime("%Y-%m-%d %H:%M UTC") if a.created_at else None,
+        "updated_at":      a.updated_at.strftime("%Y-%m-%d %H:%M UTC") if a.updated_at else None,
+    }
+
+@app.route("/api/accounts", methods=["GET"])
+@login_required
+def accounts_list():
+    """Return all active TradingAccounts for the logged-in user."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        accounts = db.query(TradingAccount).filter(
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        ).order_by(TradingAccount.sort_order, TradingAccount.name).all()
+        return jsonify({"accounts": [_account_to_dict(a) for a in accounts]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/accounts", methods=["POST"])
+@login_required
+def accounts_create():
+    """Create a new TradingAccount. Auto-generate EA secret (uuid hex) and encrypt it."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body    = request.json or {}
+    name        = (body.get("name") or "").strip()
+    broker      = (body.get("broker") or "").strip()
+    server      = (body.get("server") or "").strip()
+    account_num = (body.get("account_number") or "").strip()
+    acct_type   = (body.get("account_type") or "DEMO").upper()
+    currency    = (body.get("currency") or "USD").upper()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if acct_type not in ("LIVE", "DEMO"):
+        return jsonify({"error": "account_type must be LIVE or DEMO"}), 400
+    ea_secret = uuid.uuid4().hex
+    db = _DBSession()
+    try:
+        # Check for duplicate account name
+        existing = db.query(TradingAccount).filter(
+            TradingAccount.user_id == user_id,
+            TradingAccount.name == name,
+            TradingAccount.is_active == True,
+        ).first()
+        if existing:
+            return jsonify({"error": "An account with this name already exists."}), 409
+        a = TradingAccount(
+            user_id=user_id,
+            name=name,
+            broker=broker,
+            server=server,
+            account_number=account_num,
+            account_type=acct_type,
+            currency=currency,
+            platform="MT5",
+            ea_secret_enc=_enc(ea_secret),
+            color=body.get("color"),
+            sort_order=body.get("sort_order", 0),
+        )
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        result = _account_to_dict(a)
+        # Include the EA secret once on creation so the user can copy it
+        result["ea_secret"] = ea_secret
+        return jsonify(result), 201
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/accounts/<int:account_id>", methods=["PUT"])
+@login_required
+def accounts_update(account_id):
+    """Update an existing TradingAccount's editable fields."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body    = request.json or {}
+    db = _DBSession()
+    try:
+        a = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        ).first()
+        if not a:
+            return jsonify({"error": "Account not found"}), 404
+        if "name" in body and body["name"]:
+            a.name = str(body["name"]).strip()
+        if "broker" in body:
+            a.broker = str(body["broker"]).strip()
+        if "server" in body:
+            a.server = str(body["server"]).strip()
+        if "account_number" in body:
+            a.account_number = str(body["account_number"]).strip()
+        if "account_type" in body:
+            t = body["account_type"].upper()
+            if t in ("LIVE", "DEMO"):
+                a.account_type = t
+        if "currency" in body:
+            a.currency = str(body["currency"]).upper()[:8]
+        if "color" in body:
+            a.color = str(body["color"])[:16] if body["color"] else None
+        if "sort_order" in body:
+            a.sort_order = int(body["sort_order"])
+        # Regenerate EA secret if requested
+        if body.get("regenerate_secret"):
+            a.ea_secret_enc = _enc(uuid.uuid4().hex)
+        a.updated_at = datetime.utcnow()
+        db.commit()
+        result = _account_to_dict(a)
+        # Include new EA secret if regenerated
+        if body.get("regenerate_secret") and a.ea_secret_enc:
+            result["ea_secret"] = _dec(a.ea_secret_enc)
+        return jsonify(result)
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/accounts/<int:account_id>", methods=["DELETE"])
+@login_required
+def accounts_delete(account_id):
+    """Soft-delete a TradingAccount — set is_active=False."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        a = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        ).first()
+        if not a:
+            return jsonify({"error": "Account not found"}), 404
+        # Check for open positions
+        open_positions = db.query(SignalHistory).filter(
+            SignalHistory.account_id == account_id,
+            SignalHistory.outcome == None,
+        ).count()
+        if open_positions > 0:
+            return jsonify({"error": f"Cannot delete account with {open_positions} open position(s)."}), 409
+        a.is_active = False
+        a.updated_at = datetime.utcnow()
+        db.commit()
+        return jsonify({"status": "deleted"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+@app.route("/api/accounts/<int:account_id>/summary", methods=["GET"])
+@login_required
+def accounts_summary(account_id):
+    """Return balance/equity/margin from mt5_state for this user's account."""
+    user_id = str(session.get("user_id"))
+    with mt5_state_lock:
+        state = mt5_state.get(user_id) or mt5_state.get("default")
+    if not state:
+        return jsonify({
+            "balance": None, "equity": None, "margin": None,
+            "margin_free": None, "margin_level": None, "connected": False,
+        })
+    acct_info = state.get("account", {})
+    last_seen = datetime.fromisoformat(state["last_seen"])
+    secs_ago  = (datetime.utcnow() - last_seen).total_seconds()
+    connected = secs_ago < 45
+    return jsonify({
+        "balance":      acct_info.get("balance"),
+        "equity":       acct_info.get("equity"),
+        "margin":       acct_info.get("margin"),
+        "margin_free":  acct_info.get("margin_free"),
+        "margin_level": acct_info.get("margin_level"),
+        "connected":    connected,
+        "secs_ago":     int(secs_ago),
+    })
+
+# ─── TRADING JOURNAL ENDPOINTS ────────────────────────────────
+
+@app.route("/api/accounts/<int:account_id>/journal", methods=["GET"])
+@login_required
+def journal_list(account_id):
+    """List journal entries for an account, ordered by created_at DESC.
+    Optional query param: ?limit=N (default 20). Includes linked trade info."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    limit = request.args.get("limit", 20, type=int)
+    if limit < 1 or limit > 200:
+        limit = 20
+    db = _DBSession()
+    try:
+        # Verify account belongs to user
+        acct = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+        ).first()
+        if not acct:
+            return jsonify({"error": "Account not found"}), 404
+
+        entries = db.query(TradingJournal).filter(
+            TradingJournal.account_id == account_id,
+            TradingJournal.user_id == user_id,
+        ).order_by(TradingJournal.created_at.desc()).limit(limit).all()
+
+        result = []
+        for e in entries:
+            linked_trade = None
+            if e.signal_history_id:
+                sig = db.query(SignalHistory).filter(
+                    SignalHistory.id == e.signal_history_id
+                ).first()
+                if sig:
+                    linked_trade = {
+                        "ticker": sig.ticker,
+                        "signal": sig.signal,
+                        "outcome": sig.outcome,
+                        "confidence": sig.confidence,
+                        "fired_at": sig.fired_at.strftime("%Y-%m-%d %H:%M UTC") if sig.fired_at else None,
+                    }
+
+            result.append({
+                "id":                e.id,
+                "account_id":        e.account_id,
+                "signal_history_id": e.signal_history_id,
+                "ticket":            e.ticket,
+                "notes":             e.notes,
+                "tags":              json.loads(e.tags) if e.tags else [],
+                "emotion":           e.emotion,
+                "lesson_learned":    e.lesson_learned,
+                "screenshot_url":    e.screenshot_url,
+                "trade_rating":      e.trade_rating,
+                "linked_trade":      linked_trade,
+                "created_at":        e.created_at.strftime("%Y-%m-%d %H:%M UTC") if e.created_at else None,
+                "updated_at":        e.updated_at.strftime("%Y-%m-%d %H:%M UTC") if e.updated_at else None,
+            })
+        return jsonify({"entries": result})
+    except Exception as ex:
+        return jsonify({"error": str(ex)}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/accounts/<int:account_id>/journal", methods=["POST"])
+@login_required
+def journal_create(account_id):
+    """Create a new journal entry for an account."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body = request.json or {}
+
+    # Validate account ownership
+    db = _DBSession()
+    try:
+        acct = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+        ).first()
+        if not acct:
+            db.close()
+            return jsonify({"error": "Account not found"}), 404
+
+        # Validate emotion
+        valid_emotions = {"confident", "anxious", "frustrated", "neutral",
+                          "greedy", "fearful", "hopeful", "excited"}
+        emotion = body.get("emotion")
+        if emotion and emotion not in valid_emotions:
+            db.close()
+            return jsonify({"error": f"Invalid emotion. Must be one of: {', '.join(sorted(valid_emotions))}"}), 400
+
+        # Validate trade_rating
+        trade_rating = body.get("trade_rating")
+        if trade_rating is not None:
+            try:
+                trade_rating = int(trade_rating)
+            except (ValueError, TypeError):
+                db.close()
+                return jsonify({"error": "trade_rating must be an integer"}), 400
+            if trade_rating < 1 or trade_rating > 5:
+                db.close()
+                return jsonify({"error": "trade_rating must be between 1 and 5"}), 400
+
+        # Parse tags (JSON string or array)
+        tags_raw = body.get("tags")
+        tags_str = None
+        if tags_raw is not None:
+            if isinstance(tags_raw, str):
+                tags_str = tags_raw
+            else:
+                try:
+                    tags_str = json.dumps(tags_raw)
+                except Exception:
+                    tags_str = json.dumps([])
+
+        entry = TradingJournal(
+            account_id=account_id,
+            user_id=user_id,
+            signal_history_id=body.get("signal_history_id"),
+            ticket=body.get("ticket", type=int),
+            notes=body.get("notes"),
+            tags=tags_str,
+            emotion=emotion,
+            lesson_learned=body.get("lesson_learned"),
+            screenshot_url=body.get("screenshot_url"),
+            trade_rating=trade_rating,
+        )
+        db.add(entry)
+        db.commit()
+
+        return jsonify({
+            "status": "created",
+            "entry": {
+                "id": entry.id,
+                "account_id": entry.account_id,
+                "signal_history_id": entry.signal_history_id,
+                "ticket": entry.ticket,
+                "notes": entry.notes,
+                "tags": json.loads(entry.tags) if entry.tags else [],
+                "emotion": entry.emotion,
+                "lesson_learned": entry.lesson_learned,
+                "screenshot_url": entry.screenshot_url,
+                "trade_rating": entry.trade_rating,
+                "created_at": entry.created_at.strftime("%Y-%m-%d %H:%M UTC") if entry.created_at else None,
+                "updated_at": entry.updated_at.strftime("%Y-%m-%d %H:%M UTC") if entry.updated_at else None,
+            }
+        }), 201
+    except Exception as ex:
+        db.rollback()
+        return jsonify({"error": str(ex)}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/journal/<int:entry_id>", methods=["PUT"])
+@login_required
+def journal_update(entry_id):
+    """Update an existing journal entry."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body = request.json or {}
+    db = _DBSession()
+    try:
+        entry = db.query(TradingJournal).filter(
+            TradingJournal.id == entry_id,
+            TradingJournal.user_id == user_id,
+        ).first()
+        if not entry:
+            return jsonify({"error": "Journal entry not found"}), 404
+
+        # Validate emotion
+        valid_emotions = {"confident", "anxious", "frustrated", "neutral",
+                          "greedy", "fearful", "hopeful", "excited"}
+        emotion = body.get("emotion")
+        if emotion is not None and emotion not in valid_emotions:
+            return jsonify({"error": f"Invalid emotion. Must be one of: {', '.join(sorted(valid_emotions))}"}), 400
+
+        # Validate trade_rating
+        trade_rating = body.get("trade_rating")
+        if trade_rating is not None:
+            try:
+                trade_rating = int(trade_rating)
+            except (ValueError, TypeError):
+                return jsonify({"error": "trade_rating must be an integer"}), 400
+            if trade_rating < 1 or trade_rating > 5:
+                return jsonify({"error": "trade_rating must be between 1 and 5"}), 400
+
+        # Parse tags
+        tags_raw = body.get("tags")
+        if tags_raw is not None:
+            if isinstance(tags_raw, str):
+                entry.tags = tags_raw
+            else:
+                try:
+                    entry.tags = json.dumps(tags_raw)
+                except Exception:
+                    entry.tags = json.dumps([])
+
+        # Update allowed fields
+        if "notes" in body:
+            entry.notes = body["notes"]
+        if "emotion" in body:
+            entry.emotion = body["emotion"]
+        if "lesson_learned" in body:
+            entry.lesson_learned = body["lesson_learned"]
+        if "screenshot_url" in body:
+            entry.screenshot_url = body["screenshot_url"]
+        if "ticket" in body:
+            entry.ticket = body.get("ticket", type=int)
+        if trade_rating is not None:
+            entry.trade_rating = trade_rating
+        if "signal_history_id" in body:
+            entry.signal_history_id = body.get("signal_history_id")
+
+        entry.updated_at = datetime.utcnow()
+        db.commit()
+
+        return jsonify({
+            "status": "updated",
+            "entry": {
+                "id": entry.id,
+                "account_id": entry.account_id,
+                "signal_history_id": entry.signal_history_id,
+                "ticket": entry.ticket,
+                "notes": entry.notes,
+                "tags": json.loads(entry.tags) if entry.tags else [],
+                "emotion": entry.emotion,
+                "lesson_learned": entry.lesson_learned,
+                "screenshot_url": entry.screenshot_url,
+                "trade_rating": entry.trade_rating,
+                "created_at": entry.created_at.strftime("%Y-%m-%d %H:%M UTC") if entry.created_at else None,
+                "updated_at": entry.updated_at.strftime("%Y-%m-%d %H:%M UTC") if entry.updated_at else None,
+            }
+        })
+    except Exception as ex:
+        db.rollback()
+        return jsonify({"error": str(ex)}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/journal/<int:entry_id>", methods=["DELETE"])
+@login_required
+def journal_delete(entry_id):
+    """Delete a journal entry."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        entry = db.query(TradingJournal).filter(
+            TradingJournal.id == entry_id,
+            TradingJournal.user_id == user_id,
+        ).first()
+        if not entry:
+            return jsonify({"error": "Journal entry not found"}), 404
+        db.delete(entry)
+        db.commit()
+        return jsonify({"status": "deleted"})
+    except Exception as ex:
+        db.rollback()
+        return jsonify({"error": str(ex)}), 500
+    finally:
+        db.close()
+
+
 # ─── WEB PUSH SUBSCRIPTION ENDPOINTS ──────────────────────────
 
 @app.route("/api/push/vapid-public-key", methods=["GET"])
@@ -13381,7 +13876,7 @@ def backtest_route():
 
 import redis as _redis_module
 from rq import Queue as RQQueue
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, text, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker
 from scipy.stats import norm as _scipy_norm
 
