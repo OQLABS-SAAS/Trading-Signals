@@ -7895,6 +7895,48 @@ def mt5_submit_order():
     finally:
         db.close()
 
+@app.route("/api/orders", methods=["POST"])
+@login_required
+def orders_submit():
+    """Submit an order via the DotVerse execution pipeline."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body          = request.json or {}
+    user_id       = str(session.get("user_id"))
+    symbol        = (body.get("symbol") or "").upper().strip()
+    side          = (body.get("side") or "").upper()
+    quantity      = float(body.get("quantity", 0.01))
+    entry_price   = float(body.get("entry_price", 0))
+    stop_loss     = body.get("stop_loss")
+    take_profit   = body.get("take_profit")
+    timeframe     = body.get("timeframe") or ""
+    order_type    = body.get("order_type", "market")
+    signal_id     = body.get("signal_id") or ""
+    if not symbol or side not in ("BUY", "SELL"):
+        return jsonify({"error": "symbol and side (BUY/SELL) are required"}), 400
+    db = _DBSession()
+    try:
+        order = MT5Order(
+            user_id    = user_id,
+            symbol     = symbol,
+            order_type = side,
+            volume     = quantity,
+            price      = entry_price,
+            sl         = float(stop_loss)   if stop_loss   else None,
+            tp         = float(take_profit)  if take_profit  else None,
+            timeframe  = timeframe or None,
+            status     = "pending",
+            comment    = f"DotVerse {symbol} {side} | order_type={order_type} | signal_id={signal_id}",
+        )
+        db.add(order)
+        db.commit()
+        return jsonify({"status": "pending", "order_id": order.id, "symbol": symbol})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
 @app.route("/api/mt5/pending", methods=["GET"])
 @_require_ea
 def mt5_get_pending():
@@ -11971,7 +12013,7 @@ def scan_list():
         # Run all tickers in parallel — 6 tickers in ~5s instead of ~30s
         threads = [_threading.Thread(target=_scan_one, args=(t,)) for t in tickers]
         for th in threads: th.start()
-        for th in threads: th.join(timeout=25)
+        for th in threads: th.join(timeout=60)
 
         def sort_key(r):
             if r.get("error"): return 99
