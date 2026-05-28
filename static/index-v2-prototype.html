@@ -13763,6 +13763,32 @@ function showUnderstand(){
     </div>`;
   }).join('')}</div>`;
 
+  // ── Markov Matrix data fetch ────────────────────────────────────────────────
+  if (sig.sym && sig.tf) {
+    // Fetch Markov matrix data from backend
+    dvFetchT('/api/analysis/markov', {method:'POST', headers:{'Content-Type':'application/json'}, 
+      body: JSON.stringify({ticker: sig.sym, timeframe: sig.tf})
+    }, 15000).then(function(r) {
+      if (r && r.success && r.data) {
+        sig.markov = r.data;
+        // Re-render the Understand tab to show Markov Matrix
+        setTimeout(() => {
+          const el = document.getElementById('dashContent');
+          if (el) {
+            // We need to re-call showUnderstand to update the Markov section
+            // But we can't directly call it recursively, so we'll trigger a re-render
+            const navEl = document.querySelector('.nav-item.active');
+            if (navEl && navEl.dataset.nav === 'understand') {
+              showUnderstand();
+            }
+          }
+        }, 100);
+      }
+    }).catch(function(err) {
+      console.warn('Markov data fetch failed:', err);
+    });
+  }
+        
   // ── Real MTF from API ────────────────────────────────────────────────────────
   const mtfRaw=sig.mtf||{};
   function _mtfSig(l){const d=mtfRaw[l]||mtfRaw[l.toLowerCase()]||{};return d.trend||d.signal||null;}
