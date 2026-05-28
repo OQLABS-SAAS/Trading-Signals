@@ -5086,6 +5086,20 @@ button { font-weight: 400 !important; }
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         Analyse
       </button>
+      <button id="qpScanAllBtn" onclick="qpScanAll()"
+        style="padding:6px 14px;font-family:var(--mono);font-size:11px;border-radius:5px;letter-spacing:.04em;display:inline-flex;align-items:center;gap:6px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.3);color:var(--gold);cursor:pointer;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg>
+        Scan All Markets
+      </button>
+    </div>
+
+    <!-- ── Inline Quick Analyse scan results ── -->
+    <div id="qpScanResults" style="flex-shrink:0;display:none;border-bottom:1px solid rgba(201,168,76,.08);background:rgba(8,9,14,.5);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 24px;">
+        <span id="qpScanStatus" style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.6);"></span>
+        <button id="qpScanClearBtn" onclick="qpScanClear()" style="display:none;font-family:var(--mono);font-size:9px;padding:4px 10px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);color:var(--t3);border-radius:4px;cursor:pointer;">Clear</button>
+      </div>
+      <div id="qpScanCards" style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:8px;padding:4px 24px 12px;scrollbar-width:thin;min-height:40px;"></div>
     </div>
 
     <!-- ── Global market sessions strip ── -->
@@ -7574,7 +7588,7 @@ function dvLoadInst(sym,asset){const inp=document.getElementById('dvTickerInput'
 // through Market → Signal → click chip → Understand pipeline.
 const QP_TICKERS = {
   crypto:    [['BTCUSD','BTC · Bitcoin'],['ETHUSD','ETH · Ethereum'],['SOLUSD','SOL · Solana'],['BNBUSD','BNB · Binance Coin'],['XRPUSD','XRP · Ripple'],['ADAUSD','ADA · Cardano'],['DOGEUSD','DOGE · Dogecoin'],['DOTUSD','DOT · Polkadot'],['AVAXUSD','AVAX · Avalanche'],['LINKUSD','LINK · Chainlink'],['MATICUSD','MATIC · Polygon'],['LTCUSD','LTC · Litecoin'],['ATOMUSD','ATOM · Cosmos'],['NEARUSD','NEAR · Near'],['ARBUSD','ARB · Arbitrum'],['APTUSD','APT · Aptos'],['INJUSD','INJ · Injective'],['SUIUSD','SUI · Sui']],
-  stock:     [['AAPL','AAPL · Apple'],['NVDA','NVDA · Nvidia'],['TSLA','TSLA · Tesla'],['AMZN','AMZN · Amazon'],['MSFT','MSFT · Microsoft'],['GOOGL','GOOGL · Alphabet'],['META','META · Meta'],['AMD','AMD · AMD'],['NFLX','NFLX · Netflix'],['JPM','JPM · JPMorgan'],['BAC','BAC · Bank of America'],['XOM','XOM · ExxonMobil'],['V','V · Visa'],['MA','MA · Mastercard'],['WMT','WMT · Walmart'],['DIS','DIS · Disney'],['COIN','COIN · Coinbase'],['INTC','INTC · Intel'],['CRM','CRM · Salesforce'],['SHOP','SHOP · Shopify']],
+  stock:     [['AAPL','AAPL · Apple'],['NVDA','NVDA · Nvidia'],['TSLA','TSLA · Tesla'],['AMZN','AMZN · Amazon'],['MSFT','MSFT · Microsoft'],['GOOGL','GOOGL · Alphabet'],['META','META · Meta'],['AMD','AMD · AMD'],['NFLX','NFLX · Netflix'],['JPM','JPM · JPMorgan'],['BAC','BAC · Bank of America'],['XOM','XOM · ExxonMobil'],['V','V · Visa'],['MA','MA · Mastercard'],['JNJ','JNJ · Johnson & Johnson'],['PG','PG · Procter & Gamble'],['UNH','UNH · UnitedHealth'],['HD','HD · Home Depot'],['WMT','WMT · Walmart'],['DIS','DIS · Disney'],['PYPL','PYPL · PayPal'],['ADBE','ADBE · Adobe'],['CRM','CRM · Salesforce'],['INTC','INTC · Intel'],['ORCL','ORCL · Oracle'],['KO','KO · Coca-Cola'],['PEP','PEP · PepsiCo'],['NKE','NKE · Nike'],['MRK','MRK · Merck'],['ABBV','ABBV · AbbVie'],['CVX','CVX · Chevron'],['BA','BA · Boeing'],['CAT','CAT · Caterpillar'],['COIN','COIN · Coinbase'],['SHOP','SHOP · Shopify']],
   forex:     [['EURUSD','EUR/USD'],['GBPUSD','GBP/USD'],['USDJPY','USD/JPY'],['AUDUSD','AUD/USD'],['USDCAD','USD/CAD'],['USDCHF','USD/CHF'],['NZDUSD','NZD/USD'],['EURGBP','EUR/GBP'],['EURJPY','EUR/JPY'],['GBPJPY','GBP/JPY'],['AUDJPY','AUD/JPY'],['USDINR','USD/INR'],['USDCNH','USD/CNH'],['USDMXN','USD/MXN']],
   commodity: [['XAUUSD','XAU/USD · Gold'],['XAGUSD','XAG/USD · Silver'],['WTI','WTI · Crude Oil'],['BRENT','BRENT · Brent Oil'],['NATGAS','NATGAS · Natural Gas'],['COPPER','COPPER · Copper'],['XPTUSD','XPT/USD · Platinum'],['XPDUSD','XPD/USD · Palladium']],
   index:     [['SPX','S&P 500'],['NDX','Nasdaq 100'],['DJI','Dow Jones'],['RUT','Russell 2000'],['DAX','DAX'],['FTSE','FTSE 100'],['NIKKEI','Nikkei 225'],['HSI','Hang Seng'],['VIX','VIX']],
@@ -7638,6 +7652,121 @@ async function qpAnalyse(presetTicker, presetTf) {
     if (typeof dvRunAnalyze === 'function') dvRunAnalyze();
   }, 80);
 }
+
+// ── Quick Analyse "Scan All Markets" ──────────────────────────
+// Scans ALL asset classes on ALL timeframes via the shared scan engine,
+// then renders compact signal cards inline below the Quick Analyse bar.
+var _qpScanAbort = false;
+async function qpScanAll() {
+  const btn = document.getElementById('qpScanAllBtn');
+  const resultsDiv = document.getElementById('qpScanResults');
+  const cardsDiv = document.getElementById('qpScanCards');
+  const statusEl = document.getElementById('qpScanStatus');
+  const clearBtn = document.getElementById('qpScanClearBtn');
+  if (!btn || !resultsDiv) return;
+  if (btn.disabled) return;  // already scanning
+
+  _qpScanAbort = false;
+  btn.disabled = true;
+  btn.innerHTML = '<div style="width:11px;height:11px;border-radius:50%;border:2px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .6s linear infinite;flex-shrink:0;"></div> Scanning…';
+  resultsDiv.style.display = '';
+  cardsDiv.innerHTML = '<div style="padding:12px 0;font-family:var(--mono);font-size:10px;color:var(--t3);">Launching scan requests across all asset classes and timeframes…</div>';
+  statusEl.textContent = 'Scanning 5 asset classes × 7 timeframes…';
+  clearBtn.style.display = 'none';
+
+  try {
+    const result = await _runScanBase(ALL_SCAN_GROUPS);
+    if (_qpScanAbort) return;
+
+    // Map raw results to uniform opp objects
+    const rawOpps = (result.results || [])
+      .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
+      .map(function(r){
+        return {
+          sym:     r.ticker || r.symbol || '',
+          tf:      (r.timeframe || '1d').toUpperCase(),
+          sig:     r.signal,
+          id:      (r.id) || (r.ticker||r.symbol)+':'+(r.timeframe||'1d').toUpperCase()+':'+r.signal+':'+Date.now(),
+          entry:   r.entry     || null,
+          sl:      r.stop_loss  || null,
+          tp:      r.tp1        || null,
+          tp2:     r.tp2        || null,
+          tp3:     r.tp3        || null,
+          rr:      r.rr1 || r.rr || '--',
+          conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
+          confLbl: r.confidence_label || r.confidence || 'LIKELY',
+          asset:   r.asset_type || 'equity',
+          reason:  r.reason || r.summary || 'Live DotVerse signal',
+          bullCount:   r.bull_score   || 0,
+          bearCount:   r.bear_score   || 0,
+          volRatio:    r.vol_ratio    || 1.0,
+          quality:     r.quality || null,
+          smc_structures: r.smc_structures || null,
+          regime_context: r.regime_context || ''
+        };
+      });
+
+    if (rawOpps.length === 0) {
+      statusEl.textContent = 'No signals found. ' + (result.errors.length || 0) + ' error(s).';
+      cardsDiv.innerHTML = '<div style="padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--t3);text-align:center;">No signals returned by scan.</div>';
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg> Scan All Markets';
+      clearBtn.style.display = '';
+      return;
+    }
+
+    statusEl.textContent = rawOpps.length + ' signal(s) found across all markets';
+    clearBtn.style.display = '';
+
+    // Render compact signal cards (no backtesting — pure scan results inline)
+    var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
+    const cards = rawOpps.map(function(o, i){
+      var cc = _confColor(o.sig);
+      var oJson = JSON.stringify(o).replace(/\"/g, '&quot;');
+      var assetIcon = {crypto:'⟠', stock:'⌂', forex:'$', commodity:'◆', index:'∏', equity:'⌂'}[o.asset] || '○';
+      return '<div onclick="loadSignalContext(' + oJson + ')" style="flex-shrink:0;width:240px;padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(237,232,216,.08);cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:4px;" onmouseover="this.style.borderColor=\'rgba(201,168,76,.3)\';this.style.background=\'rgba(201,168,76,.04)\';" onmouseout="this.style.borderColor=\'rgba(237,232,216,.08)\';this.style.background=\'rgba(255,255,255,.02)\';">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+        + '<div style="display:flex;align-items:center;gap:6px;">'
+        + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(237,232,216,.35);">' + String(i+1).padStart(2,'0') + '</span>'
+        + '<span style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t1);">' + o.sym + '</span>'
+        + '<span style="font-family:var(--mono);font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(237,232,216,.04);color:var(--t3);">' + o.tf + '</span>'
+        + '<span style="font-size:9px;color:var(--t3);">' + assetIcon + '</span>'
+        + '</div>'
+        + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:' + cc + '22;border:1px solid ' + cc + '44;color:' + cc + ';">' + o.sig + '</span>'
+        + '</div>'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-top:2px;">'
+        + '<span style="font-family:var(--mono);font-size:10px;color:' + cc + ';font-weight:600;">' + o.conf + '%</span>'
+        + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">R:' + o.rr + '</span>'
+        + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);" title="Entry / SL / TP">' + (o.entry||'--') + ' · ' + (o.sl||'--') + ' · ' + (o.tp||'--') + '</span>'
+        + '</div>'
+        + '<div style="font-size:8.5px;color:var(--t3);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (o.reason||'').substring(0,80) + '</div>'
+        + '</div>';
+    }).join('');
+
+    cardsDiv.innerHTML = cards;
+  } catch(e) {
+    statusEl.textContent = 'Scan error: ' + (e?.message||'unknown');
+    cardsDiv.innerHTML = '<div style="padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--t3);text-align:center;">Scan failed. Try again.</div>';
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg> Scan All Markets';
+}
+
+function qpScanClear() {
+  _qpScanAbort = true;
+  const resultsDiv = document.getElementById('qpScanResults');
+  const cardsDiv = document.getElementById('qpScanCards');
+  const statusEl = document.getElementById('qpScanStatus');
+  const clearBtn = document.getElementById('qpScanClearBtn');
+  const btn = document.getElementById('qpScanAllBtn');
+  if (resultsDiv) resultsDiv.style.display = 'none';
+  if (cardsDiv) cardsDiv.innerHTML = '';
+  if (statusEl) statusEl.textContent = '';
+  if (clearBtn) clearBtn.style.display = 'none';
+  if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg> Scan All Markets'; }
+}
+
 async function dvRunAnalyze(){
   const inp=document.getElementById('dvTickerInput');
   const qpInp=document.getElementById('qpTickerInput');
@@ -8631,6 +8760,57 @@ function _sfUpdateMetrics(opps){
   set('sfMetricSub2', bt&&bt.win_rate!=null?(bt.total_trades||bt.sample_size||'?')+' signals evaluated':'run backtest for win rate');
 }
 
+// ── Scan group definitions — used by both Signal tab and Quick Analyse ──
+const ALL_SCAN_GROUPS = [
+  { tickers: ['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','ADAUSD','DOGEUSD','DOTUSD','AVAXUSD','LINKUSD'], asset_type: 'crypto' },
+  { tickers: ['NVDA','AAPL','TSLA','AMZN','MSFT','GOOGL','META','AMD','NFLX','JPM','COIN','SHOP'],          asset_type: 'stock' },
+  { tickers: ['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','USDCHF','NZDUSD','EURGBP','EURJPY','GBPJPY'],     asset_type: 'forex' },
+  { tickers: ['XAUUSD','XAGUSD','WTI','BRENT','NATGAS','COPPER','XPTUSD','XPDUSD'],                           asset_type: 'commodity', daily_only: true },
+  { tickers: ['SPX','NDX','DJI','RUT','DAX','FTSE','NIKKEI','HSI','VIX'],                                     asset_type: 'index', daily_only: true }
+];
+const ALL_SCAN_TFS = ['15m','30m','1h','4h','1d','1w','1mo'];
+
+// Shared scan engine — parallel POSTs to /api/scan-list for each group × timeframe
+async function _runScanBase(groups) {
+  var _scanErrors = [];
+  var _scanTotal = 0;
+  const _requests = groups.flatMap(function(g){
+    var tfs = g.daily_only ? ['1d'] : ALL_SCAN_TFS;
+    return tfs.map(function(tf){
+      _scanTotal++;
+      return new Promise(function(resolve){
+        dvFetch('/api/scan-list', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: tf })
+        }).then(function(r){
+          if(r && r.results) resolve(r);
+          else {
+            if(r && r.error) _scanErrors.push(r.error);
+            resolve({results:[]});
+          }
+        })
+        .catch(function(e){
+          _scanErrors.push(e?.message || 'fetch error');
+          resolve({results:[]});
+        });
+        setTimeout(function(){
+          _scanErrors.push('timeout after 45s');
+          resolve({results:[]});
+        }, 45000);
+      });
+    });
+  });
+  var _settled = await Promise.allSettled(_requests);
+  var _results = [];
+  _settled.forEach(function(s){
+    if(s.status === 'fulfilled' && s.value && s.value.results){
+      _results = _results.concat(s.value.results);
+    }
+  });
+  return { results: _results, errors: _scanErrors, total: _scanTotal };
+}
+
 async function _sfFetchSignals(){
   const list  = document.getElementById('sfOppsList');
   if(!list) return;
@@ -8746,6 +8926,7 @@ async function _sfFetchSignals(){
             sym:     r.ticker || r.symbol || '',
             tf:      (r.timeframe || _activeTf).toUpperCase(),
             sig:     r.signal,
+            id:      (r.id) || (r.ticker||r.symbol)+':'+(r.timeframe||_activeTf).toUpperCase()+':'+r.signal+':'+Date.now(),
             entry:   r.entry     || null,
             sl:      r.stop_loss  || null,
             tp:      r.tp1        || null,
@@ -10115,14 +10296,14 @@ function showMarket(){
 
   /* ── Ticker strip data ── */
   const mkts=[
-    {sym:'S&P 500', val:'5,284.47', chg:'+0.82%', up:true},
-    {sym:'NASDAQ',  val:'16,521',   chg:'+1.14%', up:true},
-    {sym:'DOW',     val:'39,872',   chg:'+0.43%', up:true},
-    {sym:'VIX',     val:'14.22',    chg:'−3.4%',  up:false},
-    {sym:'BTC',     val:'68,240',   chg:'+2.1%',  up:true},
-    {sym:'ETH',     val:'3,485',    chg:'+1.7%',  up:true},
-    {sym:'GOLD',    val:'2,341',    chg:'+0.3%',  up:true},
-    {sym:'OIL',     val:'82.40',    chg:'−0.9%',  up:false},
+    {sym:'S&P 500', val:'—', chg:'—', up:false},
+    {sym:'NASDAQ',  val:'—', chg:'—', up:false},
+    {sym:'DOW',     val:'—', chg:'—', up:false},
+    {sym:'VIX',     val:'—', chg:'—', up:false},
+    {sym:'BTC',     val:'—', chg:'—', up:false},
+    {sym:'ETH',     val:'—', chg:'—', up:false},
+    {sym:'GOLD',    val:'—', chg:'—', up:false},
+    {sym:'OIL',     val:'—', chg:'—', up:false},
   ];
   const tickerBar=mkts.map(m=>`
     <div class="mkt-tick">
@@ -10167,92 +10348,43 @@ function showMarket(){
   };
 
   const indices=[
-    {sym:'SPY', name:'S&P 500 ETF',    price:'524.80', chg:'+0.82%', up:true,  col:'#62f29d', bg:'rgba(98,242,157,.1)'},
-    {sym:'QQQ', name:'NASDAQ ETF',     price:'420.45', chg:'+1.14%', up:true,  col:'var(--amb)', bg:'rgba(201,168,76,.08)'},
-    {sym:'DIA', name:'Dow Jones ETF',  price:'397.20', chg:'+0.43%', up:true,  col:'rgba(237,232,216,.82)', bg:'rgba(237,232,216,.07)'},
-    {sym:'IWM', name:'Russell 2000',   price:'198.60', chg:'−0.22%', up:false, col:'rgba(237,232,216,.65)', bg:'rgba(237,232,216,.05)'},
+    {sym:'SPY', name:'S&P 500 ETF',    price:'—', chg:'—', up:false,  col:'#62f29d', bg:'rgba(98,242,157,.1)'},
+    {sym:'QQQ', name:'NASDAQ ETF',     price:'—', chg:'—', up:false,  col:'var(--amb)', bg:'rgba(201,168,76,.08)'},
+    {sym:'DIA', name:'Dow Jones ETF',  price:'—', chg:'—', up:false,  col:'rgba(237,232,216,.82)', bg:'rgba(237,232,216,.07)'},
+    {sym:'IWM', name:'Russell 2000',   price:'—', chg:'—', up:false, col:'rgba(237,232,216,.65)', bg:'rgba(237,232,216,.05)'},
   ];
   const crypto=[
-    {sym:'BTC', name:'Bitcoin',  price:'$68,240', chg:'+2.1%', up:true,  col:'rgba(237,232,216,.82)', bg:'rgba(237,232,216,.08)'},
-    {sym:'ETH', name:'Ethereum', price:'$3,485',  chg:'+1.7%', up:true,  col:'var(--amb)',           bg:'rgba(201,168,76,.08)'},
-    {sym:'SOL', name:'Solana',   price:'$168.40', chg:'+3.2%', up:true,  col:'#62f29d',             bg:'rgba(98,242,157,.08)'},
-    {sym:'BNB', name:'BNB',      price:'$612.80', chg:'−0.4%', up:false, col:'rgba(237,232,216,.62)', bg:'rgba(237,232,216,.05)'},
+    {sym:'BTC', name:'Bitcoin',  price:'—', chg:'—', up:false,  col:'rgba(237,232,216,.82)', bg:'rgba(237,232,216,.08)'},
+    {sym:'ETH', name:'Ethereum', price:'—', chg:'—', up:false,  col:'var(--amb)',           bg:'rgba(201,168,76,.08)'},
+    {sym:'SOL', name:'Solana',   price:'—', chg:'—', up:false,  col:'#62f29d',             bg:'rgba(98,242,157,.08)'},
+    {sym:'BNB', name:'BNB',      price:'—', chg:'—', up:false, col:'rgba(237,232,216,.62)', bg:'rgba(237,232,216,.05)'},
   ];
   const commodities=[
-    {sym:'XAU', name:'Gold Spot',      price:'$2,341', chg:'+0.3%', up:true,  col:'rgba(237,232,216,.82)', bg:'rgba(237,232,216,.08)'},
-    {sym:'WTI', name:'Crude Oil WTI',  price:'$82.40', chg:'−0.9%', up:false, col:'rgba(237,232,216,.65)', bg:'rgba(237,232,216,.05)'},
-    {sym:'XAG', name:'Silver Spot',    price:'$27.60', chg:'+0.6%', up:true,  col:'rgba(220,225,240,.7)',bg:'rgba(220,225,240,.06)'},
+    {sym:'XAU', name:'Gold Spot',      price:'—', chg:'—', up:false,  col:'rgba(237,232,216,.82)', bg:'rgba(237,232,216,.08)'},
+    {sym:'WTI', name:'Crude Oil WTI',  price:'—', chg:'—', up:false, col:'rgba(237,232,216,.65)', bg:'rgba(237,232,216,.05)'},
+    {sym:'XAG', name:'Silver Spot',    price:'—', chg:'—', up:false,  col:'rgba(220,225,240,.7)',bg:'rgba(220,225,240,.06)'},
   ];
 
-  /* ── Heatmap ── */
-  const heatData=[
-    {sym:'AAPL',chg:1.2},{sym:'MSFT',chg:0.8},{sym:'NVDA',chg:3.4},{sym:'AMZN',chg:0.4},
-    {sym:'META',chg:1.1},{sym:'GOOG',chg:0.6},{sym:'TSLA',chg:-1.8},
-    {sym:'AMD', chg:2.1},{sym:'NFLX',chg:-0.3},{sym:'UBER',chg:0.9},{sym:'PYPL',chg:-0.7},
-    {sym:'INTC',chg:-1.2},{sym:'ORCL',chg:0.5},{sym:'ADBE',chg:1.4},
-  ];
-  const heatCells=heatData.map(h=>{
-    const intensity=Math.min(Math.abs(h.chg)/3.5,1);
-    const isUp=h.chg>0;
-    // Clean solid tile: opacity scales with magnitude
-    const bgCol = isUp
-      ? `rgba(52,199,89,${.12+intensity*.52})`
-      : `rgba(255,59,48,${.12+intensity*.52})`;
-    const textCol = isUp ? '#5de8a0' : '#e8706e';
-    return `<div class="mkt-heat-cell" id="mkheat-${h.sym}" onclick="mktAnalyseSym('${h.sym}')" title="${h.sym}: ${h.chg>0?'+':''}${h.chg}% today · click to analyse" style="background:${bgCol};">
-      <div class="mkt-heat-sym">${h.sym}</div>
-      <div class="mkt-heat-val" style="color:${textCol};">${h.chg>0?'+':''}${h.chg}%</div>
-    </div>`;
-  }).join('');
+  /* ── Heatmap — rendered live by _mktUpdateLiveData() after price fetch ── */
+  const heatCells='<div class="mkt-heat-loading" style="grid-column:1/-1;text-align:center;padding:24px;color:rgba(237,232,216,.35);font-size:11px;font-family:var(--mono);">Loading heatmap…</div>';
 
-  /* ── Sector bars — placeholder until live fetch ── */
-  const sectors=[
-    {n:'Technology', v:'—', col:'#c9a84c',  glow:'rgba(201,168,76,.4)'},
-    {n:'Healthcare', v:'—', col:'#62f29d',  glow:'rgba(98,242,157,.35)'},
-    {n:'Financials', v:'—', col:'rgba(237,232,216,.82)', glow:'rgba(237,232,216,.26)'},
-    {n:'Consumer',   v:'—', col:'rgba(237,232,216,.55)', glow:'rgba(237,232,216,.22)'},
-    {n:'Energy',     v:'—', col:'rgba(237,232,216,.38)',glow:'rgba(237,232,216,.15)'},
-    {n:'Real Estate',v:'—', col:'#f07070',  glow:'rgba(240,112,112,.35)'},
-  ];
-  const sectorBars=sectors.map((s,i)=>`
-    <div class="mkt-bar-row">
-      <div class="mkt-bar-lbl">${s.n}</div>
-      <div class="mkt-bar-track">
-        <div class="mkt-bar-fill" id="mktSectorBar${i}" style="width:0%;background:${s.col};--mkt-bar-glow:${s.glow};box-shadow:0 0 8px ${s.glow};transition:width .6s ease-out;"></div>
-      </div>
-      <div class="mkt-bar-val" id="mktSectorVal${i}">${s.v}</div>
-    </div>`).join('');
+  /* ── Sector bars — populated dynamically by _loadSectors() from API ── */
+  const sectorBars='<div class="mkt-bar-loading" style="text-align:center;padding:24px;color:rgba(237,232,216,.35);font-size:11px;font-family:var(--mono);">Loading sectors…</div>';
 
-  /* ── Economic calendar ── */
-  const ecItems=[
-    {t:'09:30',col:'#f07070',  e:'Non-Farm Payrolls',      c:'USA',f:'Prev: 303K · Est: 240K',imp:'HIGH'},
-    {t:'10:00',col:'rgba(237,232,216,.72)',e:'ISM Manufacturing PMI',c:'USA',f:'Prev: 50.3 · Est: 49.9',imp:'MED'},
-    {t:'11:00',col:'#62f29d',  e:'EIA Crude Oil Inventory', c:'USA',f:'Prev: −3.2M · Est: −1.8M',imp:'LOW'},
-    {t:'14:00',col:'rgba(237,232,216,.72)',e:'Fed Chair Powell Speech',c:'USA',f:'Impact: Medium-High',imp:'MED'},
-    {t:'16:30',col:'#62f29d',  e:'UK Manufacturing PMI',   c:'GBR',f:'Prev: 51.2 · Est: 51.0',imp:'LOW'},
-  ];
-  const ecRows=ecItems.map((e,i)=>`
-    <div class="mkt-ec-row">
-      <div class="mkt-ec-time">${e.t}</div>
-      <div class="mkt-ec-impact-wrap">
-        <div class="mkt-ec-dot" style="background:${e.col};color:${e.col};"></div>
-        ${i<ecItems.length-1?'<div class="mkt-ec-line"></div>':''}
-      </div>
-      <div class="mkt-ec-body">
-        <div class="mkt-ec-event">${e.e}</div>
-        <div class="mkt-ec-country">${e.c}</div>
-        <div class="mkt-ec-forecast">${e.f}</div>
-        <span class="mkt-ec-impact-tag" style="background:${e.col==='#f07070'?'rgba(240,112,112,.1)':e.col==='#62f29d'?'rgba(98,242,157,.08)':'rgba(237,232,216,.07)'};color:${e.col};border:1px solid ${e.col==='#f07070'?'rgba(240,112,112,.25)':e.col==='#62f29d'?'rgba(98,242,157,.2)':'rgba(237,232,216,.18)'}">${e.imp}</span>
-      </div>
-    </div>`).join('');
+  /* ── Economic calendar — populated dynamically by _mktUpdateLiveData() from API ── */
+  const ecRows='<div style="text-align:center;padding:24px;color:rgba(237,232,216,.35);font-size:11px;font-family:var(--mono);">Loading economic calendar…</div>';
 
   /* ── Top signals — fetched live, rendered by _mktFetchTopSignals() after render ── */
 
   /* ── Market conditions chip ── */
-  const bullCount = crypto.filter(m=>m.up).length + indices.filter(m=>m.up).length;
+  const isLoaded = indices.some(m => m.price !== '—');
+  const bullCount = isLoaded ? (crypto.filter(m=>m.up).length + indices.filter(m=>m.up).length) : 0;
   const totalCount = crypto.length + indices.length;
   let condCls, condLabel, condDesc;
-  if(bullCount/totalCount >= 0.6){
+  if(!isLoaded){
+    condCls=''; condLabel='Loading market conditions…';
+    condDesc='Fetching live data…';
+  } else if(bullCount/totalCount >= 0.6){
     condCls='trending'; condLabel='TRENDING CONDITIONS';
     condDesc=bullCount+' of '+totalCount+' assets in directional moves · Good session for momentum trades';
   } else if(bullCount/totalCount >= 0.4){
@@ -10726,7 +10858,7 @@ async function _mktUpdateLiveData(){
       const loEl=document.getElementById('mklo-'+disp);
       if(hiEl && d.high != null) hiEl.textContent=(disp==='BTC'||disp==='ETH'||disp==='XAU'||disp==='SOL'||disp==='WTI'||disp==='XAG'?'$':'')+_fmt(d.high);
       if(loEl && d.low != null) loEl.textContent=(disp==='BTC'||disp==='ETH'||disp==='XAU'||disp==='SOL'||disp==='WTI'||disp==='XAG'?'$':'')+_fmt(d.low);
-      // Heatmap
+      // Heatmap — update existing cells + build new ones from API data
       const htEl=document.getElementById('mkheat-'+disp);
       if(htEl){
         const intensity=Math.min(Math.abs(chgN)/3.5,1);
@@ -10736,20 +10868,56 @@ async function _mktUpdateLiveData(){
         if(htVal){htVal.textContent=(chgN>=0?'+':'')+chgN.toFixed(2)+'%';htVal.style.color=htCol;}
       }
     });
+    // Dynamically build heatmap cells from API data (replaces loading state)
+    const heatContainer=document.querySelector('.mkt-heatmap');
+    if(heatContainer){
+      const firstChild=heatContainer.firstElementChild;
+      const isLoading=firstChild&&firstChild.classList.contains('mkt-heat-loading');
+      if(isLoading||!firstChild){
+        const cells=Object.entries(TM)
+          .filter(function([disp,yfT]){
+            const d=data[yfT];
+            return d&&d.price!=null;
+          })
+          .map(function([disp,yfT]){
+            const d=data[yfT];
+            const chgN=d.chg||0;
+            const isUp=chgN>=0;
+            const intensity=Math.min(Math.abs(chgN)/3.5,1);
+            const bgCol=isUp?`rgba(52,199,89,${.12+intensity*.52})`:`rgba(255,59,48,${.12+intensity*.52})`;
+            const textCol=isUp?'#5de8a0':'#e8706e';
+            return `<div class="mkt-heat-cell" id="mkheat-${disp}" onclick="mktAnalyseSym('${disp}')" title="${disp}: ${chgN>=0?'+':''}${chgN.toFixed(2)}% today · click to analyse" style="background:${bgCol};">
+              <div class="mkt-heat-sym">${disp}</div>
+              <div class="mkt-heat-val" style="color:${textCol};">${chgN>=0?'+':''}${chgN.toFixed(2)}%</div>
+            </div>`;
+          }).join('');
+        heatContainer.innerHTML=cells||'<div style="grid-column:1/-1;text-align:center;padding:16px;color:rgba(237,232,216,.3);font-size:11px;">No heatmap data available</div>';
+      }
+    }
   }catch(e){}
-  // Fetch live economic calendar
+  // Fetch live economic calendar — ALWAYS replaces, no hardcoded fallback
   try{
     const cal=await dvFetch('/api/econ-calendar');
-    if(!cal||!Array.isArray(cal.result)||!cal.result.length) return;
-    const ecParent=document.querySelector('.mkt-ec-row')?.parentElement;
-    if(!ecParent) return;
+    const ecCard=document.querySelector('.mkt-section-card[data-guide="market-latest-news"]');
+    if(!ecCard) return;
+    const headEl=ecCard.querySelector('.mkt-sc-head');
+    if(!headEl) return;
+    // Remove old rows below the head
+    for(var ci=ecCard.children.length-1;ci>=0;ci--){
+      if(ecCard.children[ci]===headEl) break;
+      ecCard.removeChild(ecCard.children[ci]);
+    }
+    if(!cal||!Array.isArray(cal.result)||!cal.result.length){
+      var emptyMsg=document.createElement('div');
+      emptyMsg.style.cssText='text-align:center;padding:24px;color:rgba(237,232,216,.35);font-size:11px;font-family:var(--mono);';
+      emptyMsg.textContent='Economic calendar unavailable — check back later';
+      ecCard.appendChild(emptyMsg);
+      return;
+    }
     const impCol={1:'#62f29d',2:'rgba(237,232,216,.72)',3:'#f07070'};
     const impLbl={1:'LOW',2:'MED',3:'HIGH'};
     const events=cal.result.slice(0,5);
-    // Only replace static HTML if API returned valid times — don't wipe good data
-    var hasValidTime=events.some(function(ev){return ev.time && ev.time!=='--:--';});
-    if(!hasValidTime) return;
-    ecParent.innerHTML=events.map(function(ev,i){
+    ecCard.insertAdjacentHTML('beforeend', events.map(function(ev,i){
       const t=ev.time||'--:--';
       const imp=ev.importance||1; const col=impCol[imp]||'rgba(237,232,216,.5)';
       const country=(ev.country||'').toUpperCase().slice(0,3);
@@ -10762,13 +10930,27 @@ async function _mktUpdateLiveData(){
           <div class="mkt-ec-event">${ev.title||'Event'}</div>
           <div class="mkt-ec-country">${country}</div>
           <div class="mkt-ec-forecast">${prev}${est}</div>
-          <span class="mkt-ec-impact-tag" style="background:${imp===3?'rgba(240,112,112,.1)':imp===1?'rgba(98,242,157,.08)':'rgba(237,232,216,.07)'};color:${col};border:1px solid ${imp===3?'rgba(240,112,112,.25)':imp===1?'rgba(98,242,157,.2)':'rgba(237,232,216,.18)'}">${impLbl[imp]||'MED'}</span>
+          <span class="mkt-ec-impact-tag" style="background:${imp===3?'rgba(240,112,112,.1)':imp===1?'rgba(98,242,157,.08)':'rgba(237,232,216,.07)'};color:${col};border:1px solid ${imp===3?'rgba(240,112,112,.25)':imp===1?'rgba(98,242,157,.2)':'rgba(237,232,216,.18)'}\">${impLbl[imp]||'MED'}</span>
         </div>
       </div>`;
-    }).join('');
-  }catch(e){}
+    }).join(''));
+  }catch(e){
+    var ecCard2=document.querySelector('.mkt-section-card[data-guide="market-latest-news"]');
+    if(ecCard2){
+      var headEl2=ecCard2.querySelector('.mkt-sc-head');
+      if(headEl2){
+        for(var ci2=ecCard2.children.length-1;ci2>=0;ci2--){
+          if(ecCard2.children[ci2]===headEl2) break;
+          ecCard2.removeChild(ecCard2.children[ci2]);
+        }
+        var errMsg=document.createElement('div');
+        errMsg.style.cssText='text-align:center;padding:24px;color:rgba(237,232,216,.35);font-size:11px;font-family:var(--mono);';
+        errMsg.textContent='Economic calendar unavailable — check back later';
+        ecCard2.appendChild(errMsg);
+      }
+    }
+  }
 }
-
 function mktToggleRow(rowId, rowEl){
   var exp = document.getElementById(rowId);
   if(!exp) return;
@@ -10794,24 +10976,37 @@ async function _loadFearGreed(){
 async function _loadSectors(){
   try{
     var r = await dvFetch('/api/sectors');
-    if(!r || !Array.isArray(r.sectors)) { _sectorFail(); return; }
-    r.sectors.forEach(function(s, i){
-      var bar = document.getElementById('mktSectorBar'+i);
-      var val = document.getElementById('mktSectorVal'+i);
+    if(!r || !Array.isArray(r.sectors)) { _renderSectorFail(); return; }
+    var wrap = document.querySelector('.mkt-bar-wrap');
+    if(!wrap) return;
+    var sectorColors = ['#c9a84c','#62f29d','rgba(237,232,216,.82)','rgba(237,232,216,.55)','rgba(237,232,216,.38)','#f07070','rgba(98,242,157,.7)','rgba(201,168,76,.6)','rgba(237,232,216,.48)','rgba(240,112,112,.5)'];
+    wrap.innerHTML = r.sectors.map(function(s, i){
       var chg = parseFloat(s.change_pct);
       if(!isFinite(chg)) chg = null;
       var pct = chg != null ? Math.min(100, Math.max(0, Math.round((chg + 3) / 6 * 100))) : 0;
       var displayPct = chg != null ? (chg>=0?'+':'')+chg.toFixed(1)+'%' : '—';
-      if(bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
-      if(val) val.textContent = displayPct;
+      var col = sectorColors[i % sectorColors.length];
+      var glow = col.replace(')',',.4)').replace('rgb','rgba');
+      return `<div class="mkt-bar-row">
+        <div class="mkt-bar-lbl">${s.name||s.sector||'Sector '+(i+1)}</div>
+        <div class="mkt-bar-track">
+          <div class="mkt-bar-fill" id="mktSectorBar${i}" style="width:${pct}%;background:${col};--mkt-bar-glow:${glow};box-shadow:0 0 8px ${glow};transition:width .6s ease-out;"></div>
+        </div>
+        <div class="mkt-bar-val" id="mktSectorVal${i}">${displayPct}</div>
+      </div>`;
+    }).join('');
+    /* Animate bars after render */
+    requestAnimationFrame(function(){
+      wrap.querySelectorAll('.mkt-bar-fill').forEach(function(el){
+        var w = el.style.width; el.style.width = '0';
+        setTimeout(function(){ el.style.width = w; }, 60);
+      });
     });
-  }catch(e){ _sectorFail(); }
+  }catch(e){ _renderSectorFail(); }
 }
-function _sectorFail(){
-  for(var i=0;i<6;i++){
-    var v=document.getElementById('mktSectorVal'+i);
-    if(v) v.textContent = '—';
-  }
+function _renderSectorFail(){
+  var wrap = document.querySelector('.mkt-bar-wrap');
+  if(wrap) wrap.innerHTML = '<div style="text-align:center;padding:24px;color:rgba(237,232,216,.35);font-size:11px;font-family:var(--mono);">Sectors unavailable</div>';
 }
 
 // Navigate to UNDERSTAND with this symbol ready to analyse
@@ -13568,6 +13763,32 @@ function showUnderstand(){
     </div>`;
   }).join('')}</div>`;
 
+  // ── Markov Matrix data fetch ────────────────────────────────────────────────
+  if (sig.sym && sig.tf) {
+    // Fetch Markov matrix data from backend
+    dvFetchT('/api/analysis/markov', {method:'POST', headers:{'Content-Type':'application/json'}, 
+      body: JSON.stringify({ticker: sig.sym, timeframe: sig.tf})
+    }, 15000).then(function(r) {
+      if (r && r.success && r.data) {
+        sig.markov = r.data;
+        // Re-render the Understand tab to show Markov Matrix
+        setTimeout(() => {
+          const el = document.getElementById('dashContent');
+          if (el) {
+            // We need to re-call showUnderstand to update the Markov section
+            // But we can't directly call it recursively, so we'll trigger a re-render
+            const navEl = document.querySelector('.nav-item.active');
+            if (navEl && navEl.dataset.nav === 'understand') {
+              showUnderstand();
+            }
+          }
+        }, 100);
+      }
+    }).catch(function(err) {
+      console.warn('Markov data fetch failed:', err);
+    });
+  }
+        
   // ── Real MTF from API ────────────────────────────────────────────────────────
   const mtfRaw=sig.mtf||{};
   function _mtfSig(l){const d=mtfRaw[l]||mtfRaw[l.toLowerCase()]||{};return d.trend||d.signal||null;}
@@ -13959,6 +14180,153 @@ function showUnderstand(){
             <div style="font-size:10.5px;color:var(--t3);margin-top:2px;">Confluence = indicator agreement, not win rate</div>
           </div>
         </div>
+        
+        <!-- Markov Matrix UI -->
+        ${(() => {
+          if (!sig || !sig.markov) return '';
+          const m = sig.markov;
+          const bullPct = m.bull_pct != null ? Math.round(m.bull_pct * 100) : 0;
+          const bearPct = m.bear_pct != null ? Math.round(m.bear_pct * 100) : 0;
+          const netPct = bullPct - bearPct;
+          const hmmStatus = m.hmm_aligned ? 'aligned' : 'diverging';
+          const currentState = m.current_state || 'BULL';
+          
+          return `<div class="und-card" data-guide="markov-matrix" style="margin-top:12px;">
+            <div class="und-card-title">Markov Transition Matrix</div>
+            
+            <!-- Beginner explanation -->
+            <div style="font-size:12px;color:rgba(237,232,216,.65);margin-bottom:14px;line-height:1.6;">
+              This matrix shows the probability that the market stays in its current trend or switches to a different trend
+            </div>
+            
+            <!-- Signal strength summary -->
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+              <div style="flex:1;">
+                <div style="font-size:11px;color:rgba(237,232,216,.5);margin-bottom:4px;">Signal Strength</div>
+                <div style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;">
+                  <span style="color:#5de8a0;">Bull ${bullPct}%</span>
+                  <span style="color:rgba(237,232,216,.4);">−</span>
+                  <span style="color:#e8706e;">Bear ${bearPct}%</span>
+                  <span style="color:rgba(237,232,216,.4);">=</span>
+                  <span style="color:#c9a84c;font-weight:700;">+${netPct > 0 ? '+' : ''}${netPct}%</span>
+                </div>
+              </div>
+              
+              <!-- HMM confirmation badge -->
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:4px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:rgba(201,168,76,.9);">${hmmStatus}</span>
+              </div>
+            </div>
+            
+            <!-- 3x3 transition matrix grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">
+              <!-- Row 1: Bull -->
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">BULL</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
+                  <div class="markov-cell" data-state="bull-to-bull" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>BB</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
+                  </div>
+                  <div class="markov-cell" data-state="bull-to-neutral" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>BN</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Neutral</div>
+                  </div>
+                  <div class="markov-cell" data-state="bull-to-bear" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>BE</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Bearish</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Row 2: Neutral -->
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">NEUTRAL</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
+                  <div class="markov-cell" data-state="neutral-to-bull" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>NB</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Bullish</div>
+                  </div>
+                  <div class="markov-cell" data-state="neutral-to-neutral" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>NN</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
+                  </div>
+                  <div class="markov-cell" data-state="neutral-to-bear" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>NE</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Bearish</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Row 3: Bear -->
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">BEAR</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
+                  <div class="markov-cell" data-state="bear-to-bull" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>EB</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Bullish</div>
+                  </div>
+                  <div class="markov-cell" data-state="bear-to-neutral" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:122px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>EN</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Neutral</div>
+                  </div>
+                  <div class="markov-cell" data-state="bear-to-bear" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>EE</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Multi-day forecast bar -->
+            <div style="margin-bottom:16px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <div style="font-size:11px;color:rgba(237,232,216,.5);font-family:var(--mono);">Multi-Day Forecast</div>
+                <div style="font-size:10px;color:rgba(237,232,216,.4);">T+1 → T+28</div>
+              </div>
+              <div style="display:flex;gap:4px;">
+                <!-- P^1 (T+1) -->
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="font-size:9px;color:rgba(237,232,216,.4);margin-bottom:4px;">P¹</div>
+                  <div style="height:80px;width:100%;background:rgba(237,232,216,.04);border-radius:4px;overflow:hidden;position:relative;">
+                    <div style="height:${m.p1_bull_pct != null ? Math.round(m.p1_bull_pct * 100) : 0}%;width:100%;background:linear-gradient(to top, #5de8a0, #3dbe6c);position:absolute;bottom:0;"></div>
+                  </div>
+                </div>
+                
+                <!-- P^5 (T+5) -->
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="font-size:9px;color:rgba(237,232,216,.4);margin-bottom:4px;">P⁵</div>
+                  <div style="height:80px;width:100%;background:rgba(237,232,216,.04);border-radius:4px;overflow:hidden;position:relative;">
+                    <div style="height:${m.p5_bull_pct != null ? Math.round(m.p5_bull_pct * 100) : 0}%;width:100%;background:linear-gradient(to top, #5de8a0, #3dbe6c);position:absolute;bottom:0;"></div>
+                  </div>
+                </div>
+                
+                <!-- P^10 (T+10) -->
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="font-size:9px;color:rgba(237,232,216,.4);margin-bottom:4px;">P¹⁰</div>
+                  <div style="height:80px;width:100%;background:rgba(237,232,216,.04);border-radius:4px;overflow:hidden;position:relative;">
+                    <div style="height:${m.p10_bull_pct != null ? Math.round(m.p10_bull_pct * 100) : 0}%;width:100%;background:linear-gradient(to top, #5de8a0, #3dbe6c);position:absolute;bottom:0;"></div>
+                  </div>
+                </div>
+                
+                <!-- P^20 (T+20) -->
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="font-size:9px;color:rgba(237,232,216,.4);margin-bottom:4px;">P²⁰</div>
+                  <div style="height:80px;width:100%;background:rgba(237,232,216,.04);border-radius:4px;overflow:hidden;position:relative;">
+                    <div style="height:${m.p20_bull_pct != null ? Math.round(m.p20_bull_pct * 100) : 0}%;width:100%;background:linear-gradient(to top, #5de8a0, #3dbe6c);position:absolute;bottom:0;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Current state highlight indicator -->
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#c9a84c;flex-shrink:0;"></div>
+              <div style="font-size:11px;color:rgba(237,232,216,.65);">Current state: ${currentState}</div>
+            </div>
+          </div>`;
+        })()}
+        
         <!-- Engine context badges (commits 1-7 — surface engine state) -->
         ${(()=>{
           const badges = [];
@@ -15511,7 +15879,6 @@ function _vRunAnalysis(){
     + '<div style="display:flex;justify-content:space-between;font-size:9px;font-family:var(--mono);color:var(--t3);margin-bottom:6px"><span id="verdictProgressLabel">Initialising…</span><span id="verdictProgressPct">0%</span></div>'
     + '<div style="height:4px;background:rgba(237,232,216,.08);border-radius:2px;overflow:hidden"><div id="verdictProgressFill" style="height:100%;width:0%;background:linear-gradient(90deg,rgba(201,168,76,.6),var(--gold));border-radius:2px;transition:width .8s ease"></div></div>'
     + '</div>'
-    + '<div id="verdictAgentList" style="max-width:420px;margin:16px auto 0;text-align:left;font-size:9px;font-family:var(--mono);color:var(--t3);line-height:2"></div>'
     + '</div>';
   _vFetchLive(sig);
 }
@@ -15557,7 +15924,7 @@ function _vFetchLive(sig){
   }
   // If pre-warm job is already running, just poll it
   if (window._verdictPrewarmJobId) {
-    _vShowBanner('loading','Analysis running — 8 agents studying the market…');
+    _vShowBanner('loading','Analysis running — AI agents studying the market…');
     _vPollResult(window._verdictPrewarmJobId, sig);
     return;
   }
@@ -15569,23 +15936,19 @@ function _vFetchLive(sig){
     if (!r) { _vShowBanner('error','Could not reach the analysis server. Check your connection and try again.'); return; }
     if (r.status==='unavailable') { _vShowBanner('error','TradingAgents could not start. This usually means Python 3.10+ is not available on the server. Check Railway deploy logs for package install errors.'); return; }
     if (r.error) { _vShowBanner('error','Server error: '+r.error); return; }
-    if (r.job_id) { _vShowBanner('loading','Analysis running — 8 agents studying the market…'); _vPollResult(r.job_id, sig); }
+    if (r.job_id) { _vShowBanner('loading','Analysis running — AI agents studying the market…'); _vPollResult(r.job_id, sig); }
     else if (r.verdict) { _vRenderLive(sig, r.verdict, r.structured||null); } // cache hit
     else { _vShowBanner('error', 'Unexpected server response. Try again.'); }
   }).catch(function(){ _vShowBanner('error','Network error reaching the analysis server.'); });
 }
+// T0.2 — AI agent progress bars are placeholder / coming-soon UX
 var _verdictStages = [
-  { at:  0, pct:  4, label: 'Queueing job on analysis worker…' },
-  { at:  3, pct: 12, label: 'Agent 1 · Market Analyst — reading price action' },
-  { at:  8, pct: 22, label: 'Agent 2 · Fundamentals Analyst — reviewing financials' },
-  { at: 13, pct: 32, label: 'Agent 3 · News Analyst — scanning recent headlines' },
-  { at: 18, pct: 42, label: 'Agent 4 · Sentiment Analyst — gauging market mood' },
-  { at: 23, pct: 52, label: 'Agent 5 · Technical Analyst — running indicators' },
-  { at: 28, pct: 61, label: 'Agent 6 · Bull Researcher — building the BUY case' },
-  { at: 34, pct: 70, label: 'Agent 7 · Bear Researcher — building the SELL case' },
-  { at: 40, pct: 79, label: 'Agent 8 · Risk Manager — reviewing the trade plan' },
-  { at: 46, pct: 88, label: 'Portfolio Manager — drafting final verdict…' },
-  { at: 55, pct: 94, label: 'Agents debating trade… almost done' },
+  { at:  0, pct:  5,  label: 'Queueing analysis job…' },
+  { at:  5, pct: 20,  label: 'Analysing price action…' },
+  { at: 15, pct: 40,  label: 'Reviewing signal parameters…' },
+  { at: 28, pct: 60,  label: 'Checking market conditions…' },
+  { at: 42, pct: 80,  label: 'Assembling plain-English verdict…' },
+  { at: 55, pct: 95,  label: 'Finalising report…' },
 ];
 function _vUpdateProgress(polls){
   var stage = _verdictStages[0];
@@ -15596,20 +15959,9 @@ function _vUpdateProgress(polls){
   var fill = document.getElementById('verdictProgressFill');
   var label = document.getElementById('verdictProgressLabel');
   var pct = document.getElementById('verdictProgressPct');
-  var list = document.getElementById('verdictAgentList');
   if (fill) fill.style.width = stage.pct + '%';
   if (label) label.textContent = stage.label;
   if (pct) pct.textContent = stage.pct + '%';
-  if (list && polls > 0){
-    var agentNum = Math.min(polls < 3 ? 0 : Math.floor((polls - 3) / 6) + 1, 8);
-    var completedAgents = [];
-    var agentNames = ['Market Analyst','Fundamentals Analyst','News Analyst','Sentiment Analyst','Technical Analyst','Bull Researcher','Bear Researcher','Risk Manager'];
-    for (var a = 0; a < agentNum && a < 8; a++){
-      completedAgents.push('<span style="color:rgba(93,232,160,.6)"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" style="display:inline-block;vertical-align:-1px" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l3.5 3L10 2.5"/></svg></span> <span style="color:var(--t2)">' + agentNames[a] + '</span>');
-    }
-    if (polls >= 46) completedAgents.push('<span style="color:rgba(201,168,76,.8)">↻</span> <span style="color:var(--gold)">Portfolio Manager deliberating…</span>');
-    list.innerHTML = completedAgents.join('<br>');
-  }
 }
 function _vPollResult(jobId, sig){
   window._verdictJobId = jobId; // persist so tab-switch can resume polling
@@ -18693,7 +19045,39 @@ async function mt5Execute() {
 function actExecute(){
   const platform=document.getElementById('actPlatform')?.value||'';
   if(platform.includes('MT5')){
-    mt5Execute();
+    const btn=document.getElementById('mt5ExecBtn');
+    const status=document.getElementById('mt5ExecStatus');
+    const sig=window._activeSignal||{};
+    const ticker=sig.sym||'';
+    if(!ticker){ if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">No signal loaded</span>'; return; }
+    if(btn){ btn.disabled=true; btn.style.opacity='0.6'; }
+    if(status) status.innerHTML='<span style="color:#d4b87a;">Sending...</span>';
+    const quantity=parseFloat(document.getElementById('actLots')?.value)||0.1;
+    dvFetch('/api/orders',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        symbol: sig.sym,
+        side: sig.sig,
+        quantity: quantity,
+        entry_price: parseFloat(sig.entry)||0,
+        stop_loss: parseFloat(sig.sl)||null,
+        take_profit: parseFloat(sig.tp)||null,
+        order_type: window._actExOrderType||'market',
+        signal_id: sig.id||(sig.sym+':'+sig.tf+':'+sig.sig+':'+Date.now())
+      })
+    }).then(function(res){
+      if(res&&res.order_id){
+        if(status) status.innerHTML='<span style="color:rgba(61,190,108,.9);">Order sent &middot; #'+res.order_id+'</span>';
+        _dvToast('Order submitted &mdash; #'+res.order_id,'rgba(61,190,108,.15)','rgba(61,190,108,.4)');
+        actRefreshOrderFeed();
+        mt5Poll();
+      }else{
+        if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">Failed &mdash; order rejected</span>';
+        _dvToast('Order failed','rgba(224,85,85,.15)','rgba(224,85,85,.4)');
+      }
+      if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+    });
   } else {
     const sig=window._activeSignal||{};
     const status=document.getElementById('mt5ExecStatus');
@@ -18996,35 +19380,39 @@ function _buildAutoChips(ticket) {
 
 function _mt5UpdateStatePills(counts) { /* prototype stub */ }
 
-function mt5LoadTradeChart(sym, type, tf, levels) { /* prototype stub — no chart panel in v2 */ }
+/* mt5LoadTradeChart removed — no chart panel in v2 */
+
+function _closePaperTrade(ticket, sym, level) {
+  var isExit2 = level === 'SL' || level === 'MARKET';
+  var pnlMsg = '';
+  if (window._demoPosCache) {
+    var pos = window._demoPosCache.find(function(p){ return String(p.ticket) === String(ticket); });
+    if (pos) {
+      var profit = parseFloat(pos.profit) || 0;
+      pnlMsg = profit > 0 ? ' · P&L: +$' + profit.toFixed(2) : profit < 0 ? ' · P&L: -$' + Math.abs(profit).toFixed(2) : '';
+    }
+    window._demoPosCache = window._demoPosCache.filter(function(p){ return String(p.ticket) !== String(ticket); });
+    // Persist exited ticket IDs so they stay gone after hard refresh
+    try {
+      var _prev = JSON.parse(localStorage.getItem('dv_exited_demos') || '[]');
+      if(_prev.indexOf(String(ticket)) === -1) _prev.push(String(ticket));
+      localStorage.setItem('dv_exited_demos', JSON.stringify(_prev));
+    } catch(e){}
+  }
+  var msg = isExit2
+    ? (sym + ' demo trade closed' + pnlMsg)
+    : ('Demo TP taken on ' + sym + pnlMsg);
+  if (typeof _dvToast === 'function') _dvToast(msg, 'rgba(93,232,160,.12)', 'rgba(93,232,160,.4)');
+  _mt5RenderPositions(window._demoPosCache || []);
+}
 
 function mt5ClosePosition(ticket, sym, level) {
   if (!ticket) return;
   // Guard: demo/prototype trades use non-integer ticket IDs (e.g. 'T001')
-  // Remove from local demo cache and re-render instead of hitting the backend.
+  // Delegate paper trades to _closePaperTrade; this function handles real trades only.
   var ticketInt = parseInt(ticket, 10);
   if (isNaN(ticketInt) || ticketInt <= 0) {
-    var isExit2 = level === 'SL' || level === 'MARKET';
-    var pnlMsg = '';
-    if (window._demoPosCache) {
-      var pos = window._demoPosCache.find(function(p){ return String(p.ticket) === String(ticket); });
-      if (pos) {
-        var profit = parseFloat(pos.profit) || 0;
-        pnlMsg = profit > 0 ? ' · P&L: +$' + profit.toFixed(2) : profit < 0 ? ' · P&L: -$' + Math.abs(profit).toFixed(2) : '';
-      }
-      window._demoPosCache = window._demoPosCache.filter(function(p){ return String(p.ticket) !== String(ticket); });
-      // Persist exited ticket IDs so they stay gone after hard refresh
-      try {
-        var _prev = JSON.parse(localStorage.getItem('dv_exited_demos') || '[]');
-        if(_prev.indexOf(String(ticket)) === -1) _prev.push(String(ticket));
-        localStorage.setItem('dv_exited_demos', JSON.stringify(_prev));
-      } catch(e){}
-    }
-    var msg = isExit2
-      ? (sym + ' demo trade closed' + pnlMsg)
-      : ('Demo TP taken on ' + sym + pnlMsg);
-    if (typeof _dvToast === 'function') _dvToast(msg, 'rgba(93,232,160,.12)', 'rgba(93,232,160,.4)');
-    _mt5RenderPositions(window._demoPosCache || []);
+    _closePaperTrade(ticket, sym, level);
     return;
   }
   var isExit = level === 'SL' || level === 'MARKET';

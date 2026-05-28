@@ -1871,26 +1871,27 @@ def build_ind_from_tv(tv, ticker=None, timeframe=None, asset_type=None):
         ema_trend = "MIXED"
 
     return {
+        "ready":          False,
         "price":          round(p, 4),
         "chg_1d":         round(chg, 2),
-        "chg_1w":         0.0,
-        "chg_1m":         0.0,
-        "high_52w":       round(p * 1.3, 4),
-        "low_52w":        round(p * 0.7, 4),
+        "chg_1w":         None,
+        "chg_1m":         None,
+        "high_52w":       None,
+        "low_52w":        None,
         "rsi":            round(float(rsi), 1),
-        "rsi_divergence": {"type": "none", "label": "", "strength": 0, "desc": "", "all": []},
+        "rsi_divergence": {"type": "none", "strength": "none"},
         "ema20":          round(float(e20),  4),
         "ema50":          round(float(e50),  4),
         "ema200":         round(float(e200), 4),
         "ema_trend":      ema_trend,
         "macd_hist":      round(float(macd), 6),
-        "bb_pos":         round(bb_pos,  3),
-        "bb_width":       round(bb_width, 3),
-        "atr":            round(float(atr), 6),
+        "bb_pos":         None,
+        "bb_width":       None,
+        "atr":            None,
         "vol_ratio":      _tv_vol_ratio(ticker, asset_type),  # SIG-7: real volume ratio
-        "supertrend":     "NEUTRAL",
-        "resistance":     round(bbu, 4),
-        "support":        round(bbl, 4),
+        "supertrend":     None,
+        "resistance":     None,
+        "support":        None,
         "chart_dates":        [],
         "chart_prices":       [],
         "chart_opens":        [],
@@ -4425,12 +4426,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
 
     # ── C2: VIX Macro Gate — Redis-cached 15 min, negligible latency ──────────
     # Fetch the current VIX zone. If Redis has a recent result this costs ~1ms.
-    # REDUCED zone (VIX 15-25): tighten confluence gate to 75% minimum — elevated
+    # REDUCED zone (VIX 20-25): tighten confluence gate to 75% minimum — elevated
     # fear makes oscillators noisier, so we require stronger agreement before
-    # showing a signal. NO_TRADE zone (VIX 25+): handled after all gates below.
+    # showing a signal. CAUTION zone (VIX 25-30): position-size reduction applies
+    # below. NO_TRADE zone (VIX 30+): handled after all gates below.
     _vix_ctx = _get_vix_score()
     _macro_override = False
-    if _vix_ctx["zone"] == "REDUCED":
+    if _vix_ctx["zone"] in ("REDUCED", "CAUTION"):
         threshold = max(threshold, 0.75)
 
     if bull_pct >= threshold:
@@ -4626,7 +4628,7 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         gate_note = gate_note or f"Only {total_votes} indicator{'s' if total_votes != 1 else ''} voted — need at least {MIN_VOTES_FOR_SIGNAL} for an actionable signal."
 
     # ── C2: VIX NO_TRADE zone — suppress all BUY/SELL signals ───────────────
-    # VIX > 25 means panic-driven markets where technical analysis is unreliable.
+    # VIX > 30 means panic-driven markets where technical analysis is unreliable.
     # Override any directional signal to HOLD regardless of indicator agreement.
     # macro_override=True is returned so the frontend can show the suppression
     # message and the red VIX badge (rendered in C3).
@@ -9913,7 +9915,7 @@ def _get_vix_score():
     if   vix < 14:  score, zone = 95, "FULL";     msg = f"Markets are very calm right now (VIX {vix:.1f}). This is one of the best conditions to trade — indicators are reliable and prices are behaving predictably. Trade at your normal size."
     elif vix < 20:  score, zone = 80, "FULL";     msg = f"Markets are calm (VIX {vix:.1f}). Normal conditions — your signals are reliable. Trade at your normal size."
     elif vix < 25:  score, zone = 60, "REDUCED";  msg = f"Markets are more nervous than usual (VIX {vix:.1f}). DotVerse is being extra picky — only showing signals where many indicators strongly agree. If a BUY or SELL signal appears, it has passed a stricter test than normal. Consider reducing position size by about a third."
-    elif vix < 30:  score, zone = 40, "REDUCED";  msg = f"Markets are fearful right now (VIX {vix:.1f}). Prices are jumping around unpredictably and signals are less reliable. DotVerse has tightened its filter significantly. If you trade, put in half your normal amount — and be ready for the price to move sharply against you even on a good signal."
+    elif vix < 30:  score, zone = 40, "CAUTION";  msg = f"CAUTION — Reduce position size. Markets are fearful (VIX {vix:.1f}). Prices are jumping around unpredictably and signals are less reliable. If you trade, put in half your normal amount — and be ready for the price to move sharply against you even on a good signal."
     elif vix < 35:  score, zone = 20, "NO_TRADE"; msg = f"Markets are in panic mode (VIX {vix:.1f}). DotVerse has suppressed all signals — when fear is this high, prices are driven by emotion, not by the technical patterns your indicators read. Sit on your hands. Wait for VIX to drop below 30 before trading."
     else:           score, zone =  5, "NO_TRADE"; msg = f"Extreme fear in markets — this is a crash or crisis level (VIX {vix:.1f}). All signals are suppressed. Do not trade. Sitting in cash is the right move right now. Wait for conditions to stabilise before returning."
 
@@ -10145,7 +10147,7 @@ def _global_automation_job():
         vix_zone = vix_data.get("zone", "FULL")
         vix_val  = vix_data.get("vix")
 
-        if vix_zone not in ("REDUCED", "NO_TRADE") or vix_val is None:
+        if vix_zone not in ("REDUCED", "CAUTION", "NO_TRADE") or vix_val is None:
             return  # markets calm — no broadcast needed
 
         today    = datetime.utcnow().strftime("%Y-%m-%d")
@@ -12390,7 +12392,11 @@ def simulate():
             },
         }
 
-        return jsonify({"simulation": sim})
+        return jsonify({
+            "simulation": sim,
+            "type": "educational_demo",
+            "disclaimer": "Illustrative scenarios only — not based on market data or statistical computation."
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -16560,6 +16566,7 @@ def optimise_result():
 
 import hashlib as _hl
 import math as _math
+import concurrent.futures
 
 VERDICT_CONFIG = {
     "llm_provider": "deepseek",
@@ -16586,7 +16593,7 @@ try:
     )
     from tradingagents.agents.utils.agent_states import AgentState
     from langgraph.graph import END, START, StateGraph
-    from langchain_core.messages import HumanMessage as _LCHumanMessage
+    from langchain_core.messages import HumanMessage as _LCHumanMessage, AIMessage as _LCAIMessage
 
     def _create_thesis_injector(prior_keys, analyst_focus):
         key_labels = {
@@ -16617,6 +16624,73 @@ try:
                 return {}
         return injector_node
 
+    # ── Fix 3: Per-agent LLM response caching with Redis ──
+    _VERDICT_CACHE_TICKER = None
+    _VERDICT_CACHE_DATE = None
+
+    def _make_cached_llm(llm, agent_name):
+        """Wrap an LLM's invoke method with Redis caching.
+        Cache key: verdict_agent:{ticker}:{agent_name}:{date}
+        TTL: 3600s (1 hour).
+        Falls back gracefully if Redis is unavailable.
+        """
+        original_invoke = llm.invoke
+
+        def _cached_invoke(messages, **kwargs):
+            ticker = _VERDICT_CACHE_TICKER
+            date_str = _VERDICT_CACHE_DATE
+            if _redis_client and ticker and date_str:
+                cache_key = f"verdict_agent:{ticker}:{agent_name}:{date_str}"
+                try:
+                    cached = _redis_client.get(cache_key)
+                    if cached is not None:
+                        return _LCAIMessage(content=cached)
+                except Exception:
+                    pass
+
+            result = original_invoke(messages, **kwargs)
+
+            if _redis_client and ticker and date_str and result is not None:
+                try:
+                    content = result.content if hasattr(result, 'content') else str(result)
+                    _redis_client.setex(cache_key, 3600, content)
+                except Exception:
+                    pass
+
+            return result
+
+        llm.invoke = _cached_invoke
+        return llm
+
+    def _create_risk_reviewer(llm):
+        """Fix 2: Replace 3 debators (aggressive/conservative/neutral) with a single
+        Risk Reviewer that produces one consolidated risk assessment."""
+        def risk_reviewer_node(state):
+            try:
+                market_report = (state.get('market_report') or '')[:1000]
+                sentiment_report = (state.get('sentiment_report') or '')[:1000]
+                news_report = (state.get('news_report') or '')[:1000]
+                fundamentals_report = (state.get('fundamentals_report') or '')[:1000]
+                investment_plan = (state.get('investment_plan') or '')[:1000]
+                prompt = (
+                    f"=== RISK REVIEW ===\n"
+                    f"Market Analysis: {market_report}\n"
+                    f"Sentiment: {sentiment_report}\n"
+                    f"News/Macro: {news_report}\n"
+                    f"Fundamentals: {fundamentals_report}\n"
+                    f"Investment Plan: {investment_plan}\n\n"
+                    f"Your task: Produce a concise risk assessment for this trade. "
+                    f"Cover: (1) position sizing recommendation, (2) key risks to monitor, "
+                    f"(3) stop-loss placement advice, (4) any red flags. "
+                    f"3-5 paragraphs maximum."
+                )
+                msg = _LCHumanMessage(content=prompt)
+                result = llm.invoke([msg])
+                return {"final_trade_decision": result.content if hasattr(result, 'content') else str(result)}
+            except Exception:
+                return {"final_trade_decision": "Risk review unavailable due to error."}
+        return risk_reviewer_node
+
     class _SharedContextGraphSetup(GraphSetup):
         def setup_graph(self, selected_analysts=['market', 'social', 'news', 'fundamentals']):
             if not selected_analysts:
@@ -16640,68 +16714,35 @@ try:
                 analyst_nodes['fundamentals'] = create_fundamentals_analyst(self.quick_thinking_llm)
                 delete_nodes['fundamentals']  = create_msg_delete()
                 tool_nodes_map['fundamentals'] = self.tool_nodes['fundamentals']
-            analyst_focus = {
-                'social':       'Does current social media sentiment CONFIRM or CONTRADICT the market structure above?',
-                'news':         'Does the current news and macro environment SUPPORT or UNDERMINE the emerging thesis?',
-                'fundamentals': 'Do the company fundamentals SUPPORT or CONTRADICT the thesis above?',
-            }
-            key_map = {
-                'market':       'market_report',
-                'social':       'sentiment_report',
-                'news':         'news_report',
-                'fundamentals': 'fundamentals_report',
-            }
-            inject_nodes = {}
-            for i, analyst_type in enumerate(selected_analysts):
-                if i == 0:
-                    continue
-                prior_keys = [key_map[selected_analysts[j]] for j in range(i) if selected_analysts[j] in key_map]
-                focus = analyst_focus.get(analyst_type, 'Focus on confirming or contradicting the emerging thesis.')
-                inject_nodes[analyst_type] = _create_thesis_injector(prior_keys, focus)
             bull_researcher_node   = create_bull_researcher(self.quick_thinking_llm)
             bear_researcher_node   = create_bear_researcher(self.quick_thinking_llm)
             research_manager_node  = create_research_manager(self.deep_thinking_llm)
             trader_node            = create_trader(self.quick_thinking_llm)
-            aggressive_analyst     = create_aggressive_debator(self.quick_thinking_llm)
-            neutral_analyst        = create_neutral_debator(self.quick_thinking_llm)
-            conservative_analyst   = create_conservative_debator(self.quick_thinking_llm)
+            # Fix 2: Replace 3 debators with 1 Risk Reviewer
+            risk_reviewer_node     = _create_risk_reviewer(self.quick_thinking_llm)
             portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm)
             workflow = StateGraph(AgentState)
+            # Fix 1: Add all 4 analyst nodes in parallel from START
             for analyst_type, node in analyst_nodes.items():
                 workflow.add_node(f'{analyst_type.capitalize()} Analyst', node)
                 workflow.add_node(f'Msg Clear {analyst_type.capitalize()}', delete_nodes[analyst_type])
                 workflow.add_node(f'tools_{analyst_type}', tool_nodes_map[analyst_type])
-                if analyst_type in inject_nodes:
-                    workflow.add_node(f'Inject Thesis {analyst_type.capitalize()}', inject_nodes[analyst_type])
+                workflow.add_edge(START, f'{analyst_type.capitalize()} Analyst')
+                workflow.add_conditional_edges(
+                    f'{analyst_type.capitalize()} Analyst',
+                    getattr(self.conditional_logic, f'should_continue_{analyst_type}'),
+                    [f'tools_{analyst_type}', f'Msg Clear {analyst_type.capitalize()}'],
+                )
+                workflow.add_edge(f'tools_{analyst_type}', f'{analyst_type.capitalize()} Analyst')
+                # Fan-in: all 4 clear nodes converge on Bull Researcher
+                workflow.add_edge(f'Msg Clear {analyst_type.capitalize()}', 'Bull Researcher')
             workflow.add_node('Bull Researcher', bull_researcher_node)
             workflow.add_node('Bear Researcher', bear_researcher_node)
             workflow.add_node('Research Manager', research_manager_node)
             workflow.add_node('Trader', trader_node)
-            workflow.add_node('Aggressive Analyst', aggressive_analyst)
-            workflow.add_node('Neutral Analyst', neutral_analyst)
-            workflow.add_node('Conservative Analyst', conservative_analyst)
+            # Fix 2: Single Risk Reviewer replaces 3 debators
+            workflow.add_node('Risk Reviewer', risk_reviewer_node)
             workflow.add_node('Portfolio Manager', portfolio_manager_node)
-            first_analyst = selected_analysts[0]
-            workflow.add_edge(START, f'{first_analyst.capitalize()} Analyst')
-            for i, analyst_type in enumerate(selected_analysts):
-                current = f'{analyst_type.capitalize()} Analyst'
-                tools   = f'tools_{analyst_type}'
-                clear   = f'Msg Clear {analyst_type.capitalize()}'
-                workflow.add_conditional_edges(
-                    current,
-                    getattr(self.conditional_logic, f'should_continue_{analyst_type}'),
-                    [tools, clear],
-                )
-                workflow.add_edge(tools, current)
-                if i < len(selected_analysts) - 1:
-                    next_type = selected_analysts[i + 1]
-                    if next_type in inject_nodes:
-                        workflow.add_edge(clear, f'Inject Thesis {next_type.capitalize()}')
-                        workflow.add_edge(f'Inject Thesis {next_type.capitalize()}', f'{next_type.capitalize()} Analyst')
-                    else:
-                        workflow.add_edge(clear, f'{next_type.capitalize()} Analyst')
-                else:
-                    workflow.add_edge(clear, 'Bull Researcher')
             workflow.add_conditional_edges(
                 'Bull Researcher',
                 self.conditional_logic.should_continue_debate,
@@ -16713,27 +16754,16 @@ try:
                 {'Bull Researcher': 'Bull Researcher', 'Research Manager': 'Research Manager'},
             )
             workflow.add_edge('Research Manager', 'Trader')
-            workflow.add_edge('Trader', 'Aggressive Analyst')
-            workflow.add_conditional_edges(
-                'Aggressive Analyst',
-                self.conditional_logic.should_continue_risk_analysis,
-                {'Conservative Analyst': 'Conservative Analyst', 'Portfolio Manager': 'Portfolio Manager'},
-            )
-            workflow.add_conditional_edges(
-                'Conservative Analyst',
-                self.conditional_logic.should_continue_risk_analysis,
-                {'Neutral Analyst': 'Neutral Analyst', 'Portfolio Manager': 'Portfolio Manager'},
-            )
-            workflow.add_conditional_edges(
-                'Neutral Analyst',
-                self.conditional_logic.should_continue_risk_analysis,
-                {'Aggressive Analyst': 'Aggressive Analyst', 'Portfolio Manager': 'Portfolio Manager'},
-            )
+            # Fix 2: Trader → Risk Reviewer → Portfolio Manager → END
+            workflow.add_edge('Trader', 'Risk Reviewer')
+            workflow.add_edge('Risk Reviewer', 'Portfolio Manager')
             workflow.add_edge('Portfolio Manager', END)
             return workflow
 
     class SharedContextTradingGraph(TradingAgentsGraph):
-        """Stage 2: shared-context analyst chain — each analyst receives prior agents' emerging thesis."""
+        """Stage 2: shared-context analyst chain — each analyst receives prior agents' emerging thesis.
+        Fix 3: Overrides propagate() to wrap LLMs with per-agent Redis response caching.
+        """
         def __init__(self, selected_analysts=['market', 'social', 'news', 'fundamentals'], debug=False, config=None, callbacks=None):
             super().__init__(selected_analysts=selected_analysts, debug=debug, config=config, callbacks=callbacks)
             self.graph_setup = _SharedContextGraphSetup(
@@ -16744,6 +16774,20 @@ try:
             )
             self.workflow = self.graph_setup.setup_graph(selected_analysts)
             self.graph = self.workflow.compile()
+
+        def propagate(self, ticker, trade_date_str, **kwargs):
+            """Override: wrap LLMs with Redis caching before calling parent propagate."""
+            # Fix 3: Set cache context for per-agent LLM response caching
+            global _VERDICT_CACHE_TICKER, _VERDICT_CACHE_DATE
+            _VERDICT_CACHE_TICKER = ticker
+            _VERDICT_CACHE_DATE = trade_date_str
+
+            # Wrap LLMs with Redis caching (one wrapper per distinct agent role)
+            _make_cached_llm(self.quick_thinking_llm, 'analyst')
+            _make_cached_llm(self.deep_thinking_llm, 'manager')
+
+            # Delegate to the parent's propagate (uses the now-cached LLMs)
+            return super().propagate(ticker, trade_date_str, **kwargs)
 
     TA_AVAILABLE = True  # LAST — only True if every import and class definition above succeeded
 except Exception as e:
@@ -17607,6 +17651,70 @@ try:
                 pass
 except Exception:
     pass
+
+# ─── WALK-FORWARD MARKOV BACKTEST ────────────────────────────────
+import sys as _sys
+_markov_bt_path = os.path.dirname(os.path.abspath(__file__))
+if _markov_bt_path not in _sys.path:
+    _sys.path.insert(0, _markov_bt_path)
+from backtest_markov import WalkForwardBacktest as _WalkForwardBacktest
+
+
+@app.route("/api/backtest/markov", methods=["GET"])
+@login_required
+def backtest_markov():
+    """GET /api/backtest/markov?ticker=X&asset_type=stock&timeframe=1d&years=3
+
+    Walk-forward backtesting for the Markov regime-prediction strategy.
+    Recalculates transition matrix each day using ONLY data up to that
+    day (no look-ahead bias). Strategy: LONG when Bull predicted,
+    SHORT when Bear predicted, HOLD when Sideways predicted.
+
+    Returns JSON: win_rate_pct, total_return_pct, annualised_return_pct,
+    sharpe, max_drawdown_pct, benchmark_return_pct, equity_curve,
+    benchmark_curve, directional_accuracy_pct, trade log.
+    """
+    ticker = ""
+    try:
+        ticker = request.args.get("ticker", "").upper().strip()
+        asset_type = request.args.get("asset_type", "stock").strip().lower()
+        timeframe = request.args.get("timeframe", "1d").strip().lower()
+        years_str = request.args.get("years", "3").strip()
+        years = max(1, min(10, int(years_str)))
+
+        if not ticker:
+            return jsonify({"error": "Missing required parameter: ticker"}), 400
+
+        valid_assets = {"stock", "crypto", "forex", "index", "commodity"}
+        if asset_type not in valid_assets:
+            return jsonify({
+                "error": f"Invalid asset_type '{asset_type}'. Must be one of: {', '.join(sorted(valid_assets))}"
+            }), 400
+
+        bt = _WalkForwardBacktest()
+        result = bt.run(ticker, asset_type=asset_type, years=years)
+
+        if "error" in result and result["error"]:
+            print(f"[backtest-markov] Error for {ticker}: {result['error']}")
+            return jsonify({
+                "error": f"Markov backtest failed for {ticker}: {result['error']}",
+                "ticker": ticker,
+                "asset_type": asset_type,
+            }), 502
+
+        result["request"] = {
+            "ticker": ticker,
+            "asset_type": asset_type,
+            "timeframe": timeframe,
+            "years": years,
+        }
+        return jsonify(result)
+
+    except Exception as exc:
+        safe_ticker = ticker or "(unknown)"
+        print(f"[backtest-markov] Exception for {safe_ticker}: {exc}")
+        return jsonify({"error": f"Internal error: {str(exc)[:200]}"}), 500
+
 
 # NOTE on the RQ worker:
 # The previous in-process daemon-thread approach (running rq Worker.work() as a
