@@ -5080,6 +5080,7 @@ button { font-weight: 400 !important; }
         <button class="qp-tf" data-tf="1d"  onclick="qpSetTF('1d',this)"  style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">1D</button>
         <button class="qp-tf" data-tf="1w"  onclick="qpSetTF('1w',this)"  style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">1W</button>
         <button class="qp-tf" data-tf="1mo" onclick="qpSetTF('1mo',this)" style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">1M</button>
+        <button class="qp-tf" data-tf="all" onclick="qpSetTF('all',this)" style="padding:5px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.7);border-radius:4px;cursor:pointer;letter-spacing:.04em;">All</button>
       </div>
       <button id="qpAnalyseBtn" class="btn-pipeline" onclick="qpAnalyse()"
         style="padding:6px 14px;font-family:var(--mono);font-size:11px;border-radius:5px;letter-spacing:.04em;display:inline-flex;align-items:center;gap:6px;">
@@ -7609,18 +7610,39 @@ window._dvTF = window._dvTF || '4h';
 function qpSetTF(tf, btn) {
   window._dvTF = tf;
   document.querySelectorAll('.qp-tf').forEach(b => {
-    if (b === btn) {
-      b.style.background = 'rgba(201,168,76,.18)';
-      b.style.borderColor = 'rgba(201,168,76,.45)';
-      b.style.color = 'rgba(201,168,76,.95)';
+    if (tf === 'all') {
+      // "All" mode: highlight the All button, dim individual TF buttons
+      if (b === btn) {
+        b.style.background = 'rgba(201,168,76,.18)';
+        b.style.borderColor = 'rgba(201,168,76,.45)';
+        b.style.color = 'rgba(201,168,76,.95)';
+      } else {
+        b.style.background = 'rgba(237,232,216,.04)';
+        b.style.borderColor = 'rgba(237,232,216,.14)';
+        b.style.color = 'rgba(237,232,216,.5)';
+      }
     } else {
-      b.style.background = 'rgba(237,232,216,.04)';
-      b.style.borderColor = 'rgba(237,232,216,.14)';
-      b.style.color = 'rgba(237,232,216,.7)';
+      if (b.dataset.tf === 'all') {
+        // Dim the All button when an individual TF is selected
+        b.style.background = 'rgba(237,232,216,.04)';
+        b.style.borderColor = 'rgba(237,232,216,.14)';
+        b.style.color = 'rgba(237,232,216,.5)';
+      } else if (b === btn) {
+        b.style.background = 'rgba(201,168,76,.18)';
+        b.style.borderColor = 'rgba(201,168,76,.45)';
+        b.style.color = 'rgba(201,168,76,.95)';
+      } else {
+        b.style.background = 'rgba(237,232,216,.04)';
+        b.style.borderColor = 'rgba(237,232,216,.14)';
+        b.style.color = 'rgba(237,232,216,.7)';
+      }
     }
   });
 }
+var _qpScanBusy = false;
+var _qpScanAbortCtrl = null;
 async function qpAnalyse(presetTicker, presetTf) {
+  if (_qpScanBusy) return;
   const inp     = document.getElementById('qpTickerInput');
   const tickSel = document.getElementById('qpTickerSel');
   const assetSel= document.getElementById('qpAssetSel');
@@ -7639,6 +7661,121 @@ async function qpAnalyse(presetTicker, presetTf) {
   }
   if (presetTf) window._dvTF = presetTf;
   if (assetSel && assetSel.value) window._dvAsset = assetSel.value;
+
+  // ── "All" TF mode: scan this asset across all 7 TFs, show inline cards ──
+  if (window._dvTF === 'all') {
+    _qpScanBusy = true;
+    const analyseBtn = document.getElementById('qpAnalyseBtn');
+    const resultsDiv = document.getElementById('qpScanResults');
+    const cardsDiv = document.getElementById('qpScanCards');
+    const statusEl = document.getElementById('qpScanStatus');
+    const clearBtn = document.getElementById('qpScanClearBtn');
+    if (!resultsDiv) { _qpScanBusy = false; return; }
+
+    if (analyseBtn) { analyseBtn.disabled = true; analyseBtn.innerHTML = '<div style="width:11px;height:11px;border-radius:50%;border:2px solid rgba(237,232,216,.2);border-top-color:var(--gold);animation:dvSpinAnim .6s linear infinite;flex-shrink:0;"></div> Scanning…'; }
+    resultsDiv.style.display = '';
+    cardsDiv.innerHTML = '<div style="padding:12px 0;font-family:var(--mono);font-size:10px;color:var(--t3);">Scanning ' + sym + ' across all timeframes…</div>';
+    statusEl.textContent = 'Scanning ' + sym + ' across 7 timeframes…';
+    if (clearBtn) clearBtn.style.display = 'none';
+
+    try {
+      const allTfs = ['15m','30m','1h','4h','1d','1w','1mo'];
+      const assetType = window._dvAsset || 'crypto';
+      const tickerList = [sym];
+      const scanResults = [];
+      const scanErrors = [];
+
+      for (let i = 0; i < allTfs.length; i++) {
+        const tf = allTfs[i];
+        try {
+          const r = await dvFetch('/api/scan-list', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ tickers: tickerList, asset_type: assetType, timeframe: tf })
+          });
+          if (r && r.results) {
+            r.results.forEach(function(res){ if (res) { res._tf = tf; scanResults.push(res); } });
+          } else {
+            if (r && r.error) scanErrors.push(r.error);
+          }
+        } catch(e) {
+          scanErrors.push(e?.message || 'fetch error for ' + tf);
+        }
+      }
+
+      const rawOpps = scanResults
+        .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
+        .map(function(r){
+          return {
+            sym:     sym,
+            tf:      (r._tf || '1d').toUpperCase(),
+            sig:     r.signal,
+            id:      sym + ':' + (r._tf || '1d').toUpperCase() + ':' + r.signal + ':' + Date.now(),
+            entry:   r.entry     || null,
+            sl:      r.stop_loss  || null,
+            tp:      r.tp1        || null,
+            tp2:     r.tp2        || null,
+            tp3:     r.tp3        || null,
+            rr:      r.rr1 || r.rr || '--',
+            conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
+            confLbl: r.confidence_label || r.confidence || 'LIKELY',
+            asset:   assetType,
+            reason:  r.reason || r.summary || 'Live DotVerse signal',
+            bullCount:   r.bull_score   || 0,
+            bearCount:   r.bear_score   || 0,
+            volRatio:    r.vol_ratio    || 1.0,
+            quality:     r.quality || null,
+            smc_structures: r.smc_structures || null,
+            regime_context: r.regime_context || ''
+          };
+        });
+
+      if (rawOpps.length === 0) {
+        statusEl.textContent = 'No signals found for ' + sym + '.' + (scanErrors.length ? ' (' + scanErrors.length + ' scan(s) failed)' : '');
+        cardsDiv.innerHTML = '<div style="padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--t3);text-align:center;">No signals returned for ' + sym + '.</div>';
+        if (clearBtn) clearBtn.style.display = '';
+        if (analyseBtn) { analyseBtn.disabled = false; analyseBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Analyse'; }
+        _qpScanBusy = false;
+        return;
+      }
+
+      statusEl.textContent = rawOpps.length + ' signal(s) found for ' + sym + (scanErrors.length ? ' (' + scanErrors.length + ' scan(s) failed)' : '');
+      if (clearBtn) clearBtn.style.display = '';
+
+      var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
+      const cards = rawOpps.map(function(o, i){
+        var cc = _confColor(o.sig);
+        var oJson = JSON.stringify(o).replace(/\"/g, '&quot;');
+        return '<div onclick="loadAllTfSignal(' + oJson + ')" style="flex-shrink:0;width:240px;padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(237,232,216,.08);cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:4px;" onmouseover="this.style.borderColor=\'rgba(201,168,76,.3)\';this.style.background=\'rgba(201,168,76,.04)\';" onmouseout="this.style.borderColor=\'rgba(237,232,216,.08)\';this.style.background=\'rgba(255,255,255,.02)\';">'
+          + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+          + '<div style="display:flex;align-items:center;gap:6px;">'
+          + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(237,232,216,.35);">' + String(i+1).padStart(2,'0') + '</span>'
+          + '<span style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--t1);">' + o.sym + '</span>'
+          + '<span style="font-family:var(--mono);font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(237,232,216,.04);color:var(--t3);">' + o.tf + '</span>'
+          + '</div>'
+          + '<span style="font-family:var(--mono);font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:' + cc + '22;border:1px solid ' + cc + '44;color:' + cc + ';">' + o.sig + '</span>'
+          + '</div>'
+          + '<div style="display:flex;align-items:center;gap:8px;margin-top:2px;">'
+          + '<span style="font-family:var(--mono);font-size:10px;color:' + cc + ';font-weight:600;">' + o.conf + '%</span>'
+          + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">R:' + o.rr + '</span>'
+          + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);" title="Entry / SL / TP">' + (o.entry||'--') + ' · ' + (o.sl||'--') + ' · ' + (o.tp||'--') + '</span>'
+          + '</div>'
+          + '<div style="font-size:8.5px;color:var(--t3);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (o.reason||'').substring(0,80) + '</div>'
+          + '</div>';
+      }).join('');
+
+      cardsDiv.innerHTML = cards;
+    } catch(e) {
+      statusEl.textContent = 'Scan error: ' + (e?.message||'unknown');
+      cardsDiv.innerHTML = '<div style="padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--t3);text-align:center;">Scan failed. Try again.</div>';
+    }
+
+    if (analyseBtn) { analyseBtn.disabled = false; analyseBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Analyse'; }
+    _qpScanBusy = false;
+    return;
+  }
+
+  // ── Single-TF mode: navigate to Understand and run analysis ──
   // Mirror into the Understand-tab input so dvRunAnalyze finds the value
   const undInp = document.getElementById('dvTickerInput');
   if (undInp) undInp.value = sym;
@@ -7646,10 +7783,29 @@ async function qpAnalyse(presetTicker, presetTf) {
   setNav('understand');
   if (typeof showUnderstand === 'function') showUnderstand();
   // showUnderstand may have wiped the dvTickerInput element — re-set after re-render
+  _qpScanBusy = true;
   setTimeout(() => {
     const inp2 = document.getElementById('dvTickerInput');
     if (inp2) inp2.value = sym;
-    if (typeof dvRunAnalyze === 'function') dvRunAnalyze();
+    // Add 20s timeout wrapper around dvRunAnalyze
+    var _qpTimeoutId = setTimeout(function() {
+      const btn = document.getElementById('qpAnalyseBtn');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Analyse'; }
+      _qpScanBusy = false;
+      if (typeof _dvToast === 'function') _dvToast('Analysis timed out','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    }, 20000);
+    if (typeof dvRunAnalyze === 'function') {
+      dvRunAnalyze().then(function() {
+        clearTimeout(_qpTimeoutId);
+        _qpScanBusy = false;
+      }).catch(function() {
+        clearTimeout(_qpTimeoutId);
+        _qpScanBusy = false;
+      });
+    } else {
+      clearTimeout(_qpTimeoutId);
+      _qpScanBusy = false;
+    }
   }, 80);
 }
 
@@ -7658,6 +7814,7 @@ async function qpAnalyse(presetTicker, presetTf) {
 // then renders compact signal cards inline below the Quick Analyse bar.
 var _qpScanAbort = false;
 async function qpScanAll() {
+  if (_qpScanBusy) return;
   const btn = document.getElementById('qpScanAllBtn');
   const resultsDiv = document.getElementById('qpScanResults');
   const cardsDiv = document.getElementById('qpScanCards');
@@ -7666,7 +7823,9 @@ async function qpScanAll() {
   if (!btn || !resultsDiv) return;
   if (btn.disabled) return;  // already scanning
 
+  _qpScanBusy = true;
   _qpScanAbort = false;
+  _qpScanAbortCtrl = new AbortController();
   btn.disabled = true;
   btn.innerHTML = '<div style="width:11px;height:11px;border-radius:50%;border:2px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .6s linear infinite;flex-shrink:0;"></div> Scanning…';
   resultsDiv.style.display = '';
@@ -7675,8 +7834,8 @@ async function qpScanAll() {
   clearBtn.style.display = 'none';
 
   try {
-    const result = await _runScanBase(ALL_SCAN_GROUPS);
-    if (_qpScanAbort) return;
+    const result = await _runScanBase(ALL_SCAN_GROUPS, _qpScanAbortCtrl.signal);
+    if (_qpScanAbort) { _qpScanBusy = false; return; }
 
     // Map raw results to uniform opp objects
     const rawOpps = (result.results || [])
@@ -7712,10 +7871,12 @@ async function qpScanAll() {
       btn.disabled = false;
       btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg> Scan All Markets';
       clearBtn.style.display = '';
+      _qpScanBusy = false;
       return;
     }
 
-    statusEl.textContent = rawOpps.length + ' signal(s) found across all markets';
+    // Fix 3: Append error count when results exist
+    statusEl.textContent = rawOpps.length + ' signal(s) found across all markets' + (result.errors.length ? ' (' + result.errors.length + ' scan(s) failed)' : '');
     clearBtn.style.display = '';
 
     // Render compact signal cards (no backtesting — pure scan results inline)
@@ -7751,10 +7912,13 @@ async function qpScanAll() {
 
   btn.disabled = false;
   btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="15 3 21 3 21 9"/></svg> Scan All Markets';
+  _qpScanBusy = false;
 }
 
 function qpScanClear() {
   _qpScanAbort = true;
+  _qpScanAbortCtrl?.abort();
+  _qpScanBusy = false;
   const resultsDiv = document.getElementById('qpScanResults');
   const cardsDiv = document.getElementById('qpScanCards');
   const statusEl = document.getElementById('qpScanStatus');
@@ -8771,43 +8935,50 @@ const ALL_SCAN_GROUPS = [
 const ALL_SCAN_TFS = ['15m','30m','1h','4h','1d','1w','1mo'];
 
 // Shared scan engine — parallel POSTs to /api/scan-list for each group × timeframe
-async function _runScanBase(groups) {
+async function _runScanBase(groups, signal) {
   var _scanErrors = [];
   var _scanTotal = 0;
+  // Build the list of request descriptors (no longer wrap in individual Promises)
   const _requests = groups.flatMap(function(g){
     var tfs = g.daily_only ? ['1d'] : ALL_SCAN_TFS;
     return tfs.map(function(tf){
       _scanTotal++;
-      return new Promise(function(resolve){
-        dvFetch('/api/scan-list', {
+      return {
+        url: '/api/scan-list',
+        opts: {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: tf })
-        }).then(function(r){
-          if(r && r.results) resolve(r);
-          else {
-            if(r && r.error) _scanErrors.push(r.error);
-            resolve({results:[]});
-          }
-        })
-        .catch(function(e){
-          _scanErrors.push(e?.message || 'fetch error');
-          resolve({results:[]});
-        });
-        setTimeout(function(){
-          _scanErrors.push('timeout after 45s');
-          resolve({results:[]});
-        }, 45000);
-      });
+          body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: tf }),
+          signal: signal  // pass abort signal through
+        }
+      };
     });
   });
-  var _settled = await Promise.allSettled(_requests);
+  // Process requests in batches of 6 (max concurrent)
   var _results = [];
-  _settled.forEach(function(s){
-    if(s.status === 'fulfilled' && s.value && s.value.results){
-      _results = _results.concat(s.value.results);
-    }
-  });
+  var CONCURRENCY = 6;
+  for (var i = 0; i < _requests.length; i += CONCURRENCY) {
+    var batch = _requests.slice(i, i + CONCURRENCY);
+    var batchResults = await Promise.allSettled(batch.map(function(req){
+      return dvFetch(req.url, req.opts).then(function(r){
+        if (r && r.results) return r;
+        else {
+          if (r && r.error) _scanErrors.push(r.error);
+          return {results:[]};
+        }
+      }).catch(function(e){
+        if (e?.name === 'AbortError') throw e; // let abort propagate
+        _scanErrors.push(e?.message || 'fetch error');
+        return {results:[]};
+      });
+    }));
+    // Collect results from this batch
+    batchResults.forEach(function(s){
+      if(s.status === 'fulfilled' && s.value && s.value.results){
+        _results = _results.concat(s.value.results);
+      }
+    });
+  }
   return { results: _results, errors: _scanErrors, total: _scanTotal };
 }
 
@@ -10060,6 +10231,27 @@ function loadSignalContext(o){
   setTimeout(function(){ undRunBacktest(true); }, 300);
   // Auto-navigate to CONTEXT pre-trade gate
   setNav('understand');showUnderstand();
+}
+
+// Load a signal from the "All TF" scan inline cards — navigates to Understand with the specific TF
+function loadAllTfSignal(o) {
+  window._dvTF = (o.tf || '4h').toLowerCase();
+  // Click the corresponding TF button in the Quick Analyse row
+  document.querySelectorAll('.qp-tf').forEach(function(b){
+    if (b.dataset.tf === window._dvTF) {
+      qpSetTF(window._dvTF, b);
+    }
+  });
+  // Mirror ticker into Understand input and run analysis
+  const undInp = document.getElementById('dvTickerInput');
+  if (undInp) undInp.value = o.sym || '';
+  setNav('understand');
+  if (typeof showUnderstand === 'function') showUnderstand();
+  setTimeout(function(){
+    const inp2 = document.getElementById('dvTickerInput');
+    if (inp2) inp2.value = o.sym || '';
+    if (typeof dvRunAnalyze === 'function') dvRunAnalyze();
+  }, 80);
 }
 
 // Compute session context client-side — mirrors Python _get_session_context().
