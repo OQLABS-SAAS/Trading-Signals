@@ -15996,6 +15996,7 @@ def optimise_result():
 
 import hashlib as _hl
 import math as _math
+import concurrent.futures
 
 VERDICT_CONFIG = {
     "llm_provider": "deepseek",
@@ -16022,7 +16023,7 @@ try:
     )
     from tradingagents.agents.utils.agent_states import AgentState
     from langgraph.graph import END, START, StateGraph
-    from langchain_core.messages import HumanMessage as _LCHumanMessage
+    from langchain_core.messages import HumanMessage as _LCHumanMessage, AIMessage as _LCAIMessage
 
     def _create_thesis_injector(prior_keys, analyst_focus):
         key_labels = {
@@ -16053,6 +16054,73 @@ try:
                 return {}
         return injector_node
 
+    # ── Fix 3: Per-agent LLM response caching with Redis ──
+    _VERDICT_CACHE_TICKER = None
+    _VERDICT_CACHE_DATE = None
+
+    def _make_cached_llm(llm, agent_name):
+        """Wrap an LLM's invoke method with Redis caching.
+        Cache key: verdict_agent:{ticker}:{agent_name}:{date}
+        TTL: 3600s (1 hour).
+        Falls back gracefully if Redis is unavailable.
+        """
+        original_invoke = llm.invoke
+
+        def _cached_invoke(messages, **kwargs):
+            ticker = _VERDICT_CACHE_TICKER
+            date_str = _VERDICT_CACHE_DATE
+            if _redis_client and ticker and date_str:
+                cache_key = f"verdict_agent:{ticker}:{agent_name}:{date_str}"
+                try:
+                    cached = _redis_client.get(cache_key)
+                    if cached is not None:
+                        return _LCAIMessage(content=cached)
+                except Exception:
+                    pass
+
+            result = original_invoke(messages, **kwargs)
+
+            if _redis_client and ticker and date_str and result is not None:
+                try:
+                    content = result.content if hasattr(result, 'content') else str(result)
+                    _redis_client.setex(cache_key, 3600, content)
+                except Exception:
+                    pass
+
+            return result
+
+        llm.invoke = _cached_invoke
+        return llm
+
+    def _create_risk_reviewer(llm):
+        """Fix 2: Replace 3 debators (aggressive/conservative/neutral) with a single
+        Risk Reviewer that produces one consolidated risk assessment."""
+        def risk_reviewer_node(state):
+            try:
+                market_report = (state.get('market_report') or '')[:1000]
+                sentiment_report = (state.get('sentiment_report') or '')[:1000]
+                news_report = (state.get('news_report') or '')[:1000]
+                fundamentals_report = (state.get('fundamentals_report') or '')[:1000]
+                investment_plan = (state.get('investment_plan') or '')[:1000]
+                prompt = (
+                    f"=== RISK REVIEW ===\n"
+                    f"Market Analysis: {market_report}\n"
+                    f"Sentiment: {sentiment_report}\n"
+                    f"News/Macro: {news_report}\n"
+                    f"Fundamentals: {fundamentals_report}\n"
+                    f"Investment Plan: {investment_plan}\n\n"
+                    f"Your task: Produce a concise risk assessment for this trade. "
+                    f"Cover: (1) position sizing recommendation, (2) key risks to monitor, "
+                    f"(3) stop-loss placement advice, (4) any red flags. "
+                    f"3-5 paragraphs maximum."
+                )
+                msg = _LCHumanMessage(content=prompt)
+                result = llm.invoke([msg])
+                return {"final_trade_decision": result.content if hasattr(result, 'content') else str(result)}
+            except Exception:
+                return {"final_trade_decision": "Risk review unavailable due to error."}
+        return risk_reviewer_node
+
     class _SharedContextGraphSetup(GraphSetup):
         def setup_graph(self, selected_analysts=['market', 'social', 'news', 'fundamentals']):
             if not selected_analysts:
@@ -16076,68 +16144,35 @@ try:
                 analyst_nodes['fundamentals'] = create_fundamentals_analyst(self.quick_thinking_llm)
                 delete_nodes['fundamentals']  = create_msg_delete()
                 tool_nodes_map['fundamentals'] = self.tool_nodes['fundamentals']
-            analyst_focus = {
-                'social':       'Does current social media sentiment CONFIRM or CONTRADICT the market structure above?',
-                'news':         'Does the current news and macro environment SUPPORT or UNDERMINE the emerging thesis?',
-                'fundamentals': 'Do the company fundamentals SUPPORT or CONTRADICT the thesis above?',
-            }
-            key_map = {
-                'market':       'market_report',
-                'social':       'sentiment_report',
-                'news':         'news_report',
-                'fundamentals': 'fundamentals_report',
-            }
-            inject_nodes = {}
-            for i, analyst_type in enumerate(selected_analysts):
-                if i == 0:
-                    continue
-                prior_keys = [key_map[selected_analysts[j]] for j in range(i) if selected_analysts[j] in key_map]
-                focus = analyst_focus.get(analyst_type, 'Focus on confirming or contradicting the emerging thesis.')
-                inject_nodes[analyst_type] = _create_thesis_injector(prior_keys, focus)
             bull_researcher_node   = create_bull_researcher(self.quick_thinking_llm)
             bear_researcher_node   = create_bear_researcher(self.quick_thinking_llm)
             research_manager_node  = create_research_manager(self.deep_thinking_llm)
             trader_node            = create_trader(self.quick_thinking_llm)
-            aggressive_analyst     = create_aggressive_debator(self.quick_thinking_llm)
-            neutral_analyst        = create_neutral_debator(self.quick_thinking_llm)
-            conservative_analyst   = create_conservative_debator(self.quick_thinking_llm)
+            # Fix 2: Replace 3 debators with 1 Risk Reviewer
+            risk_reviewer_node     = _create_risk_reviewer(self.quick_thinking_llm)
             portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm)
             workflow = StateGraph(AgentState)
+            # Fix 1: Add all 4 analyst nodes in parallel from START
             for analyst_type, node in analyst_nodes.items():
                 workflow.add_node(f'{analyst_type.capitalize()} Analyst', node)
                 workflow.add_node(f'Msg Clear {analyst_type.capitalize()}', delete_nodes[analyst_type])
                 workflow.add_node(f'tools_{analyst_type}', tool_nodes_map[analyst_type])
-                if analyst_type in inject_nodes:
-                    workflow.add_node(f'Inject Thesis {analyst_type.capitalize()}', inject_nodes[analyst_type])
+                workflow.add_edge(START, f'{analyst_type.capitalize()} Analyst')
+                workflow.add_conditional_edges(
+                    f'{analyst_type.capitalize()} Analyst',
+                    getattr(self.conditional_logic, f'should_continue_{analyst_type}'),
+                    [f'tools_{analyst_type}', f'Msg Clear {analyst_type.capitalize()}'],
+                )
+                workflow.add_edge(f'tools_{analyst_type}', f'{analyst_type.capitalize()} Analyst')
+                # Fan-in: all 4 clear nodes converge on Bull Researcher
+                workflow.add_edge(f'Msg Clear {analyst_type.capitalize()}', 'Bull Researcher')
             workflow.add_node('Bull Researcher', bull_researcher_node)
             workflow.add_node('Bear Researcher', bear_researcher_node)
             workflow.add_node('Research Manager', research_manager_node)
             workflow.add_node('Trader', trader_node)
-            workflow.add_node('Aggressive Analyst', aggressive_analyst)
-            workflow.add_node('Neutral Analyst', neutral_analyst)
-            workflow.add_node('Conservative Analyst', conservative_analyst)
+            # Fix 2: Single Risk Reviewer replaces 3 debators
+            workflow.add_node('Risk Reviewer', risk_reviewer_node)
             workflow.add_node('Portfolio Manager', portfolio_manager_node)
-            first_analyst = selected_analysts[0]
-            workflow.add_edge(START, f'{first_analyst.capitalize()} Analyst')
-            for i, analyst_type in enumerate(selected_analysts):
-                current = f'{analyst_type.capitalize()} Analyst'
-                tools   = f'tools_{analyst_type}'
-                clear   = f'Msg Clear {analyst_type.capitalize()}'
-                workflow.add_conditional_edges(
-                    current,
-                    getattr(self.conditional_logic, f'should_continue_{analyst_type}'),
-                    [tools, clear],
-                )
-                workflow.add_edge(tools, current)
-                if i < len(selected_analysts) - 1:
-                    next_type = selected_analysts[i + 1]
-                    if next_type in inject_nodes:
-                        workflow.add_edge(clear, f'Inject Thesis {next_type.capitalize()}')
-                        workflow.add_edge(f'Inject Thesis {next_type.capitalize()}', f'{next_type.capitalize()} Analyst')
-                    else:
-                        workflow.add_edge(clear, f'{next_type.capitalize()} Analyst')
-                else:
-                    workflow.add_edge(clear, 'Bull Researcher')
             workflow.add_conditional_edges(
                 'Bull Researcher',
                 self.conditional_logic.should_continue_debate,
@@ -16149,27 +16184,16 @@ try:
                 {'Bull Researcher': 'Bull Researcher', 'Research Manager': 'Research Manager'},
             )
             workflow.add_edge('Research Manager', 'Trader')
-            workflow.add_edge('Trader', 'Aggressive Analyst')
-            workflow.add_conditional_edges(
-                'Aggressive Analyst',
-                self.conditional_logic.should_continue_risk_analysis,
-                {'Conservative Analyst': 'Conservative Analyst', 'Portfolio Manager': 'Portfolio Manager'},
-            )
-            workflow.add_conditional_edges(
-                'Conservative Analyst',
-                self.conditional_logic.should_continue_risk_analysis,
-                {'Neutral Analyst': 'Neutral Analyst', 'Portfolio Manager': 'Portfolio Manager'},
-            )
-            workflow.add_conditional_edges(
-                'Neutral Analyst',
-                self.conditional_logic.should_continue_risk_analysis,
-                {'Aggressive Analyst': 'Aggressive Analyst', 'Portfolio Manager': 'Portfolio Manager'},
-            )
+            # Fix 2: Trader → Risk Reviewer → Portfolio Manager → END
+            workflow.add_edge('Trader', 'Risk Reviewer')
+            workflow.add_edge('Risk Reviewer', 'Portfolio Manager')
             workflow.add_edge('Portfolio Manager', END)
             return workflow
 
     class SharedContextTradingGraph(TradingAgentsGraph):
-        """Stage 2: shared-context analyst chain — each analyst receives prior agents' emerging thesis."""
+        """Stage 2: shared-context analyst chain — each analyst receives prior agents' emerging thesis.
+        Fix 3: Overrides propagate() to wrap LLMs with per-agent Redis response caching.
+        """
         def __init__(self, selected_analysts=['market', 'social', 'news', 'fundamentals'], debug=False, config=None, callbacks=None):
             super().__init__(selected_analysts=selected_analysts, debug=debug, config=config, callbacks=callbacks)
             self.graph_setup = _SharedContextGraphSetup(
@@ -16180,6 +16204,20 @@ try:
             )
             self.workflow = self.graph_setup.setup_graph(selected_analysts)
             self.graph = self.workflow.compile()
+
+        def propagate(self, ticker, trade_date_str, **kwargs):
+            """Override: wrap LLMs with Redis caching before calling parent propagate."""
+            # Fix 3: Set cache context for per-agent LLM response caching
+            global _VERDICT_CACHE_TICKER, _VERDICT_CACHE_DATE
+            _VERDICT_CACHE_TICKER = ticker
+            _VERDICT_CACHE_DATE = trade_date_str
+
+            # Wrap LLMs with Redis caching (one wrapper per distinct agent role)
+            _make_cached_llm(self.quick_thinking_llm, 'analyst')
+            _make_cached_llm(self.deep_thinking_llm, 'manager')
+
+            # Delegate to the parent's propagate (uses the now-cached LLMs)
+            return super().propagate(ticker, trade_date_str, **kwargs)
 
     TA_AVAILABLE = True  # LAST — only True if every import and class definition above succeeded
 except Exception as e:
