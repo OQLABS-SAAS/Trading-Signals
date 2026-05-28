@@ -16625,22 +16625,19 @@ try:
         return injector_node
 
     # ── Fix 3: Per-agent LLM response caching with Redis ──
-    _VERDICT_CACHE_TICKER = None
-    _VERDICT_CACHE_DATE = None
 
-    def _make_cached_llm(llm, agent_name):
+    def _make_cached_llm(llm, agent_name, ticker, date_str):
         """Wrap an LLM's invoke method with Redis caching.
-        Cache key: verdict_agent:{ticker}:{agent_name}:{date}
+        Cache key: verdict_agent:{ticker}:{agent_name}:{date}:{msg_hash}
         TTL: 3600s (1 hour).
         Falls back gracefully if Redis is unavailable.
         """
         original_invoke = llm.invoke
 
         def _cached_invoke(messages, **kwargs):
-            ticker = _VERDICT_CACHE_TICKER
-            date_str = _VERDICT_CACHE_DATE
             if _redis_client and ticker and date_str:
-                cache_key = f"verdict_agent:{ticker}:{agent_name}:{date_str}"
+                msg_hash = _hl.md5(repr(messages).encode()).hexdigest()[:16]
+                cache_key = f"verdict_agent:{ticker}:{agent_name}:{date_str}:{msg_hash}"
                 try:
                     cached = _redis_client.get(cache_key)
                     if cached is not None:
@@ -16777,14 +16774,9 @@ try:
 
         def propagate(self, ticker, trade_date_str, **kwargs):
             """Override: wrap LLMs with Redis caching before calling parent propagate."""
-            # Fix 3: Set cache context for per-agent LLM response caching
-            global _VERDICT_CACHE_TICKER, _VERDICT_CACHE_DATE
-            _VERDICT_CACHE_TICKER = ticker
-            _VERDICT_CACHE_DATE = trade_date_str
-
             # Wrap LLMs with Redis caching (one wrapper per distinct agent role)
-            _make_cached_llm(self.quick_thinking_llm, 'analyst')
-            _make_cached_llm(self.deep_thinking_llm, 'manager')
+            _make_cached_llm(self.quick_thinking_llm, 'analyst', ticker, trade_date_str)
+            _make_cached_llm(self.deep_thinking_llm, 'manager', ticker, trade_date_str)
 
             # Delegate to the parent's propagate (uses the now-cached LLMs)
             return super().propagate(ticker, trade_date_str, **kwargs)
