@@ -1389,26 +1389,27 @@ def build_ind_from_tv(tv, ticker=None, timeframe=None, asset_type=None):
         ema_trend = "MIXED"
 
     return {
+        "ready":          False,
         "price":          round(p, 4),
         "chg_1d":         round(chg, 2),
-        "chg_1w":         0.0,
-        "chg_1m":         0.0,
-        "high_52w":       round(p * 1.3, 4),
-        "low_52w":        round(p * 0.7, 4),
+        "chg_1w":         None,
+        "chg_1m":         None,
+        "high_52w":       None,
+        "low_52w":        None,
         "rsi":            round(float(rsi), 1),
-        "rsi_divergence": {"type": "none", "label": "", "strength": 0, "desc": "", "all": []},
+        "rsi_divergence": {"type": "none", "strength": "none"},
         "ema20":          round(float(e20),  4),
         "ema50":          round(float(e50),  4),
         "ema200":         round(float(e200), 4),
         "ema_trend":      ema_trend,
         "macd_hist":      round(float(macd), 6),
-        "bb_pos":         round(bb_pos,  3),
-        "bb_width":       round(bb_width, 3),
-        "atr":            round(float(atr), 6),
+        "bb_pos":         None,
+        "bb_width":       None,
+        "atr":            None,
         "vol_ratio":      _tv_vol_ratio(ticker, asset_type),  # SIG-7: real volume ratio
-        "supertrend":     "NEUTRAL",
-        "resistance":     round(bbu, 4),
-        "support":        round(bbl, 4),
+        "supertrend":     None,
+        "resistance":     None,
+        "support":        None,
         "chart_dates":        [],
         "chart_prices":       [],
         "chart_opens":        [],
@@ -3904,12 +3905,13 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
 
     # ── C2: VIX Macro Gate — Redis-cached 15 min, negligible latency ──────────
     # Fetch the current VIX zone. If Redis has a recent result this costs ~1ms.
-    # REDUCED zone (VIX 15-25): tighten confluence gate to 75% minimum — elevated
+    # REDUCED zone (VIX 20-25): tighten confluence gate to 75% minimum — elevated
     # fear makes oscillators noisier, so we require stronger agreement before
-    # showing a signal. NO_TRADE zone (VIX 25+): handled after all gates below.
+    # showing a signal. CAUTION zone (VIX 25-30): position-size reduction applies
+    # below. NO_TRADE zone (VIX 30+): handled after all gates below.
     _vix_ctx = _get_vix_score()
     _macro_override = False
-    if _vix_ctx["zone"] == "REDUCED":
+    if _vix_ctx["zone"] in ("REDUCED", "CAUTION"):
         threshold = max(threshold, 0.75)
 
     if bull_pct >= threshold:
@@ -4105,7 +4107,7 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         gate_note = gate_note or f"Only {total_votes} indicator{'s' if total_votes != 1 else ''} voted — need at least {MIN_VOTES_FOR_SIGNAL} for an actionable signal."
 
     # ── C2: VIX NO_TRADE zone — suppress all BUY/SELL signals ───────────────
-    # VIX > 25 means panic-driven markets where technical analysis is unreliable.
+    # VIX > 30 means panic-driven markets where technical analysis is unreliable.
     # Override any directional signal to HOLD regardless of indicator agreement.
     # macro_override=True is returned so the frontend can show the suppression
     # message and the red VIX badge (rendered in C3).
@@ -9387,7 +9389,7 @@ def _get_vix_score():
     if   vix < 14:  score, zone = 95, "FULL";     msg = f"Markets are very calm right now (VIX {vix:.1f}). This is one of the best conditions to trade — indicators are reliable and prices are behaving predictably. Trade at your normal size."
     elif vix < 20:  score, zone = 80, "FULL";     msg = f"Markets are calm (VIX {vix:.1f}). Normal conditions — your signals are reliable. Trade at your normal size."
     elif vix < 25:  score, zone = 60, "REDUCED";  msg = f"Markets are more nervous than usual (VIX {vix:.1f}). DotVerse is being extra picky — only showing signals where many indicators strongly agree. If a BUY or SELL signal appears, it has passed a stricter test than normal. Consider reducing position size by about a third."
-    elif vix < 30:  score, zone = 40, "REDUCED";  msg = f"Markets are fearful right now (VIX {vix:.1f}). Prices are jumping around unpredictably and signals are less reliable. DotVerse has tightened its filter significantly. If you trade, put in half your normal amount — and be ready for the price to move sharply against you even on a good signal."
+    elif vix < 30:  score, zone = 40, "CAUTION";  msg = f"CAUTION — Reduce position size. Markets are fearful (VIX {vix:.1f}). Prices are jumping around unpredictably and signals are less reliable. If you trade, put in half your normal amount — and be ready for the price to move sharply against you even on a good signal."
     elif vix < 35:  score, zone = 20, "NO_TRADE"; msg = f"Markets are in panic mode (VIX {vix:.1f}). DotVerse has suppressed all signals — when fear is this high, prices are driven by emotion, not by the technical patterns your indicators read. Sit on your hands. Wait for VIX to drop below 30 before trading."
     else:           score, zone =  5, "NO_TRADE"; msg = f"Extreme fear in markets — this is a crash or crisis level (VIX {vix:.1f}). All signals are suppressed. Do not trade. Sitting in cash is the right move right now. Wait for conditions to stabilise before returning."
 
@@ -9619,7 +9621,7 @@ def _global_automation_job():
         vix_zone = vix_data.get("zone", "FULL")
         vix_val  = vix_data.get("vix")
 
-        if vix_zone not in ("REDUCED", "NO_TRADE") or vix_val is None:
+        if vix_zone not in ("REDUCED", "CAUTION", "NO_TRADE") or vix_val is None:
             return  # markets calm — no broadcast needed
 
         today    = datetime.utcnow().strftime("%Y-%m-%d")
@@ -11856,7 +11858,11 @@ def simulate():
             },
         }
 
-        return jsonify({"simulation": sim})
+        return jsonify({
+            "simulation": sim,
+            "type": "educational_demo",
+            "disclaimer": "Illustrative scenarios only — not based on market data or statistical computation."
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
