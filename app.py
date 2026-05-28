@@ -17470,36 +17470,68 @@ _OPENAPI_SPEC = {
     }
 }
 
-@app.route("/api/analysis/markov", methods=["GET"])
+
+# ─── WALK-FORWARD MARKOV BACKTEST ────────────────────────────────
+# Import the dedicated backtest module. It handles its own sys.path
+# setup to find markov_engine.py in the same directory.
+import sys as _sys
+_markov_bt_path = os.path.dirname(os.path.abspath(__file__))
+if _markov_bt_path not in _sys.path:
+    _sys.path.insert(0, _markov_bt_path)
+from backtest_markov import WalkForwardBacktest as _WalkForwardBacktest
+
+
+@app.route("/api/backtest/markov", methods=["GET"])
 @login_required
-def analysis_markov():
-    """GET /api/analysis/markov?ticker=X&asset_type=stock&timeframe=1d
+def backtest_markov():
+    """GET /api/backtest/markov?ticker=X&asset_type=stock&timeframe=1d&years=3
 
-    Runs the full Markov chain analysis pipeline on the given ticker.
-    Uses EODHD daily price data (timeframe is accepted but Markov always
-    uses daily data for state classification).
+    Walk-forward backtesting for the Markov regime-prediction strategy.
 
-    Returns JSON with:
-      - transition_matrix (3x3): probability of moving between Bull/Bear/Sideways
-      - state_counts: how many bars were classified in each state
-      - multi_day_forecast_5d/10d/20d: matrix-squared probabilities
-      - stationary_distribution: long-run regime probabilities
-      - hmm_confirmation: HMM agreement rate and hidden transition matrix
+    Walk-forward means the transition matrix is recalculated each day using
+    ONLY data available up to that day (no look-ahead bias). The strategy
+    goes LONG when Bull is predicted, SHORT when Bear is predicted, and
+    HOLD when Sideways is predicted.
+
+    Parameters
+    ----------
+    ticker : str (required)
+        Ticker symbol (e.g. SPY, AAPL, BTC-USD).
+    asset_type : str (default: stock)
+        One of: stock, crypto, forex, index, commodity.
+    timeframe : str (default: 1d)
+        Accepted but Markov always uses daily data for state classification.
+    years : int (default: 3)
+        Years of history to include in the backtest (1-10).
+
+    Returns
+    -------
+    JSON with:
+      - win_rate_pct: percentage of winning trades
+      - total_return_pct: total compounded return over the test period
+      - annualised_return_pct: annualised return
+      - sharpe: annualised Sharpe ratio (risk-free = 0)
+      - max_drawdown_pct: peak-to-trough drawdown
+      - benchmark_return_pct: buy-and-hold return over the same period
+      - strategy_vs_benchmark_pct: strategy return minus benchmark
+      - equity_curve: array of equity values (starts at 1.0)
+      - benchmark_curve: array of benchmark values
+      - trades: complete trade log
+      - directional_accuracy_pct: % of correct state predictions
+      - state_summary: breakdown of predictions per current state
 
     Errors:
       400 — missing ticker
-      502 — Markov engine failed to fetch or compute data
+      502 — backtest failed (insufficient data, fetch error)
     """
     ticker = ""
     try:
-        # -- Read query parameters --------------------------------
         ticker = request.args.get("ticker", "").upper().strip()
         asset_type = request.args.get("asset_type", "stock").strip().lower()
-        # timeframe is accepted but Markov uses daily data internally.
-        # We store it in the response for transparency.
         timeframe = request.args.get("timeframe", "1d").strip().lower()
+        years_str = request.args.get("years", "3").strip()
+        years = max(1, min(10, int(years_str)))  # clamp 1-10
 
-        # -- Validate inputs --------------------------------------
         if not ticker:
             return jsonify({"error": "Missing required parameter: ticker"}), 400
 
@@ -17509,35 +17541,31 @@ def analysis_markov():
                 "error": f"Invalid asset_type '{asset_type}'. Must be one of: {', '.join(sorted(valid_assets))}"
             }), 400
 
-        # -- Run the Markov engine --------------------------------
-        # Uses EODHD via the engine's built-in fetch_daily_prices().
-        # The engine handles its own EODHD_API_KEY env var fallback.
-        engine = MarkovEngine()
-        result = engine.run(ticker, asset_type=asset_type, days=365, hmm_iterations=50)
+        # Run the walk-forward backtest
+        bt = _WalkForwardBacktest()
+        result = bt.run(ticker, asset_type=asset_type, years=years)
 
-        # Check if the engine returned an error
         if "error" in result and result["error"]:
-            print(f"[markov-endpoint] Engine error for {ticker}: {result['error']}")
+            print(f"[backtest-markov] Error for {ticker}: {result['error']}")
             return jsonify({
-                "error": f"Markov analysis failed for {ticker}: {result['error']}",
+                "error": f"Markov backtest failed for {ticker}: {result['error']}",
                 "ticker": ticker,
                 "asset_type": asset_type,
             }), 502
 
-        # -- Attach request metadata and return -------------------
+        # Attach request metadata
         result["request"] = {
             "ticker": ticker,
             "asset_type": asset_type,
             "timeframe": timeframe,
+            "years": years,
         }
-        result["cached"] = False
-        # Markov results are cached by _get_markov_signal(), but this
-        # endpoint always runs fresh for correctness.
+
         return jsonify(result)
 
     except Exception as exc:
         safe_ticker = ticker or "(unknown)"
-        print(f"[markov-endpoint] Exception for {safe_ticker}: {exc}")
+        print(f"[backtest-markov] Exception for {safe_ticker}: {exc}")
         return jsonify({"error": f"Internal error: {str(exc)[:200]}"}), 500
 
 
