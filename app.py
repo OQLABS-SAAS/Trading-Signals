@@ -16945,13 +16945,69 @@ try:
 except Exception:
     pass
 
-# NOTE on the RQ worker:
-# The previous in-process daemon-thread approach (running rq Worker.work() as a
-# thread inside gunicorn) is fundamentally fragile because rq's default Worker
-# forks a child process per job and fork() inside a Python thread under the GIL
-# can deadlock or corrupt gunicorn's state. It also dies if a job exceeds
-# gunicorn's --timeout. The worker now runs as a separate process started by
-# start.sh — see Procfile and run_worker.py.
+# ─── WALK-FORWARD MARKOV BACKTEST ────────────────────────────────
+import sys as _sys
+_markov_bt_path = os.path.dirname(os.path.abspath(__file__))
+if _markov_bt_path not in _sys.path:
+    _sys.path.insert(0, _markov_bt_path)
+from backtest_markov import WalkForwardBacktest as _WalkForwardBacktest
+
+
+@app.route("/api/backtest/markov", methods=["GET"])
+@login_required
+def backtest_markov():
+    """GET /api/backtest/markov?ticker=X&asset_type=stock&timeframe=1d&years=3
+
+    Walk-forward backtesting for the Markov regime-prediction strategy.
+    Recalculates transition matrix each day using ONLY data up to that
+    day (no look-ahead bias). Strategy: LONG when Bull predicted,
+    SHORT when Bear predicted, HOLD when Sideways predicted.
+
+    Returns JSON: win_rate_pct, total_return_pct, annualised_return_pct,
+    sharpe, max_drawdown_pct, benchmark_return_pct, equity_curve,
+    benchmark_curve, directional_accuracy_pct, trade log.
+    """
+    ticker = ""
+    try:
+        ticker = request.args.get("ticker", "").upper().strip()
+        asset_type = request.args.get("asset_type", "stock").strip().lower()
+        timeframe = request.args.get("timeframe", "1d").strip().lower()
+        years_str = request.args.get("years", "3").strip()
+        years = max(1, min(10, int(years_str)))
+
+        if not ticker:
+            return jsonify({"error": "Missing required parameter: ticker"}), 400
+
+        valid_assets = {"stock", "crypto", "forex", "index", "commodity"}
+        if asset_type not in valid_assets:
+            return jsonify({
+                "error": f"Invalid asset_type '{asset_type}'. Must be one of: {', '.join(sorted(valid_assets))}"
+            }), 400
+
+        bt = _WalkForwardBacktest()
+        result = bt.run(ticker, asset_type=asset_type, years=years)
+
+        if "error" in result and result["error"]:
+            print(f"[backtest-markov] Error for {ticker}: {result['error']}")
+            return jsonify({
+                "error": f"Markov backtest failed for {ticker}: {result['error']}",
+                "ticker": ticker,
+                "asset_type": asset_type,
+            }), 502
+
+        result["request"] = {
+            "ticker": ticker,
+            "asset_type": asset_type,
+            "timeframe": timeframe,
+            "years": years,
+        }
+        return jsonify(result)
+
+    except Exception as exc:
+        safe_ticker = ticker or "(unknown)"
+        print(f"[backtest-markov] Exception for {safe_ticker}: {exc}")
+        return jsonify({"error": f"Internal error: {str(exc)[:200]}"}), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
