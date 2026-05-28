@@ -36,6 +36,488 @@ _browser_session.headers.update({
     "Referer":         "https://finance.yahoo.com/",
 })
 
+# ═══════════════════════════════════════════════════════════════
+# MARKOV ENGINE — Inline module for market regime analysis
+# ═══════════════════════════════════════════════════════════════
+# This section implements a complete Markov analysis pipeline:
+#   1. Fetches daily price data from EODHD (primary data source)
+#   2. Classifies market states (Bull / Bear / Sideways at +/-5%)
+#   3. Builds a 3x3 transition matrix with rolling lookback
+#   4. Squares the matrix for multi-day probability forecasts
+#   5. Computes the stationary distribution (long-run probabilities)
+#   6. Runs a simple HMM for regime confirmation
+#
+# All logic is vectorized with numpy/pandas and has no look-ahead bias.
+# ═══════════════════════════════════════════════════════════════
+
+# ── Configuration constants ────────────────────────────
+RETURN_THRESHOLD = 0.05
+STATE_BULL = 0
+STATE_BEAR = 1
+STATE_SIDEWAYS = 2
+STATE_LABELS = {STATE_BULL: "Bull", STATE_BEAR: "Bear", STATE_SIDEWAYS: "Sideways"}
+DEFAULT_LOOKBACK = 20
+MAX_BARS = 500
+EODHD_TIMEOUT = (5, 15)
+
+
+def _markov_normalise_ticker(ticker: str, asset_type: str) -> str:
+    """Build the EODHD-compatible symbol string for a given ticker + asset type."""
+    raw = ticker.upper().replace("=X", "").replace("=F", "")
+    if asset_type == "stock":
+        return f"{raw.replace('-', '')}.US"
+    if asset_type == "forex":
+        return raw.replace("-", "").replace("/", "") + ".FOREX"
+    if asset_type == "crypto":
+        base = raw.replace("-USD", "").replace("-USDT", "").replace("-USDC", "")
+        return base.strip("-")
+    if asset_type == "index":
+        INDEX_MAP = {
+            "^GSPC": "SPY.US", "^VIX": "UVXY.US", "^NDX": "QQQ.US",
+            "^DJI": "DIA.US", "^RUT": "IWM.US", "^IXIC": "QQQ.US",
+        }
+        return INDEX_MAP.get(raw, raw.replace("-", ""))
+    if asset_type == "commodity":
+        COMMODITY_MAP = {
+            "GC": "XAUUSD.FOREX", "SI": "XAGUSD.FOREX",
+            "PL": "XPTUSD.FOREX", "PA": "XPDUSD.FOREX",
+        }
+        return COMMODITY_MAP.get(raw, raw)
+    return raw
+
+
+def _markov_fetch_prices(
+    ticker: str, asset_type: str = "stock",
+    days: int = 365, api_key=None,
+):
+    """Fetch daily close prices from EODHD."""
+    key = api_key or os.environ.get("EODHD_API_KEY", "").strip()
+    if not key:
+        print("[markov-engine] EODHD_API_KEY not set -- cannot fetch data")
+        return None
+    symbol = _markov_normalise_ticker(ticker, asset_type)
+    today = datetime.now()
+    from_date = (today - timedelta(days=days)).strftime("%Y-%m-%d")
+    to_date = today.strftime("%Y-%m-%d")
+    url = f"https://eodhd.com/api/eod/{symbol}"
+    params = {"api_token": key, "fmt": "json", "from": from_date, "to": to_date}
+    try:
+        resp = requests.get(url, params=params, timeout=EODHD_TIMEOUT)
+        if resp.status_code != 200:
+            print(f"[markov-engine] EODHD HTTP {resp.status_code} for {symbol}")
+            return None
+        data = resp.json()
+        if not isinstance(data, list) or len(data) < 20:
+            print(f"[markov-engine] EODHD insufficient bars for {symbol}: {len(data) if isinstance(data, list) else 0}")
+            return None
+        dates, closes = [], []
+        for bar in data:
+            try:
+                d_raw = bar.get("date") or bar.get("datetime", "")
+                if " " in d_raw:
+                    d_parsed = datetime.strptime(d_raw, "%Y-%m-%d %H:%M:%S")
+                else:
+                    d_parsed = datetime.strptime(d_raw, "%Y-%m-%d")
+                dates.append(d_parsed)
+                closes.append(float(bar["close"]))
+            except (ValueError, KeyError):
+                continue
+        if len(closes) < 20:
+            print(f"[markov-engine] EODHD only parsed {len(closes)} valid bars for {symbol}")
+            return None
+        series = pd.Series(closes, index=pd.DatetimeIndex(dates))
+        series = series.sort_index().iloc[-MAX_BARS:]
+        print(f"[markov-engine] Fetched {len(series)} daily bars for {symbol} ({ticker})")
+        return series
+    except requests.RequestException as exc:
+        print(f"[markov-engine] EODHD request failed for {symbol}: {exc}")
+        return None
+
+
+def _markov_classify_states(prices, threshold=RETURN_THRESHOLD):
+    """Classify daily returns into Bull/Bear/Sideways states."""
+    prices_arr = np.asarray(prices, dtype=np.float64) if not isinstance(prices, np.ndarray) else prices.astype(np.float64)
+    if len(prices_arr) < 2:
+        return np.array([STATE_SIDEWAYS])
+    log_rets = np.diff(np.log(prices_arr))
+    states = np.full(len(prices_arr), STATE_SIDEWAYS, dtype=np.int64)
+    states[1:] = np.select(
+        [log_rets > threshold, log_rets < -threshold],
+        [STATE_BULL, STATE_BEAR],
+        default=STATE_SIDEWAYS,
+    )
+    return states
+
+
+def _markov_build_transition_matrix(states, lookback=DEFAULT_LOOKBACK):
+    """Build a 3x3 transition matrix from the most recent N transitions."""
+    if len(states) < 2:
+        return np.full((3, 3), np.nan)
+    from_states = states[:-1]
+    to_states = states[1:]
+    if lookback < len(from_states):
+        from_states = from_states[-lookback:]
+        to_states = to_states[-lookback:]
+    flat_idx = from_states * 3 + to_states
+    counts = np.bincount(flat_idx, minlength=9).reshape(3, 3).astype(np.float64)
+    row_sums = counts.sum(axis=1, keepdims=True)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        matrix = np.where(row_sums > 0, counts / row_sums, 0.0)
+    return matrix
+
+
+def _markov_square_matrix(P, steps=5):
+    """Compute P^n for multi-day forecasts."""
+    result = np.asarray(P, dtype=np.float64)
+    for _ in range(steps - 1):
+        result = result @ P
+    return result
+
+
+def _markov_stationary_distribution(P):
+    """Compute stationary (long-run/steady-state) distribution."""
+    if np.any(np.isnan(P)) or np.any(np.isinf(P)):
+        return None
+    eigenvalues, eigenvectors = np.linalg.eig(P.T)
+    idx = np.argmin(np.abs(eigenvalues - 1.0))
+    pi = np.real(eigenvectors[:, idx])
+    if np.sum(pi) != 0:
+        pi = pi / np.sum(pi)
+    else:
+        return None
+    pi = np.maximum(pi, 0.0)
+    pi = pi / np.sum(pi)
+    return pi
+
+
+class _MarkovSimpleHMM:
+    """A simple HMM for regime confirmation (Baum-Welch EM + Viterbi)."""
+
+    def __init__(self, n_hidden=3, n_obs=3, max_iter=50, tol=1e-4, random_seed=42):
+        self.n = n_hidden
+        self.m = n_obs
+        self.max_iter = max_iter
+        self.tol = tol
+        self.rng = np.random.default_rng(random_seed)
+        self.pi = None
+        self.A = None
+        self.B = None
+        self.log_likelihoods = None
+
+    def _initialise(self, obs):
+        self.pi = np.ones(self.n) / self.n
+        A_raw = self.rng.uniform(size=(self.n, self.n))
+        self.A = A_raw / A_raw.sum(axis=1, keepdims=True)
+        B_diag = np.eye(self.n, self.m) * 0.7
+        B_noise = self.rng.uniform(size=(self.n, self.m)) * 0.15
+        self.B = B_diag + B_noise
+        self.B = self.B / self.B.sum(axis=1, keepdims=True)
+
+    def _forward(self, obs):
+        T = len(obs)
+        alpha = np.zeros((T, self.n))
+        alpha[0] = self.pi * self.B[:, obs[0]]
+        alpha[0] /= alpha[0].sum()
+        for t in range(1, T):
+            alpha[t] = (alpha[t - 1] @ self.A) * self.B[:, obs[t]]
+            s = alpha[t].sum()
+            if s > 0:
+                alpha[t] /= s
+        return alpha
+
+    def _backward(self, obs):
+        T = len(obs)
+        beta = np.ones((T, self.n))
+        for t in range(T - 2, -1, -1):
+            beta[t] = (self.A @ (self.B[:, obs[t + 1]] * beta[t + 1]))
+            s = beta[t].sum()
+            if s > 0:
+                beta[t] /= s
+        return beta
+
+    def _baum_welch_step(self, obs, alpha, beta):
+        T = len(obs)
+        gamma = alpha * beta
+        gamma /= gamma.sum(axis=1, keepdims=True)
+        xi = np.zeros((T - 1, self.n, self.n))
+        for t in range(T - 1):
+            for i in range(self.n):
+                for j in range(self.n):
+                    xi[t, i, j] = alpha[t, i] * self.A[i, j] * self.B[j, obs[t + 1]] * beta[t + 1, j]
+            xi[t] /= xi[t].sum()
+        self.pi = gamma[0]
+        for i in range(self.n):
+            denom = gamma[:-1, i].sum()
+            if denom > 0:
+                self.A[i] = xi[:, i, :].sum(axis=0) / denom
+        for i in range(self.n):
+            denom = gamma[:, i].sum()
+            if denom > 0:
+                for k in range(self.m):
+                    self.B[i, k] = gamma[obs == k, i].sum() / denom
+
+    def _log_likelihood(self, obs, alpha):
+        return np.log(alpha[-1].sum()) if alpha[-1].sum() > 0 else -np.inf
+
+    def fit(self, obs):
+        obs = np.asarray(obs, dtype=np.int64)
+        self._initialise(obs)
+        self.log_likelihoods = []
+        for iteration in range(self.max_iter):
+            alpha = self._forward(obs)
+            beta = self._backward(obs)
+            self._baum_welch_step(obs, alpha, beta)
+            ll = self._log_likelihood(obs, alpha)
+            self.log_likelihoods.append(ll)
+            if iteration > 1:
+                delta = ll - self.log_likelihoods[-2]
+                if abs(delta) < self.tol:
+                    break
+        return self
+
+    def viterbi(self, obs):
+        T = len(obs)
+        if T == 0:
+            return np.array([], dtype=np.int64)
+        delta = np.zeros((T, self.n))
+        psi = np.zeros((T, self.n), dtype=np.int64)
+        delta[0] = self.pi * self.B[:, obs[0]]
+        delta[0] /= delta[0].sum() if delta[0].sum() > 0 else 1.0
+        for t in range(1, T):
+            for j in range(self.n):
+                probs = delta[t - 1] * self.A[:, j] * self.B[j, obs[t]]
+                psi[t, j] = np.argmax(probs)
+                delta[t, j] = probs[psi[t, j]]
+        path = np.zeros(T, dtype=np.int64)
+        path[-1] = np.argmax(delta[-1])
+        for t in range(T - 2, -1, -1):
+            path[t] = psi[t + 1, path[t + 1]]
+        return path
+
+    def get_confidence(self, obs, threshold_states):
+        hidden = self.viterbi(obs)
+        min_len = min(len(hidden), len(threshold_states))
+        agreement = (hidden[:min_len] == threshold_states[:min_len]).mean()
+        hmm_stationary = _markov_stationary_distribution(self.A)
+        return {
+            "agreement_rate": round(float(agreement), 4),
+            "hidden_transition_matrix": self.A.round(4).tolist(),
+            "stationary_distribution": hmm_stationary.round(4).tolist() if hmm_stationary is not None else None,
+            "most_likely_regime": int(hidden[-1]),
+            "most_likely_regime_label": STATE_LABELS.get(int(hidden[-1]), "Unknown"),
+        }
+
+
+class MarkovEngine:
+    """Orchestrates the full Markov chain analysis pipeline."""
+
+    def __init__(self, api_key=None, lookback=DEFAULT_LOOKBACK):
+        self.api_key = api_key
+        self.lookback = lookback
+        self.prices = None
+        self.states = None
+        self.transition_matrix = None
+        self.stationary = None
+        self.hmm_model = None
+        self.hmm_result = None
+
+    def run(self, ticker, asset_type="stock", days=365, hmm_iterations=50):
+        prices = _markov_fetch_prices(ticker, asset_type, days, self.api_key)
+        if prices is None:
+            return {"error": f"Failed to fetch data for {ticker} ({asset_type})"}
+        self.prices = prices
+        states = _markov_classify_states(prices)
+        self.states = states
+        unique, counts = np.unique(states, return_counts=True)
+        state_counts = {STATE_LABELS.get(int(s), f"State{s}"): int(c) for s, c in zip(unique, counts)}
+        P = _markov_build_transition_matrix(states, lookback=self.lookback)
+        self.transition_matrix = P
+        P_5d = _markov_square_matrix(P, steps=5)
+        P_10d = _markov_square_matrix(P, steps=10)
+        P_20d = _markov_square_matrix(P, steps=20)
+        pi = _markov_stationary_distribution(P)
+        self.stationary = pi
+        if len(states) >= 20:
+            obs = states.copy()
+            hmm = _MarkovSimpleHMM(n_hidden=3, n_obs=3, max_iter=hmm_iterations)
+            hmm.fit(obs)
+            self.hmm_model = hmm
+            hmm_result = hmm.get_confidence(obs, states)
+            self.hmm_result = hmm_result
+        else:
+            hmm_result = {
+                "agreement_rate": None,
+                "hidden_transition_matrix": None,
+                "stationary_distribution": None,
+                "most_likely_regime": None,
+                "most_likely_regime_label": "Insufficient data",
+            }
+            self.hmm_result = hmm_result
+        return self._build_output(ticker, asset_type, P, pi, P_5d, P_10d, P_20d, state_counts, hmm_result)
+
+    def _build_output(self, ticker, asset_type, P, pi, P_5d, P_10d, P_20d, state_counts, hmm_result):
+        labels = [STATE_LABELS[i] for i in range(3)]
+        return {
+            "engine_version": "1.0.0",
+            "ticker": ticker,
+            "asset_type": asset_type,
+            "lookback_days": self.lookback,
+            "return_threshold_pct": RETURN_THRESHOLD * 100,
+            "n_bars": len(self.prices) if self.prices is not None else 0,
+            "n_transitions": max(0, (len(self.states) - 1) if self.states is not None else 0),
+            "state_counts": state_counts,
+            "state_labels": labels,
+            "transition_matrix": P.round(4).tolist(),
+            "transition_matrix_labels": {"from": labels, "to": labels},
+            "transition_matrix_interpretation": (
+                "Rows = current state, Columns = next state. "
+                "E.g. row Bull, col Bear = probability market goes Bull->Bear next day."
+            ),
+            "multi_day_forecast_5d": P_5d.round(4).tolist(),
+            "multi_day_forecast_10d": P_10d.round(4).tolist(),
+            "multi_day_forecast_20d": P_20d.round(4).tolist(),
+            "forecast_interpretation": (
+                "P^N matrix: row = starting state, col = state after N steps. "
+                "For large N the rows converge to the stationary distribution."
+            ),
+            "stationary_distribution": pi.round(4).tolist() if pi is not None else None,
+            "stationary_labels": labels,
+            "stationary_interpretation": (
+                "Long-run probability of each regime, regardless of starting state. "
+                "If Bear is 0.60, the market spends ~60% of days in Bear over the long term."
+            ),
+            "hmm_confirmation": hmm_result,
+            "hmm_interpretation": (
+                "The HMM independently learns the 'true' regime sequence using "
+                "probabilistic inference. If agreement_rate is high (above 0.70), "
+                "the simple threshold method is reliable. Low agreement suggests "
+                "the +/-5% boundary may be too rigid for current conditions."
+            ),
+        }
+
+
+# ─── MARKOV INTEGRATION ────────────────────────────────
+# Cache + helper to feed Markov results into get_analysis()
+
+# Default weight for the Markov confidence factor.
+# The Markov signal value (Bull% - Bear%) ranges from -1.0 to 1.0,
+# and this weight scales how much it affects the vote counts.
+MARKOV_DEFAULT_WEIGHT = 0.3
+
+# Cache Markov results for 1 hour since they use daily data
+_markov_cache      = {}
+_markov_cache_lock = threading.Lock()
+MARKOV_CACHE_TTL   = 3600  # 1 hour in seconds
+
+def _get_markov_signal(ticker, asset_type, api_key=None, weight=MARKOV_DEFAULT_WEIGHT):
+    """Run the Markov engine and compute the Markov confidence signal.
+
+    The Markov signal value is (Bull% - Bear%) from the stationary
+    distribution of the engine's 3x3 transition matrix. This gives
+    a value from -1.0 (strongly bearish) to +1.0 (strongly bullish).
+
+    Parameters
+    ----------
+    ticker : str
+        Ticker symbol (e.g. 'SPY', 'AAPL', 'BTC-USD').
+    asset_type : str
+        One of 'stock', 'forex', 'crypto', 'index', 'commodity'.
+    api_key : str or None
+        EODHD API key. Falls back to EODHD_API_KEY env var.
+    weight : float
+        How much weight the Markov signal gets in the vote pool.
+        Default 0.3 means a full-strength Markov signal (Bull%=Bear%+1.0)
+        contributes 0.3 votes to the directional count.
+
+    Returns
+    -------
+    dict with keys:
+        signal_value : float from -1.0 (bearish) to +1.0 (bullish)
+        weighted_vote : float — the actual vote contribution (signal_value * weight)
+        bull_pct : float or None — Bull% from stationary distribution
+        bear_pct : float or None — Bear% from stationary distribution
+        status : str — 'ok', 'no_data', 'error'
+        error : str or None
+    """
+    # Build a cache key from the ticker + asset type
+    cache_key = f"markov:{ticker}:{asset_type}"
+
+    # Check cache first (Markov uses daily data — no need to re-fetch often)
+    with _markov_cache_lock:
+        cached = _markov_cache.get(cache_key)
+        if cached and (time.time() - cached["ts"]) < MARKOV_CACHE_TTL:
+            return cached["result"]
+
+    # Run the Markov engine
+    try:
+        engine = MarkovEngine(api_key=api_key)
+        result = engine.run(ticker, asset_type=asset_type, days=365, hmm_iterations=50)
+
+        # Check for errors
+        if "error" in result:
+            err_msg = f"Markov engine error for {ticker}: {result['error']}"
+            print(f"[markov-integration] {err_msg}")
+            return {
+                "signal_value": 0.0,
+                "weighted_vote": 0.0,
+                "bull_pct": None,
+                "bear_pct": None,
+                "status": "error",
+                "error": err_msg,
+            }
+
+        # Extract stationary distribution: [Bull%, Bear%, Sideways%]
+        stationary = result.get("stationary_distribution")
+        if stationary is None or len(stationary) < 3:
+            print(f"[markov-integration] No stationary distribution for {ticker}")
+            return {
+                "signal_value": 0.0,
+                "weighted_vote": 0.0,
+                "bull_pct": None,
+                "bear_pct": None,
+                "status": "no_data",
+                "error": "No stationary distribution available",
+            }
+
+        bull_pct = stationary[0]  # Probability of Bull state
+        bear_pct = stationary[1]  # Probability of Bear state
+        signal_value = bull_pct - bear_pct  # Ranges from -1.0 to +1.0
+        weighted_vote = signal_value * weight
+
+        print(
+            f"[markov-integration] {ticker} {asset_type}: "
+            f"Bull={bull_pct:.2f} Bear={bear_pct:.2f} "
+            f"signal={signal_value:+.3f} weighted_vote={weighted_vote:+.3f}"
+        )
+
+        output = {
+            "signal_value": round(signal_value, 4),
+            "weighted_vote": round(weighted_vote, 4),
+            "bull_pct": round(bull_pct, 4),
+            "bear_pct": round(bear_pct, 4),
+            "status": "ok",
+            "error": None,
+        }
+
+        # Store in cache
+        with _markov_cache_lock:
+            _markov_cache[cache_key] = {"ts": time.time(), "result": output}
+
+        return output
+
+    except Exception as exc:
+        err_msg = f"Markov engine exception for {ticker}: {exc}"
+        print(f"[markov-integration] {err_msg}")
+        return {
+            "signal_value": 0.0,
+            "weighted_vote": 0.0,
+            "bull_pct": None,
+            "bear_pct": None,
+            "status": "error",
+            "error": err_msg,
+        }
+
+
 # ─── SIMPLE TTL CACHE ─────────────────────────────────────────
 # Caches yfinance + TradingView results for 5 min to reduce API hammering.
 _cache      = {}
@@ -2884,7 +3366,7 @@ Return ONLY valid JSON. No markdown."""
                 "temperature": 0.3,
                 "max_tokens": 900
             },
-            timeout=(10, 25)
+            timeout=(10, 90)
         )
 
         if response.status_code != 200:
@@ -3601,7 +4083,8 @@ def detect_smc_structures(df):
     return result
 
 
-def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=None):
+def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=None,
+                 use_markov=False, markov_weight=MARKOV_DEFAULT_WEIGHT):
     """Generate trading signal using gated template logic.
 
     Accuracy fixes (v2):
@@ -3873,6 +4356,44 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         bearish_count += _rw["htf"]
     else:
         neutral_count += _rw["htf"]  # NEUTRAL or RANGE — no structural edge
+
+    # ── Markov signal vote (configurable toggle, off by default) ────────
+    # The Markov engine analyses the stationary distribution of a 3x3
+    # transition matrix to compute a long-run regime bias. We convert
+    # (Bull% - Bear%) into a weighted vote contribution that feeds into
+    # the same bullish_count / bearish_count pool as every other indicator.
+    # This means the Markov signal participates in the confluence gate,
+    # confidence computation, and all downstream gates transparently.
+    # No special-casing needed — it's just another vote.
+    _markov_result = None
+    if use_markov:
+        _markov_result = _get_markov_signal(ticker, asset_type, weight=markov_weight)
+        _mv = _markov_result.get("weighted_vote", 0.0)
+        if _mv > 0:
+            bullish_count += _mv
+            _markov_desc = (
+                f"Markov regime analysis adds a bullish bias "
+                f"(+{abs(_mv):.2f} vote): stationary distribution shows "
+                f"Bull={_markov_result['bull_pct']*100:.0f}% vs "
+                f"Bear={_markov_result['bear_pct']*100:.0f}%."
+            )
+        elif _mv < 0:
+            bearish_count += abs(_mv)
+            _markov_desc = (
+                f"Markov regime analysis adds a bearish bias "
+                f"(-{abs(_mv):.2f} vote): stationary distribution shows "
+                f"Bear={_markov_result['bear_pct']*100:.0f}% vs "
+                f"Bull={_markov_result['bull_pct']*100:.0f}%."
+            )
+        else:
+            _markov_desc = (
+                f"Markov regime analysis is neutral: stationary distribution "
+                f"shows Bull={_markov_result.get('bull_pct', 0)*100:.0f}% vs "
+                f"Bear={_markov_result.get('bear_pct', 0)*100:.0f}% — no directional edge."
+            )
+        print(f"[markov-integration] {ticker}: {_markov_desc}")
+    else:
+        _markov_desc = ""
 
     # ── Net score (kept for reference) ──
     net = bullish_count - bearish_count
@@ -4570,6 +5091,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
         # show traders what institutional patterns DotVerse detected.
         # _smc is already computed at voting time (line ~3357).
         "smc_structures": _smc,
+        # ── Markov signal: exposed when enabled so the frontend can show
+        # the Markov regime bias and how it influenced the signal.
+        # Only non-null when use_markov=True was passed to get_analysis().
+        "markov_enabled": use_markov,
+        "markov_signal": _markov_result if use_markov else None,
     }
 
     # ── Phase 2.2: Signal Quality Score ───────────────────────────────────
@@ -11061,6 +11587,12 @@ def analyze():
             else:
                 print(f"[analyze] divergence safety-net: not enough data ({_n} bars)")
 
+        # Read Markov integration toggle from request body
+        # use_markov: enable/disable the Markov confidence factor
+        # markov_weight: how much the Markov signal influences votes (default 0.3)
+        _use_markov    = body.get("use_markov", False)
+        _markov_weight = float(body.get("markov_weight", MARKOV_DEFAULT_WEIGHT))
+
         # Hard fail only when BOTH TV and yfinance/Stooq are unavailable
         if not tv_ok and not yf_ok:
             return jsonify({"error": f"Could not fetch data for '{ticker}'. "
@@ -11069,7 +11601,9 @@ def analyze():
         # ── STEP 3: Claude analysis (always runs, uses best available ind) ───
         _t2 = time.time()
         print(f"[analyze] data ready [{_t2-_t1:.1f}s] — calling Claude...")
-        analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv, mtf=mtf, user_id=session.get("user_id"))
+        analysis = get_analysis(ticker, asset_type, ind, timeframe, tv=tv, mtf=mtf,
+                                 user_id=session.get("user_id"),
+                                 use_markov=_use_markov, markov_weight=_markov_weight)
         _t3 = time.time()
         print(f"[analyze] Claude done [{_t3-_t2:.1f}s] — returning response")
         counter  = detect_counter_trade(ind)
@@ -11860,6 +12394,42 @@ def simulate():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/analysis/markov", methods=["GET"])
+@login_required
+def markov_analysis():
+    """GET /api/analysis/markov
+
+    Run the Markov transition matrix engine for a given ticker.
+
+    Query parameters:
+        ticker     (str)  — e.g. 'SPY', 'AAPL', 'BTC-USD' (default: SPY)
+        asset_type (str)  — one of stock/forex/crypto/index/commodity (default: stock)
+        days       (int)  — days of history to fetch (default: 365)
+        lookback   (int)  — rolling window of transitions (default: 20)
+
+    Returns the full Markov analysis result: transition matrix,
+    multi-day forecasts (P^5, P^10, P^20), stationary distribution,
+    state counts, and HMM confirmation (agreement rate, hidden
+    transition matrix, most likely regime).
+    """
+    try:
+        ticker     = request.args.get("ticker", "SPY").upper().strip()
+        asset_type = request.args.get("asset_type", "stock").strip().lower()
+        days       = int(request.args.get("days", "365"))
+        lookback   = int(request.args.get("lookback", "20"))
+
+        engine = MarkovEngine(lookback=lookback)
+        result = engine.run(ticker, asset_type=asset_type, days=days, hmm_iterations=50)
+
+        if "error" in result:
+            return jsonify({"error": result["error"]}), 400
+
+        return jsonify(result)
+
+    except Exception as exc:
+        return jsonify({"error": f"Markov analysis failed: {exc}"}), 500
 
 
 @app.route("/api/alert-test", methods=["POST"])
@@ -16899,6 +17469,77 @@ _OPENAPI_SPEC = {
         }
     }
 }
+
+@app.route("/api/analysis/markov", methods=["GET"])
+@login_required
+def analysis_markov():
+    """GET /api/analysis/markov?ticker=X&asset_type=stock&timeframe=1d
+
+    Runs the full Markov chain analysis pipeline on the given ticker.
+    Uses EODHD daily price data (timeframe is accepted but Markov always
+    uses daily data for state classification).
+
+    Returns JSON with:
+      - transition_matrix (3x3): probability of moving between Bull/Bear/Sideways
+      - state_counts: how many bars were classified in each state
+      - multi_day_forecast_5d/10d/20d: matrix-squared probabilities
+      - stationary_distribution: long-run regime probabilities
+      - hmm_confirmation: HMM agreement rate and hidden transition matrix
+
+    Errors:
+      400 — missing ticker
+      502 — Markov engine failed to fetch or compute data
+    """
+    ticker = ""
+    try:
+        # -- Read query parameters --------------------------------
+        ticker = request.args.get("ticker", "").upper().strip()
+        asset_type = request.args.get("asset_type", "stock").strip().lower()
+        # timeframe is accepted but Markov uses daily data internally.
+        # We store it in the response for transparency.
+        timeframe = request.args.get("timeframe", "1d").strip().lower()
+
+        # -- Validate inputs --------------------------------------
+        if not ticker:
+            return jsonify({"error": "Missing required parameter: ticker"}), 400
+
+        valid_assets = {"stock", "crypto", "forex", "index", "commodity"}
+        if asset_type not in valid_assets:
+            return jsonify({
+                "error": f"Invalid asset_type '{asset_type}'. Must be one of: {', '.join(sorted(valid_assets))}"
+            }), 400
+
+        # -- Run the Markov engine --------------------------------
+        # Uses EODHD via the engine's built-in fetch_daily_prices().
+        # The engine handles its own EODHD_API_KEY env var fallback.
+        engine = MarkovEngine()
+        result = engine.run(ticker, asset_type=asset_type, days=365, hmm_iterations=50)
+
+        # Check if the engine returned an error
+        if "error" in result and result["error"]:
+            print(f"[markov-endpoint] Engine error for {ticker}: {result['error']}")
+            return jsonify({
+                "error": f"Markov analysis failed for {ticker}: {result['error']}",
+                "ticker": ticker,
+                "asset_type": asset_type,
+            }), 502
+
+        # -- Attach request metadata and return -------------------
+        result["request"] = {
+            "ticker": ticker,
+            "asset_type": asset_type,
+            "timeframe": timeframe,
+        }
+        result["cached"] = False
+        # Markov results are cached by _get_markov_signal(), but this
+        # endpoint always runs fresh for correctness.
+        return jsonify(result)
+
+    except Exception as exc:
+        safe_ticker = ticker or "(unknown)"
+        print(f"[markov-endpoint] Exception for {safe_ticker}: {exc}")
+        return jsonify({"error": f"Internal error: {str(exc)[:200]}"}), 500
+
 
 @app.route("/api/docs")
 def api_docs():
