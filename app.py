@@ -17009,6 +17009,14 @@ def backtest_markov():
         return jsonify({"error": f"Internal error: {str(exc)[:200]}"}), 500
 
 
+# NOTE on the RQ worker:
+# The previous in-process daemon-thread approach (running rq Worker.work() as a
+# thread inside gunicorn) is fundamentally fragile because rq's default Worker
+# forks a child process per job and fork() inside a Python thread under the GIL
+# can deadlock or corrupt gunicorn's state. It also dies if a job exceeds
+# gunicorn's --timeout. The worker now runs as a separate process started by
+# start.sh — see Procfile and run_worker.py.
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
