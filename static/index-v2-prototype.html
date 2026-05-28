@@ -14154,6 +14154,153 @@ function showUnderstand(){
             <div style="font-size:10.5px;color:var(--t3);margin-top:2px;">Confluence = indicator agreement, not win rate</div>
           </div>
         </div>
+        
+        <!-- Markov Matrix UI -->
+        ${(() => {
+          if (!sig || !sig.markov) return '';
+          const m = sig.markov;
+          const bullPct = m.bull_pct != null ? Math.round(m.bull_pct * 100) : 0;
+          const bearPct = m.bear_pct != null ? Math.round(m.bear_pct * 100) : 0;
+          const netPct = bullPct - bearPct;
+          const hmmStatus = m.hmm_aligned ? 'aligned' : 'diverging';
+          const currentState = m.current_state || 'BULL';
+          
+          return `<div class="und-card" data-guide="markov-matrix" style="margin-top:12px;">
+            <div class="und-card-title">Markov Transition Matrix</div>
+            
+            <!-- Beginner explanation -->
+            <div style="font-size:12px;color:rgba(237,232,216,.65);margin-bottom:14px;line-height:1.6;">
+              This matrix shows the probability that the market stays in its current trend or switches to a different trend
+            </div>
+            
+            <!-- Signal strength summary -->
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+              <div style="flex:1;">
+                <div style="font-size:11px;color:rgba(237,232,216,.5);margin-bottom:4px;">Signal Strength</div>
+                <div style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;">
+                  <span style="color:#5de8a0;">Bull ${bullPct}%</span>
+                  <span style="color:rgba(237,232,216,.4);">−</span>
+                  <span style="color:#e8706e;">Bear ${bearPct}%</span>
+                  <span style="color:rgba(237,232,216,.4);">=</span>
+                  <span style="color:#c9a84c;font-weight:700;">+${netPct > 0 ? '+' : ''}${netPct}%</span>
+                </div>
+              </div>
+              
+              <!-- HMM confirmation badge -->
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:4px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:rgba(201,168,76,.9);">${hmmStatus}</span>
+              </div>
+            </div>
+            
+            <!-- 3x3 transition matrix grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">
+              <!-- Row 1: Bull -->
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">BULL</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
+                  <div class="markov-cell" data-state="bull-to-bull" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>BB</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
+                  </div>
+                  <div class="markov-cell" data-state="bull-to-neutral" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>BN</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Neutral</div>
+                  </div>
+                  <div class="markov-cell" data-state="bull-to-bear" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>BE</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Bearish</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Row 2: Neutral -->
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">NEUTRAL</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
+                  <div class="markov-cell" data-state="neutral-to-bull" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>NB</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Bullish</div>
+                  </div>
+                  <div class="markov-cell" data-state="neutral-to-neutral" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>NN</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
+                  </div>
+                  <div class="markov-cell" data-state="neutral-to-bear" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>NE</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Bearish</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Row 3: Bear -->
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">BEAR</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
+                  <div class="markov-cell" data-state="bear-to-bull" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>EB</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Bullish</div>
+                  </div>
+                  <div class="markov-cell" data-state="bear-to-neutral" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:122px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>EN</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Neutral</div>
+                  </div>
+                  <div class="markov-cell" data-state="bear-to-bear" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                    <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>EE</sub></div>
+                    <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Multi-day forecast bar -->
+            <div style="margin-bottom:16px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <div style="font-size:11px;color:rgba(237,232,216,.5);font-family:var(--mono);">Multi-Day Forecast</div>
+                <div style="font-size:10px;color:rgba(237,232,216,.4);">T+1 → T+28</div>
+              </div>
+              <div style="display:flex;gap:4px;">
+                <!-- P^1 (T+1) -->
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="font-size:9px;color:rgba(237,232,216,.4);margin-bottom:4px;">P¹</div>
+                  <div style="height:80px;width:100%;background:rgba(237,232,216,.04);border-radius:4px;overflow:hidden;position:relative;">
+                    <div style="height:${m.p1_bull_pct != null ? Math.round(m.p1_bull_pct * 100) : 0}%;width:100%;background:linear-gradient(to top, #5de8a0, #3dbe6c);position:absolute;bottom:0;"></div>
+                  </div>
+                </div>
+                
+                <!-- P^5 (T+5) -->
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="font-size:9px;color:rgba(237,232,216,.4);margin-bottom:4px;">P⁵</div>
+                  <div style="height:80px;width:100%;background:rgba(237,232,216,.04);border-radius:4px;overflow:hidden;position:relative;">
+                    <div style="height:${m.p5_bull_pct != null ? Math.round(m.p5_bull_pct * 100) : 0}%;width:100%;background:linear-gradient(to top, #5de8a0, #3dbe6c);position:absolute;bottom:0;"></div>
+                  </div>
+                </div>
+                
+                <!-- P^10 (T+10) -->
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="font-size:9px;color:rgba(237,232,216,.4);margin-bottom:4px;">P¹⁰</div>
+                  <div style="height:80px;width:100%;background:rgba(237,232,216,.04);border-radius:4px;overflow:hidden;position:relative;">
+                    <div style="height:${m.p10_bull_pct != null ? Math.round(m.p10_bull_pct * 100) : 0}%;width:100%;background:linear-gradient(to top, #5de8a0, #3dbe6c);position:absolute;bottom:0;"></div>
+                  </div>
+                </div>
+                
+                <!-- P^20 (T+20) -->
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="font-size:9px;color:rgba(237,232,216,.4);margin-bottom:4px;">P²⁰</div>
+                  <div style="height:80px;width:100%;background:rgba(237,232,216,.04);border-radius:4px;overflow:hidden;position:relative;">
+                    <div style="height:${m.p20_bull_pct != null ? Math.round(m.p20_bull_pct * 100) : 0}%;width:100%;background:linear-gradient(to top, #5de8a0, #3dbe6c);position:absolute;bottom:0;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Current state highlight indicator -->
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#c9a84c;flex-shrink:0;"></div>
+              <div style="font-size:11px;color:rgba(237,232,216,.65);">Current state: ${currentState}</div>
+            </div>
+          </div>`;
+        })()}
+        
         <!-- Engine context badges (commits 1-7 — surface engine state) -->
         ${(()=>{
           const badges = [];
