@@ -38,6 +38,8 @@ echo "[boot] Worker PID $WORKER_PID — starting gunicorn"
 exec gunicorn app:app \
   --bind "0.0.0.0:$PORT" \
   --workers "$WORKERS" \
+  --worker-class gevent \
+  --worker-connections 1000 \
   --timeout "$TIMEOUT" \
   --access-logfile - \
   --error-logfile -
