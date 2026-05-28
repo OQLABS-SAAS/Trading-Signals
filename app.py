@@ -13542,6 +13542,7 @@ class SignalHistory(_Base):
     outcome           = Column(String(10),  nullable=True)   # WIN / LOSS / BE
     actual_exit_price = Column(Float,       nullable=True)
     actual_pnl_r      = Column(Float,       nullable=True)   # R-multiples: positive=profit, negative=loss
+    account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=True, index=True)
 
 class CalibrationLabel(_Base):
     """P2.1 — Per-user labeled dataset for isotonic regression calibration.
@@ -13572,6 +13573,46 @@ class EquitySnapshot(_Base):
     user_id        = Column(String(64), nullable=False, default="default")
     equity_index   = Column(Float,      nullable=False, default=100.0)
     snapshotted_at = Column(DateTime,   nullable=False, default=datetime.utcnow)
+
+
+class TradingAccount(_Base):
+    __tablename__ = "trading_accounts"
+    id              = Column(Integer, primary_key=True)
+    user_id         = Column(String(64), nullable=False, index=True)
+    name            = Column(String(64), nullable=False)
+    broker          = Column(String(64), nullable=True)
+    server          = Column(String(64), nullable=True)
+    account_number  = Column(String(32), nullable=True)
+    account_type    = Column(String(16), nullable=False, default="demo")
+    currency        = Column(String(8), nullable=False, default="USD")
+    platform        = Column(String(8), nullable=False, default="MT5")
+    ea_secret_enc   = Column(Text, nullable=True)
+    last_seen       = Column(DateTime, nullable=True)
+    status          = Column(String(16), nullable=False, default="disconnected")
+    error_message   = Column(Text, nullable=True)
+    color           = Column(String(16), nullable=True)
+    is_active       = Column(Boolean, nullable=False, default=True)
+    sort_order      = Column(Integer, nullable=False, default=0)
+    created_at      = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at      = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TradingJournal(_Base):
+    __tablename__ = "trading_journal"
+    id              = Column(Integer, primary_key=True)
+    account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=False)
+    user_id         = Column(String(64), nullable=False, index=True)
+    signal_history_id = Column(Integer, ForeignKey("signal_history.id"), nullable=True)
+    ticket          = Column(Integer, nullable=True)
+    notes           = Column(Text, nullable=True)
+    tags            = Column(Text, nullable=True)
+    emotion         = Column(String(32), nullable=True)
+    lesson_learned  = Column(Text, nullable=True)
+    screenshot_url  = Column(String(512), nullable=True)
+    trade_rating    = Column(Integer, nullable=True)
+    created_at      = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at      = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
 class ExchangeKey(_Base):
     """Exchange API keys — Fernet-encrypted, one row per connected exchange per user."""
@@ -13619,6 +13660,7 @@ class MT5Order(_Base):
     comment          = Column(String(128),nullable=True)
     entry_confluence = Column(Float,      nullable=True)   # bull_pct at time of submission (0.0–1.0)
     entry_atr        = Column(Float,      nullable=True)   # ATR price distance at time of submission
+    account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=True, index=True)
     created_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
     filled_at   = Column(DateTime,   nullable=True)
 
@@ -15151,23 +15193,33 @@ def performance_monthly_heatmap():
                 key = r.fired_at.strftime("%Y-%m")
                 monthly[key] += (r.actual_pnl_r or 0.0)
 
-        # Build the matrix
+        # Build the matrix — also count number of trades per cell
         all_years = sorted(set(k[:4] for k in monthly.keys()))
         all_months = ["Jan","Feb","Mar","Apr","May","Jun",
                       "Jul","Aug","Sep","Oct","Nov","Dec"]
+        monthly_counts = defaultdict(int)
+        for r in rows:
+            if r.fired_at:
+                key = r.fired_at.strftime("%Y-%m")
+                monthly_counts[key] += 1
 
         values = []
+        counts = []
         for year in all_years:
-            row = []
+            row_v = []
+            row_c = []
             for mi, month_name in enumerate(all_months):
                 key = f"{year}-{mi+1:02d}"
-                row.append(round(monthly.get(key, 0.0), 2))
-            values.append(row)
+                row_v.append(round(monthly.get(key, 0.0), 2))
+                row_c.append(monthly_counts.get(key, 0))
+            values.append(row_v)
+            counts.append(row_c)
 
         return jsonify({
             "years": all_years,
             "months": all_months,
-            "values": values
+            "values": values,
+            "counts": counts,
         })
     finally:
         db.close()
