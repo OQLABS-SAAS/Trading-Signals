@@ -14491,7 +14491,7 @@ def backtest_route():
 
 import redis as _redis_module
 from rq import Queue as RQQueue
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Date, Boolean, Text, text, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker
 from scipy.stats import norm as _scipy_norm
 
