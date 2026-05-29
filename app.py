@@ -678,6 +678,51 @@ def require_tier(minimum):
         return decorated
     return decorator
 
+
+# ─── AGENT TAB SESSION RATE LIMITER ──────────────────────────
+# Per-session, per-endpoint-group rate limiting (60 req/min default).
+# Uses Redis if available, otherwise falls back to in-memory dict.
+_agent_rate_store = {}  # fallback in-memory store {key: [(timestamp,), ...]}
+
+def _agent_rate_limit(limit=60, window=60):
+    """Decorator — rate-limit per user session within a rolling window (req/min)."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            user_id = str(session.get("user_id", "anonymous"))
+            endpoint_key = f"agent_rl:{user_id}:{request.endpoint}"
+            now = time.time()
+            if _redis_client:
+                try:
+                    key = f"agent_rl:{user_id}:{request.endpoint}:{int(now // window)}"
+                    count = int(_redis_client.get(key) or 0)
+                    if count >= limit:
+                        retry_after = window - (int(now) % window)
+                        return jsonify({
+                            "error": "Rate limit exceeded",
+                            "limit": limit,
+                            "retry_after_seconds": retry_after
+                        }), 429
+                    _redis_client.incr(key)
+                    _redis_client.expire(key, window * 2)
+                except Exception:
+                    pass
+            else:
+                # In-memory fallback
+                if endpoint_key not in _agent_rate_store:
+                    _agent_rate_store[endpoint_key] = []
+                calls = [t for t in _agent_rate_store[endpoint_key] if now - t < window]
+                if len(calls) >= limit:
+                    return jsonify({
+                        "error": "Rate limit exceeded",
+                        "limit": limit
+                    }), 429
+                calls.append(now)
+                _agent_rate_store[endpoint_key] = calls
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
 # ─── Tier Cap Helpers (7.2) ─────────────────────────────────────
 TIER_RANK = {"free": 0, "pro": 1, "elite": 2}
 
@@ -14662,6 +14707,61 @@ class TradingAccount(_Base):
     updated_at      = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+# ═══════════════════════════════════════════════════════════════
+# AGENT TAB MODELS — Trade, DailyMetrics, AuditLog
+# ═══════════════════════════════════════════════════════════════
+
+class AgentTrade(_Base):
+    """H2 / Agent Tab — Individual trade record tied to a TradingAccount."""
+    __tablename__ = "agent_trades"
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    uuid            = Column(String(36), nullable=False, unique=True, default=lambda: str(uuid.uuid4()))
+    account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=False, index=True)
+    signal_id       = Column(Integer, nullable=True)
+    symbol          = Column(String(32), nullable=False)
+    side            = Column(String(4), nullable=False)   # BUY / SELL
+    quantity        = Column(Float, nullable=False, default=0.0)
+    entry_price     = Column(Float, nullable=False)
+    exit_price      = Column(Float, nullable=True)
+    stop_loss       = Column(Float, nullable=True)
+    take_profit     = Column(Float, nullable=True)
+    entry_time      = Column(DateTime, nullable=False, default=datetime.utcnow)
+    exit_time       = Column(DateTime, nullable=True)
+    realized_pnl    = Column(Float, nullable=True)
+    unrealized_pnl  = Column(Float, nullable=True)
+    rr_ratio        = Column(Float, nullable=True)
+    status          = Column(String(8), nullable=False, default="OPEN")   # OPEN / CLOSED
+    outcome         = Column(String(4), nullable=True)                    # WIN / LOSS / BE
+    notes           = Column(Text, nullable=True)
+    created_at      = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AgentDailyMetrics(_Base):
+    """H2 / Agent Tab — Per-account, per-date aggregate metrics row."""
+    __tablename__ = "agent_daily_metrics"
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=False, index=True)
+    date            = Column(Date, nullable=False)
+    starting_balance = Column(Float, nullable=True)
+    ending_balance  = Column(Float, nullable=True)
+    pnl             = Column(Float, nullable=True, default=0.0)
+    trades_count    = Column(Integer, nullable=False, default=0)
+    wins_count      = Column(Integer, nullable=False, default=0)
+    losses_count    = Column(Integer, nullable=False, default=0)
+    max_drawdown    = Column(Float, nullable=True)
+    created_at      = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AgentAuditLog(_Base):
+    """H2 / Agent Tab — Audit trail for agent actions (syncs, trade edits, account changes)."""
+    __tablename__ = "agent_audit_log"
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=True)
+    event_type      = Column(String(32), nullable=False)  # sync / trade_created / trade_closed / account_archived / etc.
+    description     = Column(Text, nullable=False)
+    created_at      = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class TradingJournal(_Base):
     __tablename__ = "trading_journal"
     id              = Column(Integer, primary_key=True)
@@ -18163,6 +18263,850 @@ def api_docs_swagger():
 <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>SwaggerUIBundle({url:'/api/docs',dom_id:'#swagger-ui'})</script>
 </body></html>"""
+
+
+# ═══════════════════════════════════════════════════════════════
+# AGENT TAB API — /api/trading-agent/*
+# ═══════════════════════════════════════════════════════════════
+
+# ─── Serialisation helper ────────────────────────────────────
+def _agent_trade_to_dict(t):
+    return {
+        "id":            t.id,
+        "uuid":          t.uuid,
+        "account_id":    t.account_id,
+        "signal_id":     t.signal_id,
+        "symbol":        t.symbol,
+        "side":          t.side,
+        "quantity":      t.quantity,
+        "entry_price":   t.entry_price,
+        "exit_price":    t.exit_price,
+        "stop_loss":     t.stop_loss,
+        "take_profit":   t.take_profit,
+        "entry_time":    t.entry_time.isoformat() if t.entry_time else None,
+        "exit_time":     t.exit_time.isoformat() if t.exit_time else None,
+        "realized_pnl":  t.realized_pnl,
+        "unrealized_pnl": t.unrealized_pnl,
+        "rr_ratio":      t.rr_ratio,
+        "status":        t.status,
+        "outcome":       t.outcome,
+        "notes":         t.notes,
+        "created_at":    t.created_at.isoformat() if t.created_at else None,
+    }
+
+
+def _format_duration(start, end):
+    if not start or not end:
+        return ""
+    delta = end - start
+    days = delta.days
+    hours = delta.seconds // 3600
+    minutes = (delta.seconds % 3600) // 60
+    if days > 0:
+        return f"{days}d {hours}h"
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+# ─── 1. GET /api/trading-agent/dashboard ──────────────────────
+@app.route("/api/trading-agent/dashboard", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_dashboard():
+    """Aggregate metrics across all user accounts."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        accounts = db.query(TradingAccount).filter(
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        ).all()
+        account_ids = [a.id for a in accounts]
+        total_accounts = len(accounts)
+        online = sum(1 for a in accounts if a.status == "connected")
+
+        # Aggregates from trades
+        open_trades = db.query(AgentTrade).filter(
+            AgentTrade.account_id.in_(account_ids),
+            AgentTrade.status == "OPEN",
+        ).all() if account_ids else []
+        total_open_positions = len(open_trades)
+        unrealized_pnl = sum((t.unrealized_pnl or 0.0) for t in open_trades)
+
+        # Recent closed trades for win rate (last 90 days)
+        cutoff = datetime.utcnow() - timedelta(days=90)
+        closed_trades = db.query(AgentTrade).filter(
+            AgentTrade.account_id.in_(account_ids),
+            AgentTrade.status == "CLOSED",
+            AgentTrade.exit_time >= cutoff,
+        ).all() if account_ids else []
+        total_closed = len(closed_trades)
+        wins = sum(1 for t in closed_trades if t.outcome == "WIN")
+        win_rate = round(wins / total_closed * 100, 1) if total_closed > 0 else 0.0
+
+        # Accounts needing attention
+        attention = []
+        healthy = []
+        for a in accounts:
+            entry = {
+                "id": a.id,
+                "name": a.name,
+                "initials": "".join([w[0] for w in a.name.split()]).upper()[:2],
+                "broker": a.broker,
+                "server": a.server,
+                "account_number": a.account_number,
+                "account_type": a.account_type,
+                "currency": a.currency,
+                "status": a.status,
+                "last_seen": a.last_seen.isoformat() if a.last_seen else None,
+            }
+            if a.status in ("warning", "error", "disconnected"):
+                attention.append(entry)
+            else:
+                healthy.append(entry)
+
+        return jsonify({
+            "total_accounts": total_accounts,
+            "online_accounts": online,
+            "total_open_positions": total_open_positions,
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "total_closed_trades_90d": total_closed,
+            "win_rate_90d": win_rate,
+            "attention": attention,
+            "healthy": healthy,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 2. GET /api/trading-agent/positions ─────────────────────
+@app.route("/api/trading-agent/positions", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_positions():
+    """All open positions across user accounts."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    account_id = request.args.get("account_id")
+    db = _DBSession()
+    try:
+        query = db.query(AgentTrade).join(TradingAccount).filter(
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+            AgentTrade.status == "OPEN",
+        )
+        if account_id:
+            query = query.filter(AgentTrade.account_id == int(account_id))
+        trades = query.order_by(AgentTrade.entry_time.desc()).all()
+
+        acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
+            TradingAccount.user_id == user_id
+        ).all()}
+
+        results = []
+        for t in trades:
+            d = _agent_trade_to_dict(t)
+            d["account_name"] = acct_map.get(t.account_id, "Unknown")
+            d["duration"] = _format_duration(t.entry_time, datetime.utcnow() if t.status == "OPEN" else t.exit_time)
+            results.append(d)
+        return jsonify({"positions": results, "count": len(results)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 3. GET /api/trading-agent/trades ────────────────────────
+@app.route("/api/trading-agent/trades", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_trades():
+    """All trades with optional filters."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    account_id = request.args.get("account_id")
+    symbol     = request.args.get("symbol")
+    outcome    = request.args.get("outcome")
+    search     = request.args.get("search")
+    status     = request.args.get("status", "CLOSED")
+    date_from  = request.args.get("date_from")
+    date_to    = request.args.get("date_to")
+    limit      = int(request.args.get("limit", 200))
+    offset     = int(request.args.get("offset", 0))
+
+    db = _DBSession()
+    try:
+        query = db.query(AgentTrade).join(TradingAccount).filter(
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        )
+        if account_id:
+            query = query.filter(AgentTrade.account_id == int(account_id))
+        if status:
+            query = query.filter(AgentTrade.status == status.upper())
+        if symbol:
+            query = query.filter(AgentTrade.symbol.ilike(f"%{symbol}%"))
+        if outcome:
+            query = query.filter(AgentTrade.outcome == outcome.upper())
+        if search:
+            query = query.filter(AgentTrade.symbol.ilike(f"%{search}%"))
+        if date_from:
+            query = query.filter(AgentTrade.exit_time >= datetime.fromisoformat(date_from))
+        if date_to:
+            query = query.filter(AgentTrade.exit_time <= datetime.fromisoformat(date_to))
+
+        total = query.count()
+        trades = query.order_by(AgentTrade.exit_time.desc().nullslast(), AgentTrade.entry_time.desc()).offset(offset).limit(limit).all()
+
+        acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
+            TradingAccount.user_id == user_id
+        ).all()}
+
+        results = []
+        for t in trades:
+            d = _agent_trade_to_dict(t)
+            d["account_name"] = acct_map.get(t.account_id, "Unknown")
+            results.append(d)
+
+        return jsonify({"trades": results, "total": total, "limit": limit, "offset": offset})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 4. POST /api/trading-agent/trades ───────────────────────
+@app.route("/api/trading-agent/trades", methods=["POST"])
+@login_required
+@_agent_rate_limit(60)
+def agent_create_trade():
+    """Create a new trade (manual entry)."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body = request.json or {}
+    account_id = body.get("account_id")
+    if not account_id:
+        return jsonify({"error": "account_id is required"}), 400
+    db = _DBSession()
+    try:
+        acct = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        ).first()
+        if not acct:
+            return jsonify({"error": "Account not found or not owned"}), 404
+
+        trade = AgentTrade(
+            uuid=str(uuid.uuid4()),
+            account_id=account_id,
+            signal_id=body.get("signal_id"),
+            symbol=(body.get("symbol") or "").upper(),
+            side=(body.get("side") or "BUY").upper(),
+            quantity=body.get("quantity", 0.0),
+            entry_price=body.get("entry_price", 0.0),
+            stop_loss=body.get("stop_loss"),
+            take_profit=body.get("take_profit"),
+            entry_time=datetime.fromisoformat(body["entry_time"]) if body.get("entry_time") else datetime.utcnow(),
+            status="OPEN",
+            notes=body.get("notes"),
+        )
+        db.add(trade)
+        db.add(AgentAuditLog(
+            account_id=account_id,
+            event_type="trade_created",
+            description=f"Trade {trade.uuid} created: {trade.side} {trade.symbol} @ {trade.entry_price}"
+        ))
+        db.commit()
+        db.refresh(trade)
+        return jsonify(_agent_trade_to_dict(trade)), 201
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 4b. GET /api/trading-agent/trades/export ──────────────────
+@app.route("/api/trading-agent/trades/export", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_trades_export():
+    """CSV export of filtered trades."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    account_id = request.args.get("account_id")
+    date_from  = request.args.get("date_from")
+    date_to    = request.args.get("date_to")
+    db = _DBSession()
+    try:
+        query = db.query(AgentTrade).join(TradingAccount).filter(
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        )
+        if account_id:
+            query = query.filter(AgentTrade.account_id == int(account_id))
+        if date_from:
+            query = query.filter(AgentTrade.exit_time >= datetime.fromisoformat(date_from))
+        if date_to:
+            query = query.filter(AgentTrade.exit_time <= datetime.fromisoformat(date_to))
+        trades = query.order_by(AgentTrade.exit_time.desc().nullslast()).all()
+
+        acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
+            TradingAccount.user_id == user_id
+        ).all()}
+
+        import csv, io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Date", "Account", "Symbol", "Side", "Entry", "Exit", "P&L", "R:R", "Outcome", "Status"])
+        for t in trades:
+            writer.writerow([
+                (t.exit_time or t.entry_time).strftime("%Y-%m-%d %H:%M") if (t.exit_time or t.entry_time) else "",
+                acct_map.get(t.account_id, ""),
+                t.symbol,
+                t.side,
+                t.entry_price,
+                t.exit_price or "",
+                round(t.realized_pnl or 0, 2),
+                round(t.rr_ratio, 2) if t.rr_ratio else "",
+                t.outcome or "",
+                t.status,
+            ])
+        csv_data = output.getvalue()
+        output.close()
+        return Response(
+            csv_data,
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment; filename=trade-history.csv"}
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 5. GET /api/trading-agent/trades/<id> ───────────────────
+@app.route("/api/trading-agent/trades/<int:trade_id>", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_trade_detail(trade_id):
+    """Single trade detail."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        trade = db.query(AgentTrade).join(TradingAccount).filter(
+            AgentTrade.id == trade_id,
+            TradingAccount.user_id == user_id,
+        ).first()
+        if not trade:
+            return jsonify({"error": "Trade not found"}), 404
+        acct = db.query(TradingAccount).filter(TradingAccount.id == trade.account_id).first()
+        result = _agent_trade_to_dict(trade)
+        result["account_name"] = acct.name if acct else "Unknown"
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 6. PUT /api/trading-agent/trades/<id> ────────────────────
+@app.route("/api/trading-agent/trades/<int:trade_id>", methods=["PUT"])
+@login_required
+@_agent_rate_limit(60)
+def agent_update_trade(trade_id):
+    """Update a trade (close, add notes, etc.)."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body = request.json or {}
+    db = _DBSession()
+    try:
+        trade = db.query(AgentTrade).join(TradingAccount).filter(
+            AgentTrade.id == trade_id,
+            TradingAccount.user_id == user_id,
+        ).first()
+        if not trade:
+            return jsonify({"error": "Trade not found"}), 404
+
+        if "exit_price" in body:
+            trade.exit_price = body["exit_price"]
+        if "status" in body:
+            trade.status = body["status"].upper()
+            if trade.status == "CLOSED":
+                trade.exit_time = trade.exit_time or datetime.utcnow()
+                if trade.exit_price and trade.entry_price:
+                    multiplier = 1 if trade.side == "BUY" else -1
+                    trade.realized_pnl = (trade.exit_price - trade.entry_price) * multiplier * trade.quantity
+        if "outcome" in body:
+            trade.outcome = body["outcome"].upper()
+        if "notes" in body:
+            trade.notes = body["notes"]
+        if "stop_loss" in body:
+            trade.stop_loss = body["stop_loss"]
+        if "take_profit" in body:
+            trade.take_profit = body["take_profit"]
+
+        event = "trade_updated" if trade.status == "OPEN" else "trade_closed"
+        db.add(AgentAuditLog(
+            account_id=trade.account_id,
+            event_type=event,
+            description=f"Trade {trade.uuid} {event}: {trade.symbol} — Status: {trade.status}, P&L: {trade.realized_pnl}"
+        ))
+        db.commit()
+        db.refresh(trade)
+        return jsonify(_agent_trade_to_dict(trade))
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 7. GET /api/trading-agent/analytics ─────────────────────
+@app.route("/api/trading-agent/analytics", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_analytics():
+    """KPI + chart data: win rate, profit factor, Sharpe, equity curve points."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    account_id = request.args.get("account_id")
+    period     = request.args.get("period", "90d")
+    db = _DBSession()
+    try:
+        acct_filter = [TradingAccount.user_id == user_id, TradingAccount.is_active == True]
+        if account_id:
+            acct_filter.append(TradingAccount.id == int(account_id))
+        accts = db.query(TradingAccount).filter(*acct_filter).all()
+        acct_ids = [a.id for a in accts]
+
+        cutoff = None
+        days_map = {"30d": 30, "90d": 90, "1y": 365}
+        if period in days_map:
+            cutoff = datetime.utcnow() - timedelta(days=days_map[period])
+
+        if not acct_ids:
+            return jsonify({
+                "total_trades": 0, "wins": 0, "losses": 0, "be": 0,
+                "win_rate": 0, "profit_factor": 0, "total_pnl": 0,
+                "avg_rr": 0, "sharpe_ratio": 0, "equity_curve": []
+            })
+
+        q = db.query(AgentTrade).filter(
+            AgentTrade.account_id.in_(acct_ids),
+            AgentTrade.status == "CLOSED",
+        )
+        if cutoff:
+            q = q.filter(AgentTrade.exit_time >= cutoff)
+        trades = q.all()
+
+        total = len(trades)
+        wins = sum(1 for t in trades if t.outcome == "WIN")
+        losses = sum(1 for t in trades if t.outcome == "LOSS")
+        be = sum(1 for t in trades if t.outcome == "BE")
+        win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+
+        gross_profit = sum((t.realized_pnl or 0) for t in trades if (t.realized_pnl or 0) > 0)
+        gross_loss   = abs(sum((t.realized_pnl or 0) for t in trades if (t.realized_pnl or 0) < 0))
+        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0.0
+
+        total_pnl = round(sum(t.realized_pnl or 0 for t in trades), 2)
+        valid_rr = [t.rr_ratio for t in trades if t.rr_ratio and t.rr_ratio > 0]
+        avg_rr = round(sum(valid_rr) / len(valid_rr), 2) if valid_rr else 0.0
+
+        sharpe = 0.0
+        daily_metrics = db.query(AgentDailyMetrics).filter(
+            AgentDailyMetrics.account_id.in_(acct_ids)
+        ).all() if acct_ids else []
+        if daily_metrics:
+            daily_pnl = [m.pnl or 0 for m in daily_metrics]
+            mean_pnl = sum(daily_pnl) / len(daily_pnl) if daily_pnl else 0
+            variance = sum((v - mean_pnl) ** 2 for v in daily_pnl) / len(daily_pnl) if daily_pnl else 1
+            std = variance ** 0.5
+            sharpe = round(mean_pnl / std, 2) if std > 0 else 0.0
+
+        equity_curve = []
+        running = 100.0
+        sorted_metrics = sorted(daily_metrics, key=lambda m: m.date)
+        for m in sorted_metrics:
+            equity_curve.append({
+                "date": m.date.isoformat(),
+                "value": round(running, 2),
+                "pnl": round(m.pnl or 0, 2),
+            })
+            if m.starting_balance and m.starting_balance > 0:
+                running *= (1 + (m.pnl or 0) / m.starting_balance)
+
+        return jsonify({
+            "total_trades": total,
+            "wins": wins,
+            "losses": losses,
+            "be": be,
+            "win_rate": win_rate,
+            "profit_factor": profit_factor,
+            "total_pnl": total_pnl,
+            "avg_rr": avg_rr,
+            "sharpe_ratio": sharpe,
+            "equity_curve": equity_curve,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 8. GET /api/trading-agent/portfolio ─────────────────────
+@app.route("/api/trading-agent/portfolio", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_portfolio():
+    """Combined portfolio metrics across all accounts."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        accts = db.query(TradingAccount).filter(
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        ).all()
+        acct_ids = [a.id for a in accts]
+
+        open_trades = db.query(AgentTrade).filter(
+            AgentTrade.account_id.in_(acct_ids),
+            AgentTrade.status == "OPEN",
+        ).all() if acct_ids else []
+
+        total_unrealized = sum(t.unrealized_pnl or 0 for t in open_trades)
+        total_open = len(open_trades)
+        symbols = list(set(t.symbol for t in open_trades))
+
+        accounts = []
+        for a in accts:
+            acct_open = [t for t in open_trades if t.account_id == a.id]
+            accounts.append({
+                "id": a.id,
+                "name": a.name,
+                "initials": "".join([w[0] for w in a.name.split()]).upper()[:2],
+                "status": a.status,
+                "open_positions": len(acct_open),
+                "unrealized_pnl": round(sum(t.unrealized_pnl or 0 for t in acct_open), 2),
+            })
+
+        return jsonify({
+            "total_accounts": len(accounts),
+            "total_open_positions": total_open,
+            "total_unrealized_pnl": round(total_unrealized, 2),
+            "unique_symbols": symbols,
+            "accounts": accounts,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 9. POST /api/trading-agent/accounts/<id>/archive ────────
+@app.route("/api/trading-agent/accounts/<int:account_id>/archive", methods=["POST"])
+@login_required
+@_agent_rate_limit(30)
+def agent_archive_account(account_id):
+    """Soft-delete (archive) an account."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        acct = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+        ).first()
+        if not acct:
+            return jsonify({"error": "Account not found"}), 404
+        acct.is_active = False
+        db.add(AgentAuditLog(
+            account_id=account_id,
+            event_type="account_archived",
+            description=f"Account '{acct.name}' archived by user"
+        ))
+        db.commit()
+        return jsonify({"success": True, "message": f"Account '{acct.name}' archived"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 10. POST /api/trading-agent/accounts/<id>/sync ───────────
+@app.route("/api/trading-agent/accounts/<int:account_id>/sync", methods=["POST"])
+@login_required
+@_agent_rate_limit(10)
+def agent_sync_account(account_id):
+    """Trigger a sync/refresh from MT5 EA."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        acct = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        ).first()
+        if not acct:
+            return jsonify({"error": "Account not found"}), 404
+        acct.updated_at = datetime.utcnow()
+        db.add(AgentAuditLog(
+            account_id=account_id,
+            event_type="sync_triggered",
+            description=f"Manual sync triggered for account '{acct.name}'"
+        ))
+        db.commit()
+        return jsonify({
+            "success": True,
+            "message": f"Sync triggered for '{acct.name}'. Data will refresh shortly."
+        })
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 11. GET /api/trading-agent/accounts/<id>/daily-metrics ──
+@app.route("/api/trading-agent/accounts/<int:account_id>/daily-metrics", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_daily_metrics(account_id):
+    """Get daily metrics for a specific account."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        acct = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+        ).first()
+        if not acct:
+            return jsonify({"error": "Account not found"}), 404
+
+        metrics = db.query(AgentDailyMetrics).filter(
+            AgentDailyMetrics.account_id == account_id,
+        ).order_by(AgentDailyMetrics.date.desc()).limit(365).all()
+
+        results = [{
+            "id": m.id,
+            "date": m.date.isoformat(),
+            "starting_balance": m.starting_balance,
+            "ending_balance": m.ending_balance,
+            "pnl": m.pnl,
+            "trades_count": m.trades_count,
+            "wins_count": m.wins_count,
+            "losses_count": m.losses_count,
+            "max_drawdown": m.max_drawdown,
+        } for m in metrics]
+
+        return jsonify({
+            "account_id": account_id,
+            "account_name": acct.name,
+            "metrics": results,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 12. POST /api/trading-agent/accounts/<id>/recompute-daily ──
+@app.route("/api/trading-agent/accounts/<int:account_id>/recompute-daily", methods=["POST"])
+@login_required
+@_agent_rate_limit(10)
+def agent_recompute_daily(account_id):
+    """Recalculate daily metrics from trade history."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    db = _DBSession()
+    try:
+        acct = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+        ).first()
+        if not acct:
+            return jsonify({"error": "Account not found"}), 404
+
+        trades = db.query(AgentTrade).filter(
+            AgentTrade.account_id == account_id,
+            AgentTrade.status == "CLOSED",
+        ).all()
+
+        from collections import defaultdict
+        daily = defaultdict(lambda: {"trades": 0, "wins": 0, "losses": 0, "pnl": 0.0})
+        for t in trades:
+            date_key = (t.exit_time or t.entry_time).date()
+            daily[date_key]["trades"] += 1
+            daily[date_key]["pnl"] += (t.realized_pnl or 0)
+            if t.outcome == "WIN":
+                daily[date_key]["wins"] += 1
+            elif t.outcome == "LOSS":
+                daily[date_key]["losses"] += 1
+
+        db.query(AgentDailyMetrics).filter(AgentDailyMetrics.account_id == account_id).delete()
+        for date_key, d in sorted(daily.items()):
+            db.add(AgentDailyMetrics(
+                account_id=account_id,
+                date=date_key,
+                pnl=round(d["pnl"], 2),
+                trades_count=d["trades"],
+                wins_count=d["wins"],
+                losses_count=d["losses"],
+            ))
+
+        db.add(AgentAuditLog(
+            account_id=account_id,
+            event_type="daily_recomputed",
+            description=f"Daily metrics recomputed for '{acct.name}': {len(daily)} days, {len(trades)} trades"
+        ))
+        db.commit()
+        return jsonify({"success": True, "days_computed": len(daily)})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 13. POST /api/trading-agent/accounts ────────────────────
+@app.route("/api/trading-agent/accounts", methods=["POST"])
+@login_required
+@_agent_rate_limit(10)
+def agent_add_account():
+    """Add a new MT5 account."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    user_id = str(session.get("user_id"))
+    body = request.json or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    db = _DBSession()
+    try:
+        a = TradingAccount(
+            user_id=user_id,
+            name=name,
+            broker=(body.get("broker") or "").strip(),
+            server=(body.get("server") or "").strip(),
+            account_number=(body.get("account_number") or "").strip(),
+            account_type=(body.get("account_type") or "DEMO").upper(),
+            currency=(body.get("currency") or "USD").upper(),
+            platform="MT5",
+        )
+        # Generate EA secret if _enc is available
+        try:
+            a.ea_secret_enc = _enc(uuid.uuid4().hex)
+        except Exception:
+            a.ea_secret_enc = None
+        db.add(a)
+        db.flush()
+        db.add(AgentAuditLog(
+            account_id=a.id,
+            event_type="account_added",
+            description=f"New account '{name}' added via Agent tab"
+        ))
+        db.commit()
+        db.refresh(a)
+        result = _account_to_dict(a)
+        try:
+            result["ea_secret"] = _dec(a.ea_secret_enc) if a.ea_secret_enc and _fernet else None
+        except Exception:
+            result["ea_secret"] = None
+        return jsonify(result), 201
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── ENSURE AGENT TABLES EXIST ──────────────────────────────────
+try:
+    if _db_engine:
+        with _db_engine.begin() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS agent_trades (
+                    id SERIAL PRIMARY KEY,
+                    uuid VARCHAR(36) NOT NULL UNIQUE,
+                    account_id INTEGER NOT NULL,
+                    signal_id INTEGER,
+                    symbol VARCHAR(32) NOT NULL,
+                    side VARCHAR(4) NOT NULL,
+                    quantity FLOAT NOT NULL DEFAULT 0.0,
+                    entry_price FLOAT NOT NULL,
+                    exit_price FLOAT,
+                    stop_loss FLOAT,
+                    take_profit FLOAT,
+                    entry_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    exit_time TIMESTAMP,
+                    realized_pnl FLOAT,
+                    unrealized_pnl FLOAT,
+                    rr_ratio FLOAT,
+                    status VARCHAR(8) NOT NULL DEFAULT 'OPEN',
+                    outcome VARCHAR(4),
+                    notes TEXT,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS agent_daily_metrics (
+                    id SERIAL PRIMARY KEY,
+                    account_id INTEGER NOT NULL,
+                    date DATE NOT NULL,
+                    starting_balance FLOAT,
+                    ending_balance FLOAT,
+                    pnl FLOAT DEFAULT 0.0,
+                    trades_count INTEGER NOT NULL DEFAULT 0,
+                    wins_count INTEGER NOT NULL DEFAULT 0,
+                    losses_count INTEGER NOT NULL DEFAULT 0,
+                    max_drawdown FLOAT,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS agent_audit_log (
+                    id SERIAL PRIMARY KEY,
+                    account_id INTEGER,
+                    event_type VARCHAR(32) NOT NULL,
+                    description TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            try:
+                _conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_trades_account ON agent_trades(account_id)"))
+                _conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_trades_status ON agent_trades(status)"))
+                _conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_daily_metrics_account ON agent_daily_metrics(account_id)"))
+                _conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_daily_metrics_date ON agent_daily_metrics(date)"))
+                _conn.execute(text("CREATE INDEX IF NOT EXISTS idx_agent_audit_log_account ON agent_audit_log(account_id)"))
+            except Exception:
+                pass
+except Exception:
+    pass
+
 
 # ── Ensure api_keys table exists ─────────────────────────────────
 try:
