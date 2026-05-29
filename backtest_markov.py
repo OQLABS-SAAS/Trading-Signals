@@ -36,7 +36,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from markov_engine import (
     classify_states,
     build_transition_matrix,
-    fetch_daily_prices,
+    fetch_prices,
+    _adaptive_threshold,
     STATE_BULL,
     STATE_BEAR,
     STATE_SIDEWAYS,
@@ -65,7 +66,8 @@ class WalkForwardBacktest:
         api_key: Optional[str] = None,
         lookback: int = DEFAULT_LOOKBACK,
         warmup_bars: int = DEFAULT_WARMUP_BARS,
-        threshold: float = 0.05,
+        threshold: Optional[float] = None,
+        timeframe: str = "1d",
     ):
         """
         Parameters
@@ -76,13 +78,17 @@ class WalkForwardBacktest:
             Number of recent transitions to include in the rolling matrix.
         warmup_bars : int
             Minimum number of price bars before the walk-forward loop begins.
-        threshold : float
+        threshold : float or None
             Return threshold for Bull/Bear/Sideways classification.
+            If None (default), computed adaptively from the asset's volatility.
+        timeframe : str
+            Bar timeframe: "1d", "15m", "1h", or "4h".
         """
         self.api_key = api_key
         self.lookback = lookback
         self.warmup_bars = warmup_bars
         self.threshold = threshold
+        self.timeframe = timeframe
 
         # Cached results after run()
         self.prices: Optional[pd.Series] = None
@@ -99,9 +105,11 @@ class WalkForwardBacktest:
         ticker: str,
         asset_type: str = "stock",
         years: int = DEFAULT_YEARS,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
     ) -> dict:
         """
-        Run the walk-forward backtest on daily data.
+        Run the walk-forward backtest.
 
         Parameters
         ----------
@@ -110,7 +118,12 @@ class WalkForwardBacktest:
         asset_type : str
             Asset type for symbol mapping.
         years : int
-            Years of history to fetch (min 1, max 10).
+            Years of history to fetch (min 1, max 10).  Ignored when
+            *from_date* / *to_date* are supplied.
+        from_date : str or None
+            Start date (YYYY-MM-DD).  Pass both from/to for bulk fetch.
+        to_date : str or None
+            End date (YYYY-MM-DD).
 
         Returns
         -------
@@ -128,8 +141,13 @@ class WalkForwardBacktest:
         days = max(int(years * 365), 365)
         days = min(days, 3650)  # cap at 10 years
 
-        # Step 1: fetch prices
-        prices = fetch_daily_prices(ticker, asset_type, days, self.api_key)
+        # Step 1: fetch prices (bulk: single API call via date range)
+        prices = fetch_prices(
+            ticker, asset_type, days, self.api_key,
+            timeframe=self.timeframe,
+            from_date=from_date,
+            to_date=to_date,
+        )
         if prices is None:
             return {"error": f"Failed to fetch data for {ticker} ({asset_type})"}
         if len(prices) < self.warmup_bars + 10:
@@ -143,6 +161,12 @@ class WalkForwardBacktest:
         self.prices = prices
         n = len(prices)
         warmup = self.warmup_bars
+
+        # Compute adaptive threshold once (volatility-aware, based on full series)
+        threshold = self.threshold
+        if threshold is None:
+            threshold = _adaptive_threshold(prices)
+        self.used_threshold = threshold  # capture for reporting
 
         # Step 2: run walk-forward loop
         trades = []
@@ -175,7 +199,7 @@ class WalkForwardBacktest:
             # Classify states using only available data (no look-ahead)
             states = classify_states(
                 available.values.astype(np.float64),
-                threshold=self.threshold,
+                threshold=self.used_threshold,
             )
 
             if len(states) < 2:
@@ -312,17 +336,18 @@ class WalkForwardBacktest:
                 correct += 1
             elif ps == STATE_BEAR and ar < 0:
                 correct += 1
-            elif ps == STATE_SIDEWAYS and abs(ar) < self.threshold * 100:
+            elif ps == STATE_SIDEWAYS and abs(ar) < self.used_threshold * 100:
                 correct += 1
         directional_accuracy = correct / n_trades if n_trades > 0 else 0.0
 
         return {
             "ticker": str(prices.name) if hasattr(prices, "name") and prices.name else "?",
-            "engine_version": "1.0.0",
+            "engine_version": "1.1.0",
             "method": "walk-forward",
+            "timeframe": self.timeframe,
             "warmup_bars": warmup,
             "lookback": self.lookback,
-            "threshold_pct": self.threshold * 100,
+            "threshold_pct": round(self.used_threshold * 100, 2),
             "n_out_of_sample_days": n_trades,
             "n_trades": n_trades,
             "n_wins": n_wins,
@@ -388,7 +413,10 @@ def quick_backtest(
     years: int = 3,
     api_key: Optional[str] = None,
     lookback: int = DEFAULT_LOOKBACK,
+    timeframe: str = "1d",
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
 ) -> dict:
     """Run a one-shot walk-forward backtest with sensible defaults."""
-    bt = WalkForwardBacktest(api_key=api_key, lookback=lookback)
-    return bt.run(ticker, asset_type, years=years)
+    bt = WalkForwardBacktest(api_key=api_key, lookback=lookback, timeframe=timeframe)
+    return bt.run(ticker, asset_type, years=years, from_date=from_date, to_date=to_date)

@@ -36,7 +36,38 @@ import requests
 # Return threshold for state classification.
 # Trailing returns above +5% are classed as Bull, below -5% as Bear,
 # and everything in between as Sideways.
+# NOTE: This is a fallback only.  classify_states() now uses an adaptive
+# volatility-aware threshold by default (see _adaptive_threshold()).
 RETURN_THRESHOLD = 0.05
+
+
+def _adaptive_threshold(prices: Union[pd.Series, np.ndarray], lookback: int = 252) -> float:
+    """Calculate return threshold based on asset volatility.
+
+    Uses 3x the average absolute return over the lookback period.
+    This adapts to the asset's natural volatility — stocks with 1 % daily swings
+    get tighter thresholds than crypto with 5 % daily swings.
+
+    Returns a float between 0.02 (minimum 2%) and 0.10 (maximum 10%).
+    """
+    if isinstance(prices, np.ndarray):
+        prices_arr = prices
+    else:
+        prices_arr = prices.values.astype(np.float64)
+
+    if len(prices_arr) < 5:
+        return RETURN_THRESHOLD  # fallback for tiny series
+
+    # Use the most recent *lookback* bars
+    window = prices_arr[-min(lookback, len(prices_arr)):]
+    if len(window) < 5:
+        return RETURN_THRESHOLD
+
+    rets = np.abs(np.diff(np.log(window)))
+    avg_return = np.mean(rets)
+    threshold = max(0.02, min(0.10, float(avg_return) * 3))
+    return threshold
+
 
 # State-to-integer mapping for matrix indexing
 STATE_BULL = 0       # returns > +threshold
@@ -92,14 +123,17 @@ def _normalise_ticker(ticker: str, asset_type: str) -> str:
 # 1. EODHD data fetching
 # ---------------------------------------------------------------------------
 
-def fetch_daily_prices(
+def fetch_prices(
     ticker: str,
     asset_type: str = "stock",
     days: int = 365,
     api_key: Optional[str] = None,
+    timeframe: str = "1d",
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
 ) -> Optional[pd.Series]:
     """
-    Fetch daily close prices from EODHD.
+    Fetch price data from EODHD with intraday timeframe support.
 
     Parameters
     ----------
@@ -108,14 +142,24 @@ def fetch_daily_prices(
     asset_type : str
         One of 'stock', 'forex', 'crypto', 'index', 'commodity'.
     days : int
-        Number of calendar days of history to request.
+        Number of calendar days of history to request (ignored when
+        *from_date* / *to_date* are supplied).
     api_key : str or None
         EODHD API key.  Falls back to the EODHD_API_KEY environment variable.
+    timeframe : str
+        Bar interval.  One of ``"1d"`` (daily), ``"15m"``, ``"1h"``, or ``"4h"``.
+        - ``"1d"`` uses the bulk EOD endpoint (one API call for all history).
+        - ``"15m"`` / ``"1h"`` use the intraday endpoint with date-range support.
+        - ``"4h"`` fetches 1h intraday and resamples to 4h via pandas.
+    from_date : str or None
+        Start date in ``YYYY-MM-DD`` format.  If omitted, computed from *days*.
+    to_date : str or None
+        End date in ``YYYY-MM-DD`` format.  Defaults to today.
 
     Returns
     -------
     pd.Series or None
-        Close prices indexed by date (sorted ascending), or None on failure.
+        Close prices indexed by date/datetime (sorted ascending), or None on failure.
     """
     key = api_key or os.environ.get("EODHD_API_KEY", "").strip()
     if not key:
@@ -124,21 +168,51 @@ def fetch_daily_prices(
 
     symbol = _normalise_ticker(ticker, asset_type)
     today = datetime.now()
-    from_date = (today - timedelta(days=days)).strftime("%Y-%m-%d")
-    to_date = today.strftime("%Y-%m-%d")
 
-    url = f"https://eodhd.com/api/eod/{symbol}"
-    params = {"api_token": key, "fmt": "json", "from": from_date, "to": to_date}
+    if to_date is None:
+        to_date = today.strftime("%Y-%m-%d")
+    if from_date is None:
+        from_date = (today - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    # ------------------------------------------------------------------
+    # Intraday paths
+    # ------------------------------------------------------------------
+    intraday_intervals = {"15m", "1h"}
+
+    if timeframe in intraday_intervals:
+        url = f"https://eodhd.com/api/intraday/{symbol}"
+        params = {
+            "api_token": key,
+            "fmt": "json",
+            "interval": timeframe,
+            "from": from_date,
+            "to": to_date,
+        }
+    elif timeframe == "4h":
+        # 4h = fetch 1h from EODHD then resample locally
+        url = f"https://eodhd.com/api/intraday/{symbol}"
+        params = {
+            "api_token": key,
+            "fmt": "json",
+            "interval": "1h",
+            "from": from_date,
+            "to": to_date,
+        }
+    else:
+        # Default: daily via the bulk history endpoint (single API call)
+        url = f"https://eodhd.com/api/eod/{symbol}"
+        params = {"api_token": key, "fmt": "json", "from": from_date, "to": to_date}
 
     try:
         resp = requests.get(url, params=params, timeout=EODHD_TIMEOUT)
         if resp.status_code != 200:
-            print(f"[markov-engine] EODHD HTTP {resp.status_code} for {symbol}")
+            print(f"[markov-engine] EODHD HTTP {resp.status_code} for {symbol} (tf={timeframe})")
             return None
 
         data = resp.json()
         if not isinstance(data, list) or len(data) < 20:
-            print(f"[markov-engine] EODHD insufficient bars for {symbol}: {len(data) if isinstance(data, list) else 0}")
+            n = len(data) if isinstance(data, list) else 0
+            print(f"[markov-engine] EODHD insufficient bars for {symbol}: {n}")
             return None
 
         # Parse bars into a price series
@@ -161,14 +235,33 @@ def fetch_daily_prices(
 
         series = pd.Series(closes, index=pd.DatetimeIndex(dates))
         series = series.sort_index()
+
+        # Resample 4h from 1h source data
+        if timeframe == "4h":
+            series = series.resample("4h").agg({
+                "close": "last" if isinstance(series, pd.DataFrame) else "last"
+            })
+            # resample returns a DataFrame when agg dict is used; handle both cases
+            if isinstance(series, pd.DataFrame):
+                series = series["close"]
+            series = series.dropna()
+            if len(series) < 20:
+                print(f"[markov-engine] Only {len(series)} 4h bars after resampling for {symbol}")
+                return None
+
         series = series.iloc[-MAX_BARS:]  # keep most recent bars
 
-        print(f"[markov-engine] Fetched {len(series)} daily bars for {symbol} ({ticker})")
+        tf_label = timeframe if timeframe != "1d" else "daily"
+        print(f"[markov-engine] Fetched {len(series)} {tf_label} bars for {symbol} ({ticker})")
         return series
 
     except requests.RequestException as exc:
         print(f"[markov-engine] EODHD request failed for {symbol}: {exc}")
         return None
+
+
+# Backward-compatible alias
+fetch_daily_prices = fetch_prices
 
 
 # ---------------------------------------------------------------------------
@@ -177,13 +270,17 @@ def fetch_daily_prices(
 
 def classify_states(
     prices: Union[pd.Series, np.ndarray],
-    threshold: float = RETURN_THRESHOLD,
+    threshold: Optional[float] = None,
 ) -> np.ndarray:
     """
-    Classify daily returns into Bull / Bear / Sideways states.
+    Classify returns (data-agnostic) into Bull / Bear / Sideways states.
 
-    Uses the full price series to compute daily log returns, then assigns
-    a state to *each day* based on its return relative to the threshold.
+    Uses the full price series to compute log returns, then assigns
+    a state to *each day/bar* based on its return relative to the threshold.
+
+    If *threshold* is not provided, it is computed adaptively via
+    ``_adaptive_threshold(prices)`` so that it scales to the asset's own
+    volatility rather than using the global 5 % fallback.
 
     Returns an integer array of the same length as *prices*:
         STATE_BULL (0)  -> return > +threshold
@@ -193,6 +290,9 @@ def classify_states(
     The first element is padded with STATE_SIDEWAYS because there is no
     prior price to compute a return from.
     """
+    if threshold is None:
+        threshold = _adaptive_threshold(prices)
+
     if isinstance(prices, pd.Series):
         prices_arr = prices.values.astype(np.float64)
     else:
@@ -625,6 +725,7 @@ class MarkovEngine:
         asset_type: str = "stock",
         days: int = 365,
         hmm_iterations: int = 50,
+        timeframe: str = "1d",
     ) -> dict:
         """
         Run the full Markov analysis pipeline.
@@ -639,6 +740,8 @@ class MarkovEngine:
             Days of history to fetch.
         hmm_iterations : int
             Baum-Welch EM iterations for the HMM confirmer.
+        timeframe : str
+            Bar timeframe: "1d", "15m", "1h", or "4h".
 
         Returns
         -------
@@ -653,7 +756,7 @@ class MarkovEngine:
             engine_version
         """
         # Step 1: fetch data
-        prices = fetch_daily_prices(ticker, asset_type, days, self.api_key)
+        prices = fetch_prices(ticker, asset_type, days, self.api_key, timeframe=timeframe)
         if prices is None:
             return {"error": f"Failed to fetch data for {ticker} ({asset_type})"}
 
@@ -704,12 +807,13 @@ class MarkovEngine:
             self.hmm_result = hmm_result
 
         # Build the output dict
-        return self._build_output(ticker, asset_type, P, pi, P_5d, P_10d, P_20d, state_counts, hmm_result)
+        return self._build_output(ticker, asset_type, timeframe, P, pi, P_5d, P_10d, P_20d, state_counts, hmm_result)
 
     def _build_output(
         self,
         ticker: str,
         asset_type: str,
+        timeframe: str,
         P: np.ndarray,
         pi: Optional[np.ndarray],
         P_5d: np.ndarray,
@@ -722,11 +826,13 @@ class MarkovEngine:
         labels = [STATE_LABELS[i] for i in range(3)]
 
         return {
-            "engine_version": "1.0.0",
+            "engine_version": "1.1.0",
             "ticker": ticker,
             "asset_type": asset_type,
+            "timeframe": timeframe,
             "lookback_days": self.lookback,
-            "return_threshold_pct": RETURN_THRESHOLD * 100,
+            "return_threshold_pct": round(float(_adaptive_threshold(self.prices)) * 100, 2)
+                if self.prices is not None else RETURN_THRESHOLD * 100,
             "n_bars": len(self.prices) if self.prices is not None else 0,
             "n_transitions": max(0, (len(self.states) - 1) if self.states is not None else 0),
 
@@ -780,6 +886,7 @@ def quick_analysis(
     api_key: Optional[str] = None,
     lookback: int = DEFAULT_LOOKBACK,
     days: int = 365,
+    timeframe: str = "1d",
 ) -> dict:
     """
     Run a one-shot Markov analysis with sensible defaults.
@@ -788,4 +895,4 @@ def quick_analysis(
     pass to a JSON serializer.
     """
     engine = MarkovEngine(api_key=api_key, lookback=lookback)
-    return engine.run(ticker, asset_type, days=days)
+    return engine.run(ticker, asset_type, days=days, timeframe=timeframe)
