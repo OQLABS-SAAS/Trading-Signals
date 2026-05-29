@@ -5694,7 +5694,7 @@ button { font-weight: 400 !important; }
       </div>
       <div class="dtop-r">
         <!-- Agent Client Selector (hidden by default, shown on Agent tab) -->
-        <div class="agent-client-selector" id="agentClientSelector" onclick="this.querySelector('.agent-client-dropdown').classList.toggle('agent-show');this.classList.toggle('agent-open');event.stopPropagation();">
+        <div class="agent-client-selector" id="agentClientSelector" data-tip="Select a client account to filter positions, history, and reports" onclick="this.querySelector('.agent-client-dropdown').classList.toggle('agent-show');this.classList.toggle('agent-open');event.stopPropagation();">
           <div class="agent-client-av" id="agentClientAv">WC</div>
           <div>
             <span class="agent-client-label">Who are we looking at?</span>
@@ -7669,7 +7669,7 @@ async function _agentRenderPanel(name, panel){
             + '<div class="agent-card-metrics"><div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+(a.balance != null ? a.balance : 'N/A')+'</div></div>'
             + (a.drawdown != null ? '<div><div class="agent-metric-label">Drawdown</div><div class="agent-metric-sub">'+a.drawdown+'</div></div>' : '')+'</div>'
             + (a.problem ? '<div class="agent-card-explain">'+a.problem+'</div>' : '')
-            + '<button class="agent-card-btn" onclick="event.stopPropagation();_agentSwitchSubtab(\'positions\')">Review Positions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-left:2px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button>'
+            + '<button class="agent-card-btn" data-tip="View open positions for this account" onclick="event.stopPropagation();_agentSwitchSubtab(\'positions\')">Review Positions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-left:2px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button>'
             + '</div>';
         }).join('') + '</div>' : '')
       + '<div class="agent-section-head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg><span class="agent-section-label agent-subtle">Running Smoothly</span></div>'
@@ -7765,15 +7765,15 @@ async function _agentRenderPanel(name, panel){
     var hSymbols = Array.from(new Set(trades.map(function(t){return t.symbol;}))).sort();
     var hAccounts = Array.from(new Set(trades.map(function(t){return t.account_name || t.client_name || 'Unknown';}))).sort();
     panel.innerHTML = '<div class="agent-filter-bar">'
-      + '<select class="agent-filter-select" id="agentHistAcct" onchange="_agentApplyHistFilters()"><option value="all">All Accounts</option>'
+      + '<select class="agent-filter-select" id="agentHistAcct" data-tip="Filter by client account" onchange="_agentApplyHistFilters()"><option value="all">All Accounts</option>'
       + hAccounts.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('')
       + '</select>'
-      + '<select class="agent-filter-select" id="agentHistDate" onchange="_agentApplyHistFilters()"><option value="all">All Time</option><option value="today">Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="3months">Last 3 Months</option></select>'
-      + '<select class="agent-filter-select" id="agentHistSym" onchange="_agentApplyHistFilters()"><option value="all">All Symbols</option>'
+      + '<select class="agent-filter-select" id="agentHistDate" data-tip="Filter by time period" onchange="_agentApplyHistFilters()"><option value="all">All Time</option><option value="today">Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="3months">Last 3 Months</option></select>'
+      + '<select class="agent-filter-select" id="agentHistSym" data-tip="Filter by trading symbol" onchange="_agentApplyHistFilters()"><option value="all">All Symbols</option>'
       + hSymbols.map(function(s){return '<option value="'+s+'">'+s+'</option>';}).join('')
       + '</select>'
-      + '<select class="agent-filter-select" id="agentHistOut" onchange="_agentApplyHistFilters()"><option value="all">All Outcomes</option><option value="win">Win</option><option value="loss">Loss</option><option value="be">Break Even</option></select>'
-      + '<button class="agent-export-btn" onclick="_agentExportCSV()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Export CSV</button>'
+      + '<select class="agent-filter-select" id="agentHistOut" data-tip="Filter by trade result (win, loss, break-even)" onchange="_agentApplyHistFilters()"><option value="all">All Outcomes</option><option value="win">Win</option><option value="loss">Loss</option><option value="be">Break Even</option></select>'
+      + '<button class="agent-export-btn" data-tip="Download filtered trade history as CSV" onclick="_agentExportCSV()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Export CSV</button>'
       + '</div>'
       + '<div class="agent-filter-chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px;opacity:0.7;"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg><span id="agentFilterLabel">Showing: ' + (_agentActiveClient && _agentClientData[_agentActiveClient] ? _agentClientData[_agentActiveClient].name : 'All Clients') + '</span></div>'
       + '<div class="agent-table-wrap"><table class="agent-data-table" id="agentHistTable"><thead><tr>'
@@ -7820,15 +7820,14 @@ async function _agentRenderPanel(name, panel){
       });
     }
     var connectFormHtml = '<div class="agent-connect-form" id="agentConnectForm"><h3>Connect New Account</h3><div class="agent-form-grid">'
-      + '<div><label>Client Name</label><input type="text" id="agentNewName" placeholder="e.g. Orion Capital"></div>'
-      + '<div><label>Broker</label><select id="agentNewBroker"><option>MetaTrader 5</option><option>cTrader</option></select></div>'
-      + '<div><label>Server</label><input type="text" id="agentNewServer" placeholder="e.g. ICMarkets-Live"></div>'
-      + '<div><label>Login</label><input type="text" id="agentNewLogin" placeholder="Account number"></div>'
-      + '<div><label>Password</label><input type="password" id="agentNewPass" placeholder="Password"></div>'
-      + '<div><label>Leverage</label><select id="agentNewLev"><option>1:100</option><option>1:200</option><option>1:500</option></select></div>'
+      + '<div data-tip="Give this account a recognizable name, like &apos;Johnson — IC Markets&apos;"><label>Client Name</label><input type="text" id="agentNewName" placeholder="e.g. Orion Capital"></div>'
+      + '<div data-tip="Your broker name, e.g. IC Markets, Pepperstone, FXCM"><label>Broker</label><select id="agentNewBroker"><option>MetaTrader 5</option><option>cTrader</option></select></div>'
+      + '<div data-tip="Your broker&apos;s MT5 server name. Usually found in your MT5 terminal."><label>Server</label><input type="text" id="agentNewServer" placeholder="e.g. ICMarkets-Live"></div>'
+      + '<div data-tip="Your MT5 account login ID, typically a number."><label>Login</label><input type="text" id="agentNewLogin" placeholder="Account number"></div>'
+      + '<div data-tip="Your MT5 account password. Stored encrypted."><label>Password</label><input type="password" id="agentNewPass" placeholder="Password"></div>'
       + '</div><span id="connectError" style="color:var(--red);font-size:11px;display:block;margin-top:6px;"></span><div class="agent-form-actions"><button class="agent-acct-btn agent-edit" onclick="_agentCancelConnect()">Cancel</button><button class="agent-generate-btn" onclick="_agentAddAccount()">Connect</button></div></div>';
     if(accounts.length === 0){
-      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No accounts connected</div><div class="agent-empty-desc">Connect your first MT5 account to start managing positions, tracking trades, and generating reports.</div><button class="agent-connect-btn" onclick="_agentShowConnect()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button></div>' + connectFormHtml;
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No accounts connected</div><div class="agent-empty-desc">Connect your first MT5 account to start managing positions, tracking trades, and generating reports.</div><button class="agent-connect-btn" data-tip="Add a new MT5 account" onclick="_agentShowConnect()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button></div>' + connectFormHtml;
       return;
     }
     var accts = accounts.map(function(a){
@@ -7843,16 +7842,16 @@ async function _agentRenderPanel(name, panel){
         + '<div class="agent-acct-row"><span class="agent-acct-label">Leverage</span><span class="agent-acct-value">'+(a.leverage != null ? a.leverage : 'N/A')+'</span></div>'
         + '</div>'
         + '<div class="agent-acct-actions">'
-        + '<button class="agent-acct-btn agent-edit" onclick="_agentToggleEdit(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit</button>'
-        + '<button class="agent-acct-btn agent-sync" onclick="_agentSyncAcct(\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Sync</button>'
-        + '<button class="agent-acct-btn agent-disconnect" onclick="_agentConfirmDisc(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.68 13.31a6 6 0 003.41-2.25M14 6.33A7.98 7.98 0 002 12a7.98 7.98 0 004.07 7.1"/><path d="M16 17.67A7.98 7.98 0 0022 12a7.98 7.98 0 00-4-6.91"/><line x1="2" y1="2" x2="22" y2="22"/></svg> Disconnect</button>'
+        + '<button class="agent-acct-btn agent-edit" data-tip="Edit account details" onclick="_agentToggleEdit(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit</button>'
+        + '<button class="agent-acct-btn agent-sync" data-tip="Refresh account data from broker" onclick="_agentSyncAcct(\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Sync</button>'
+        + '<button class="agent-acct-btn agent-disconnect" data-tip="Disconnect this account" onclick="_agentConfirmDisc(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.68 13.31a6 6 0 003.41-2.25M14 6.33A7.98 7.98 0 002 12a7.98 7.98 0 004.07 7.1"/><path d="M16 17.67A7.98 7.98 0 0022 12a7.98 7.98 0 00-4-6.91"/><line x1="2" y1="2" x2="22" y2="22"/></svg> Disconnect</button>'
         + '</div>'
         + '<div class="agent-inline-edit"><label>Client Name</label><input type="text" value="'+a.name+'"><label>Login</label><input type="text" value="'+(a.login||'')+'"><label>Server</label><input type="text" value="'+(a.server||'')+'"><div class="agent-inline-row"><button class="agent-acct-btn agent-sync" onclick="_agentSaveEdit(this,\''+a.id+'\')">Save</button><button class="agent-acct-btn agent-edit" onclick="_agentCancelEdit(this)">Cancel</button></div></div>'
         + '<div class="agent-confirm-disc">Disconnect this account?<div class="agent-confirm-row"><button class="agent-confirm-btn agent-confirm" onclick="_agentDoDisc(\''+a.id+'\')">Confirm</button><button class="agent-confirm-btn agent-cancel" onclick="_agentCancelDisc(this)">Cancel</button></div></div>'
         + '</div>';
     }).join('');
     panel.innerHTML = '<div class="agent-account-grid">'+accts+'</div>'
-      + '<button class="agent-connect-btn" onclick="_agentShowConnect()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button>'
+      + '<button class="agent-connect-btn" data-tip="Add a new MT5 account" onclick="_agentShowConnect()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button>'
       + connectFormHtml;
   }
 }
@@ -7994,12 +7993,12 @@ function _agentReportsBuildUI(panel, reportData){
     return '<div class="agent-metric-card" data-tip="'+m.t+'"><div class="agent-label">'+m.l+'</div><div class="agent-value" style="'+(m.c||'')+'">'+m.v+'</div><div class="agent-sub">'+m.s+'</div></div>';
   }).join('');
   panel.innerHTML = '<div class="agent-filter-bar">'
-    + '<select class="agent-filter-select" id="agentReportClient">'+clientOpts+'</select>'
-    + '<select class="agent-filter-select" id="agentReportMonth">'+monthOpts+'</select>'
-    + '<button class="agent-generate-btn" onclick="_agentGenerateReport()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Generate</button>'
+    + '<select class="agent-filter-select" id="agentReportClient" data-tip="Filter by client account">'+clientOpts+'</select>'
+    + '<select class="agent-filter-select" id="agentReportMonth" data-tip="Select reporting period">'+monthOpts+'</select>'
+    + '<button class="agent-generate-btn" data-tip="Generate performance report for selected filters" onclick="_agentGenerateReport()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Generate</button>'
     + '</div>'
     + '<div class="agent-metrics-grid agent-show" style="display:grid;" id="agentMetricsGrid">'+metricsHtml+'</div>'
-    + '<button class="agent-download-btn agent-show" onclick="_agentDownloadReport()">'
+    + '<button class="agent-download-btn agent-show" data-tip="Download report as CSV" onclick="_agentDownloadReport()">'
     + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Download CSV</button>';
 }
 function _agentGenerateReport(){
@@ -8171,8 +8170,7 @@ async function _agentAddAccount(){
     broker: (document.getElementById('agentNewBroker')||{}).value||'MetaTrader 5',
     server: (document.getElementById('agentNewServer')||{}).value||'Live',
     login: (document.getElementById('agentNewLogin')||{}).value||'',
-    password: (document.getElementById('agentNewPass')||{}).value||'',
-    leverage: (document.getElementById('agentNewLev')||{}).value||'1:200'
+    password: (document.getElementById('agentNewPass')||{}).value||''
   };
   var result = await dvFetch('/api/trading-agent/accounts', {method:'POST',body:JSON.stringify(payload)});
   if(result && result.success){
@@ -8201,14 +8199,14 @@ function showAgent(){
   _agentActiveClient = _agentActiveClient || '';
   _agentSubtab = _agentSubtab || 'overview';
   var tabs = [
-    {id:'overview', label:'Overview'},
-    {id:'positions', label:'Positions'},
-    {id:'history',   label:'History'},
-    {id:'reports',   label:'Reports'},
-    {id:'accounts',  label:'Accounts'}
+    {id:'overview', label:'Overview', tip:'Dashboard summary of all connected accounts, attention items, and account health'},
+    {id:'positions', label:'Positions', tip:'View currently open trades across all client accounts'},
+    {id:'history',   label:'History', tip:'Closed trade history with P&L, R:R, and outcome data'},
+    {id:'reports',   label:'Reports', tip:'Performance analytics: win rate, profit factor, Sharpe ratio, and more'},
+    {id:'accounts',  label:'Accounts', tip:'Manage connected trading accounts — add, edit, sync, or disconnect'}
   ];
   var navHtml = tabs.map(function(t){
-    return '<button class="subtab' + (_agentSubtab === t.id ? ' active' : '') + '" data-tab="' + t.id + '" onclick="_agentSwitchSubtab(\'' + t.id + '\')">' + t.label + '</button>';
+    return '<button class="subtab' + (_agentSubtab === t.id ? ' active' : '') + '" data-tab="' + t.id + '" data-tip="' + (t.tip||'') + '" onclick="_agentSwitchSubtab(\'' + t.id + '\')">' + t.label + '</button>';
   }).join('');
   el.innerHTML = '<div class="agent-dash">'
     + '<div class="subtab-bar" id="agentSubtabNav">' + navHtml + '</div>'
