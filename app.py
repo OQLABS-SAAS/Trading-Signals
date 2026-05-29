@@ -18054,16 +18054,6 @@ _OPENAPI_SPEC = {
 }
 
 
-# ─── WALK-FORWARD MARKOV BACKTEST ────────────────────────────────
-# Import the dedicated backtest module. It handles its own sys.path
-# setup to find markov_engine.py in the same directory.
-import sys as _sys
-_markov_bt_path = os.path.dirname(os.path.abspath(__file__))
-if _markov_bt_path not in _sys.path:
-    _sys.path.insert(0, _markov_bt_path)
-from backtest_markov import WalkForwardBacktest as _WalkForwardBacktest
-
-
 @app.route("/api/backtest/markov", methods=["GET"])
 @login_required
 def backtest_markov():
@@ -18107,6 +18097,13 @@ def backtest_markov():
       400 — missing ticker
       502 — backtest failed (insufficient data, fetch error)
     """
+    # ── Lazy import: only loads backtest_markov when endpoint is called ──
+    import sys as _sys
+    _markov_bt_path = os.path.dirname(os.path.abspath(__file__))
+    if _markov_bt_path not in _sys.path:
+        _sys.path.insert(0, _markov_bt_path)
+    from backtest_markov import WalkForwardBacktest as _WalkForwardBacktest
+
     ticker = ""
     try:
         ticker = request.args.get("ticker", "").upper().strip()
