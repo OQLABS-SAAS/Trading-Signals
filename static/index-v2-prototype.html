@@ -4660,6 +4660,15 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
    ═══════════════════════════════════════════════ */
 
 /* Agent Greeting Card */
+.agent-loading{display:flex;flex-direction:column;align-items:center;gap:12px;padding:60px 20px;}
+.agent-spinner{width:28px;height:28px;border:2px solid rgba(237,232,216,.12);border-top-color:var(--gold);border-radius:50%;animation:agentSpin .8s linear infinite;}
+@keyframes agentSpin{to{transform:rotate(360deg)}}
+.agent-loading-text{color:var(--t3);font-size:13px;font-family:var(--mono);}
+.agent-empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:60px 20px;text-align:center;}
+.agent-empty-icon{opacity:.35;margin-bottom:4px;}
+.agent-empty-title{font-size:18px;font-weight:600;color:var(--t1);}
+.agent-empty-desc{font-size:13px;color:var(--t3);max-width:360px;line-height:1.5;}
+
 .agent-greet-card{
   background:rgba(9,8,13,.66);
   backdrop-filter:blur(18px) saturate(160%) brightness(1.05);
@@ -4948,6 +4957,15 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
   border:1px solid rgba(237,232,216,.08);
   border-radius:8px;margin-bottom:12px;
 }
+.agent-filter-chip{
+  display:flex;align-items:center;gap:6px;
+  padding:8px 14px;margin-bottom:10px;
+  background:rgba(201,168,76,.07);
+  border:1px solid rgba(201,168,76,.15);
+  border-radius:6px;
+  font-size:12px;color:var(--t2);
+  font-family:var(--ui);
+}
 .agent-filter-select{
   background:rgba(7,6,10,.55);
   border:1px solid rgba(237,232,216,.14);
@@ -5171,6 +5189,8 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
   border-color:rgba(201,168,76,.4);
   color:var(--gold);
 }
+.agent-retry-btn{margin-top:8px;border-color:var(--gold);color:var(--gold);background:transparent;padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+.agent-retry-btn:hover{background:rgba(201,168,76,.08);}
 
 /* Agent Connect Form */
 .agent-connect-form{
@@ -5697,7 +5717,7 @@ button { font-weight: 400 !important; }
           <div class="agent-client-av" id="agentClientAv">WC</div>
           <div>
             <span class="agent-client-label">Who are we looking at?</span>
-            <span class="agent-client-name" id="agentClientName">Williams Capital</span>
+            <span class="agent-client-name" id="agentClientName">Select a client</span>
           </div>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--t3);"><path d="M6 9l6 6 6-6"/></svg>
           <div class="agent-client-dropdown" id="agentClientDropdown"></div>
@@ -5937,6 +5957,12 @@ function setNav(id){
   if (agentSel) {
     if (id === 'agent') { agentSel.classList.add('agent-visible'); }
     else { agentSel.classList.remove('agent-visible'); }
+  }
+  
+  // Restore top bar label when leaving Agent tab
+  if (id !== 'agent') {
+    var label = document.querySelector('.dtop-label');
+    if(label) label.innerHTML = 'TRADING DASHBOARD &middot; <span id="dashDate">&mdash;</span>';
   }
   
   // Close agent client dropdown when clicking outside
@@ -7581,59 +7607,14 @@ function showSettings(tab){
 // ══════════════════════════════════════════════════════════════
 
 // Agent tab state
-var _agentSubtab = 'dashboard';
+var _agentSubtab = 'overview';
 var _agentActiveClient = null;
 var _agentReportData = null;
 var _agentAccounts = [];
 var _agentOpenCount = 0;
 
-// Agent data — mock client accounts for demo
-var _agentClientData = {
-  'williams-capital': {id:'williams-capital',initials:'WC',name:'Williams Capital',balance:'$487,200',drawdown:'-22.4%',status:'warning',broker:'MetaTrader 5',server:'ICMarkets-Demo',login:'5038274',equity:'$489,650',leverage:'1:500',problem:'Drawdown threshold exceeded. 3 losing positions open.'},
-  'apex-trading': {id:'apex-trading',initials:'AT',name:'Apex Trading LLC',balance:'$312,800',drawdown:'-8.2%',status:'warning',broker:'MetaTrader 5',server:'ICMarkets-Live',login:'6028193',equity:'$314,100',leverage:'1:200',problem:'Margin call risk. Free margin below $500.'},
-  'meridian-funds': {id:'meridian-funds',initials:'MF',name:'Meridian Funds',balance:'$1,240,000',drawdown:'-3.1%',status:'online',broker:'MetaTrader 5',server:'ICMarkets-Live',login:'7012345',equity:'$1,242,500',leverage:'1:100'},
-  'atlas-trading': {id:'atlas-trading',initials:'AT',name:'Atlas Trading',balance:'$678,000',drawdown:'-5.4%',status:'online',broker:'MetaTrader 5',server:'ICMarkets-Live',login:'8091234',equity:'$680,200',leverage:'1:200'},
-  'northstar-capital': {id:'northstar-capital',initials:'NC',name:'Northstar Capital',balance:'$2,100,000',drawdown:'-1.8%',status:'online',broker:'MetaTrader 5',server:'ICMarkets-Live',login:'9012345',equity:'$2,104,000',leverage:'1:100'},
-  'phoenix-group': {id:'phoenix-group',initials:'PG',name:'Phoenix Group',balance:'$423,500',drawdown:'-11.2%',status:'offline',broker:'MetaTrader 5',server:'ICMarkets-Demo',login:'1023456',equity:'$425,000',leverage:'1:500'},
-  'summit-investments': {id:'summit-investments',initials:'SI',name:'Summit Investments',balance:'$890,000',drawdown:'-4.5%',status:'online',broker:'MetaTrader 5',server:'ICMarkets-Live',login:'2034567',equity:'$893,200',leverage:'1:200'},
-  'vanguard-trading': {id:'vanguard-trading',initials:'VT',name:'Vanguard Trading',balance:'$567,000',drawdown:'-6.7%',status:'online',broker:'MetaTrader 5',server:'Pepperstone-Live',login:'3045678',equity:'$570,100',leverage:'1:200'},
-  'horizon-partners': {id:'horizon-partners',initials:'HP',name:'Horizon Partners',balance:'$1,560,000',drawdown:'-2.3%',status:'online',broker:'MetaTrader 5',server:'ICMarkets-Live',login:'4056789',equity:'$1,564,000',leverage:'1:100'},
-  'zenith-capital': {id:'zenith-capital',initials:'ZC',name:'Zenith Capital',balance:'$345,000',drawdown:'-9.8%',status:'offline',broker:'MetaTrader 5',server:'ICMarkets-Demo',login:'5067890',equity:'$347,500',leverage:'1:500'},
-  'pinnacle-group': {id:'pinnacle-group',initials:'PG',name:'Pinnacle Group',balance:'$745,000',drawdown:'-3.9%',status:'online',broker:'MetaTrader 5',server:'ICMarkets-Live',login:'6078901',equity:'$748,200',leverage:'1:200'},
-  'sterling-trading': {id:'sterling-trading',initials:'ST',name:'Sterling Trading',balance:'$234,000',drawdown:'-7.1%',status:'online',broker:'MetaTrader 5',server:'Pepperstone-Live',login:'7089012',equity:'$236,100',leverage:'1:500'}
-};
-
-// Agent mock positions
-var _agentPositions = [
-  {client:'williams-capital',symbol:'XAUUSD',side:'BUY',entry:'2634.52',current:'2648.31',pnl:1247.32,dur:'3d 4h'},
-  {client:'williams-capital',symbol:'EURUSD',side:'SELL',entry:'1.0842',current:'1.0821',pnl:210.50,dur:'1d 8h'},
-  {client:'williams-capital',symbol:'US30',side:'BUY',entry:'38420',current:'38210',pnl:-890.50,dur:'5d 2h'},
-  {client:'apex-trading',symbol:'XAUUSD',side:'BUY',entry:'2640.10',current:'2648.31',pnl:821.00,dur:'2d 6h'},
-  {client:'apex-trading',symbol:'NAS100',side:'SELL',entry:'19240',current:'19310',pnl:-420.00,dur:'1d 3h'},
-  {client:'meridian-funds',symbol:'GBPUSD',side:'BUY',entry:'1.2640',current:'1.2680',pnl:400.00,dur:'4d 1h'},
-  {client:'meridian-funds',symbol:'BTCUSD',side:'BUY',entry:'67200',current:'68450',pnl:1250.00,dur:'1w 2d'},
-  {client:'atlas-trading',symbol:'EURUSD',side:'BUY',entry:'1.0800',current:'1.0821',pnl:185.00,dur:'2d 5h'},
-  {client:'northstar-capital',symbol:'XAUUSD',side:'SELL',entry:'2655.00',current:'2648.31',pnl:669.00,dur:'1d 9h'},
-  {client:'summit-investments',symbol:'US30',side:'BUY',entry:'38150',current:'38210',pnl:310.00,dur:'3d 0h'},
-  {client:'vanguard-trading',symbol:'EURUSD',side:'SELL',entry:'1.0860',current:'1.0821',pnl:340.50,dur:'2d 2h'},
-  {client:'horizon-partners',symbol:'GBPUSD',side:'BUY',entry:'1.2620',current:'1.2680',pnl:600.00,dur:'6d 3h'},
-  {client:'phoenix-group',symbol:'XAUUSD',side:'BUY',entry:'2652.00',current:'2648.31',pnl:-369.00,dur:'4d 5h'}
-];
-
-// Agent mock history
-var _agentHistory = [
-  {date:'2026-05-28',client:'williams-capital',symbol:'XAUUSD',side:'BUY',entry:'2634.52',exit:'2658.10',pnl:2358.00,rr:2.4,outcome:'win'},
-  {date:'2026-05-27',client:'meridian-funds',symbol:'US30',side:'BUY',entry:'38100',exit:'37920',pnl:-890.00,rr:0,outcome:'loss'},
-  {date:'2026-05-26',client:'atlas-trading',symbol:'XAUUSD',side:'BUY',entry:'2638.00',exit:'2645.00',pnl:700.00,rr:1.6,outcome:'win'},
-  {date:'2026-05-25',client:'summit-investments',symbol:'EURUSD',side:'BUY',entry:'1.0780',exit:'1.0820',pnl:400.00,rr:2.0,outcome:'win'},
-  {date:'2026-05-24',client:'horizon-partners',symbol:'XAUUSD',side:'SELL',entry:'2648.00',exit:'2635.00',pnl:1300.00,rr:2.6,outcome:'win'},
-  {date:'2026-05-23',client:'phoenix-group',symbol:'EURUSD',side:'SELL',entry:'1.0850',exit:'1.0860',pnl:-100.00,rr:0,outcome:'loss'},
-  {date:'2026-05-22',client:'zenith-capital',symbol:'XAUUSD',side:'BUY',entry:'2630.00',exit:'2640.00',pnl:1000.00,rr:2.0,outcome:'win'},
-  {date:'2026-05-21',client:'williams-capital',symbol:'BTCUSD',side:'SELL',entry:'68800',exit:'69200',pnl:-400.00,rr:0,outcome:'loss'},
-  {date:'2026-05-20',client:'northstar-capital',symbol:'XAUUSD',side:'BUY',entry:'2642.00',exit:'2655.00',pnl:1300.00,rr:2.2,outcome:'win'},
-  {date:'2026-05-19',client:'summit-investments',symbol:'US30',side:'BUY',entry:'37950',exit:'38150',pnl:980.00,rr:2.5,outcome:'win'},
-  {date:'2026-05-17',client:'sterling-trading',symbol:'XAUUSD',side:'BUY',entry:'2635.00',exit:'2620.00',pnl:-1500.00,rr:0,outcome:'loss'}
-];
+// Agent data — runtime cache populated from API
+var _agentClientData = {};
 
 // Agent SVG helpers
 function _agentSvgGreenUp(){return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><path d="M12 5v14M5 12l7-7 7 7"/></svg>';}
@@ -7651,6 +7632,9 @@ function _agentPnlColor(val){if(val>0) return 'var(--grn)';if(val<0) return 'var
 function _agentOutcomeSvg(o){if(o==='win') return _agentSvgWin();if(o==='loss') return _agentSvgLoss();return _agentSvgBE();}
 
 function _agentSwitchSubtab(name){
+  // Abort any in-flight render for the previous sub-tab
+  if(window._agentAbort) window._agentAbort.abort();
+  window._agentAbort = new AbortController();
   _agentSubtab = name;
   var nav = document.getElementById('agentSubtabNav');
   if(nav){
@@ -7659,25 +7643,50 @@ function _agentSwitchSubtab(name){
   _agentRenderPanel(name, document.getElementById('agentPanel'));
 }
 
-function _agentRenderPanel(name, panel){
+async function _agentRenderPanel(name, panel){
   if(!panel) return;
   var clients = Object.values(_agentClientData);
   var attention = clients.filter(function(c){return c.status === 'warning' || c.status === 'offline' || c.status === 'error';});
-  var healthy = clients.filter(function(c){return c.status === 'online';});
+  var healthy = clients.filter(function(c){return c.status === 'online' || c.status === 'connected';});
 
-  if(name === 'dashboard'){
+  if(name === 'overview' || name === 'dashboard'){
+    panel.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Loading accounts...</div></div>';
+    var d = Object.keys(_agentClientData).length ? null : await dvFetch('/api/trading-agent/dashboard');
+    if(window._agentAbort && window._agentAbort.signal.aborted) return;
+    if(d){
+      (d.attention||[]).concat(d.healthy||[]).forEach(function(a){_agentClientData[a.id]=a;});
+      clients = Object.values(_agentClientData);
+      attention = clients.filter(function(c){return c.status==='warning'||c.status==='offline'||c.status==='error';});
+      healthy = clients.filter(function(c){return c.status==='online'||c.status==='connected';});
+    }
+    // Check if session expired (redirected to login)
+    if(!d && !Object.keys(_agentClientData).length){
+      if(document.querySelector('.sign-in, .login-form, #loginForm')){
+        panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></div><div class="agent-empty-title">Session expired</div><div class="agent-empty-desc">Please sign in again.</div><button class="agent-connect-btn" onclick="window.location.href=\'/\'">Sign In</button></div>';
+        return;
+      }
+    }
+    if(!Object.keys(_agentClientData).length) {
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">Could not load accounts</div><div class="agent-empty-desc">Unable to reach the trading server. Check your connection and try again.</div><button class="agent-connect-btn" onclick="_agentRenderPanel(\'dashboard\',document.getElementById(\'agentPanel\'))" style="margin-top:12px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg> Retry</button></div>';
+      return;
+    }
+    if(!clients.length){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No accounts connected yet</div><div class="agent-empty-desc">Connect your first MT5 account to start managing client trades.</div><button class="agent-connect-btn" onclick="_agentSwitchSubtab(\'accounts\')" style="margin-top:12px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button></div>';
+      return;
+    }
+    var userName = (document.querySelector('#sidebarUserName') || {}).textContent || 'Trader';
     panel.innerHTML = '<div class="agent-greet-card" data-tip="Overview of all connected client accounts and their health status">'
-      + '<h2>Good afternoon, Omar.</h2>'
+      + '<h2>Good afternoon, '+userName+'.</h2>'
       + '<p>You have <strong>'+clients.length+' accounts</strong> connected today. '
-      + (attention.length ? '<span class="agent-problem-highlight">Williams Capital needs a look &mdash; drawdown is at 22%.</span>' : '')
+      + (attention.length ? '<span class="agent-problem-highlight">'+attention[0].name+' needs a look &mdash; '+(attention[0].drawdown||attention[0].problem||'requires attention')+'.</span>' : '')
       + '</p></div>'
       + (attention.length ? '<div class="agent-section-head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2"><path d="M12 2L2 22h20L12 2z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="19" r="1" fill="#e8706e"/></svg><span class="agent-section-label agent-red">Needs Attention</span></div>'
         + '<div class="agent-problem-cards">'
         + attention.map(function(a){
-          return '<div class="agent-card agent-problem" data-tip="'+a.name+': '+(a.problem||'Requires attention')+'" onclick="_agentSelectClient(\''+a.id+'\')">'
-            + '<div class="agent-card-header"><div class="agent-card-av">'+a.initials+'</div><div class="agent-card-name">'+a.name+'</div>'+_agentSvgDot(a.status)+'</div>'
-            + '<div class="agent-card-metrics"><div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+a.balance+'</div></div>'
-            + (a.drawdown ? '<div><div class="agent-metric-label">Drawdown</div><div class="agent-metric-sub">'+a.drawdown+'</div></div>' : '')+'</div>'
+          return '<div class="agent-card agent-problem" data-tip="'+(a.name||'Unnamed')+': '+(a.problem||'Requires attention')+'" onclick="_agentSelectClient(\''+a.id+'\')">'
+            + '<div class="agent-card-header"><div class="agent-card-av">'+(a.initials||'??')+'</div><div class="agent-card-name">'+(a.name||'Unnamed')+'</div>'+_agentSvgDot(a.status)+'</div>'
+            + '<div class="agent-card-metrics"><div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+(a.balance != null ? a.balance : 'N/A')+'</div></div>'
+            + (a.drawdown != null ? '<div><div class="agent-metric-label">Drawdown</div><div class="agent-metric-sub">'+a.drawdown+'</div></div>' : '')+'</div>'
             + (a.problem ? '<div class="agent-card-explain">'+a.problem+'</div>' : '')
             + '<button class="agent-card-btn" onclick="event.stopPropagation();_agentSwitchSubtab(\'positions\')">Review Positions <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-left:2px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button>'
             + '</div>';
@@ -7685,129 +7694,185 @@ function _agentRenderPanel(name, panel){
       + '<div class="agent-section-head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg><span class="agent-section-label agent-subtle">Running Smoothly</span></div>'
       + '<div class="agent-healthy-grid">'
       + healthy.map(function(a){
-        var pnlVal = Math.round((Math.random() * 2000 - 500) * 100) / 100;
+        var pnlVal = 0; // Real P&L comes from API data when available
         var pnlSign = pnlVal >= 0 ? '+' : '';
-        return '<div class="agent-card" data-tip="'+a.name+': Balance '+a.balance+' | Drawdown '+(a.drawdown||'N/A')+' | Status: Online" onclick="_agentSelectClient(\''+a.id+'\')">'
-          + '<div class="agent-card-header"><div class="agent-card-av-sm">'+a.initials+'</div><div class="agent-card-name">'+a.name+'</div>'+_agentSvgDot('online')+'</div>'
-          + '<div class="agent-card-metrics"><div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+a.balance+'</div></div></div>'
+        return '<div class="agent-card" data-tip="'+(a.name||'Unnamed')+': Balance '+(a.balance != null ? a.balance : 'N/A')+' | Drawdown '+(a.drawdown != null ? a.drawdown : 'N/A')+' | Status: Online" onclick="_agentSelectClient(\''+a.id+'\')">'
+          + '<div class="agent-card-header"><div class="agent-card-av-sm">'+(a.initials||'??')+'</div><div class="agent-card-name">'+(a.name||'Unnamed')+'</div>'+_agentSvgDot('online')+'</div>'
+          + '<div class="agent-card-metrics"><div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+(a.balance != null ? a.balance : 'N/A')+'</div></div></div>'
           + '<div style="font-family:var(--mono);font-size:12px;color:'+(pnlVal>=0?'var(--grn)':'var(--red)')+';">Today: '+pnlSign+'$'+Math.abs(pnlVal).toFixed(2)+'</div>'
           + '<div class="agent-card-status">All systems normal</div></div>';
       }).join('') + '</div>';
   }
 
   else if(name === 'positions'){
-    var rows = _agentPositions.map(function(p){
-      var c = _agentClientData[p.client] || {name:p.client,initials:'??'};
-      var pnlStr = _agentPnlStr(p.pnl), pnlColor = _agentPnlColor(p.pnl);
-      return '<tr data-client="'+p.client+'">'
-        + '<td data-label="Client"><span class="agent-client-badge">'+c.initials+'</span> '+c.name+'</td>'
-        + '<td data-label="Symbol" style="font-family:var(--mono);">'+p.symbol+'</td>'
-        + '<td data-label="Side"><span class="agent-side-badge agent-'+(p.side.toLowerCase())+'">'+p.side+'</span></td>'
-        + '<td data-label="Entry" style="font-family:var(--mono);">'+p.entry+'</td>'
-        + '<td data-label="Current" style="font-family:var(--mono);">'+p.current+'</td>'
-        + '<td data-label="P&amp;L" data-tip="'+(p.pnl>0?'Profit of $'+p.pnl.toFixed(2)+'. This trade is profitable.':p.pnl<0?'Loss of $'+Math.abs(p.pnl).toFixed(2)+'. This trade is losing.':'Break even.')+'" style="font-family:var(--mono);color:'+pnlColor+';">'+pnlStr+'</td>'
-        + '<td data-label="Duration" data-tip="This trade has been open for '+p.dur+'.">'+p.dur+'</td>'
-        + '</tr>';
-    }).join('');
-    panel.innerHTML = '<div class="agent-table-wrap"><table class="agent-data-table"><thead><tr>'
-      + '<th data-tip="The client who owns this position">Client</th>'
-      + '<th data-tip="Trading instrument ticker">Symbol</th>'
-      + '<th data-tip="Buy (long) or Sell (short)">Side</th>'
-      + '<th data-tip="Price at which the trade was opened">Entry</th>'
-      + '<th data-tip="Current market price">Current</th>'
-      + '<th data-tip="Profit &amp; Loss. Green = profitable, red = losing">P&amp;L</th>'
-      + '<th data-tip="How long the trade has been open">Duration</th>'
-      + '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+    panel.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Loading positions...</div></div>';
+    var data = await dvFetch('/api/trading-agent/positions');
+    if(window._agentAbort && window._agentAbort.signal.aborted) return;
+    if(!data){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></div><div class="agent-empty-title">Could not load positions</div><div class="agent-empty-desc">Check your connection and try again.</div><button class="agent-connect-btn" onclick="_agentRenderPanel(\'positions\',document.getElementById(\'agentPanel\'))"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Retry</button></div>';
+      return;
+    }
+    if(!data.positions || !data.positions.length){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No open positions</div><div class="agent-empty-desc">Take a trade from the Act tab to see it here.</div></div>';
+      return;
+    }
+    // Render positions table
+    var positions = data.positions;
+    var html = '<table class="agent-data-table pos-table"><thead><tr>';
+    html += '<th data-tip="The client who owns this position">Client</th>';
+    html += '<th data-tip="Trading instrument ticker symbol (e.g., EURUSD, AAPL)">Symbol</th>';
+    html += '<th data-tip="Buy (long) = profit when price rises. Sell (short) = profit when price falls.">Side</th>';
+    html += '<th data-tip="Price at which the trade was opened">Entry</th>';
+    html += '<th data-tip="Current market price of the instrument">Current</th>';
+    html += '<th data-tip="Profit &amp; Loss. Green up-arrow = profitable, red down-arrow = losing">P&amp;L</th>';
+    html += '<th data-tip="How long this trade has been open">Duration</th>';
+    html += '</tr></thead><tbody>';
+    positions.forEach(function(p){
+      var pnlVal = p.realized_pnl != null ? Number(p.realized_pnl) : (p.pnl || 0), pnlStr = _agentPnlStr(pnlVal), pnlColor = _agentPnlColor(pnlVal);
+      var clientName = p.account_name || p.client_name || p.client || 'Unknown';
+      var clientInit = p.account_name ? p.account_name.substring(0,2).toUpperCase() : (p.client_initials || (clientName.split(' ').map(function(w){return w[0];}).join('').substring(0,2).toUpperCase()));
+      html += '<tr data-client="'+(p.account_name||p.client||'')+'">';
+      html += '<td data-label="Client"><span class="agent-client-badge">'+clientInit+'</span> '+clientName+'</td>';
+      html += '<td data-label="Symbol" style="font-family:var(--mono);">'+p.symbol+'</td>';
+      html += '<td data-label="Side"><span class="agent-side-badge agent-'+((p.side||'unknown').toLowerCase())+'">'+(p.side||'')+'</span></td>';
+      html += '<td data-label="Entry" style="font-family:var(--mono);">'+(p.entry_price || p.entry || '')+'</td>';
+      html += '<td data-label="Current" style="font-family:var(--mono);">'+(p.current_price || p.current || '')+'</td>';
+      html += '<td data-label="P&amp;L" data-tip="'+(pnlVal>0?'Profit of $'+pnlVal.toFixed(2)+'. This trade is profitable.':pnlVal<0?'Loss of $'+Math.abs(pnlVal).toFixed(2)+'. This trade is losing.':'Break even.')+'" style="font-family:var(--mono);color:'+pnlColor+';">'+pnlStr+'</td>';
+      html += '<td data-label="Duration" data-tip="This trade has been open for '+(p.duration || p.dur || '')+'.">'+(p.duration || p.dur || '')+'</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    panel.innerHTML = '<div class="agent-filter-chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px;opacity:0.7;"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg><span id="agentFilterLabel">Showing: ' + (_agentActiveClient && _agentClientData[_agentActiveClient] ? _agentClientData[_agentActiveClient].name : 'All Clients') + '</span></div><div class="agent-table-wrap">'+html+'</div>';
   }
 
   else if(name === 'history'){
-    var hrows = _agentHistory.map(function(h){
-      var c = _agentClientData[h.client] || {name:h.client};
-      var pnlStr = _agentPnlStr(h.pnl), pnlColor = _agentPnlColor(h.pnl);
-      var rrDisplay = h.rr > 0 ? h.rr.toFixed(1) : '\u2014';
-      return '<tr data-account="'+c.name+'" data-symbol="'+h.symbol+'" data-outcome="'+h.outcome+'" data-date="'+h.date+'">'
-        + '<td data-label="Date">'+h.date+'</td>'
-        + '<td data-label="Client">'+c.name+'</td>'
-        + '<td data-label="Symbol" style="font-family:var(--mono);">'+h.symbol+'</td>'
-        + '<td data-label="Side"><span class="agent-side-badge agent-'+(h.side.toLowerCase())+'">'+h.side+'</span></td>'
-        + '<td data-label="Entry" style="font-family:var(--mono);">'+h.entry+'</td>'
-        + '<td data-label="Exit" style="font-family:var(--mono);">'+h.exit+'</td>'
-        + '<td data-label="P&amp;L" data-tip="'+(h.pnl>0?'Profit of $'+h.pnl.toFixed(2):h.pnl<0?'Loss of $'+Math.abs(h.pnl).toFixed(2):'Break even')+'" style="font-family:var(--mono);color:'+pnlColor+';">'+pnlStr+'</td>'
-        + '<td data-label="R:R" data-tip="Risk-to-Reward: '+rrDisplay+'. '+(h.rr>=2?'Excellent.':h.rr>=1.5?'Good.':h.rr>0?'Below target.':'Trade closed at a loss.')+'" style="font-family:var(--mono);">'+rrDisplay+'</td>'
-        + '<td data-label="Outcome" data-tip="'+(h.outcome==='win'?'WIN \u2014 This trade closed at a profit.':h.outcome==='loss'?'LOSS \u2014 This trade closed at a loss.':'BREAK EVEN \u2014 No meaningful gain or loss.')+'" style="text-align:center;">'+_agentOutcomeSvg(h.outcome)+'</td>'
+    panel.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Loading trade history&hellip;</div></div>';
+    var data = await dvFetch('/api/trading-agent/trades?status=CLOSED');
+    if(window._agentAbort && window._agentAbort.signal.aborted) return;
+    if(!data){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></div><div class="agent-empty-title">Could not load trade history</div><div class="agent-empty-desc">Check your connection and try again.</div><button class="agent-connect-btn" onclick="_agentRenderPanel(\'history\',document.getElementById(\'agentPanel\'))"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Retry</button></div>';
+      return;
+    }
+    if(!data.trades || !data.trades.length){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No trade history</div><div class="agent-empty-desc">Closed trades from your MT5 accounts will appear here.</div></div>';
+      return;
+    }
+    var trades = data.trades;
+    var hrows = trades.map(function(t){
+      var clientName = t.account_name || t.client_name || 'Unknown';
+      var pnl = t.realized_pnl != null ? Number(t.realized_pnl) : 0;
+      var pnlStr = _agentPnlStr(pnl), pnlColor = _agentPnlColor(pnl);
+      var rr = t.rr_ratio != null ? Number(t.rr_ratio) : 0;
+      var rrDisplay = rr > 0 ? rr.toFixed(1) : '\u2014';
+      var outcome = (t.outcome||'').toLowerCase();
+      var side = t.side || '';
+      var entryPrice = t.entry_price != null ? t.entry_price : '';
+      var exitPrice = t.exit_price != null ? t.exit_price : '';
+      var dateStr = t.exit_time || t.date || t.entry_time || '';
+      return '<tr data-account="'+clientName+'" data-symbol="'+(t.symbol||'')+'" data-outcome="'+outcome+'" data-date="'+dateStr+'">'
+        + '<td data-label="Date">'+dateStr+'</td>'
+        + '<td data-label="Client">'+clientName+'</td>'
+        + '<td data-label="Symbol" style="font-family:var(--mono);">'+(t.symbol||'')+'</td>'
+        + '<td data-label="Side"><span class="agent-side-badge agent-'+side.toLowerCase()+'">'+side+'</span></td>'
+        + '<td data-label="Entry" style="font-family:var(--mono);">'+entryPrice+'</td>'
+        + '<td data-label="Exit" style="font-family:var(--mono);">'+exitPrice+'</td>'
+        + '<td data-label="P&amp;L" data-tip="'+(pnl>0?'Profit of $'+pnl.toFixed(2):pnl<0?'Loss of $'+Math.abs(pnl).toFixed(2):'Break even')+'" style="font-family:var(--mono);color:'+pnlColor+';">'+pnlStr+'</td>'
+        + '<td data-label="R:R" data-tip="Risk-to-Reward: '+rrDisplay+'. '+(rr>=2?'Excellent.':rr>=1.5?'Good.':rr>0?'Below target.':'Trade closed at a loss.')+'" style="font-family:var(--mono);">'+rrDisplay+'</td>'
+        + '<td data-label="Outcome" data-tip="'+(outcome==='win'?'WIN \u2014 This trade closed at a profit.':outcome==='loss'?'LOSS \u2014 This trade closed at a loss.':'BREAK EVEN \u2014 No meaningful gain or loss.')+'" style="text-align:center;">'+_agentOutcomeSvg(outcome)+'</td>'
         + '</tr>';
     }).join('');
-    var hSymbols = Array.from(new Set(_agentHistory.map(function(h){return h.symbol;}))).sort();
+    var hSymbols = Array.from(new Set(trades.map(function(t){return t.symbol;}))).sort();
+    var hAccounts = Array.from(new Set(trades.map(function(t){return t.account_name || t.client_name || 'Unknown';}))).sort();
     panel.innerHTML = '<div class="agent-filter-bar">'
       + '<select class="agent-filter-select" id="agentHistAcct" onchange="_agentApplyHistFilters()"><option value="all">All Accounts</option>'
-      + clients.map(function(c){return '<option value="'+c.name+'">'+c.name+'</option>';}).join('')
+      + hAccounts.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('')
       + '</select>'
-      + '<select class="agent-filter-select" id="agentHistDate" onchange="_agentApplyHistFilters()"><option value="all">All Time</option><option value="week">This Week</option><option value="month">This Month</option><option value="3months">Last 3 Months</option></select>'
+      + '<select class="agent-filter-select" id="agentHistDate" onchange="_agentApplyHistFilters()"><option value="all">All Time</option><option value="today">Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="3months">Last 3 Months</option></select>'
       + '<select class="agent-filter-select" id="agentHistSym" onchange="_agentApplyHistFilters()"><option value="all">All Symbols</option>'
       + hSymbols.map(function(s){return '<option value="'+s+'">'+s+'</option>';}).join('')
       + '</select>'
       + '<select class="agent-filter-select" id="agentHistOut" onchange="_agentApplyHistFilters()"><option value="all">All Outcomes</option><option value="win">Win</option><option value="loss">Loss</option><option value="be">Break Even</option></select>'
       + '<button class="agent-export-btn" onclick="_agentExportCSV()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Export CSV</button>'
       + '</div>'
+      + '<div class="agent-filter-chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px;opacity:0.7;"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg><span id="agentFilterLabel">Showing: ' + (_agentActiveClient && _agentClientData[_agentActiveClient] ? _agentClientData[_agentActiveClient].name : 'All Clients') + '</span></div>'
       + '<div class="agent-table-wrap"><table class="agent-data-table" id="agentHistTable"><thead><tr>'
       + '<th data-tip="Date the trade was closed">Date</th>'
-      + '<th data-tip="Client account that executed the trade">Client</th>'
-      + '<th data-tip="Trading instrument">Symbol</th>'
-      + '<th data-tip="Direction of the trade">Side</th>'
-      + '<th data-tip="Entry price when trade was opened">Entry</th>'
-      + '<th data-tip="Exit price when trade was closed">Exit</th>'
-      + '<th data-tip="Profit &amp; Loss. Green = profitable trade.">P&amp;L</th>'
+      + '<th data-tip="The client who executed this trade">Client</th>'
+      + '<th data-tip="Trading instrument ticker symbol (e.g., EURUSD, AAPL)">Symbol</th>'
+      + '<th data-tip="Buy (long) = profit when price rises. Sell (short) = profit when price falls.">Side</th>'
+      + '<th data-tip="Price at which the trade was opened">Entry</th>'
+      + '<th data-tip="Price at which the trade was closed">Exit</th>'
+      + '<th data-tip="Profit &amp; Loss. Green check = WIN, red X = LOSS, gold dash = BE">P&amp;L</th>'
       + '<th data-tip="Risk-to-Reward ratio. For every $1 risked, you made $X. Above 1.5 is good.">R:R</th>'
-      + '<th data-tip="Trade result">Outcome</th>'
+      + '<th data-tip="Trade result. Green check = profitable, red X = loss, gold dash = break-even">Outcome</th>'
       + '</tr></thead><tbody>'+hrows+'</tbody></table></div>';
   }
 
   else if(name === 'reports'){
-    panel.innerHTML = '<div class="agent-report-controls">'
-      + '<div><label>Client</label><select class="agent-report-select" id="agentReportClient">'
-      + '<option value="all">All Clients</option>'
-      + clients.map(function(c){return '<option value="'+c.id+'">'+c.name+'</option>';}).join('')
-      + '</select></div>'
-      + '<div><label>Month</label><select class="agent-report-select" id="agentReportMonth">'
-      + '<option value="2026-05" selected>May 2026</option><option value="2026-04">April 2026</option><option value="2026-03">March 2026</option>'
-      + '</select></div>'
-      + '<button class="agent-generate-btn" onclick="_agentGenerateReport()">Generate</button></div>'
-      + '<div class="agent-metrics-grid" id="agentMetricsGrid"></div>'
-      + '<button class="agent-download-btn" id="agentDownloadBtn" onclick="_agentDownloadReport()">'
-      + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Download CSV</button>';
+    panel.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Loading analytics&hellip;</div></div>';
+    var reportData = await dvFetch('/api/trading-agent/analytics');
+    if(window._agentAbort && window._agentAbort.signal.aborted) return;
+    if(!reportData){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></div><div class="agent-empty-title">Could not load analytics</div><div class="agent-empty-desc">Check your connection and try again.</div><button class="agent-connect-btn" onclick="_agentRenderPanel(\'reports\',document.getElementById(\'agentPanel\'))"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Retry</button></div>';
+      return;
+    }
+    if(!(reportData.total_trades || reportData.trade_count || reportData.tradeCount || reportData.win_rate || reportData.winRate)){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No analytics data</div><div class="agent-empty-desc">Start trading to see performance metrics.</div></div>';
+      return;
+    }
+    _agentReportData = reportData;
+    _agentReportsBuildUI(panel, reportData);
   }
 
   else if(name === 'accounts'){
-    var accts = clients.map(function(a){
-      return '<div class="agent-acct-card" data-tip="'+a.name+' \u2014 Balance: '+a.balance+' | Status: '+(a.status.charAt(0).toUpperCase()+a.status.slice(1))+' | Broker: '+a.broker+'">'
-        + '<div class="agent-acct-header"><div class="agent-acct-av">'+a.initials+'</div><div class="agent-acct-name">'+a.name+'</div>'+(a.status==='online'?'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#c9a84c"/></svg>':a.status==='offline'?'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#e8706e"/></svg>':'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#d4a843"/></svg>')+'</div>'
-        + '<div class="agent-acct-details">'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Broker</span><span class="agent-acct-value">'+a.broker+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Server</span><span class="agent-acct-value">'+a.server+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Login</span><span class="agent-acct-value agent-mono">'+a.login+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Balance</span><span class="agent-acct-value agent-mono">'+a.balance+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Equity</span><span class="agent-acct-value agent-mono">'+a.equity+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Leverage</span><span class="agent-acct-value">'+a.leverage+'</span></div>'
-        + '</div>'
-        + '<div class="agent-acct-actions">'
-        + '<button class="agent-acct-btn agent-edit" onclick="_agentToggleEdit(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit</button>'
-        + '<button class="agent-acct-btn agent-sync" onclick="_agentSyncAcct(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Sync</button>'
-        + '<button class="agent-acct-btn agent-disconnect" onclick="_agentConfirmDisc(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.68 13.31a6 6 0 003.41-2.25M14 6.33A7.98 7.98 0 002 12a7.98 7.98 0 004.07 7.1"/><path d="M16 17.67A7.98 7.98 0 0022 12a7.98 7.98 0 00-4-6.91"/><line x1="2" y1="2" x2="22" y2="22"/></svg> Disconnect</button>'
-        + '</div>'
-        + '<div class="agent-inline-edit"><label>Client Name</label><input type="text" value="'+a.name+'"><label>Login</label><input type="text" value="'+a.login+'"><label>Server</label><input type="text" value="'+a.server+'"><div class="agent-inline-row"><button class="agent-acct-btn agent-sync" onclick="_agentSaveEdit(this,\''+a.id+'\')">Save</button><button class="agent-acct-btn agent-edit" onclick="_agentCancelEdit(this)">Cancel</button></div></div>'
-        + '<div class="agent-confirm-disc">Disconnect this account?<div class="agent-confirm-row"><button class="agent-confirm-btn agent-confirm" onclick="_agentDoDisc(this,\''+a.id+'\')">Confirm</button><button class="agent-confirm-btn agent-cancel" onclick="_agentCancelDisc(this)">Cancel</button></div></div>'
-        + '</div>';
-    }).join('');
-    panel.innerHTML = '<div class="agent-account-grid">'+accts+'</div>'
-      + '<button class="agent-connect-btn" onclick="_agentShowConnect()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button>'
-      + '<div class="agent-connect-form" id="agentConnectForm"><h3>Connect New Account</h3><div class="agent-form-grid">'
+    panel.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Loading accounts...</div></div>';
+    var data = await dvFetch('/api/trading-agent/dashboard');
+    if(window._agentAbort && window._agentAbort.signal.aborted) return;
+    if(!data){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">Could not load accounts</div><div class="agent-empty-desc">Check your connection and try again.</div><button class="agent-connect-btn agent-retry-btn" onclick="_agentSwitchSubtab(\'accounts\')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Retry</button></div>';
+      return;
+    }
+    var accounts = (data.attention || []).concat(data.healthy || []);
+    if(accounts.length > 0){
+      accounts.forEach(function(a){
+        _agentClientData[a.id] = a;
+      });
+    }
+    var connectFormHtml = '<div class="agent-connect-form" id="agentConnectForm"><h3>Connect New Account</h3><div class="agent-form-grid">'
       + '<div><label>Client Name</label><input type="text" id="agentNewName" placeholder="e.g. Orion Capital"></div>'
       + '<div><label>Broker</label><select id="agentNewBroker"><option>MetaTrader 5</option><option>cTrader</option></select></div>'
       + '<div><label>Server</label><input type="text" id="agentNewServer" placeholder="e.g. ICMarkets-Live"></div>'
       + '<div><label>Login</label><input type="text" id="agentNewLogin" placeholder="Account number"></div>'
       + '<div><label>Password</label><input type="password" id="agentNewPass" placeholder="Password"></div>'
       + '<div><label>Leverage</label><select id="agentNewLev"><option>1:100</option><option>1:200</option><option>1:500</option></select></div>'
-      + '</div><div class="agent-form-actions"><button class="agent-acct-btn agent-edit" onclick="_agentCancelConnect()">Cancel</button><button class="agent-generate-btn" onclick="_agentAddAccount()">Connect</button></div></div>';
+      + '</div><span id="connectError" style="color:var(--red);font-size:11px;display:block;margin-top:6px;"></span><div class="agent-form-actions"><button class="agent-acct-btn agent-edit" onclick="_agentCancelConnect()">Cancel</button><button class="agent-generate-btn" onclick="_agentAddAccount()">Connect</button></div></div>';
+    if(accounts.length === 0){
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No accounts connected</div><div class="agent-empty-desc">Connect your first MT5 account to start managing positions, tracking trades, and generating reports.</div><button class="agent-connect-btn" onclick="_agentShowConnect()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button></div>' + connectFormHtml;
+      return;
+    }
+    var accts = accounts.map(function(a){
+      return '<div class="agent-acct-card" data-id="'+a.id+'" data-tip="'+a.name+' \u2014 Balance: '+(a.balance != null ? a.balance : 'N/A')+' | Status: '+((a.status||'online').charAt(0).toUpperCase()+(a.status||'online').slice(1))+' | Broker: '+(a.broker||'N/A')+'" onclick="_agentSelectClient(\''+a.id+'\')">'
+        + '<div class="agent-acct-header"><div class="agent-acct-av">'+(a.initials||'??')+'</div><div class="agent-acct-name">'+a.name+'</div>'+(a.status==='online'?'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#c9a84c"/></svg>':a.status==='offline'?'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#e8706e"/></svg>':'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#d4a843"/></svg>')+'</div>'
+        + '<div class="agent-acct-details">'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Broker</span><span class="agent-acct-value">'+(a.broker||'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Server</span><span class="agent-acct-value">'+(a.server||'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Login</span><span class="agent-acct-value agent-mono">'+(a.login != null ? a.login : 'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Balance</span><span class="agent-acct-value agent-mono">'+(a.balance != null ? (typeof a.balance === 'number' ? '$' + a.balance.toFixed(2) : a.balance) : 'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Equity</span><span class="agent-acct-value agent-mono">'+(a.equity != null ? (typeof a.equity === 'number' ? '$' + a.equity.toFixed(2) : a.equity) : (a.balance != null ? (typeof a.balance === 'number' ? '$' + a.balance.toFixed(2) : a.balance) : 'N/A'))+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Leverage</span><span class="agent-acct-value">'+(a.leverage != null ? a.leverage : 'N/A')+'</span></div>'
+        + '</div>'
+        + '<div class="agent-acct-actions">'
+        + '<button class="agent-acct-btn agent-edit" onclick="_agentToggleEdit(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit</button>'
+        + '<button class="agent-acct-btn agent-sync" onclick="_agentSyncAcct(\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Sync</button>'
+        + '<button class="agent-acct-btn agent-disconnect" onclick="_agentConfirmDisc(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.68 13.31a6 6 0 003.41-2.25M14 6.33A7.98 7.98 0 002 12a7.98 7.98 0 004.07 7.1"/><path d="M16 17.67A7.98 7.98 0 0022 12a7.98 7.98 0 00-4-6.91"/><line x1="2" y1="2" x2="22" y2="22"/></svg> Disconnect</button>'
+        + '</div>'
+        + '<div class="agent-inline-edit"><label>Client Name</label><input type="text" value="'+a.name+'"><label>Login</label><input type="text" value="'+(a.login||'')+'"><label>Server</label><input type="text" value="'+(a.server||'')+'"><div class="agent-inline-row"><button class="agent-acct-btn agent-sync" onclick="_agentSaveEdit(this,\''+a.id+'\')">Save</button><button class="agent-acct-btn agent-edit" onclick="_agentCancelEdit(this)">Cancel</button></div></div>'
+        + '<div class="agent-confirm-disc">Disconnect this account?<div class="agent-confirm-row"><button class="agent-confirm-btn agent-confirm" onclick="_agentDoDisc(\''+a.id+'\')">Confirm</button><button class="agent-confirm-btn agent-cancel" onclick="_agentCancelDisc(this)">Cancel</button></div></div>'
+        + '</div>';
+    }).join('');
+    panel.innerHTML = '<div class="agent-account-grid">'+accts+'</div>'
+      + '<button class="agent-connect-btn" onclick="_agentShowConnect()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button>'
+      + connectFormHtml;
   }
 }
 
@@ -7821,12 +7886,26 @@ function _agentSelectClient(clientId){
   var dd = document.getElementById('agentClientDropdown');
   if(dd){dd.classList.remove('agent-show');}
   document.getElementById('agentClientSelector').classList.remove('agent-open');
+  // Refresh current panel if on a filterable tab
+  if(_agentSubtab === 'positions' || _agentSubtab === 'history'){
+    _agentRenderPanel(_agentSubtab, document.getElementById('agentPanel'));
+  }
 }
 
-// Populate agent client dropdown
-function _agentBuildDropdown(){
+// Populate agent client dropdown — fetches from API if _agentClientData is empty
+async function _agentBuildDropdown(){
   var dd = document.getElementById('agentClientDropdown');
   if(!dd) return;
+  // Fetch from API if _agentClientData hasn't been populated yet
+  if(Object.keys(_agentClientData).length === 0){
+    var data = await dvFetch('/api/trading-agent/dashboard');
+    if(data){
+      var accounts = (data.attention || []).concat(data.healthy || []);
+      accounts.forEach(function(a){
+        _agentClientData[a.id] = a;
+      });
+    }
+  }
   dd.innerHTML = '';
   Object.values(_agentClientData).forEach(function(c){
     var row = document.createElement('div');
@@ -7856,7 +7935,12 @@ function _agentApplyHistFilters(){
     if(dt.value !== 'all' && show){
       var rd = new Date(row.getAttribute('data-date'));
       var diffDays = (now - rd) / (1000*60*60*24);
-      if(dt.value === 'week' && diffDays > 7) show = false;
+      if(dt.value === 'today'){
+        var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        var rdDate = new Date(rd.getFullYear(), rd.getMonth(), rd.getDate());
+        if(rdDate.getTime() !== today.getTime()) show = false;
+      }
+      else if(dt.value === 'week' && diffDays > 7) show = false;
       else if(dt.value === 'month' && diffDays > 30) show = false;
       else if(dt.value === '3months' && diffDays > 90) show = false;
     }
@@ -7884,15 +7968,42 @@ function _agentExportCSV(){
 }
 
 // Reports
-function _agentGenerateReport(){
-  var grid = document.getElementById('agentMetricsGrid');
-  if(!grid) return;
-  var base = {openingBalance:487200,closingBalance:512450,totalReturn:25250,totalReturnPct:5.18,tradeCount:47,wins:31,losses:12,be:4,winRate:66.0,profitFactor:2.14,avgRR:1.84,sharpe:1.72};
+function _agentReportsBuildUI(panel, reportData){
+  var clientIds = Object.keys(_agentClientData).sort();
+  var clientOpts = '<option value="all">All Clients</option>' + clientIds.map(function(id){
+    var c = _agentClientData[id];
+    return '<option value="'+id+'">'+(c.name||id)+'</option>';
+  }).join('');
+  var now = new Date();
+  var monthOpts = '';
+  for(var m = 0; m < 12; m++){
+    var d = new Date(now.getFullYear(), now.getMonth() - m, 1);
+    var y = d.getFullYear();
+    var mn = d.getMonth();
+    var label = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][mn] + ' ' + y;
+    var val = y + '-' + String(mn+1).padStart(2,'0');
+    monthOpts += '<option value="'+val+'"'+(m===0?' selected':'')+'>'+label+'</option>';
+  }
+  var base = {
+    openingBalance: reportData.opening_balance || reportData.openingBalance || 0,
+    closingBalance: reportData.closing_balance || reportData.closingBalance || 0,
+    totalReturn: reportData.total_return || reportData.totalReturn || 0,
+    totalReturnPct: reportData.total_return_pct || reportData.totalReturnPct || 0,
+    tradeCount: reportData.total_trades || reportData.trade_count || reportData.tradeCount || 0,
+    wins: reportData.wins || 0,
+    losses: reportData.losses || 0,
+    be: reportData.be || 0,
+    winRate: reportData.win_rate || reportData.winRate || 0,
+    profitFactor: reportData.profit_factor || reportData.profitFactor || 0,
+    avgRR: reportData.avg_rr || reportData.avgRR || 0,
+    sharpe: reportData.sharpe || reportData.sharpe_ratio || 0
+  };
   var sign = base.totalReturn >= 0 ? '+' : '';
-  grid.innerHTML = [
+  var returnColor = base.totalReturn >= 0 ? 'var(--grn)' : 'var(--red)';
+  var metricsHtml = [
     {l:'Opening Balance',v:'$'+base.openingBalance.toLocaleString(),s:'Start of period',t:'The account balance at the beginning of the reporting period'},
     {l:'Closing Balance',v:'$'+base.closingBalance.toLocaleString(),s:'End of period',t:'The account balance at the end of the reporting period'},
-    {l:'Total Return',v:sign+'$'+base.totalReturn.toLocaleString(),s:sign+base.totalReturnPct.toFixed(2)+'%',t:'Absolute and percentage return over the reporting period',c:'var(--grn)'},
+    {l:'Total Return',v:sign+'$'+Math.abs(base.totalReturn).toLocaleString(),s:sign+base.totalReturnPct.toFixed(2)+'%',t:'Absolute and percentage return over the reporting period',c:returnColor},
     {l:'Trade Count',v:''+base.tradeCount,s:base.wins+'W / '+base.losses+'L / '+base.be+'BE',t:'Total number of trades closed during this period'},
     {l:'Win Rate',v:base.winRate.toFixed(1)+'%',s:base.wins+' of '+base.tradeCount+' trades',t:'Percentage of trades that closed in profit'},
     {l:'Profit Factor',v:base.profitFactor.toFixed(2),s:'Gross profit / gross loss',t:'Ratio of gross profit to gross loss. Above 1.5 is good'},
@@ -7901,19 +8012,89 @@ function _agentGenerateReport(){
   ].map(function(m){
     return '<div class="agent-metric-card" data-tip="'+m.t+'"><div class="agent-label">'+m.l+'</div><div class="agent-value" style="'+(m.c||'')+'">'+m.v+'</div><div class="agent-sub">'+m.s+'</div></div>';
   }).join('');
-  grid.style.display = 'grid';
-  grid.classList.add('agent-show');
-  var btn = document.getElementById('agentDownloadBtn');
-  if(btn) btn.classList.add('agent-show');
-  _agentReportData = base;
+  panel.innerHTML = '<div class="agent-filter-bar">'
+    + '<select class="agent-filter-select" id="agentReportClient">'+clientOpts+'</select>'
+    + '<select class="agent-filter-select" id="agentReportMonth">'+monthOpts+'</select>'
+    + '<button class="agent-generate-btn" onclick="_agentGenerateReport()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Generate</button>'
+    + '</div>'
+    + '<div class="agent-metrics-grid agent-show" style="display:grid;" id="agentMetricsGrid">'+metricsHtml+'</div>'
+    + '<button class="agent-download-btn agent-show" onclick="_agentDownloadReport()">'
+    + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Download CSV</button>';
+}
+function _agentGenerateReport(){
+  var panel = document.getElementById('agentPanel');
+  if(!panel) return;
+  var clientEl = document.getElementById('agentReportClient');
+  var monthEl = document.getElementById('agentReportMonth');
+  var clientId = clientEl ? clientEl.value : 'all';
+  var month = monthEl ? monthEl.value : '';
+  var qs = [];
+  if(clientId !== 'all') qs.push('client_id=' + encodeURIComponent(clientId));
+  if(month) qs.push('month=' + encodeURIComponent(month));
+  var metricsGrid = document.getElementById('agentMetricsGrid');
+  if(metricsGrid) metricsGrid.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Generating&hellip;</div></div>';
+  var url = '/api/trading-agent/analytics' + (qs.length ? '?' + qs.join('&') : '');
+  dvFetch(url).then(function(data){
+    if(!data || !(data.total_trades || data.trade_count || data.tradeCount || data.win_rate || data.winRate)){
+      if(metricsGrid) metricsGrid.innerHTML = '<div class="agent-empty"><div class="agent-empty-title">No analytics data</div><div class="agent-empty-desc">No data for this filter combination.</div></div>';
+      return;
+    }
+    _agentReportData = data;
+    var base = {
+      openingBalance: data.opening_balance || data.openingBalance || 0,
+      closingBalance: data.closing_balance || data.closingBalance || 0,
+      totalReturn: data.total_return || data.totalReturn || 0,
+      totalReturnPct: data.total_return_pct || data.totalReturnPct || 0,
+      tradeCount: data.total_trades || data.trade_count || data.tradeCount || 0,
+      wins: data.wins || 0,
+      losses: data.losses || 0,
+      be: data.be || 0,
+      winRate: data.win_rate || data.winRate || 0,
+      profitFactor: data.profit_factor || data.profitFactor || 0,
+      avgRR: data.avg_rr || data.avgRR || 0,
+      sharpe: data.sharpe || data.sharpe_ratio || 0
+    };
+    var sign = base.totalReturn >= 0 ? '+' : '';
+    var returnColor = base.totalReturn >= 0 ? 'var(--grn)' : 'var(--red)';
+    var metricsHtml = [
+      {l:'Opening Balance',v:'$'+base.openingBalance.toLocaleString(),s:'Start of period',t:'The account balance at the beginning of the reporting period'},
+      {l:'Closing Balance',v:'$'+base.closingBalance.toLocaleString(),s:'End of period',t:'The account balance at the end of the reporting period'},
+      {l:'Total Return',v:sign+'$'+Math.abs(base.totalReturn).toLocaleString(),s:sign+base.totalReturnPct.toFixed(2)+'%',t:'Absolute and percentage return over the reporting period',c:returnColor},
+      {l:'Trade Count',v:''+base.tradeCount,s:base.wins+'W / '+base.losses+'L / '+base.be+'BE',t:'Total number of trades closed during this period'},
+      {l:'Win Rate',v:base.winRate.toFixed(1)+'%',s:base.wins+' of '+base.tradeCount+' trades',t:'Percentage of trades that closed in profit'},
+      {l:'Profit Factor',v:base.profitFactor.toFixed(2),s:'Gross profit / gross loss',t:'Ratio of gross profit to gross loss. Above 1.5 is good'},
+      {l:'Avg R:R',v:base.avgRR.toFixed(2),s:'Avg reward per $1 risk',t:'Average Risk-to-Reward ratio. Above 1.5 is considered good'},
+      {l:'Sharpe Ratio',v:base.sharpe.toFixed(2),s:'Risk-adjusted return',t:'Sharpe Ratio measures return per unit of risk. Above 2.0 is very good'}
+    ].map(function(m){
+      return '<div class="agent-metric-card" data-tip="'+m.t+'"><div class="agent-label">'+m.l+'</div><div class="agent-value" style="'+(m.c||'')+'">'+m.v+'</div><div class="agent-sub">'+m.s+'</div></div>';
+    }).join('');
+    if(metricsGrid) metricsGrid.innerHTML = metricsHtml;
+  }).catch(function(){
+    if(metricsGrid) metricsGrid.innerHTML = '<div class="agent-empty"><div class="agent-empty-title">Failed to load</div><div class="agent-empty-desc">Check your connection and try again.</div></div>';
+  });
 }
 function _agentDownloadReport(){
-  if(!_agentReportData) _agentGenerateReport();
-  var d = _agentReportData;
+  if(!_agentReportData) { _agentSwitchSubtab('reports'); return; }
+  var rd = _agentReportData;
+  var d = {
+    openingBalance: rd.opening_balance || rd.openingBalance || 0,
+    closingBalance: rd.closing_balance || rd.closingBalance || 0,
+    totalReturn: rd.total_return || rd.totalReturn || 0,
+    totalReturnPct: rd.total_return_pct || rd.totalReturnPct || 0,
+    tradeCount: rd.total_trades || rd.trade_count || rd.tradeCount || 0,
+    wins: rd.wins || 0,
+    losses: rd.losses || 0,
+    be: rd.be || 0,
+    winRate: rd.win_rate || rd.winRate || 0,
+    profitFactor: rd.profit_factor || rd.profitFactor || 0,
+    avgRR: rd.avg_rr || rd.avgRR || 0,
+    sharpe: rd.sharpe || rd.sharpe_ratio || 0
+  };
+  var sign = d.totalReturn >= 0 ? '+' : '';
   var csv = ['"Metric","Value","Subtext"',
     '"Opening Balance","$'+d.openingBalance.toLocaleString()+'","Start of period"',
     '"Closing Balance","$'+d.closingBalance.toLocaleString()+'","End of period"',
-    '"Total Return","+$'+d.totalReturn.toLocaleString()+'","+'+d.totalReturnPct.toFixed(2)+'%"',
+    '"Total Return","'+sign+'$'+Math.abs(d.totalReturn).toLocaleString()+'","'+sign+d.totalReturnPct.toFixed(2)+'%"',
     '"Trade Count","'+d.tradeCount+'","'+d.wins+'W / '+d.losses+'L / '+d.be+'BE"',
     '"Win Rate","'+d.winRate.toFixed(1)+'%","'+d.wins+' of '+d.tradeCount+' trades"',
     '"Profit Factor","'+d.profitFactor.toFixed(2)+'","Gross profit / gross loss"',
@@ -7952,15 +8133,19 @@ function _agentCancelEdit(btn){
   var form = btn.closest('.agent-inline-edit');
   if(form) form.style.display = 'none';
 }
-function _agentSyncAcct(btn, clientId){
-  var orig = btn.innerHTML;
-  btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="agent-spin"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 019.9 8.5" stroke-linecap="round"/></svg> Syncing...';
-  btn.disabled = true;
-  setTimeout(function(){
-    btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg> Synced';
-    btn.style.color = '#5de8a0'; btn.style.borderColor = 'rgba(93,232,160,.35)'; btn.style.background = 'rgba(93,232,160,.16)';
-    setTimeout(function(){btn.innerHTML = orig; btn.disabled = false; btn.style.color = ''; btn.style.borderColor = ''; btn.style.background = '';}, 1500);
-  }, 1500);
+function _agentSyncAcct(accountId){
+  var card = document.querySelector('.agent-acct-card[data-id="'+accountId+'"]');
+  if(!card) return;
+  card.querySelector('.agent-acct-actions').innerHTML = '<span style="font-size:12px;color:var(--t3);font-family:var(--mono);">Syncing...</span>';
+  dvFetch('/api/trading-agent/accounts/'+accountId+'/sync', {method:'POST'}).then(function(data){
+    if(data){
+      _dvToast('Account synced successfully');
+      card.querySelector('.agent-acct-actions').innerHTML = '<button class="agent-acct-btn" onclick="_agentSyncAcct(\''+accountId+'\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/></svg> Sync</button>';
+    } else {
+      _dvToast('Sync failed — check connection', 'var(--red)', 'var(--red)');
+      card.querySelector('.agent-acct-actions').innerHTML = '<button class="agent-acct-btn" onclick="_agentSyncAcct(\''+accountId+'\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/></svg> Sync</button>';
+    }
+  });
 }
 function _agentConfirmDisc(btn, clientId){
   var card = btn.closest('.agent-acct-card');
@@ -7968,12 +8153,18 @@ function _agentConfirmDisc(btn, clientId){
   var disc = card.querySelector('.agent-confirm-disc');
   if(disc) disc.style.display = 'block';
 }
-function _agentDoDisc(btn, clientId){
-  var card = btn.closest('.agent-acct-card');
-  if(!card) return;
-  card.style.transition = 'opacity .3s, transform .3s';
-  card.style.opacity = '0'; card.style.transform = 'scale(0.95)';
-  setTimeout(function(){card.remove();}, 300);
+function _agentDoDisc(accountId){
+  dvFetch('/api/trading-agent/accounts/'+accountId+'/archive', {method:'POST'}).then(function(data){
+    if(data){
+      _dvToast('Account disconnected');
+      delete _agentClientData[accountId];
+      _agentOpenCount = Object.keys(_agentClientData).length;
+      _agentRenderPanel(_agentSubtab, document.getElementById('agentPanel'));
+      _agentBuildDropdown();
+    } else {
+      _dvToast('Failed to disconnect', 'var(--red)', 'var(--red)');
+    }
+  });
 }
 function _agentCancelDisc(btn){
   var disc = btn.closest('.agent-confirm-disc');
@@ -7987,28 +8178,49 @@ function _agentCancelConnect(){
   var form = document.getElementById('agentConnectForm');
   if(form) form.style.display = 'none';
 }
-function _agentAddAccount(){
+async function _agentAddAccount(){
   var name = (document.getElementById('agentNewName')||{}).value;
   if(!name||!name.trim()) return;
   name = name.trim();
-  var initials = name.split(' ').map(function(w){return w[0];}).join('').substring(0,2).toUpperCase();
-  var id = name.toLowerCase().replace(/\s+/g,'-');
-  var bal = '$'+Math.floor(Math.random()*900000+100000).toLocaleString();
-  _agentClientData[id] = {id:id,initials:initials,name:name,balance:bal,drawdown:'-'+((Math.random()*10).toFixed(1))+'%',status:'online',broker:(document.getElementById('agentNewBroker')||{}).value||'MetaTrader 5',server:(document.getElementById('agentNewServer')||{}).value||'Live',login:(document.getElementById('agentNewLogin')||{}).value||'9000000',equity:bal,leverage:(document.getElementById('agentNewLev')||{}).value||'1:200'};
-  _agentOpenCount++;
-  _agentCancelConnect();
-  _agentRenderPanel('accounts', document.getElementById('agentPanel'));
-  _agentBuildDropdown();
+  var form = document.getElementById('agentConnectForm');
+  var btn = form ? form.querySelector('.agent-generate-btn') : null;
+  if(btn){ btn.disabled = true; btn.textContent = 'Connecting...'; }
+  var payload = {
+    name: name,
+    broker: (document.getElementById('agentNewBroker')||{}).value||'MetaTrader 5',
+    server: (document.getElementById('agentNewServer')||{}).value||'Live',
+    login: (document.getElementById('agentNewLogin')||{}).value||'',
+    password: (document.getElementById('agentNewPass')||{}).value||'',
+    leverage: (document.getElementById('agentNewLev')||{}).value||'1:200'
+  };
+  var result = await dvFetch('/api/trading-agent/accounts', {method:'POST',body:JSON.stringify(payload)});
+  if(result && result.success){
+    _dvToast('Account connected successfully');
+    _agentOpenCount++;
+    _agentCancelConnect();
+    await _agentRenderPanel('accounts', document.getElementById('agentPanel'));
+    _agentBuildDropdown();
+    setTimeout(function(){ _agentSwitchSubtab('overview'); }, 100);
+  } else {
+    var errMsg = result && result.error ? result.error : 'Failed to connect account';
+    var errEl = document.getElementById('connectError');
+    if(errEl) errEl.textContent = errMsg;
+    _dvToast(errMsg);
+  }
+  if(btn){ btn.disabled = false; btn.textContent = 'Connect'; }
 }
 
 // Main showAgent
 function showAgent(){
   var el = document.getElementById('dashContent');
   if(!el) return;
-  _agentActiveClient = _agentActiveClient || 'williams-capital';
-  _agentSubtab = _agentSubtab || 'dashboard';
+  // Update top bar label
+  var label = document.querySelector('.dtop-label');
+  if(label) label.innerHTML = 'AGENT &middot; ACCOUNT MANAGEMENT';
+  _agentActiveClient = _agentActiveClient || '';
+  _agentSubtab = _agentSubtab || 'overview';
   var tabs = [
-    {id:'dashboard', label:'Dashboard'},
+    {id:'overview', label:'Overview'},
     {id:'positions', label:'Positions'},
     {id:'history',   label:'History'},
     {id:'reports',   label:'Reports'},
@@ -16951,7 +17163,6 @@ function _initUndChart(sig){
   window._undChartRefs = { chart, cs, rsiChart, rsiLine, wrap };
 
   function _applyChartBars(bars){
-    console.log('[chart] _applyChartBars called with', bars?.length || 0, 'bars');
     if(loadEl) loadEl.style.display = 'none';
     if(!bars||!bars.length){ console.warn('[chart] no bars, showing No chart data'); if(loadEl){loadEl.style.display='flex';loadEl.textContent='No chart data';} return; }
     try {
@@ -16961,7 +17172,6 @@ function _initUndChart(sig){
       } else {
         cs.setData(bars.map(b=>({time:b.time,open:b.open,high:b.high,low:b.low,close:b.close})));
       }
-      console.log('[chart] cs.setData OK with', bars.length, 'bars (type=' + _ct + ')');
     } catch(e) {
       console.error('[chart] cs.setData FAILED:', e.message, 'first bar:', bars[0]);
       if(loadEl){loadEl.style.display='flex';loadEl.textContent='Chart render error: '+e.message;}
@@ -16981,19 +17191,6 @@ function _initUndChart(sig){
   }
 
   if(loadEl) loadEl.style.display = 'flex';
-
-  // ── DIAGNOSTIC LOGGING (added 2026-04-29 for empty-chart debug) ──
-  console.log('[chart] init', {
-    sym: sym, tf: tf, asset: sig?.asset, isCrypto: isCrypto,
-    chartDates_len: sig?.chartDates?.length || 0,
-    chartPrices_len: sig?.chartPrices?.length || 0,
-    chartHighs_len: sig?.chartHighs?.length || 0,
-    chartLows_len:  sig?.chartLows?.length  || 0,
-    rsi: sig?.rsi, atr: sig?.atr,
-    wrap_clientWidth: wrap?.clientWidth,
-    inner_clientWidth: inner?.clientWidth,
-    loadEl_display: loadEl?.style?.display
-  });
 
   // Use API chart data if available (stocks, forex, commodities)
   const apiDates = sig && sig.chartDates && sig.chartDates.length ? sig.chartDates : null;
@@ -17040,22 +17237,12 @@ function _initUndChart(sig){
       time:toTs(d), open:opens[i]||apiPrices[i], high:highs[i]||apiPrices[i],
       low:lows[i]||apiPrices[i], close:apiPrices[i], volume:(sig.chartVolumes||[])[i]||0
     })).filter(b=>b.time&&!isNaN(b.close));
-    console.log('[chart] bars built:', {
-      total_input: apiDates.length,
-      after_filter: bars.length,
-      first_date_raw: apiDates[0],
-      first_ts: bars[0]?.time,
-      last_date_raw: apiDates[apiDates.length-1],
-      last_ts: bars[bars.length-1]?.time
-    });
     if(bars.length) {
-      console.log('[chart] -> _applyChartBars (data path)');
       _applyChartBars(bars);
     }
-    else if(isCrypto) { console.log('[chart] bars empty, crypto -> Binance fallback'); _fetchBinance(); }
+    else if(isCrypto) { _fetchBinance(); }
     else { _showTvFallback('bars filtered empty for ' + sym); }
   } else if(isCrypto){
-    console.log('[chart] no API data, crypto -> Binance fallback');
     _fetchBinance();
   } else {
     _showTvFallback('no chart_prices in API response for ' + sym);
@@ -17218,7 +17405,6 @@ async function undRunBacktest(silent){
   const _s = parseFloat(String(sig.sl||'').replace(/,/g,''));
   const _t = parseFloat(String(sig.tp||'').replace(/,/g,''));
   if(!isFinite(_e) || !isFinite(_s) || !isFinite(_t) || _e<=0 || _s<=0 || _t<=0){
-    console.log('[backtest] skipped — entry/sl/tp incomplete', {entry:sig.entry, sl:sig.sl, tp:sig.tp});
     if(!silent) _dvToast('Backtest needs entry, stop loss, and take profit — run a full analysis first','rgba(201,168,76,.15)','rgba(201,168,76,.3)');
     return;
   }
@@ -20865,7 +21051,6 @@ async function mt5Execute() {
                   : (_szLast.posSize && _szLast.posSize > 0) ? _szLast.posSize
                   : 0.1;
   const lots = parseFloat(document.getElementById('mt5Lots')?.value) || _autoLots;
-  console.log('[mt5] auto-size:', lots, 'source:', _szLast.lots ? 'calculator-lots' : (_szLast.posSize ? 'calculator-posSize' : 'fallback-0.1'));
   const direction = window._mt5Dir;
   const signal = window._activeSignal || {};
   const ticker = signal.sym || '';
@@ -25127,7 +25312,7 @@ async function adminGrantByEmail(){
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('/sw.js', {scope: '/'})
       .then(function(reg){
-        console.log('[PWA] Service Worker registered, scope:', reg.scope);
+        console.log('[PWA] Service Worker registered');
         // Once SW is ready, try to subscribe to push
         _initPushNotifications(reg);
       })
@@ -25136,11 +25321,10 @@ async function adminGrantByEmail(){
 
   // ── Web Push Subscription ───────────────────────
   function _initPushNotifications(swReg){
-    if(!('PushManager' in window)){ console.log('[PWA] Push API not available'); return; }
+    if(!('PushManager' in window)){ return; }
     // Check current subscription
     swReg.pushManager.getSubscription().then(function(sub){
       if(sub){
-        console.log('[PWA] Already subscribed to push');
         return;
       }
       // Fetch VAPID public key from server
@@ -25159,7 +25343,6 @@ async function adminGrantByEmail(){
         })
         .then(function(sub){
           if(!sub) return;
-          console.log('[PWA] Push subscribed:', sub.endpoint);
           // Send subscription to server
           return fetch('/api/push/subscribe', {
             method: 'POST',
@@ -25189,11 +25372,10 @@ async function adminGrantByEmail(){
     var reconnectDelay = 2000;
 
     es.addEventListener('open', function(){
-      console.log('[SSE] Connected to event stream');
     });
 
     es.addEventListener('connected', function(e){
-      try{ var d = JSON.parse(e.data); console.log('[SSE] Client ID:', d.client_id); }
+      try{ var d = JSON.parse(e.data); }
       catch(ex){}
     });
 

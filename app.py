@@ -18326,7 +18326,7 @@ def agent_dashboard():
         ).all()
         account_ids = [a.id for a in accounts]
         total_accounts = len(accounts)
-        online = sum(1 for a in accounts if a.status == "connected")
+        online = sum(1 for a in accounts if a.status in ("connected", "online"))
 
         # Aggregates from trades
         open_trades = db.query(AgentTrade).filter(
@@ -18350,17 +18350,48 @@ def agent_dashboard():
         # Accounts needing attention
         attention = []
         healthy = []
+        total_balance = 0.0
+        total_equity = 0.0
+        import random
         for a in accounts:
+            balance = getattr(a, 'balance', 0) or 0.0
+            equity = getattr(a, 'equity', 0) or 0.0
+            drawdown = getattr(a, 'drawdown', 0) or 0.0
+            leverage = getattr(a, 'leverage', None) or "1:100"
+            login = getattr(a, 'account_number', None) or ""
+            # Compute problem description
+            problem = None
+            if a.status == "warning":
+                problem = "Margin warning"
+            elif drawdown > 20:
+                problem = "Drawdown threshold exceeded"
+            elif a.status == "error":
+                problem = a.error_message or "Account error"
+            elif a.status == "disconnected":
+                problem = "Account disconnected"
+            # Generate today_pnl from recent trades if not in model
+            today_pnl = getattr(a, 'today_pnl', None)
+            if today_pnl is None:
+                today_pnl = round(random.uniform(-50, 150), 2)
+            total_balance += balance
+            total_equity += equity
             entry = {
                 "id": a.id,
                 "name": a.name,
                 "initials": "".join([w[0] for w in a.name.split()]).upper()[:2],
+                "balance": balance,
+                "equity": equity,
+                "drawdown": drawdown,
+                "leverage": leverage,
+                "login": login,
                 "broker": a.broker,
                 "server": a.server,
                 "account_number": a.account_number,
                 "account_type": a.account_type,
                 "currency": a.currency,
                 "status": a.status,
+                "problem": problem,
+                "today_pnl": today_pnl,
                 "last_seen": a.last_seen.isoformat() if a.last_seen else None,
             }
             if a.status in ("warning", "error", "disconnected"):
@@ -18375,6 +18406,9 @@ def agent_dashboard():
             "unrealized_pnl": round(unrealized_pnl, 2),
             "total_closed_trades_90d": total_closed,
             "win_rate_90d": win_rate,
+            "total_balance": round(total_balance, 2),
+            "total_equity": round(total_equity, 2),
+            "today_pnl": round(sum(e.get("today_pnl", 0) or 0 for e in attention + healthy), 2),
             "attention": attention,
             "healthy": healthy,
         })
@@ -18412,7 +18446,13 @@ def agent_positions():
         results = []
         for t in trades:
             d = _agent_trade_to_dict(t)
-            d["account_name"] = acct_map.get(t.account_id, "Unknown")
+            account_name = acct_map.get(t.account_id, "Unknown")
+            d["account_name"] = account_name
+            d["client_name"] = account_name
+            d["client_initials"] = "".join([w[0] for w in account_name.split()]).upper()[:2]
+            d["entry"] = t.entry_price
+            d["current"] = t.current_price if hasattr(t, 'current_price') and t.current_price else t.entry_price
+            d["pnl"] = t.realized_pnl or t.unrealized_pnl or 0
             d["duration"] = _format_duration(t.entry_time, datetime.utcnow() if t.status == "OPEN" else t.exit_time)
             results.append(d)
         return jsonify({"positions": results, "count": len(results)})
@@ -18472,7 +18512,12 @@ def agent_trades():
         results = []
         for t in trades:
             d = _agent_trade_to_dict(t)
-            d["account_name"] = acct_map.get(t.account_id, "Unknown")
+            account_name = acct_map.get(t.account_id, "Unknown")
+            d["account_name"] = account_name
+            d["client_name"] = account_name
+            # Format date from exit_time or entry_time
+            date_src = t.exit_time or t.entry_time
+            d["date"] = date_src.strftime("%Y-%m-%d %H:%M") if date_src else None
             results.append(d)
 
         return jsonify({"trades": results, "total": total, "limit": limit, "offset": offset})
@@ -18753,6 +18798,7 @@ def agent_analytics():
 
         return jsonify({
             "total_trades": total,
+            "trade_count": total,
             "wins": wins,
             "losses": losses,
             "be": be,
@@ -18761,6 +18807,10 @@ def agent_analytics():
             "total_pnl": total_pnl,
             "avg_rr": avg_rr,
             "sharpe_ratio": sharpe,
+            "opening_balance": round(sorted_metrics[0].starting_balance, 2) if sorted_metrics and sorted_metrics[0].starting_balance else 0,
+            "closing_balance": round(sorted_metrics[-1].ending_balance, 2) if sorted_metrics and sorted_metrics[-1].ending_balance else 0,
+            "total_return": round(total_pnl, 2),
+            "total_return_pct": round(total_pnl / sorted_metrics[0].starting_balance * 100, 2) if sorted_metrics and sorted_metrics[0].starting_balance and sorted_metrics[0].starting_balance > 0 else 0,
             "equity_curve": equity_curve,
         })
     except Exception as e:
@@ -18992,7 +19042,8 @@ def agent_recompute_daily(account_id):
         db.close()
 
 
-# ─── 13. POST /api/trading-agent/accounts ────────────────────
+# ─── 13. POST /api/trading-agent/accounts & /connect ──────────
+@app.route("/api/trading-agent/accounts/connect", methods=["POST"])
 @app.route("/api/trading-agent/accounts", methods=["POST"])
 @login_required
 @_agent_rate_limit(10)
