@@ -18390,7 +18390,12 @@ def agent_dashboard():
             # Tier 2: mt5_state balance delta
             if today_pnl is None:
                 with mt5_state_lock:
-                    state = mt5_state.get("default", {})
+                    state = {}
+                    for uid in query_ids:
+                        candidate = mt5_state.get(uid, {})
+                        if candidate and isinstance(candidate.get("account"), dict):
+                            state = candidate
+                            break
                     acct_data = state.get("account", {})
                 if acct_data and daily_row and daily_row.starting_balance is not None:
                     mt5_login = str(acct_data.get("login", "") or "")
@@ -18444,8 +18449,13 @@ def agent_dashboard():
 
         # ── Synthetic account: EA pushing data but no TradingAccount row ──
         if not accounts:
+            ea_state = None
             with mt5_state_lock:
-                ea_state = mt5_state.get("default", {})
+                for uid in query_ids:
+                    candidate = mt5_state.get(uid, {})
+                    if candidate and isinstance(candidate.get("account"), dict):
+                        ea_state = candidate
+                        break
             if ea_state and isinstance(ea_state.get("account"), dict):
                 acct_data = ea_state["account"]
                 ea_positions = ea_state.get("positions", [])

@@ -7652,17 +7652,23 @@ async function _agentRenderPanel(name, panel){
       attention = clients.filter(function(c){return c.status==='warning'||c.status==='offline'||c.status==='error';});
       healthy = clients.filter(function(c){return c.status==='online'||c.status==='connected'||c.status==='pending';});
     }
-    // Check if session expired (redirected to login)
+    // If API call failed (d is null) and no cached data, handle error cases
     if(!d && !Object.keys(_agentClientData).length){
+      // Session expired (redirected to login page)
       if(document.querySelector('.sign-in, .login-form, #loginForm')){
         panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></div><div class="agent-empty-title">Session expired</div><div class="agent-empty-desc">Please sign in again.</div><button class="agent-connect-btn" onclick="window.location.href=\'/\'">Sign In</button></div>';
         return;
       }
-    }
-    if(!Object.keys(_agentClientData).length) {
-      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">Could not load accounts</div><div class="agent-empty-desc">Unable to reach the trading server. Check your connection and try again.</div><button class="agent-connect-btn" onclick="_agentRenderPanel(\'dashboard\',document.getElementById(\'agentPanel\'))" style="margin-top:12px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg> Retry</button></div>';
+      // Genuine API error — could not reach the server
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></div><div class="agent-empty-title">Could not load accounts</div><div class="agent-empty-desc">We couldn\u2019t reach the server right now. This is usually temporary \u2014 check your internet and try again.</div><button class="agent-connect-btn" onclick="_agentRenderPanel(\'dashboard\',document.getElementById(\'agentPanel\'))" style="margin-top:12px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg> Retry</button></div>';
       return;
     }
+    // API succeeded but returned zero accounts — first-time user empty state
+    if(!Object.keys(_agentClientData).length) {
+      panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 5v14M5 12h14"/></svg></div><div class="agent-empty-title">Welcome! Let\u2019s connect your trading account</div><div class="agent-empty-desc">To get started, connect your MT5 account. We\u2019ll help you monitor your trades, track performance, and stay in control \u2014 all from one place.</div><button class="agent-connect-btn" onclick="_agentSwitchSubtab(\'accounts\')" style="margin-top:12px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect My Account</button></div>';
+      return;
+    }
+    // Safety net (should not normally be reached)
     if(!clients.length){
       panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No accounts connected yet</div><div class="agent-empty-desc">Connect your first MT5 account to start managing client trades.</div><button class="agent-connect-btn" onclick="_agentSwitchSubtab(\'accounts\')" style="margin-top:12px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button></div>';
       return;
