@@ -723,6 +723,14 @@ def _agent_rate_limit(limit=60, window=60):
         return decorated
     return decorator
 
+def _agent_user_ids():
+    """Return (session_uid, [session_uid, 'default']) for Agent tab dual-ID queries."""
+    session_uid = str(session.get("user_id"))
+    ids = [session_uid]
+    if session_uid != "default":
+        ids.append("default")
+    return session_uid, ids
+
 # ─── Tier Cap Helpers (7.2) ─────────────────────────────────────
 TIER_RANK = {"free": 0, "pro": 1, "elite": 2}
 
@@ -18317,11 +18325,11 @@ def agent_dashboard():
     """Aggregate metrics across all user accounts."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     db = _DBSession()
     try:
         accounts = db.query(TradingAccount).filter(
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         ).all()
         account_ids = [a.id for a in accounts]
@@ -18352,7 +18360,6 @@ def agent_dashboard():
         healthy = []
         total_balance = 0.0
         total_equity = 0.0
-        import random
         for a in accounts:
             balance = getattr(a, 'balance', 0) or 0.0
             equity = getattr(a, 'equity', 0) or 0.0
@@ -18369,10 +18376,46 @@ def agent_dashboard():
                 problem = a.error_message or "Account error"
             elif a.status == "disconnected":
                 problem = "Account disconnected"
-            # Generate today_pnl from recent trades if not in model
-            today_pnl = getattr(a, 'today_pnl', None)
+            # Compute today_pnl from real sources, never random
+            today_pnl = None
+
+            # Tier 1: AgentDailyMetrics for today
+            daily_row = db.query(AgentDailyMetrics).filter(
+                AgentDailyMetrics.account_id == a.id,
+                AgentDailyMetrics.date == datetime.utcnow().date(),
+            ).first()
+            if daily_row and daily_row.pnl is not None:
+                today_pnl = round(daily_row.pnl, 2)
+
+            # Tier 2: mt5_state balance delta
             if today_pnl is None:
-                today_pnl = round(random.uniform(-50, 150), 2)
+                with mt5_state_lock:
+                    state = mt5_state.get("default", {})
+                    acct_data = state.get("account", {})
+                if acct_data and daily_row and daily_row.starting_balance is not None:
+                    mt5_login = str(acct_data.get("login", "") or "")
+                    # Only apply delta if the EA's account login matches this account
+                    if mt5_login and mt5_login == str(login or ""):
+                        current_bal = float(acct_data.get("balance", 0) or 0)
+                        today_pnl = round(current_bal - daily_row.starting_balance, 2)
+
+            # Tier 3: AgentTrade realized PnL sum for today
+            if today_pnl is None:
+                from sqlalchemy import func as _func
+                has_trades_today = db.query(AgentTrade).filter(
+                    AgentTrade.account_id == a.id,
+                    AgentTrade.status == "CLOSED",
+                    _func.date(AgentTrade.exit_time) == datetime.utcnow().date(),
+                ).first() is not None
+                if has_trades_today:
+                    today_sum = db.query(
+                        _func.coalesce(_func.sum(AgentTrade.realized_pnl), 0.0)
+                    ).filter(
+                        AgentTrade.account_id == a.id,
+                        AgentTrade.status == "CLOSED",
+                        _func.date(AgentTrade.exit_time) == datetime.utcnow().date(),
+                    ).scalar()
+                    today_pnl = round(float(today_sum or 0), 2)
             total_balance += balance
             total_equity += equity
             entry = {
@@ -18398,6 +18441,40 @@ def agent_dashboard():
                 attention.append(entry)
             else:
                 healthy.append(entry)
+
+        # ── Synthetic account: EA pushing data but no TradingAccount row ──
+        if not accounts:
+            with mt5_state_lock:
+                ea_state = mt5_state.get("default", {})
+            if ea_state and isinstance(ea_state.get("account"), dict):
+                acct_data = ea_state["account"]
+                ea_positions = ea_state.get("positions", [])
+                balance = float(acct_data.get("balance") or 0)
+                equity = float(acct_data.get("equity") or balance)
+                last_seen = ea_state.get("last_seen")
+                synthetic = {
+                    "id": "__pending__",
+                    "name": "MT5 (Pending Setup)",
+                    "initials": "MT",
+                    "needs_onboarding": True,
+                    "balance": balance,
+                    "equity": equity,
+                    "drawdown": None,
+                    "leverage": None,
+                    "login": str(acct_data.get("login", "") or ""),
+                    "broker": "MetaTrader 5",
+                    "server": str(acct_data.get("server", "") or ""),
+                    "account_number": str(acct_data.get("login", "") or ""),
+                    "account_type": "live",
+                    "currency": str(acct_data.get("currency", "USD") or "USD"),
+                    "status": "pending",
+                    "problem": None,
+                    "today_pnl": None,
+                    "last_seen": last_seen.isoformat() if last_seen else None,
+                    "open_positions": len(ea_positions),
+                }
+                healthy.append(synthetic)
+                total_accounts = 1
 
         return jsonify({
             "total_accounts": total_accounts,
@@ -18426,12 +18503,12 @@ def agent_positions():
     """All open positions across user accounts."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     account_id = request.args.get("account_id")
     db = _DBSession()
     try:
         query = db.query(AgentTrade).join(TradingAccount).filter(
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
             AgentTrade.status == "OPEN",
         )
@@ -18440,7 +18517,7 @@ def agent_positions():
         trades = query.order_by(AgentTrade.entry_time.desc()).all()
 
         acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
-            TradingAccount.user_id == user_id
+            TradingAccount.user_id.in_(query_ids)
         ).all()}
 
         results = []
@@ -18470,7 +18547,7 @@ def agent_trades():
     """All trades with optional filters."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     account_id = request.args.get("account_id")
     symbol     = request.args.get("symbol")
     outcome    = request.args.get("outcome")
@@ -18484,7 +18561,7 @@ def agent_trades():
     db = _DBSession()
     try:
         query = db.query(AgentTrade).join(TradingAccount).filter(
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         )
         if account_id:
@@ -18506,7 +18583,7 @@ def agent_trades():
         trades = query.order_by(AgentTrade.exit_time.desc().nullslast(), AgentTrade.entry_time.desc()).offset(offset).limit(limit).all()
 
         acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
-            TradingAccount.user_id == user_id
+            TradingAccount.user_id.in_(query_ids)
         ).all()}
 
         results = []
@@ -18535,7 +18612,7 @@ def agent_create_trade():
     """Create a new trade (manual entry)."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     body = request.json or {}
     account_id = body.get("account_id")
     if not account_id:
@@ -18544,11 +18621,13 @@ def agent_create_trade():
     try:
         acct = db.query(TradingAccount).filter(
             TradingAccount.id == account_id,
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         ).first()
         if not acct:
             return jsonify({"error": "Account not found or not owned"}), 404
+        if acct.user_id == "default" and session_uid != "default":
+            return jsonify({"error": "Cannot modify shared EA account"}), 403
 
         trade = AgentTrade(
             uuid=str(uuid.uuid4()),
@@ -18588,14 +18667,14 @@ def agent_trades_export():
     """CSV export of filtered trades."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     account_id = request.args.get("account_id")
     date_from  = request.args.get("date_from")
     date_to    = request.args.get("date_to")
     db = _DBSession()
     try:
         query = db.query(AgentTrade).join(TradingAccount).filter(
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         )
         if account_id:
@@ -18607,7 +18686,7 @@ def agent_trades_export():
         trades = query.order_by(AgentTrade.exit_time.desc().nullslast()).all()
 
         acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
-            TradingAccount.user_id == user_id
+            TradingAccount.user_id.in_(query_ids)
         ).all()}
 
         import csv, io
@@ -18648,12 +18727,12 @@ def agent_trade_detail(trade_id):
     """Single trade detail."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     db = _DBSession()
     try:
         trade = db.query(AgentTrade).join(TradingAccount).filter(
             AgentTrade.id == trade_id,
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
         ).first()
         if not trade:
             return jsonify({"error": "Trade not found"}), 404
@@ -18675,16 +18754,20 @@ def agent_update_trade(trade_id):
     """Update a trade (close, add notes, etc.)."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     body = request.json or {}
     db = _DBSession()
     try:
         trade = db.query(AgentTrade).join(TradingAccount).filter(
             AgentTrade.id == trade_id,
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
         ).first()
         if not trade:
             return jsonify({"error": "Trade not found"}), 404
+        # Secondary ownership check for shared EA accounts
+        acct = db.query(TradingAccount).filter(TradingAccount.id == trade.account_id).first()
+        if acct and acct.user_id == "default" and session_uid != "default":
+            return jsonify({"error": "Cannot modify shared EA account"}), 403
 
         if "exit_price" in body:
             trade.exit_price = body["exit_price"]
@@ -18728,12 +18811,12 @@ def agent_analytics():
     """KPI + chart data: win rate, profit factor, Sharpe, equity curve points."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     account_id = request.args.get("account_id")
     period     = request.args.get("period", "90d")
     db = _DBSession()
     try:
-        acct_filter = [TradingAccount.user_id == user_id, TradingAccount.is_active == True]
+        acct_filter = [TradingAccount.user_id.in_(query_ids), TradingAccount.is_active == True]
         if account_id:
             acct_filter.append(TradingAccount.id == int(account_id))
         accts = db.query(TradingAccount).filter(*acct_filter).all()
@@ -18827,11 +18910,11 @@ def agent_portfolio():
     """Combined portfolio metrics across all accounts."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     db = _DBSession()
     try:
         accts = db.query(TradingAccount).filter(
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         ).all()
         acct_ids = [a.id for a in accts]
@@ -18878,15 +18961,17 @@ def agent_archive_account(account_id):
     """Soft-delete (archive) an account."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     db = _DBSession()
     try:
         acct = db.query(TradingAccount).filter(
             TradingAccount.id == account_id,
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
         ).first()
         if not acct:
             return jsonify({"error": "Account not found"}), 404
+        if acct.user_id == "default" and session_uid != "default":
+            return jsonify({"error": "Cannot modify shared EA account"}), 403
         acct.is_active = False
         db.add(AgentAuditLog(
             account_id=account_id,
@@ -18910,16 +18995,18 @@ def agent_sync_account(account_id):
     """Trigger a sync/refresh from MT5 EA."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     db = _DBSession()
     try:
         acct = db.query(TradingAccount).filter(
             TradingAccount.id == account_id,
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         ).first()
         if not acct:
             return jsonify({"error": "Account not found"}), 404
+        if acct.user_id == "default" and session_uid != "default":
+            return jsonify({"error": "Cannot modify shared EA account"}), 403
         acct.updated_at = datetime.utcnow()
         db.add(AgentAuditLog(
             account_id=account_id,
@@ -18946,15 +19033,17 @@ def agent_daily_metrics(account_id):
     """Get daily metrics for a specific account."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     db = _DBSession()
     try:
         acct = db.query(TradingAccount).filter(
             TradingAccount.id == account_id,
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
         ).first()
         if not acct:
             return jsonify({"error": "Account not found"}), 404
+        if acct.user_id == "default" and session_uid != "default":
+            return jsonify({"error": "Cannot modify shared EA account"}), 403
 
         metrics = db.query(AgentDailyMetrics).filter(
             AgentDailyMetrics.account_id == account_id,
@@ -18991,15 +19080,17 @@ def agent_recompute_daily(account_id):
     """Recalculate daily metrics from trade history."""
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
-    user_id = str(session.get("user_id"))
+    session_uid, query_ids = _agent_user_ids()
     db = _DBSession()
     try:
         acct = db.query(TradingAccount).filter(
             TradingAccount.id == account_id,
-            TradingAccount.user_id == user_id,
+            TradingAccount.user_id.in_(query_ids),
         ).first()
         if not acct:
             return jsonify({"error": "Account not found"}), 404
+        if acct.user_id == "default" and session_uid != "default":
+            return jsonify({"error": "Cannot modify shared EA account"}), 403
 
         trades = db.query(AgentTrade).filter(
             AgentTrade.account_id == account_id,

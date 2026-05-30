@@ -4761,6 +4761,7 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
 .agent-dd-dot.offline{background:#e8706e;}
 .agent-dd-dot.warning{background:#d4a843;}
 .agent-dd-dot.error{background:#e8706e;}
+.agent-dd-dot.pending{background:var(--gold);opacity:.5;}
 
 /* Agent Sub-tab Bar */
 .subtab-bar{display:flex;gap:0;border-bottom:1px solid rgba(237,232,216,.08);margin-bottom:20px;padding:0;}
@@ -4808,6 +4809,16 @@ input:checked + .ta-slider:before{transform:translateX(14px);background:#c9a84c;
 }
 .agent-card.agent-problem::before{
   background:linear-gradient(90deg,rgba(232,112,110,.3),transparent);
+}
+.agent-card.pending{
+  border:1px dashed var(--gold-bord);
+  background:var(--s1);
+  opacity:0.7;
+  cursor:pointer;
+}
+.agent-card.pending:hover{
+  opacity:1;
+  border-color:var(--gold);
 }
 .agent-card-header{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
 .agent-card-av{
@@ -7606,6 +7617,7 @@ function _agentSvgBE(){return '<svg width="16" height="16" viewBox="0 0 24 24" f
 function _agentSvgDot(status){
   if(status==='online') return '<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#c9a84c"/></svg>';
   if(status==='offline') return '<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#e8706e"/></svg>';
+  if(status==='pending') return '<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#c9a84c"/></svg>';
   return '<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#d4a843"/></svg>';
 }
 function _agentPnlStr(val){if(val>0) return _agentSvgGreenUp()+' +$'+val.toFixed(2);if(val<0) return _agentSvgRedDown()+' -$'+Math.abs(val).toFixed(2);return '$0.00';}
@@ -7628,7 +7640,7 @@ async function _agentRenderPanel(name, panel){
   if(!panel) return;
   var clients = Object.values(_agentClientData);
   var attention = clients.filter(function(c){return c.status === 'warning' || c.status === 'offline' || c.status === 'error';});
-  var healthy = clients.filter(function(c){return c.status === 'online' || c.status === 'connected';});
+  var healthy = clients.filter(function(c){return c.status === 'online' || c.status === 'connected' || c.status === 'pending';});
 
   if(name === 'overview' || name === 'dashboard'){
     panel.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Loading accounts...</div></div>';
@@ -7638,7 +7650,7 @@ async function _agentRenderPanel(name, panel){
       (d.attention||[]).concat(d.healthy||[]).forEach(function(a){_agentClientData[a.id]=a;});
       clients = Object.values(_agentClientData);
       attention = clients.filter(function(c){return c.status==='warning'||c.status==='offline'||c.status==='error';});
-      healthy = clients.filter(function(c){return c.status==='online'||c.status==='connected';});
+      healthy = clients.filter(function(c){return c.status==='online'||c.status==='connected'||c.status==='pending';});
     }
     // Check if session expired (redirected to login)
     if(!d && !Object.keys(_agentClientData).length){
@@ -7675,12 +7687,32 @@ async function _agentRenderPanel(name, panel){
       + '<div class="agent-section-head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5de8a0" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg><span class="agent-section-label agent-subtle">Running Smoothly</span></div>'
       + '<div class="agent-healthy-grid">'
       + healthy.map(function(a){
-        var pnlVal = 0; // Real P&L comes from API data when available
-        var pnlSign = pnlVal >= 0 ? '+' : '';
+        if(a.needs_onboarding) {
+          var pnlStr = '--', pnlColor = 'var(--t3)';
+          return '<div class="agent-card pending" data-tip="EA data is flowing but account setup is not complete. Finish setup to manage this account.">'
+            + '<div class="agent-card-header">'
+              + '<div class="agent-card-av-sm">MT</div>'
+              + '<div class="agent-card-name">'+(a.name||'MT5 (Pending Setup)')+'</div>'
+              + _agentSvgDot('pending')
+            + '</div>'
+            + '<div class="agent-card-metrics">'
+              + '<div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+(a.balance != null ? a.balance : 'N/A')+'</div></div>'
+              + '<div><div class="agent-metric-label">Equity</div><div class="agent-metric-value">'+(a.equity != null ? a.equity : 'N/A')+'</div></div>'
+            + '</div>'
+            + '<div style="font-family:var(--mono);font-size:12px;color:'+pnlColor+';">Today: '+pnlStr+'</div>'
+            + '<div class="agent-card-status" style="color:var(--gold);">Pending Setup</div>'
+            + '<button class="agent-card-btn" data-tip="Complete MT5 account setup to start managing this account" onclick="event.stopPropagation();_agentShowConnect()">Complete Setup <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-left:2px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button>'
+            + '</div>';
+        }
+        var pnlVal = (a.today_pnl != null) ? Number(a.today_pnl) : null;
+        var pnlSign = pnlVal != null ? (pnlVal >= 0 ? '+' : '') : '';
+        var pnlColor = pnlVal != null ? (pnlVal >= 0 ? 'var(--grn)' : 'var(--red)') : 'var(--t3)';
+        var pnlDisplay = pnlVal != null ? (pnlSign + '$' + Math.abs(pnlVal).toFixed(2)) : '--';
+        var pnlStatus = pnlVal != null ? 'Today: ' + pnlDisplay : 'Today: --';
         return '<div class="agent-card" data-tip="'+(a.name||'Unnamed')+': Balance '+(a.balance != null ? a.balance : 'N/A')+' | Drawdown '+(a.drawdown != null ? a.drawdown : 'N/A')+' | Status: Online" onclick="_agentSelectClient(\''+a.id+'\')">'
           + '<div class="agent-card-header"><div class="agent-card-av-sm">'+(a.initials||'??')+'</div><div class="agent-card-name">'+(a.name||'Unnamed')+'</div>'+_agentSvgDot('online')+'</div>'
           + '<div class="agent-card-metrics"><div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+(a.balance != null ? a.balance : 'N/A')+'</div></div></div>'
-          + '<div style="font-family:var(--mono);font-size:12px;color:'+(pnlVal>=0?'var(--grn)':'var(--red)')+';">Today: '+pnlSign+'$'+Math.abs(pnlVal).toFixed(2)+'</div>'
+          + '<div style="font-family:var(--mono);font-size:12px;color:'+pnlColor+';">'+pnlStatus+'</div>'
           + '<div class="agent-card-status">All systems normal</div></div>';
       }).join('') + '</div>';
   }
@@ -7882,12 +7914,14 @@ async function _agentBuildDropdown(){
     if(data){
       var accounts = (data.attention || []).concat(data.healthy || []);
       accounts.forEach(function(a){
+        if(a.id == null) return; // Skip synthetic accounts without DB rows
         _agentClientData[a.id] = a;
       });
     }
   }
   dd.innerHTML = '';
   Object.values(_agentClientData).forEach(function(c){
+    if(c.needs_onboarding) return;
     var row = document.createElement('div');
     row.className = 'agent-dd-row' + (_agentActiveClient === c.id ? ' agent-active' : '');
     row.onclick = function(e){e.stopPropagation();_agentSelectClient(c.id);};

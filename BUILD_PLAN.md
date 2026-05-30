@@ -93,6 +93,27 @@ Drawdown curve below equity curve: peak-to-trough % over time. Mark max drawdown
 **Status:** TODO | **Effort:** 1-2 days | **Depends on:** 4.2
 Calendar-style heatmap: months as rows, weeks as columns, cells colored by net R for that week. Uses outcome data. Pure frontend rendering from the same `/api/signals/performance-metrics` response.
 
+### 4.5 Performance Dashboard vs Agent Tab Boundary
+**Status:** DONE | **Effort:** Documented 2026-05-30
+These two tabs share overlapping metrics (PnL, Sharpe, win rate) but compute them from **different data sources** for different purposes. Clear boundaries prevent duplicate work and conflicting numbers.
+
+| Concern | Performance Dashboard | Agent Tab |
+|---------|----------------------|-----------|
+| **Tab** | PERFORMANCE tab (`showPerformance()`) | AGENT tab |
+| **Data source** | `SignalHistory` table | `AgentTrade` + `TradingAccount` + `AgentDailyMetrics` |
+| **Unit of analysis** | Signal quality (per-signal) | Trade performance (per-account, per-trader) |
+| **Audience** | Signal strategy developers | Account managers / traders |
+| **Equity curve** | Cumulative R-multiples from signal outcomes (`actual_pnl_r`) — normalized | Cumulative dollar PnL from trade `realized_pnl` — absolute dollar |
+| **Sharpe ratio** | From R-multiple returns (signal-level) | From dollar PnL returns (account-level) |
+| **Win rate** | Signal outcome WIN/LOSS rate | Trade outcome WIN/LOSS rate |
+| **Profit factor** | Gross win R / gross loss R | Gross win $ / gross loss $ |
+| **Drawdown** | Peak-to-trough in R-multiple equity curve | Peak-to-trough in dollar equity curve |
+| **Heatmap** | Monthly R-multiple returns matrix | Monthly dollar PnL matrix |
+| **Unique metrics** | Signal confidence calibration, expectancy per pattern, regime breakdown | Account balances, margin usage, client P&L, connection status |
+| **API endpoints** | `/api/signals/performance-metrics` (to be built) | `/api/trading-agent/dashboard`, `/api/trading-agent/analytics` (already built) |
+
+**Rule:** Never compute the same metric from both sources on the same tab. If a metric appears on both tabs, clearly label the source (e.g., "Sharpe (Signal)" vs "Sharpe (Account)").
+
 ---
 
 ## PHASE 1 — Already Done (No Work Needed)
