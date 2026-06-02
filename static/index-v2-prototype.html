@@ -17818,6 +17818,11 @@ function szSetRiskPreset(value, btn){
     window._userBaseRisk = parseFloat(value);  // explicit user choice — update the base preference
     if(typeof window._szTradeSizeManual !== 'undefined') window._szTradeSizeManual = false;
     window._szLadderUserSized = false;  // risk % is the driver now — let the ladder re-follow
+    // In the ladder, a preset sets EACH trade's risk % (per-trade), so the total
+    // = preset × number of trades. Trader can still adjust each leg afterwards.
+    if ((window._szMode||'single')==='multi' && Array.isArray(window._szLadder) && window._szLadder.length) {
+      window._szLadder = window._szLadder.map(function(){ return parseFloat(value); });
+    }
     if(typeof szCalc === 'function') szCalc();
   }
   szRiskHighlightChip(value);
@@ -19593,6 +19598,14 @@ function szSetMode(mode) {
     }
   }
   window._szLadderUserSized = false;
+  // Entering the ladder: start every trade at the trader's chosen per-trade risk %
+  // (independent risks they can then adjust per leg) — not a divided total.
+  if (mode === 'multi') {
+    var _rpDef = parseFloat(document.getElementById('szRisk')?.value) || 1;
+    if (Array.isArray(window._szLadder) && window._szLadder.length) {
+      window._szLadder = window._szLadder.map(function(){ return _rpDef; });
+    }
+  }
   szLadderRender();
   // Refresh the Flow-Scaled Sizing card so it reflects the new mode's trades
   // immediately (single = 1 trade, multi = all ladder legs) instead of showing
@@ -19602,6 +19615,27 @@ function szSetMode(mode) {
   if (typeof szAutoRecommendAll === 'function') { try { szAutoRecommendAll(); } catch(e){} }
 }
 
+// Plain-English DotVerse guidance for ONE ladder trade — what its risk % means,
+// the risk it carries, and a recommendation tied to its exit target.
+function _szLegGuidance(i, riskPct, riskDollars, target){
+  var r = parseFloat(riskPct) || 0;
+  var riskWord = r <= 1 ? 'a small, conservative size'
+               : r <= 2 ? 'a standard size'
+               : r <= 3 ? 'an aggressive size'
+               : 'a high-risk size — most pros never risk this much on one trade';
+  var tgtWord = ({
+    tp1:'TP1, the nearest and highest-probability target',
+    tp2:'TP2, a moderate-probability target further out',
+    tp3:'TP3, the most ambitious and lowest-probability target',
+    trail:'a trailing exit with no fixed target — it rides the move until momentum turns'
+  })[target] || (target||'').toUpperCase();
+  var rec;
+  if (target === 'tp1')      rec = r <= 1.5 ? 'A solid, safe anchor for the ladder — well sized.' : 'TP1 is high-probability, so a larger size here is defensible — just watch your running total below.';
+  else if (target === 'tp2') rec = r <= 2   ? 'Reasonable for a second target in a trend.' : 'On the heavy side for a TP2 hold — consider trimming if the trend isn\'t strong.';
+  else if (target === 'tp3') rec = r <= 1   ? 'Good — ambitious targets should carry small size like this.' : 'Consider trimming: TP3 is low-probability, so it should usually carry the LEAST size, not the most.';
+  else                       rec = r <= 1   ? 'Good — open-ended runners should stay small.' : 'Consider trimming: a runner with no fixed target is unpredictable — keep it small.';
+  return 'Trade #' + (i+1) + ' risks <strong style="color:rgba(237,232,216,.85)">' + r.toFixed(2) + '%</strong> (≈$' + Math.round(riskDollars).toLocaleString() + ' lost if its stop is hit) — ' + riskWord + ', aiming for ' + tgtWord + '. ' + rec;
+}
 function szLadderRender() {
   const wrap = document.getElementById('szLadderRows');
   if (!wrap) return;
@@ -19618,12 +19652,12 @@ function szLadderRender() {
   const tp1Dist = tp1 ? Math.abs(tp1 - entry) : 0;
   const tp2Dist = tp2 ? Math.abs(tp2 - entry) : 0;
   const tp3Dist = tp3 ? Math.abs(tp3 - entry) : 0;
-  // ── DotVerse auto-allocation ──
-  // In multi (ladder) mode, distribute the trade-size $ across the legs
-  // front-loaded and derive each leg's risk %, UNLESS the trader has manually
-  // sized a leg (or chosen a preset). Keeps trade size, risk %, and the ladder
-  // in sync so they always agree.
-  if (!window._szLadderUserSized) {
+  // ── DotVerse sizing ──
+  // SINGLE mode: the one trade is sized from the Trade Size / risk % (auto).
+  // MULTI mode: each leg carries its OWN independent risk % (the trader can
+  // stack several risks on one entry). We do NOT divide a single total here —
+  // _szLadder holds per-trade risk %, the SUM row shows the running total.
+  if ((window._szMode || 'single') === 'single' && !window._szLadderUserSized) {
     try { _szAutoAllocate(); } catch(e){}
   }
   // Running totals across all rows
@@ -19749,6 +19783,7 @@ function szLadderRender() {
       : (_rowRec && _rowRec.error)
       ? '<div style="font-family:var(--mono);font-size:8px;color:rgba(232,112,110,.65);max-width:280px;">'+_rowRec.error+'</div>'
       : '';
+    const _legGuide = (typeof _szLegGuidance === 'function') ? _szLegGuidance(i, risk, moneyAtRisk, target) : '';
     return `<div data-guide="ladder-row" style="margin-bottom:5px;">
       <div style="display:grid;grid-template-columns:32px 110px 120px 100px 62px 62px 62px 160px 24px;gap:6px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-radius:5px 5px 0 0;">
         <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
@@ -19786,7 +19821,8 @@ function szLadderRender() {
         </div>
         <button onclick="szLadderRemove(${i})" style="background:none;border:none;color:rgba(232,112,110,.6);cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button>
       </div>
-      <div style="padding:5px 9px 7px 9px;background:rgba(0,0,0,.18);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-top:none;border-radius:0 0 5px 5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <div style="padding:6px 9px 7px 9px;background:rgba(0,0,0,.18);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-top:none;border-radius:0 0 5px 5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        ${_legGuide?`<div style="width:100%;font-family:var(--mono);font-size:9px;line-height:1.5;color:rgba(237,232,216,.62);padding:2px 0 6px;border-bottom:1px solid rgba(237,232,216,.06);margin-bottom:5px;"><span style="color:rgba(201,168,76,.85);font-weight:700;">DotVerse</span> · ${_legGuide}</div>`:''}
         <div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.28);letter-spacing:.6px;min-width:78px;padding-top:1px;">AUTOMATION</div>
         ${_autoPillsHtml}
         <div style="width:1px;height:26px;background:rgba(237,232,216,.1);margin:0 3px;flex-shrink:0;align-self:center;"></div>
@@ -19807,6 +19843,19 @@ function szLadderRender() {
     <div></div>
     <div></div>
   </div>` +
+  // DotVerse running-total risk assessment — sum of every trade's independent risk %
+  (() => {
+    if (!acct || totalRisk <= 0) return '';
+    const pct = totalRisk / acct * 100;
+    const n = _rowsToRender.length;
+    let col, verdict;
+    if (pct <= 3)       { col='rgba(93,232,160,.9)';  verdict='Conservative — well within safe limits; you can hold these comfortably.'; }
+    else if (pct <= 6)  { col='rgba(201,168,76,.9)';  verdict='Moderate — a reasonable total for several positions. Make sure they are not all the same bet.'; }
+    else if (pct <= 10) { col='rgba(232,165,80,.95)'; verdict='Aggressive — at the upper end. Only justified if these trades are genuinely independent. Consider trimming.'; }
+    else                { col='rgba(232,112,110,.95)';verdict='Very high — DotVerse strongly suggests reducing. Risking this much across simultaneous trades can damage your account fast.'; }
+    return `<div style="margin-top:6px;padding:9px 12px;background:rgba(0,0,0,.18);border:1px solid rgba(237,232,216,.1);border-radius:6px;font-family:var(--mono);font-size:10px;line-height:1.55;color:rgba(237,232,216,.62);">`
+      + `<span style="color:rgba(201,168,76,.85);font-weight:700;">DotVerse</span> · You are risking <strong style="color:${col};">${pct.toFixed(2)}% of your account (≈$${Math.round(totalRisk).toLocaleString()})</strong> across these ${n} trade(s). ${verdict}</div>`;
+  })() +
   // Combined / scenario row — what you actually take home depending on exit style
   (() => {
     const haveAnyTP = tp1Dist || tp2Dist || tp3Dist;
