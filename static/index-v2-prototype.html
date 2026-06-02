@@ -10625,7 +10625,7 @@ function showToday(){
       + '<div class="sz-card-title">Plan settings</div>'
       + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">'
         + fld('Account $', inp('todayAcct', c.acct||'', 90))
-        + fld('Risk / trade %', inp('todayRisk', c.riskPct, 60))
+        + fld('Risk / trade %', '<input id="todayRisk" value="'+c.riskPct+'" onchange="_todaySetGlobalRisk(this.value)" style="width:60px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">')
         + fld('Max per class', '<select id="todayMaxPer" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 / class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2 / class</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3 / class</option></select>')
         + fld('Max trades', inp('todayMaxTrades', c.maxTrades, 56))
       + '</div>'
@@ -10788,6 +10788,17 @@ function _todayRenderPlan(){
     + '</div></div>' : '';
   area.innerHTML=summary+cards+footer;
   _todayStartLivePrices();
+}
+// Top control: re-size the WHOLE current plan to a new risk %, instantly.
+function _todaySetGlobalRisk(val){
+  var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
+  c.riskPct=r;
+  var plan=window._todayPlan||[];
+  if(plan.length){
+    plan.forEach(function(o){ o._risk=r; o._size=_todaySizeTrade(o, c.acct, r); });
+    window._todaySorted=true;
+    _todayRenderPlan();
+  }
 }
 // Fine-tune risk on a single card — resize just that trade, keep the rest.
 function _todaySetTradeRisk(idx, val){
