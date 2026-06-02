@@ -23925,6 +23925,22 @@ async function showAutomations() {
 
   // Populate the watch dashboard now that the DOM node exists
   setTimeout(avLoadWatchDash, 0);
+
+  // Reflect the REAL Telegram connection state instead of a hardcoded label.
+  (function(){
+    var lbl = document.getElementById('tgStatusLbl');
+    if (!lbl) return;
+    lbl.textContent = 'Checking Telegram…';
+    lbl.style.color = 'var(--t3)';
+    dvFetch('/api/telegram-status').then(function(d){
+      var ok = !!(d && d.configured);
+      lbl.textContent = ok ? 'Telegram connected' : 'Telegram not connected — set it up in Alerts';
+      lbl.style.color = ok ? '#5de8a0' : '#e8a020';
+    }).catch(function(){
+      lbl.textContent = 'Telegram status unavailable';
+      lbl.style.color = 'var(--t3)';
+    });
+  })();
 }
 
 
