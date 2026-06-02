@@ -10528,7 +10528,7 @@ function applyCondFilter(type, label, desc){
 }
 
 // ═══════════════════════ TODAY — daily plan home ═══════════════════════
-window._todayCfg = window._todayCfg || { acct:0, capPct:15, maxRiskPct:2, maxPerClass:1, maxTrades:5, classes:['crypto','stock','forex','commodity','index'] };
+window._todayCfg = window._todayCfg || { acct:0, riskPct:1, maxPerClass:1, maxTrades:5, classes:['crypto','stock','forex','commodity','index'] };
 window._todayPlan = window._todayPlan || [];
 
 function _todayToggleClass(id, btn){
@@ -10539,19 +10539,27 @@ function _todayToggleClass(id, btn){
     btn.style.background=on?'rgba(201,168,76,.12)':'transparent';
     btn.style.color=on?'var(--gold)':'rgba(237,232,216,.4)'; }
 }
-// Capital-driven sizing: allocate capPct of the account as capital, BUT never
-// let the implied risk exceed maxRiskPct — shrink the capital if it would.
-// Every figure is NET of spread + fees + estimated slippage (mirrors Size tab).
-function _todaySizeTrade(o, acct, capPct, maxRiskPct){
+// Lot specs per asset class: step = tradeable increment, min = broker minimum.
+var _TODAY_LOT = {
+  forex:     {step:1000,   min:1000  },   // 0.01 lot = 1,000 units
+  crypto:    {step:0.0001, min:0.0001},
+  stock:     {step:1,      min:1     },
+  index:     {step:0.01,   min:0.1   },
+  commodity: {step:0.01,   min:0.1   }
+};
+// RISK-DRIVEN sizing: the loss you control sets the size, so every trade risks
+// the SAME % and positions are meaningful & tradeable across all instruments.
+// Rounds to the broker lot step and flags positions too small for the account.
+// Every figure is NET of spread + fees + estimated slippage.
+function _todaySizeTrade(o, acct, riskPct){
   var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0, tp1=parseFloat(o.tp)||0;
   var slDist=Math.abs(entry-sl)||0;
-  var capital = (acct||0)*((capPct||15)/100);
-  if(slDist>0 && entry>0){
-    var maxRiskD = (acct||0)*((maxRiskPct||2)/100);
-    var riskAtCap = (capital/entry)*slDist;
-    if(riskAtCap>maxRiskD && riskAtCap>0) capital = capital*(maxRiskD/riskAtCap);
-  }
-  var units = entry>0 ? capital/entry : 0;
+  var riskD=(acct||0)*((riskPct||1)/100);
+  var unitsRaw = slDist>0 ? riskD/slDist : 0;
+  var SPEC = _TODAY_LOT[o.asset] || {step:0.0001, min:0.0001};
+  var units = SPEC.step>0 ? Math.round(unitsRaw/SPEC.step)*SPEC.step : unitsRaw;
+  units = parseFloat(Math.max(0,units).toFixed(8));
+  var tradeable = units>0 && units>=SPEC.min;
   var notional = units*entry;
   // Broker costs
   var spreadFrac = {crypto:0.0005, stock:0.0005, forex:0.0001, commodity:0.0005, index:0.0005}[o.asset]||0.0005;
@@ -10562,20 +10570,21 @@ function _todaySizeTrade(o, acct, capPct, maxRiskPct){
   var feeD = notional*feeRate;
   var slipD = entry*slipFrac*units;
   var costD = spreadD+feeD+slipD;
-  var grossRisk = units*slDist;
+  var grossRisk = units*slDist;            // actual risk after lot rounding
   var netLoss = grossRisk+costD;
   var grossTP1 = tp1?Math.abs(tp1-entry)*units:0;
   var netTP1 = grossTP1-costD;
   var rr = netLoss>0 ? netTP1/netLoss : 0;
-  var unitLabel, lots;
-  if(o.asset==='forex'){ lots=units/100000; unitLabel=(lots<0.01?lots.toFixed(4):lots.toFixed(2))+' lots'; }
+  var unitLabel;
+  if(o.asset==='forex'){ unitLabel=(units/100000).toFixed(2)+' lots'; }
   else if(o.asset==='crypto'){ unitLabel=(units>=1?units.toFixed(4):units.toFixed(6))+' units'; }
   else if(o.asset==='index'){ unitLabel=units.toFixed(2)+' contracts'; }
-  else { unitLabel=Math.round(units).toLocaleString()+' shares'; }
-  return { units:units, notional:notional, capital:capital,
-           capPctOfAcct: acct>0?(capital/acct*100):0,
+  else if(o.asset==='commodity'){ unitLabel=units.toFixed(2)+' lots'; }
+  else { var sh=Math.round(units); unitLabel=sh.toLocaleString()+(sh===1?' share':' shares'); }
+  return { units:units, notional:notional, tradeable:tradeable, minLot:SPEC.min, riskPctReq:(riskPct||1),
            netLoss:netLoss, netTP1:netTP1, grossRisk:grossRisk, rr:rr,
            riskPctOfAcct: acct>0?(grossRisk/acct*100):0,
+           notionalPctOfAcct: acct>0?(notional/acct*100):0,
            spreadD:spreadD, feeD:feeD, slipD:slipD, costD:costD, unitLabel:unitLabel };
 }
 function _todayDefaultAutos(tf){
@@ -10616,12 +10625,11 @@ function showToday(){
       + '<div class="sz-card-title">Plan settings</div>'
       + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">'
         + fld('Account $', inp('todayAcct', c.acct||'', 90))
-        + fld('Capital / trade %', inp('todayCap', c.capPct, 60))
-        + fld('Max risk / trade %', inp('todayMaxRisk', c.maxRiskPct, 60))
-        + fld('Max per class', '<select id="todayMaxPer" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 / class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3</option></select>')
+        + fld('Risk / trade %', inp('todayRisk', c.riskPct, 60))
+        + fld('Max per class', '<select id="todayMaxPer" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 / class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2 / class</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3 / class</option></select>')
         + fld('Max trades', inp('todayMaxTrades', c.maxTrades, 56))
       + '</div>'
-      + '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);line-height:1.5;">Capital / trade = how much of your account each position uses. Max risk caps the loss if it stops — DotVerse shrinks the size automatically so risk never exceeds it.</div>'
+      + '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);line-height:1.5;">Risk / trade = how much of your account you lose if the stop hits — this is the size driver, so every trade risks the same. You can fine-tune risk on each card after building, and run more than one per class.</div>'
       + '<div style="margin-top:13px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.04em;margin-bottom:6px;text-transform:uppercase;">Markets to include</div>'
       + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+chips+'</div>'
       + '<button onclick="_todayBuildPlan()" style="margin-top:16px;width:100%;padding:13px;border:none;border-radius:8px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.04em;cursor:pointer;">⚡ Build my plan</button>'
@@ -10641,8 +10649,7 @@ async function _todayBuildPlan(){
   var c=window._todayCfg;
   _todayStopLivePrices(); window._todaySorted=false;
   c.acct = parseFloat(document.getElementById('todayAcct')?.value)||c.acct||0;
-  c.capPct = parseFloat(document.getElementById('todayCap')?.value)||c.capPct||15;
-  c.maxRiskPct = parseFloat(document.getElementById('todayMaxRisk')?.value)||c.maxRiskPct||2;
+  c.riskPct = parseFloat(document.getElementById('todayRisk')?.value)||c.riskPct||1;
   c.maxPerClass = parseInt(document.getElementById('todayMaxPer')?.value)||1;
   c.maxTrades = parseInt(document.getElementById('todayMaxTrades')?.value)||5;
   // Need a real account size to size trades — pull from the live broker balance.
@@ -10693,7 +10700,8 @@ async function _todayBuildPlan(){
     if(seen[key]) continue;
     if((perClass[cls]||0) >= c.maxPerClass) continue;
     if(plan.length >= c.maxTrades) break;
-    o._size=_todaySizeTrade(o, c.acct, c.capPct, c.maxRiskPct);
+    o._risk = c.riskPct;                       // per-trade risk %, editable on each card
+    o._size=_todaySizeTrade(o, c.acct, o._risk);
     o._autos=_todayDefaultAutos(o.tf);
     plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
   }
@@ -10710,55 +10718,77 @@ function _todayRenderPlan(){
   var plan=window._todayPlan||[], c=window._todayCfg;
   if(!plan.length){ area.innerHTML='<div style="padding:30px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);line-height:1.7;">No high-quality setups in your markets right now. <br>That is a normal, correct outcome — DotVerse will not invent trades to fill a quota. Try again later or widen your markets above.</div>'; return; }
   var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
-  var totDeploy=0, totRisk=0, totRewardBest=0, longs=0, shorts=0, clsSet={};
-  plan.forEach(function(o){ totDeploy+=o._size.notional; totRisk+=o._size.netLoss; totRewardBest+=o._size.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; });
+  var money2=function(v){ var a=Math.abs(v); return (v<0?'-$':'$')+(a<100?a.toFixed(2):Math.round(a).toLocaleString()); };
+  var totExp=0, totRisk=0, totProfit=0, longs=0, shorts=0, clsSet={}, nTradeable=0, nTooSmall=0;
+  plan.forEach(function(o){ var s=o._size; if(!s.tradeable){ nTooSmall++; return; } totExp+=s.notional; totRisk+=s.netLoss; totProfit+=s.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; nTradeable++; });
   var autoLbl={be:'Break-even',trail:'Trailing',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
   var cards=plan.map(function(o,idx){
     var dirCol=o.sig==='BUY'?'#5de8a0':'#e8706e'; var s=o._size;
     var autos=Object.keys(o._autos).filter(function(k){return o._autos[k]&&autoLbl[k];}).map(function(k){return '<span style="font-family:var(--mono);font-size:8px;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);">'+autoLbl[k]+'</span>';}).join(' ');
+    var riskInput='<span style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">risk <input type="number" step="0.25" min="0.1" value="'+(o._risk||1)+'" onchange="_todaySetTradeRisk('+idx+',this.value)" style="width:46px;padding:3px 5px;font-family:var(--mono);font-size:10px;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.18);border-radius:4px;color:rgba(237,232,216,.9);outline:none;">%</span>';
+    var head='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">'
+      + '<span style="font-family:var(--syne);font-size:15px;font-weight:600;">'+o.sym+'</span>'
+      + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:'+dirCol+'22;color:'+dirCol+';">'+o.sig+'</span>'
+      + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);text-transform:capitalize;">'+o.asset+' · '+o.tf+'</span>'
+      + '<span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.7);">edge 1 : '+(s.rr||0).toFixed(1)+'</span>'
+      + riskInput
+    + '</div>';
+    if(!s.tradeable){
+      return '<div style="border:1px solid rgba(232,112,110,.25);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(232,112,110,.04);">'
+        + head
+        + '<div style="font-family:var(--mono);font-size:10px;color:#e8706e;line-height:1.55;margin-bottom:9px;">⚠ Too small to place on a '+money(c.acct)+' account at '+(o._risk||1)+'% risk — the position ('+s.unitLabel+') is below your broker’s minimum lot. Raise the risk % on the right, or skip this one.</div>'
+        + '<button disabled style="width:100%;padding:9px;border-radius:6px;background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.35);font-family:var(--mono);font-size:11px;font-weight:700;cursor:not-allowed;">Can’t place — too small</button>'
+      + '</div>';
+    }
     return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(237,232,216,.02);">'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">'
-        + '<span style="font-family:var(--syne);font-size:15px;font-weight:600;">'+o.sym+'</span>'
-        + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:'+dirCol+'22;color:'+dirCol+';">'+o.sig+'</span>'
-        + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);text-transform:capitalize;">'+o.asset+' · '+o.tf+'</span>'
-        + '<span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.7);">edge 1 : '+(s.rr||0).toFixed(1)+'</span>'
-      + '</div>'
+      + head
       + '<div id="today-lp-'+idx+'" style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.4);margin-bottom:9px;min-height:13px;"><span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.25);flex-shrink:0;"></span>checking live price…</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:8px;">'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Capital allocated</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money(s.notional)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.capPctOfAcct.toFixed(0)+'% of account · '+s.unitLabel+'</div></div>'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Max loss (after costs)</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#e8706e;">'+money(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.riskPctOfAcct.toFixed(2)+'% of account</div></div>'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">If TP1 hits (net)</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#5de8a0;">+'+money(s.netTP1)+'</div></div>'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Broker cost</div><div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.6);">'+money(s.costD)+'</div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.35);">spread '+money(s.spreadD)+' · fee '+money(s.feeD)+' · slip '+money(s.slipD)+'</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Max loss (after costs)</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#e8706e;">'+money2(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.riskPctOfAcct.toFixed(2)+'% of account</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Net profit if TP1</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">+'+money2(s.netTP1)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">reward 1 : '+(s.rr||0).toFixed(1)+'</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Position size</div><div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.9);">'+s.unitLabel+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">exposure '+money(s.notional)+' ('+s.notionalPctOfAcct.toFixed(0)+'% of acct)</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Broker cost</div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.6);">'+money2(s.costD)+'</div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.35);">spread '+money2(s.spreadD)+' · fee '+money2(s.feeD)+' · slip '+money2(s.slipD)+'</div></div>'
       + '</div>'
       + (autos?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">'+autos+'</div>':'')
       + '<div style="font-family:var(--mono);font-size:8px;color:rgba(93,232,160,.55);margin-bottom:9px;line-height:1.4;">🛡 Stop sits at your broker — it protects you even if you close DotVerse or lose internet.</div>'
-      + '<button onclick="_todayPlaceTrade('+idx+')" style="width:100%;padding:9px;border:none;border-radius:6px;background:rgba(93,232,160,.14);border:1px solid rgba(93,232,160,.35);color:#5de8a0;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Review &amp; place →</button>'
+      + '<button id="today-cta-'+idx+'" onclick="_todayPlaceTrade('+idx+')" style="width:100%;padding:9px;border-radius:6px;background:rgba(93,232,160,.14);border:1px solid rgba(93,232,160,.35);color:#5de8a0;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Review &amp; place →</button>'
     + '</div>';
   }).join('');
   var riskPct=c.acct>0?(totRisk/c.acct*100):0;
   var riskCol=riskPct<=3?'#5de8a0':riskPct<=6?'#c9a84c':'#e8706e';
-  var buffer=c.acct-totDeploy, deployPct=c.acct>0?(totDeploy/c.acct*100):0;
+  var buffer=c.acct-totExp, deployPct=c.acct>0?(totExp/c.acct*100):0;
   var nCls=Object.keys(clsSet).length;
-  var health = (nCls>=2 && longs>0 && shorts>0)?{t:'Balanced ✓',c:'#5de8a0'}
+  var health = nTradeable===0?{t:'No placeable trades',c:'#e8706e'}
+    : (nCls>=2 && longs>0 && shorts>0)?{t:'Balanced ✓',c:'#5de8a0'}
     : (nCls<2?{t:'⚠ One class — concentrated',c:'#c9a84c'}
     : (shorts===0?{t:'⚠ All long — one-direction bet',c:'#c9a84c'}
     : (longs===0?{t:'⚠ All short — one-direction bet',c:'#c9a84c'}
     : {t:'Mixed',c:'#c9a84c'})));
   var summary='<div style="border:1px solid rgba(93,232,160,.25);border-radius:9px;padding:13px 15px;margin-bottom:12px;background:linear-gradient(90deg,rgba(93,232,160,.06),rgba(201,168,76,.04));">'
-    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;"><span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(93,232,160,.75);font-weight:700;text-transform:uppercase;">Today\'s plan · '+plan.length+' trade'+(plan.length>1?'s':'')+'</span><span style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;color:'+health.c+';">'+health.t+'</span></div>'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;"><span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(93,232,160,.75);font-weight:700;text-transform:uppercase;">Today\'s plan · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</span><span style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;color:'+health.c+';">'+health.t+'</span></div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.7);margin-bottom:8px;">'
-      + '<span>Capital deployed: <strong>'+money(totDeploy)+'</strong> ('+deployPct.toFixed(0)+'%)</span>'
+      + '<span>Total exposure: <strong>'+money(totExp)+'</strong> ('+deployPct.toFixed(0)+'%)</span>'
       + '<span>Cash buffer: <strong style="color:'+(buffer>=0?'#5de8a0':'#e8706e')+';">'+money(buffer)+'</strong></span>'
-      + '<span>Total at risk: <strong style="color:'+riskCol+';">'+money(-totRisk)+' ('+riskPct.toFixed(2)+'%)</strong></span>'
-      + '<span>'+nCls+' class'+(nCls>1?'es':'')+' · '+longs+' long / '+shorts+' short</span>'
+      + '<span>Total max loss: <strong style="color:'+riskCol+';">'+money2(-totRisk)+' ('+riskPct.toFixed(2)+'%)</strong></span>'
+      + '<span>Total profit if all hit TP1: <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong></span>'
+      + '<span>'+nCls+' class'+(nCls===1?'':'es')+' · '+longs+' long / '+shorts+' short</span>'
     + '</div>'
-    + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money(totRewardBest)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money(-totRisk)+'</strong>. Reality lands between — some win, some lose. This is the odds working over many trades, not a promise.</div>'
-    + (deployPct>100?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Capital deployed exceeds your account — these need leverage. Lower Capital / trade % or trade fewer.</div>':'')
-    + (riskPct>6?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — consider fewer trades or a lower max-risk %.</div>':'')
-    + '<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+plan.length+' →</button>'
+    + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money2(-totRisk)+'</strong>. Reality lands between — some win, some lose. This is the odds working over many trades, not a promise.</div>'
+    + (deployPct>100?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);">ⓘ Total exposure is above your cash — leveraged instruments (forex/CFDs) control more than you put up. Your loss is still capped at the max loss shown.</div>':'')
+    + (riskPct>6?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower the risk % or trade fewer.</div>':'')
+    + (nTooSmall>0?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);">'+nTooSmall+' setup'+(nTooSmall===1?'':'s')+' too small for your account (below broker minimum) — excluded from the totals and place-all.</div>':'')
+    + (nTradeable>0?'<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+nTradeable+' →</button>':'')
   + '</div>';
   area.innerHTML=summary+cards;
   _todayStartLivePrices();
+}
+// Fine-tune risk on a single card — resize just that trade, keep the rest.
+function _todaySetTradeRisk(idx, val){
+  var plan=window._todayPlan||[]; var o=plan[idx]; if(!o) return;
+  var r=parseFloat(val); if(!(r>0)) r=o._risk||1;
+  o._risk=r; o._size=_todaySizeTrade(o, window._todayCfg.acct, r);
+  window._todaySorted=true;   // a manual tweak should not reshuffle the list
+  _todayRenderPlan();
 }
 // ── Per-card LIVE entry monitor — same live-price feed as the Signal tab ──
 function _todayStopLivePrices(){ if(window._todayLpTimer){ clearInterval(window._todayLpTimer); window._todayLpTimer=null; } }
@@ -10791,8 +10821,16 @@ function _todayStartLivePrices(){
         else if(favorable){ col='#5de8a0'; dot=col; label=Math.abs(distPct).toFixed(1)+'% '+(isBuy?'below':'above')+' entry — better price · R:R now 1:'+(liveRR>0?liveRR.toFixed(1):'—'); }
         else if(liveRR>=1){ col='rgba(201,168,76,.9)'; dot='#d4870a'; label=Math.abs(distPct).toFixed(1)+'% past entry — R:R now 1:'+liveRR.toFixed(1)+', still ok'; }
         else { col='#e8706e'; dot=col; label='ENTRY PASSED — R:R now 1:'+(liveRR>0?liveRR.toFixed(1):'<1')+', skip'; }
+        var invalid = stopBreached || targetHit || (!inZone && !favorable && liveRR<1);
+        o._live.invalid = invalid;
         var priceStr=live>=1000?live.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):live>=1?live.toFixed(4):live.toPrecision(4);
         el.innerHTML='<span style="width:5px;height:5px;border-radius:50%;background:'+dot+';flex-shrink:0;animation:lpulse 2s ease-in-out infinite;"></span><span style="color:'+col+';font-weight:600;">Now '+priceStr+'</span><span style="color:rgba(237,232,216,.2);margin:0 4px;">·</span><span style="color:'+col+';">'+label+'</span>';
+        // Keep the card's button honest with the live status — don't say "place" on a dead setup.
+        var cta=document.getElementById('today-cta-'+idx);
+        if(cta){
+          if(invalid){ cta.innerHTML='⚠ Setup moved — skip (or review)'; cta.style.background='rgba(232,112,110,.12)'; cta.style.border='1px solid rgba(232,112,110,.4)'; cta.style.color='#e8706e'; }
+          else { cta.innerHTML='Review &amp; place →'; cta.style.background='rgba(93,232,160,.14)'; cta.style.border='1px solid rgba(93,232,160,.35)'; cta.style.color='#5de8a0'; }
+        }
       }catch(e){}
     }));
     // One-time time-sensitivity sort: closest-to-entry first
@@ -10806,8 +10844,13 @@ function _todayStartLivePrices(){
   window._todayLpTimer=setInterval(pass,30000);
 }
 // ── Review & place — single card or the whole basket, one confirmed batch ──
-function _todayPlaceTrade(idx){ var o=(window._todayPlan||[])[idx]; if(!o) return; _todayConfirmAndPlace([o]); }
-function _todayPlaceAll(){ var plan=(window._todayPlan||[]).slice(); if(!plan.length) return; _todayConfirmAndPlace(plan); }
+function _todayPlaceTrade(idx){ var o=(window._todayPlan||[])[idx]; if(!o||!o._size.tradeable) return; _todayConfirmAndPlace([o]); }
+function _todayPlaceAll(){
+  // Only place trades that are tradeable AND whose live entry is still valid.
+  var plan=(window._todayPlan||[]).filter(function(o){ return o._size.tradeable && !(o._live&&o._live.invalid); });
+  if(!plan.length){ if(typeof _dvToast==='function') _dvToast('No trades are currently valid to place — entries have moved','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
+  _todayConfirmAndPlace(plan);
+}
 function _todayConfirmAndPlace(trades){
   if(!trades||!trades.length) return;
   var c=window._todayCfg, acct=c.acct||0;
