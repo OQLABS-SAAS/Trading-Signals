@@ -9880,6 +9880,41 @@ function updateFlowBadge() {
     _gradeBlurb = 'Verdict: SCALE DOWN — at least one factor (confluence / R:R / volume) is weak. Engine recommends ' + sugRisk.toFixed(1) + '% risk (your default of ' + userBase + '% × multiplier ' + mult.toFixed(2) + ').';
   }
 
+  // ── Ladder context — the flow card must reflect EVERY trade it will size ──
+  // In Scale-Out Ladder mode the suggestion is the TOTAL risk budget for all the
+  // (correlated, same-signal) trades; each trade is shown with its current vs
+  // suggested risk and dollar amount so the trader sees the whole picture.
+  var _szMode2 = window._szMode || 'single';
+  var _legs2   = window._szLadder || [];
+  var _nTrades = _szMode2 === 'single' ? 1 : (_legs2.length || 1);
+  var _acct2   = parseFloat(document.getElementById('szAcct')?.value) || 0;
+  var _curTotalRisk = 0; for (var _li = 0; _li < _nTrades; _li++) _curTotalRisk += (_legs2[_li] || 0);
+  var _scaleToSug = _curTotalRisk > 0 ? (sugRisk / _curTotalRisk) : 1;
+  var _isLadder = _nTrades > 1;
+  var _ladderRows = '';
+  if (_isLadder) {
+    for (var _lj = 0; _lj < _nTrades; _lj++) {
+      var _now  = _legs2[_lj] || 0;
+      var _then = _now * _scaleToSug;
+      _ladderRows +=
+        '<div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:9.5px;padding:3px 0;color:rgba(220,225,235,.72);border-bottom:1px solid rgba(237,232,216,.05);">'
+        + '<span style="color:rgba(180,190,210,.6);">Trade #' + (_lj + 1) + '</span>'
+        + '<span>' + _now.toFixed(2) + '% <span style="color:var(--t3);">$' + Math.round(_acct2 * _now / 100) + '</span>'
+        + ' <span style="color:var(--t3);">→</span> <b style="color:' + gradeCol + ';">' + _then.toFixed(2) + '%</b> <span style="color:var(--t3);">$' + Math.round(_acct2 * _then / 100) + '</span></span>'
+        + '</div>';
+    }
+  }
+  var _ladderPanel = _isLadder
+    ? '<div style="background:rgba(237,232,216,.03);border:1px solid ' + gradeBdr + ';border-radius:6px;padding:9px 11px;margin-bottom:12px;">'
+      + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:rgba(200,210,230,.55);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px;">'
+      + '<span>All ' + _nTrades + ' trades in this ladder</span><span>now → suggested</span></div>'
+      + _ladderRows
+      + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;font-weight:700;padding-top:6px;margin-top:3px;color:rgba(220,225,235,.9);">'
+      + '<span>TOTAL</span><span>' + _curTotalRisk.toFixed(2) + '% $' + Math.round(_acct2 * _curTotalRisk / 100)
+      + ' <span style="color:var(--t3);">→</span> <span style="color:' + gradeCol + ';">' + sugRisk.toFixed(2) + '% $' + Math.round(_acct2 * sugRisk / 100) + '</span></span></div>'
+      + '</div>'
+    : '';
+
   badge.innerHTML =
     // Header row
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
@@ -9895,11 +9930,11 @@ function updateFlowBadge() {
     + '</div>'
     + '<div style="flex:1;padding:12px 14px;">'
     + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">'
-    + '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.5px;text-transform:uppercase;">Suggested Risk</div>'
+    + '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.5px;text-transform:uppercase;">Suggested Risk' + (_isLadder ? ' (total)' : '') + '</div>'
     + sourceTag
     + '</div>'
     + '<div style="font-family:var(--mono);font-size:28px;font-weight:700;color:' + gradeCol + ';line-height:1;">' + sugRisk.toFixed(1) + '<span style="font-size:14px;opacity:.7;">%</span></div>'
-    + (function(){ var _acct=parseFloat(document.getElementById('szAcct')?.value)||0; return _acct>0?'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.45);margin-top:4px;">= $'+(_acct*sugRisk/100).toFixed(2)+' on a $'+_acct.toLocaleString()+' account</div>':''; })()
+    + (function(){ return _acct2>0?'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.45);margin-top:4px;">= $'+(_acct2*sugRisk/100).toFixed(2)+(_isLadder?(' total across '+_nTrades+' trades'):(' on a $'+_acct2.toLocaleString()+' account'))+'</div>':''; })()
     + '</div>'
     + '</div>'
     // Factor pills
@@ -9919,10 +9954,12 @@ function updateFlowBadge() {
     +     '<li style="padding-top:5px;border-top:1px solid rgba(237,232,216,.08);color:' + gradeCol + ';font-weight:600;">' + _gradeBlurb + '</li>'
     +   '</ul>'
     + '</div>'
+    // All trades in the ladder — current vs suggested per trade (reflects every open trade)
+    + _ladderPanel
     // Apply button — SVG icon, no emoji
     + '<button id="kellyApplyBtn" data-guide="kelly-badge" onclick="applyKellyRisk(this)" style="width:100%;padding:11px;border-radius:7px;border:1px solid ' + btnBdr + ';background:' + btnBg + ';color:' + btnCol + ';font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.8px;cursor:pointer;transition:all .18s;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:7px;" onmouseover="this.style.background=\'' + btnHover + '\'" onmouseout="this.style.background=\'' + btnBg + '\'">'
     + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
-    + 'APPLY ' + sugRisk.toFixed(1) + '% RISK'
+    + (_isLadder ? ('APPLY ' + sugRisk.toFixed(1) + '% ACROSS ' + _nTrades + ' TRADES') : ('APPLY ' + sugRisk.toFixed(1) + '% RISK'))
     + '</button>';
 
   badge.style.display = 'block';
@@ -19513,6 +19550,10 @@ function szSetMode(mode) {
   }
   window._szLadderUserSized = false;
   szLadderRender();
+  // Refresh the Flow-Scaled Sizing card so it reflects the new mode's trades
+  // immediately (single = 1 trade, multi = all ladder legs) instead of showing
+  // stale single-trade values until the next input change.
+  if (typeof updateFlowBadge === 'function') { try { updateFlowBadge(); } catch(e){} }
 }
 
 function szLadderRender() {
@@ -19949,7 +19990,7 @@ async function szLadderSubmitAll() {
 // Render ladder when Size tab template injects (after szCalc populates inputs)
 const _orig_szCalc = (typeof szCalc === 'function') ? szCalc : null;
 if (_orig_szCalc) {
-  szCalc = function() { _orig_szCalc(); try { szLadderRender(); } catch(e){} };
+  szCalc = function() { _orig_szCalc(); try { szLadderRender(); if (typeof updateFlowBadge === 'function') updateFlowBadge(); } catch(e){} };
 }
 
 function szTypeChange(){
