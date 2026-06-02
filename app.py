@@ -8437,10 +8437,13 @@ def mt5_submit_order():
     ticker     = body.get("ticker", "").upper().strip()
     asset_type = body.get("asset_type", "forex")
     direction  = body.get("direction", "").upper()
-    volume     = float(body.get("volume", 0.01))
-    price      = float(body.get("price", 0))
+    # Accept the field names the Size-tab frontend actually sends as aliases so
+    # the calculated position size, entry, and TP1 are not dropped:
+    #   frontend `lots`  → volume   |  `entry` → price   |  `tp1` → tp
+    volume     = float(body.get("volume") or body.get("lots") or 0.01)
+    price      = float(body.get("price")  or body.get("entry") or 0)
     sl         = body.get("sl")
-    tp         = body.get("tp")
+    tp         = body.get("tp") or body.get("tp1")
     tp2              = body.get("tp2")
     tp3              = body.get("tp3")
     timeframe        = body.get("timeframe", "")
@@ -8918,7 +8921,7 @@ def mt5_level_alert():
 def mt5_push_state():
     """EA pushes account info and open positions every 5s."""
     body      = request.json or {}
-    user_id   = body.get("user_id", "default")
+    user_id   = getattr(request, 'ea_user_id', None) or body.get("user_id", "default")
     account   = body.get("account", {})
     positions = body.get("positions", [])
     spreads   = body.get("spreads", {})     # Phase 1.2: live spread map {symbol: spread_pts}

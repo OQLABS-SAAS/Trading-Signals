@@ -9934,6 +9934,21 @@ function applyKellyRisk(btn) {
   var inp = document.getElementById('szRisk');
   if (!inp || window._kellyPct == null) return;
   inp.value = window._kellyPct.toFixed(1);
+  // Flow-scaling recommendation reaches the whole ladder: when the trader
+  // chooses to apply it in Scale-Out Ladder mode, scale EVERY leg proportionally
+  // so the ladder's total risk equals the suggested %. Recommend-only — only
+  // runs on this explicit Apply click, never automatically.
+  if (Array.isArray(window._szLadder) && window._szLadder.length) {
+    // Scale the legs that are actually active: single mode = the one trade,
+    // multi mode = all legs. Total risk after scaling equals the suggested %.
+    var _n = (window._szMode||'single')==='single' ? 1 : window._szLadder.length;
+    var _cur = 0; for (var _i=0;_i<_n;_i++) _cur += (window._szLadder[_i]||0);
+    if (_cur > 0) {
+      var _scale = window._kellyPct / _cur;
+      for (var _j=0;_j<_n;_j++) window._szLadder[_j] = Math.max(0.0001, Math.round(window._szLadder[_j]*_scale*10000)/10000);
+      window._szLadderUserSized = true; // trader opted into flow sizing — stop auto-realloc
+    }
+  }
   if (typeof szCalc === 'function') szCalc();
   // Success flash on button
   if (btn) {
@@ -19424,7 +19439,52 @@ function szApplyRecommendation() {
   if (!rec) return;
   window._szLadderTargets = rec.targets.slice();
   window._szTargetsUserModified = false;
+  window._szLadderUserSized = false;
   szLadderRender();
+}
+// ── DotVerse intelligent ladder allocation ──────────────────────────────────
+// Distributes the trade-size dollars across the ladder legs FRONT-LOADED — the
+// high-probability early leg (TP1) carries the most capital, the ambitious
+// runner the least — then derives each leg's risk % from its dollar slice so
+// trade size and risk % can never disagree. Targets come from the existing
+// timeframe/confidence engine. Returns the per-leg notional array (for display)
+// or null if entry/stop aren't set yet.
+function _szAutoAllocate() {
+  const entry = parseFloat((document.getElementById('szEntry')?.value||'').replace(/,/g,'')) || 0;
+  const sl    = parseFloat((document.getElementById('szSL')?.value||'').replace(/,/g,''))    || 0;
+  const acct  = parseFloat(document.getElementById('szAcct')?.value) || 10000;
+  const slDist = Math.abs(entry - sl);
+  if (!entry || !slDist) return null;
+  // Single mode = one trade gets the whole amount; multi = split across all legs.
+  const isSingle = (window._szMode || 'single') === 'single';
+  if (!Array.isArray(window._szLadder)) window._szLadder = [1.0];
+  const N = isSingle ? 1 : (window._szLadder.length || 1);
+  // Total capital to deploy: the trader's Trade Size if they set one, otherwise
+  // a risk-based notional whose total risk equals their Risk % setting.
+  let T = 0;
+  if (window._szTradeSizeManual) T = parseFloat(document.getElementById('szTradeSize')?.value) || 0;
+  if (!T) { const rp = parseFloat(document.getElementById('szRisk')?.value) || 1; T = acct * (rp/100) * (entry/slDist); }
+  if (!T) return null;
+  // Front-loaded weights: N, N-1, … 1  (leg 1 largest).
+  let wsum = 0; const w = [];
+  for (let i = 0; i < N; i++) { const wi = N - i; w.push(wi); wsum += wi; }
+  const notional = [];
+  for (let i = 0; i < N; i++) {
+    const noti  = T * w[i] / wsum;
+    const units = noti / entry;
+    const riskPct = units * slDist / acct * 100;
+    notional.push(noti);
+    // Set the leg in place (don't discard the rest of the array). 4-dp precision
+    // so the risk %, the $ slice, and the profits all agree.
+    window._szLadder[i] = Math.max(0.0001, Math.round(riskPct * 10000) / 10000);
+  }
+  window._szLadderNotional = notional;
+  // Targets from the existing timeframe/confidence engine.
+  if (!window._szTargetsUserModified) {
+    const rec = _szRecommendTargets(N);
+    if (rec) window._szLadderTargets = rec.targets.slice();
+  }
+  return notional;
 }
 // Switch between Single Trade and Scale-Out Ladder modes.
 // Single: renders only row 0 and hides the Add/Preset/Submit buttons bar.
@@ -19451,6 +19511,7 @@ function szSetMode(mode) {
       btnS.style.fontWeight = '600';
     }
   }
+  window._szLadderUserSized = false;
   szLadderRender();
 }
 
@@ -19470,6 +19531,14 @@ function szLadderRender() {
   const tp1Dist = tp1 ? Math.abs(tp1 - entry) : 0;
   const tp2Dist = tp2 ? Math.abs(tp2 - entry) : 0;
   const tp3Dist = tp3 ? Math.abs(tp3 - entry) : 0;
+  // ── DotVerse auto-allocation ──
+  // In multi (ladder) mode, distribute the trade-size $ across the legs
+  // front-loaded and derive each leg's risk %, UNLESS the trader has manually
+  // sized a leg (or chosen a preset). Keeps trade size, risk %, and the ladder
+  // in sync so they always agree.
+  if (!window._szLadderUserSized) {
+    try { _szAutoAllocate(); } catch(e){}
+  }
   // Running totals across all rows
   let totalRisk = 0, totalTp1 = 0, totalTp2 = 0, totalTp3 = 0;
   // Format helper — short for negative + dollar, signed
@@ -19606,7 +19675,7 @@ function szLadderRender() {
           <div style="font-size:8px;color:rgba(237,232,216,.35);">SL price</div>
           <div style="margin-top:2px;">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
         </div>
-        <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.85);">${lotsStr}<div style="font-size:8px;color:rgba(237,232,216,.4);">lots</div></div>
+        <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.85);">${entry?('$'+(units*entry).toLocaleString(undefined,{maximumFractionDigits:0})):lotsStr}<div style="font-size:8px;color:rgba(237,232,216,.4);">${entry?(lotsStr+' units'):'lots'}</div></div>
         ${tpCell(p1, 'TP1')}
         ${tpCell(p2, 'TP2')}
         ${tpCell(p3, 'TP3')}
@@ -19785,7 +19854,7 @@ function szAutoRecommend(rowIdx) {
 
 function szLadderUpdate(i, v) {
   const n = parseFloat(v);
-  if (isFinite(n) && n > 0) { window._szLadder[i] = n; szLadderRender(); }
+  if (isFinite(n) && n > 0) { window._szLadder[i] = n; window._szLadderUserSized = true; szLadderRender(); }
 }
 function szLadderPreset(kind) {
   if (kind === 'conservative') {
@@ -19798,6 +19867,7 @@ function szLadderPreset(kind) {
     window._szLadder = [1.0, 2.0, 3.0, 4.0, 5.0];
     window._szLadderTargets = ['tp1','tp2','tp3','tp3','trail'];
   }
+  window._szLadderUserSized = true;
   szLadderRender();
 }
 async function szLadderSubmitAll() {
