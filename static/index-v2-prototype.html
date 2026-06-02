@@ -10528,7 +10528,7 @@ function applyCondFilter(type, label, desc){
 }
 
 // ═══════════════════════ TODAY — daily plan home ═══════════════════════
-window._todayCfg = window._todayCfg || { acct:2000, riskPct:1, maxPerClass:1, maxTrades:5, classes:['crypto','stock','forex','commodity','index'] };
+window._todayCfg = window._todayCfg || { acct:0, capPct:15, maxRiskPct:2, maxPerClass:1, maxTrades:5, classes:['crypto','stock','forex','commodity','index'] };
 window._todayPlan = window._todayPlan || [];
 
 function _todayToggleClass(id, btn){
@@ -10539,25 +10539,68 @@ function _todayToggleClass(id, btn){
     btn.style.background=on?'rgba(201,168,76,.12)':'transparent';
     btn.style.color=on?'var(--gold)':'rgba(237,232,216,.4)'; }
 }
-function _todaySizeTrade(o, acct, riskPct){
+// Capital-driven sizing: allocate capPct of the account as capital, BUT never
+// let the implied risk exceed maxRiskPct — shrink the capital if it would.
+// Every figure is NET of spread + fees + estimated slippage (mirrors Size tab).
+function _todaySizeTrade(o, acct, capPct, maxRiskPct){
   var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0, tp1=parseFloat(o.tp)||0;
   var slDist=Math.abs(entry-sl)||0;
-  var riskD=acct*(riskPct/100);
-  var units = slDist>0 ? riskD/slDist : 0;
+  var capital = (acct||0)*((capPct||15)/100);
+  if(slDist>0 && entry>0){
+    var maxRiskD = (acct||0)*((maxRiskPct||2)/100);
+    var riskAtCap = (capital/entry)*slDist;
+    if(riskAtCap>maxRiskD && riskAtCap>0) capital = capital*(maxRiskD/riskAtCap);
+  }
+  var units = entry>0 ? capital/entry : 0;
   var notional = units*entry;
-  var rewardD = tp1 ? Math.abs(tp1-entry)*units : 0;
-  var rr = (slDist>0 && tp1) ? Math.abs(tp1-entry)/slDist : 0;
-  var unitLabel;
-  if(o.asset==='forex'){ var lots=units/100000; unitLabel=(lots<0.01?lots.toFixed(4):lots.toFixed(2))+' lots'; }
+  // Broker costs
+  var spreadFrac = {crypto:0.0005, stock:0.0005, forex:0.0001, commodity:0.0005, index:0.0005}[o.asset]||0.0005;
+  var spreadUnits = (o.spreadCost!=null && o.spreadCost>0) ? o.spreadCost : entry*spreadFrac;
+  var feeRate = o.asset==='crypto'?0.001:0.0005;
+  var slipFrac = o.asset==='forex'?0.00007:0.0004;
+  var spreadD = spreadUnits*units;
+  var feeD = notional*feeRate;
+  var slipD = entry*slipFrac*units;
+  var costD = spreadD+feeD+slipD;
+  var grossRisk = units*slDist;
+  var netLoss = grossRisk+costD;
+  var grossTP1 = tp1?Math.abs(tp1-entry)*units:0;
+  var netTP1 = grossTP1-costD;
+  var rr = netLoss>0 ? netTP1/netLoss : 0;
+  var unitLabel, lots;
+  if(o.asset==='forex'){ lots=units/100000; unitLabel=(lots<0.01?lots.toFixed(4):lots.toFixed(2))+' lots'; }
   else if(o.asset==='crypto'){ unitLabel=(units>=1?units.toFixed(4):units.toFixed(6))+' units'; }
   else if(o.asset==='index'){ unitLabel=units.toFixed(2)+' contracts'; }
   else { unitLabel=Math.round(units).toLocaleString()+' shares'; }
-  return { units:units, notional:notional, riskD:riskD, rewardD:rewardD, rr:rr, unitLabel:unitLabel };
+  return { units:units, notional:notional, capital:capital,
+           capPctOfAcct: acct>0?(capital/acct*100):0,
+           netLoss:netLoss, netTP1:netTP1, grossRisk:grossRisk, rr:rr,
+           riskPctOfAcct: acct>0?(grossRisk/acct*100):0,
+           spreadD:spreadD, feeD:feeD, slipD:slipD, costD:costD, unitLabel:unitLabel };
 }
 function _todayDefaultAutos(tf){
   var t=(tf||'').toLowerCase();
   var slow = t.indexOf('1d')>=0 || t.indexOf('1w')>=0 || t.indexOf('4h')>=0 || t.indexOf('1mo')>=0;
   return { be:true, tp1:true, trail:slow, macro:slow, inval:true, sent:false, tp2:slow, weekend:slow };
+}
+// SMART per-trade automations — calls the real DotVerse engine so each trade
+// (BUY vs SELL, scalp vs swing, with-trend vs against) gets its own set.
+function _todayTradeType(tf){ tf=(tf||'').toLowerCase(); if(tf.indexOf('15m')>=0)return'scalp'; if(tf.indexOf('30m')>=0||tf.indexOf('1h')>=0)return'day'; if(tf.indexOf('4h')>=0)return'swing'; return'position'; }
+async function _todayRecommendAutos(o){
+  try{
+    var bias = /bull/i.test(o.regime_context||'')?'BULLISH':/bear/i.test(o.regime_context||'')?'BEARISH':'NEUTRAL';
+    var rec = await dvFetch('/api/recommend-automations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      signal:o.sig, trade_type:_todayTradeType(o.tf), confidence:o.conf||'MEDIUM', confidence_label:o.confLbl||'LIKELY',
+      bull_count:o.bullCount||0, bear_count:o.bearCount||0, atr:o.atr||0, entry:parseFloat(o.entry)||0,
+      htf_bias:bias, rsi:o.rsi||50, target:'tp1'
+    })});
+    if(rec && !rec.error){
+      o._autoWhy = rec.explanation || '';
+      return { be:!!rec.be, trail:!!rec.trail, macro:!!rec.macro, inval:!!rec.inval, sent:!!rec.sent,
+               tp1:(rec.tp1!==undefined?!!rec.tp1:true), tp2:!!rec.tp2, weekend:!!rec.weekend };
+    }
+  }catch(e){}
+  return _todayDefaultAutos(o.tf);
 }
 function showToday(){
   var el=document.getElementById('dashContent'); if(!el) return;
@@ -10572,24 +10615,42 @@ function showToday(){
     + '<div class="sz-card" style="margin-bottom:14px;">'
       + '<div class="sz-card-title">Plan settings</div>'
       + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">'
-        + fld('Account $', inp('todayAcct', c.acct, 90))
-        + fld('Risk % / trade', inp('todayRisk', c.riskPct, 56))
-        + fld('Max per asset class', '<select id="todayMaxPer" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 — one per class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3</option></select>')
+        + fld('Account $', inp('todayAcct', c.acct||'', 90))
+        + fld('Capital / trade %', inp('todayCap', c.capPct, 60))
+        + fld('Max risk / trade %', inp('todayMaxRisk', c.maxRiskPct, 60))
+        + fld('Max per class', '<select id="todayMaxPer" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 / class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3</option></select>')
         + fld('Max trades', inp('todayMaxTrades', c.maxTrades, 56))
       + '</div>'
+      + '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);line-height:1.5;">Capital / trade = how much of your account each position uses. Max risk caps the loss if it stops — DotVerse shrinks the size automatically so risk never exceeds it.</div>'
       + '<div style="margin-top:13px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.04em;margin-bottom:6px;text-transform:uppercase;">Markets to include</div>'
       + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+chips+'</div>'
       + '<button onclick="_todayBuildPlan()" style="margin-top:16px;width:100%;padding:13px;border:none;border-radius:8px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.04em;cursor:pointer;">⚡ Build my plan</button>'
     + '</div>'
     + '<div id="todayPlanArea"></div>';
+  // Stop any live monitor from a previous plan, and pull the real broker balance.
+  _todayStopLivePrices(); window._todaySorted=false;
+  if(!c.acct){
+    dvFetch('/api/mt5/state').then(function(d){
+      var b=(d&&d.account&&d.account.balance)?parseFloat(d.account.balance):0;
+      if(b>0){ c.acct=b; var a=document.getElementById('todayAcct'); if(a && !a.value) a.value=Math.round(b); }
+    }).catch(function(){});
+  }
 }
 async function _todayBuildPlan(){
   var area=document.getElementById('todayPlanArea'); if(!area) return;
   var c=window._todayCfg;
-  c.acct = parseFloat(document.getElementById('todayAcct')?.value)||c.acct;
-  c.riskPct = parseFloat(document.getElementById('todayRisk')?.value)||1;
+  _todayStopLivePrices(); window._todaySorted=false;
+  c.acct = parseFloat(document.getElementById('todayAcct')?.value)||c.acct||0;
+  c.capPct = parseFloat(document.getElementById('todayCap')?.value)||c.capPct||15;
+  c.maxRiskPct = parseFloat(document.getElementById('todayMaxRisk')?.value)||c.maxRiskPct||2;
   c.maxPerClass = parseInt(document.getElementById('todayMaxPer')?.value)||1;
   c.maxTrades = parseInt(document.getElementById('todayMaxTrades')?.value)||5;
+  // Need a real account size to size trades — pull from the live broker balance.
+  if(!c.acct){
+    try{ var st=await dvFetch('/api/mt5/state'); var b=(st&&st.account&&st.account.balance)?parseFloat(st.account.balance):0; if(b>0){ c.acct=b; var ai=document.getElementById('todayAcct'); if(ai) ai.value=Math.round(b); } }catch(e){}
+  }
+  if(!c.acct){ area.innerHTML='<div style="padding:26px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:#e8706e;line-height:1.7;">Enter your account size above so DotVerse can size each trade safely.</div>'; return; }
+  window._todayFreeMargin = window._mt5AccountBalance || c.acct;
   area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning your markets for the best setups… 20–30s</div></div>';
   // Light scan: one representative timeframe per enabled class
   var groups=[
@@ -10617,6 +10678,7 @@ async function _todayBuildPlan(){
             qscore: (row.quality&&(row.quality.score!=null?row.quality.score:row.quality))||row.confidence_pct||0,
             rr1Raw: row.rr1_raw!=null?row.rr1_raw:null, spreadCost:row.spread_cost!=null?row.spread_cost:null, spreadQuality:row.spread_quality||'fair',
             bullCount:row.bull_score||0, bearCount:row.bear_score||0, volRatio:row.vol_ratio||1.0, reason:row.reason||row.summary||'Live DotVerse signal',
+            atr: row.atr!=null?row.atr:(row.atr_value!=null?row.atr_value:null), rsi: row.rsi!=null?row.rsi:50,
             quality: row.quality||null, smc_structures: row.smc_structures||null, regime_context: row.regime_context||''
           });
         });
@@ -10631,12 +10693,17 @@ async function _todayBuildPlan(){
     if(seen[key]) continue;
     if((perClass[cls]||0) >= c.maxPerClass) continue;
     if(plan.length >= c.maxTrades) break;
-    o._size=_todaySizeTrade(o, c.acct, c.riskPct);
+    o._size=_todaySizeTrade(o, c.acct, c.capPct, c.maxRiskPct);
     o._autos=_todayDefaultAutos(o.tf);
     plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
   }
   window._todayPlan=plan;
-  _todayRenderPlan();
+  _todayRenderPlan();   // show immediately with sensible defaults
+  // Upgrade each card to DotVerse's SMART per-trade automations, then re-render.
+  try{
+    await Promise.all(plan.map(async function(o){ o._autos = await _todayRecommendAutos(o); }));
+    if(window._todayPlan===plan) _todayRenderPlan();
+  }catch(e){}
 }
 function _todayRenderPlan(){
   var area=document.getElementById('todayPlanArea'); if(!area) return;
@@ -10644,48 +10711,159 @@ function _todayRenderPlan(){
   if(!plan.length){ area.innerHTML='<div style="padding:30px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);line-height:1.7;">No high-quality setups in your markets right now. <br>That is a normal, correct outcome — DotVerse will not invent trades to fill a quota. Try again later or widen your markets above.</div>'; return; }
   var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
   var totDeploy=0, totRisk=0, totRewardBest=0, longs=0, shorts=0, clsSet={};
-  plan.forEach(function(o){ totDeploy+=o._size.notional; totRisk+=o._size.riskD; totRewardBest+=o._size.rewardD; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; });
-  var autoLbl={be:'BE',trail:'Trail',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
+  plan.forEach(function(o){ totDeploy+=o._size.notional; totRisk+=o._size.netLoss; totRewardBest+=o._size.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; });
+  var autoLbl={be:'Break-even',trail:'Trailing',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
   var cards=plan.map(function(o,idx){
-    var dirCol=o.sig==='BUY'?'#5de8a0':'#e8706e';
-    var autos=Object.keys(o._autos).filter(function(k){return o._autos[k];}).map(function(k){return '<span style="font-family:var(--mono);font-size:8px;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);">'+autoLbl[k]+'</span>';}).join(' ');
+    var dirCol=o.sig==='BUY'?'#5de8a0':'#e8706e'; var s=o._size;
+    var autos=Object.keys(o._autos).filter(function(k){return o._autos[k]&&autoLbl[k];}).map(function(k){return '<span style="font-family:var(--mono);font-size:8px;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);">'+autoLbl[k]+'</span>';}).join(' ');
     return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(237,232,216,.02);">'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;flex-wrap:wrap;">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">'
         + '<span style="font-family:var(--syne);font-size:15px;font-weight:600;">'+o.sym+'</span>'
         + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:'+dirCol+'22;color:'+dirCol+';">'+o.sig+'</span>'
         + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);text-transform:capitalize;">'+o.asset+' · '+o.tf+'</span>'
-        + '<span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.7);">edge 1 : '+(o._size.rr||0).toFixed(1)+'</span>'
+        + '<span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.7);">edge 1 : '+(s.rr||0).toFixed(1)+'</span>'
       + '</div>'
-      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:9px;">'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Size</div><div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.9);">'+o._size.unitLabel+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+money(o._size.notional)+'</div></div>'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Max loss</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#e8706e;">'+money(-o._size.riskD)+'</div></div>'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">If TP1 hits</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#5de8a0;">+'+money(o._size.rewardD)+'</div></div>'
+      + '<div id="today-lp-'+idx+'" style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.4);margin-bottom:9px;min-height:13px;"><span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.25);flex-shrink:0;"></span>checking live price…</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:8px;">'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Capital allocated</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money(s.notional)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.capPctOfAcct.toFixed(0)+'% of account · '+s.unitLabel+'</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Max loss (after costs)</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#e8706e;">'+money(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.riskPctOfAcct.toFixed(2)+'% of account</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">If TP1 hits (net)</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#5de8a0;">+'+money(s.netTP1)+'</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Broker cost</div><div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.6);">'+money(s.costD)+'</div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.35);">spread '+money(s.spreadD)+' · fee '+money(s.feeD)+' · slip '+money(s.slipD)+'</div></div>'
       + '</div>'
-      + (autos?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;">'+autos+'</div>':'')
+      + (autos?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">'+autos+'</div>':'')
+      + '<div style="font-family:var(--mono);font-size:8px;color:rgba(93,232,160,.55);margin-bottom:9px;line-height:1.4;">🛡 Stop sits at your broker — it protects you even if you close DotVerse or lose internet.</div>'
       + '<button onclick="_todayPlaceTrade('+idx+')" style="width:100%;padding:9px;border:none;border-radius:6px;background:rgba(93,232,160,.14);border:1px solid rgba(93,232,160,.35);color:#5de8a0;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Review &amp; place →</button>'
     + '</div>';
   }).join('');
   var riskPct=c.acct>0?(totRisk/c.acct*100):0;
   var riskCol=riskPct<=3?'#5de8a0':riskPct<=6?'#c9a84c':'#e8706e';
+  var buffer=c.acct-totDeploy, deployPct=c.acct>0?(totDeploy/c.acct*100):0;
+  var nCls=Object.keys(clsSet).length;
+  var health = (nCls>=2 && longs>0 && shorts>0)?{t:'Balanced ✓',c:'#5de8a0'}
+    : (nCls<2?{t:'⚠ One class — concentrated',c:'#c9a84c'}
+    : (shorts===0?{t:'⚠ All long — one-direction bet',c:'#c9a84c'}
+    : (longs===0?{t:'⚠ All short — one-direction bet',c:'#c9a84c'}
+    : {t:'Mixed',c:'#c9a84c'})));
   var summary='<div style="border:1px solid rgba(93,232,160,.25);border-radius:9px;padding:13px 15px;margin-bottom:12px;background:linear-gradient(90deg,rgba(93,232,160,.06),rgba(201,168,76,.04));">'
-    + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(93,232,160,.75);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Today\'s plan · '+plan.length+' trade'+(plan.length>1?'s':'')+'</div>'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;"><span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(93,232,160,.75);font-weight:700;text-transform:uppercase;">Today\'s plan · '+plan.length+' trade'+(plan.length>1?'s':'')+'</span><span style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;color:'+health.c+';">'+health.t+'</span></div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.7);margin-bottom:8px;">'
-      + '<span>Capital: <strong>'+money(totDeploy)+'</strong></span>'
+      + '<span>Capital deployed: <strong>'+money(totDeploy)+'</strong> ('+deployPct.toFixed(0)+'%)</span>'
+      + '<span>Cash buffer: <strong style="color:'+(buffer>=0?'#5de8a0':'#e8706e')+';">'+money(buffer)+'</strong></span>'
       + '<span>Total at risk: <strong style="color:'+riskCol+';">'+money(-totRisk)+' ('+riskPct.toFixed(2)+'%)</strong></span>'
-      + '<span>'+Object.keys(clsSet).length+' classes · '+longs+' long / '+shorts+' short</span>'
+      + '<span>'+nCls+' class'+(nCls>1?'es':'')+' · '+longs+' long / '+shorts+' short</span>'
     + '</div>'
-    + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money(totRewardBest)+'</strong>; if all hit their stop you would lose <strong style="color:#e8706e;">'+money(-totRisk)+'</strong>. Reality lands between — some win, some lose. This is the odds working over many trades, not a promise.</div>'
-    + (riskPct>6?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Your total risk is above 6% — consider fewer trades or a lower risk %.</div>':'')
+    + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money(totRewardBest)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money(-totRisk)+'</strong>. Reality lands between — some win, some lose. This is the odds working over many trades, not a promise.</div>'
+    + (deployPct>100?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Capital deployed exceeds your account — these need leverage. Lower Capital / trade % or trade fewer.</div>':'')
+    + (riskPct>6?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — consider fewer trades or a lower max-risk %.</div>':'')
+    + '<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+plan.length+' →</button>'
   + '</div>';
   area.innerHTML=summary+cards;
+  _todayStartLivePrices();
 }
-function _todayPlaceTrade(idx){
-  var o=(window._todayPlan||[])[idx]; if(!o) return;
-  if(typeof loadSignalContext==='function') loadSignalContext(o);
-  window._szLadderAuto=[Object.assign(_szDefaultAuto(), o._autos||{})];
-  window._szLadderUserSized=false;
-  if(typeof setNav==='function') setNav('size');
-  if(typeof showSize==='function') showSize();
+// ── Per-card LIVE entry monitor — same live-price feed as the Signal tab ──
+function _todayStopLivePrices(){ if(window._todayLpTimer){ clearInterval(window._todayLpTimer); window._todayLpTimer=null; } }
+function _todayStartLivePrices(){
+  _todayStopLivePrices();
+  var plan=window._todayPlan||[]; if(!plan.length) return;
+  async function pass(){
+    var p=window._todayPlan||[];
+    await Promise.all(p.map(async function(o,idx){
+      var el=document.getElementById('today-lp-'+idx); if(!el) return;
+      var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0, tp=parseFloat(o.tp)||0;
+      if(!entry||!sl) return;
+      var assetParam=o.asset==='equity'?'stock':(o.asset||'stock');
+      try{
+        var res=await dvFetchT('/api/live-price?ticker='+encodeURIComponent(o.sym)+'&asset_type='+encodeURIComponent(assetParam),{},5000);
+        if(!res||!res.price) return;
+        var live=res.price, isBuy=(o.sig||'BUY').toUpperCase()!=='SELL';
+        var zone=Math.max(entry*0.003, (o.atr?o.atr*0.25:0));
+        var distPct=((live-entry)/entry)*100;
+        var liveRR=isBuy?((tp-live)/(live-sl)):((live-tp)/(sl-live));
+        o._live={price:live, distPct:distPct, rr:liveRR};
+        var stopBreached=isBuy?live<=sl:live>=sl;
+        var targetHit=isBuy?live>=tp:live<=tp;
+        var inZone=Math.abs(live-entry)<=zone;
+        var favorable=isBuy?live<entry:live>entry;
+        var col,dot,label;
+        if(stopBreached){ col='#e8706e'; dot=col; label='STOP BREACHED — setup invalid, skip'; }
+        else if(targetHit){ col='#e8706e'; dot=col; label='ENTRY PASSED — already at target'; }
+        else if(inZone){ col='#5de8a0'; dot=col; label='AT ENTRY — good time to enter'; }
+        else if(favorable){ col='#5de8a0'; dot=col; label=Math.abs(distPct).toFixed(1)+'% '+(isBuy?'below':'above')+' entry — better price · R:R now 1:'+(liveRR>0?liveRR.toFixed(1):'—'); }
+        else if(liveRR>=1){ col='rgba(201,168,76,.9)'; dot='#d4870a'; label=Math.abs(distPct).toFixed(1)+'% past entry — R:R now 1:'+liveRR.toFixed(1)+', still ok'; }
+        else { col='#e8706e'; dot=col; label='ENTRY PASSED — R:R now 1:'+(liveRR>0?liveRR.toFixed(1):'<1')+', skip'; }
+        var priceStr=live>=1000?live.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):live>=1?live.toFixed(4):live.toPrecision(4);
+        el.innerHTML='<span style="width:5px;height:5px;border-radius:50%;background:'+dot+';flex-shrink:0;animation:lpulse 2s ease-in-out infinite;"></span><span style="color:'+col+';font-weight:600;">Now '+priceStr+'</span><span style="color:rgba(237,232,216,.2);margin:0 4px;">·</span><span style="color:'+col+';">'+label+'</span>';
+      }catch(e){}
+    }));
+    // One-time time-sensitivity sort: closest-to-entry first
+    if(!window._todaySorted){
+      window._todaySorted=true;
+      p.sort(function(a,b){ return (a._live?Math.abs(a._live.distPct):999)-(b._live?Math.abs(b._live.distPct):999); });
+      _todayRenderPlan();
+    }
+  }
+  pass();
+  window._todayLpTimer=setInterval(pass,30000);
+}
+// ── Review & place — single card or the whole basket, one confirmed batch ──
+function _todayPlaceTrade(idx){ var o=(window._todayPlan||[])[idx]; if(!o) return; _todayConfirmAndPlace([o]); }
+function _todayPlaceAll(){ var plan=(window._todayPlan||[]).slice(); if(!plan.length) return; _todayConfirmAndPlace(plan); }
+function _todayConfirmAndPlace(trades){
+  if(!trades||!trades.length) return;
+  var c=window._todayCfg, acct=c.acct||0;
+  var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
+  var totLoss=0, totCap=0;
+  trades.forEach(function(o){ totLoss+=o._size.netLoss; totCap+=o._size.notional; });
+  var rows=trades.map(function(o){
+    var dir=(o.sig||'BUY').toUpperCase(), dc=o.sig==='BUY'?'#5de8a0':'#e8706e';
+    return '<div style="display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:10.5px;padding:5px 0;border-bottom:1px solid rgba(237,232,216,.07);"><span><strong>'+o.sym+'</strong> <span style="color:'+dc+';">'+dir+'</span> · '+o._size.unitLabel+'</span><span style="color:#e8706e;">'+money(-o._size.netLoss)+'</span></div>';
+  }).join('');
+  var pct=acct>0?(totLoss/acct*100):0;
+  var ov=document.createElement('div'); ov.id='todayConfirmOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(4,5,8,.78);display:flex;align-items:center;justify-content:center;padding:18px;';
+  ov.innerHTML='<div style="max-width:440px;width:100%;background:#0a0e16;border:1px solid rgba(93,232,160,.4);border-radius:14px;padding:20px 22px;max-height:92vh;overflow:auto;">'
+    +'<div style="font-family:var(--syne,sans-serif);font-size:17px;font-weight:600;margin-bottom:3px;color:#ede8d8;">Review &amp; place '+(trades.length>1?trades.length+' trades':'trade')+'</div>'
+    +'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);margin-bottom:13px;line-height:1.5;">This places <strong style="color:rgba(237,232,216,.82)">real order'+(trades.length>1?'s':'')+'</strong> with your broker (MT5). You can close '+(trades.length>1?'any of them':'it')+' anytime from the ACT tab.</div>'
+    +'<div style="margin-bottom:12px;">'+rows+'</div>'
+    +'<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);margin-bottom:4px;"><span>Capital deployed</span><span>'+money(totCap)+(acct>0?' ('+(totCap/acct*100).toFixed(0)+'%)':'')+'</span></div>'
+    +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin:8px 0 13px;">'
+      +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">If '+(trades.length>1?'every trade hits its stop':'it hits the stop')+' you lose</div>'
+      +'<div style="font-family:var(--mono);font-size:24px;font-weight:700;color:#e8706e;line-height:1;">'+money(-totLoss)+'</div>'
+      +'<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.6);margin-top:6px;line-height:1.5;">That is '+pct.toFixed(2)+'% of your account, after spread, fees and slippage. 🛡 Each stop sits <strong style="color:rgba(237,232,216,.85)">at your broker</strong> — it protects you even if you close DotVerse or lose internet.</div>'
+    +'</div>'
+    +'<div id="todayConfirmStatus" style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);margin-bottom:10px;min-height:13px;"></div>'
+    +'<div style="display:flex;gap:10px;">'
+      +'<button id="todayCfCancel" style="flex:1;padding:12px;border-radius:8px;border:1px solid rgba(237,232,216,.2);background:transparent;color:rgba(237,232,216,.7);font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">Cancel</button>'
+      +'<button id="todayCfGo" style="flex:1.4;padding:12px;border-radius:8px;border:none;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Place '+(trades.length>1?'all '+trades.length:'trade')+' →</button>'
+    +'</div>'
+  +'</div>';
+  document.body.appendChild(ov);
+  function close(){ if(ov&&ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
+  document.getElementById('todayCfCancel').onclick=close;
+  document.getElementById('todayCfGo').onclick=async function(){
+    var btn=this; btn.disabled=true; btn.textContent='Placing…';
+    var st=document.getElementById('todayConfirmStatus'); var ok=0, fail=0;
+    for(var i=0;i<trades.length;i++){
+      var o=trades[i]; var tv=(o.bullCount||0)+(o.bearCount||0);
+      try{
+        var res=await dvFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          ticker:o.sym, order_type:'Market', lots:parseFloat((o._size.units).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
+          entry:o.entry, sl:o.sl, tp1:o.tp, tp2:null, tp3:null,
+          trailing:!!(o._autos&&o._autos.trail), comment:'DotVerse Today '+(o.sig||'')+' '+o.sym,
+          entry_confluence: tv>0?((o.bullCount||0)/tv):null, entry_atr:o.atr||null
+        })});
+        if(res&&res.order_id) ok++; else fail++;
+      }catch(e){ fail++; }
+      if(st) st.textContent=(ok+fail)+'/'+trades.length+' sent…';
+    }
+    close();
+    if(typeof _dvToast==='function'){
+      if(ok>0) _dvToast(ok+' order'+(ok>1?'s':'')+' queued for MT5 — opening Act tab','rgba(93,232,160,.15)','rgba(93,232,160,.4)');
+      else _dvToast('Order'+(trades.length>1?'s':'')+' failed — check MT5 connection','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    }
+    if(ok>0){ setTimeout(function(){ if(typeof setNav==='function')setNav('act'); if(typeof showAct==='function')showAct(); if(typeof mt5Poll==='function'){ setTimeout(mt5Poll,600); setTimeout(mt5Poll,2500); } },700); }
+  };
 }
 function showSignalFeed(){
   _sfStopLivePrices();   // clear any running price-refresh interval from previous view
