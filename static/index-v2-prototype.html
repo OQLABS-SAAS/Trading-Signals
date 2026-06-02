@@ -19317,30 +19317,48 @@ function _szUpdatePrice(livePrice) {
   // Stop loss breach: price has passed the SL — signal fully invalidated
   var slBreached = sl && (isBuy ? livePrice <= sl : livePrice >= sl);
 
+  // Reward:Risk at the price the trader would ACTUALLY get filled at (live) vs
+  // the signal's planned R:R — so DotVerse guides on the real trade, not a stale one.
+  var plannedSlDist = (sl && entry)  ? Math.abs(entry - sl)  : 0;
+  var plannedTpDist = (tp1 && entry) ? Math.abs(tp1 - entry) : 0;
+  var plannedRR = plannedSlDist > 0 ? (plannedTpDist / plannedSlDist) : null;
+  var liveRR    = newSlDist     > 0 ? (newTpDist / newSlDist)         : null;
+  var rrTxt   = (liveRR != null) ? ('1:' + liveRR.toFixed(2)) : '—';
+  var rrCompare = (liveRR != null && plannedRR != null)
+    ? (liveRR >= plannedRR + 0.05 ? ' (better than the planned 1:' + plannedRR.toFixed(2) + ')'
+       : liveRR <= plannedRR - 0.05 ? ' (down from the planned 1:' + plannedRR.toFixed(2) + ')'
+       : ' (in line with the planned 1:' + plannedRR.toFixed(2) + ')')
+    : '';
+
   // Validity state machine
   var state, color, bg, borderColor, statusLabel, msg;
   if (slBreached) {
     state = 'red'; color = '#e8706e';
     bg = 'rgba(232,112,110,.07)'; borderColor = 'rgba(232,112,110,.3)';
     statusLabel = 'SL BREACHED';
-    msg = 'Price has passed the stop loss level. This signal is invalidated. Do not enter — wait for the next signal.';
+    msg = 'Live price has passed your stop loss. This signal is dead — do not enter. DotVerse will surface the next valid setup.';
   } else if (absDrift <= 0.3) {
     state = 'green'; color = '#5de8a0';
     bg = 'rgba(93,232,160,.07)'; borderColor = 'rgba(93,232,160,.3)';
     statusLabel = 'ENTER NOW';
-    msg = 'Price is at the signal entry. Your position size is optimal. Enter when ready.';
+    msg = 'Live price is right at your entry — your sizing and profit below are accurate. Reward:risk ' + rrTxt + '. Enter when ready.';
   } else if (absDrift <= 2.0 && rrOk) {
     state = 'amber'; color = '#c9a84c';
     bg = 'rgba(201,168,76,.07)'; borderColor = 'rgba(201,168,76,.3)';
-    statusLabel = 'ADJUSTED';
-    msg = 'Price has moved ' + (drift >= 0 ? '+' : '') + drift.toFixed(2) + '% from signal entry. R:R is still positive — you can still take this trade. Sizing below is based on original signal levels.';
+    if (favorable) {
+      statusLabel = 'BETTER ENTRY';
+      msg = 'Price moved ' + Math.abs(drift).toFixed(2) + '% in your favour — you can enter cheaper than the signal. Your real reward:risk here is ' + rrTxt + rrCompare + '. Note: the profit figures below still use the planned entry, so your true numbers will differ slightly at this price.';
+    } else {
+      statusLabel = 'ADJUSTED';
+      msg = 'Price moved ' + (drift >= 0 ? '+' : '') + drift.toFixed(2) + '% against the entry, but it\'s still tradeable — your real reward:risk here is ' + rrTxt + rrCompare + '. The profit figures below use the planned entry, so your actual gain will be a little less if you enter now.';
+    }
   } else {
     state = 'red'; color = '#e8706e';
     bg = 'rgba(232,112,110,.07)'; borderColor = 'rgba(232,112,110,.3)';
     statusLabel = 'ENTRY PASSED';
     msg = absDrift > 2.0
-      ? 'Price has moved ' + Math.abs(drift).toFixed(1) + '% from signal entry. This entry has passed. Do not chase — wait for the next signal.'
-      : 'Price has moved and R:R is now below 1:1. Entering here puts you at a disadvantage. Wait for the next signal.';
+      ? 'Price moved ' + Math.abs(drift).toFixed(1) + '% from the entry — this one has passed. Don\'t chase it; DotVerse will flag the next setup.'
+      : 'At the live price your reward:risk is only ' + rrTxt + ' (below 1:1). Entering here puts the odds against you — wait for the next signal.';
   }
 
   // Apply to bar
