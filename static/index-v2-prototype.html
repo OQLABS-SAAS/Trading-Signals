@@ -10746,7 +10746,7 @@ function _todayRenderPlan(){
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:8px;">'
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Max loss (after costs)</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#e8706e;">'+money2(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.riskPctOfAcct.toFixed(2)+'% of account</div></div>'
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Net profit if TP1</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">+'+money2(s.netTP1)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">reward 1 : '+(s.rr||0).toFixed(1)+'</div></div>'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Position size</div><div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.9);">'+s.unitLabel+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">exposure '+money(s.notional)+' ('+s.notionalPctOfAcct.toFixed(0)+'% of acct)</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Trade amount</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money(s.notional)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+' · '+s.notionalPctOfAcct.toFixed(0)+'% of account</div></div>'
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Broker cost</div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.6);">'+money2(s.costD)+'</div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.35);">spread '+money2(s.spreadD)+' · fee '+money2(s.feeD)+' · slip '+money2(s.slipD)+'</div></div>'
       + '</div>'
       + (autos?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">'+autos+'</div>':'')
@@ -10778,7 +10778,15 @@ function _todayRenderPlan(){
     + (nTooSmall>0?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);">'+nTooSmall+' setup'+(nTooSmall===1?'':'s')+' too small for your account (below broker minimum) — excluded from the totals and place-all.</div>':'')
     + (nTradeable>0?'<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+nTradeable+' →</button>':'')
   + '</div>';
-  area.innerHTML=summary+cards;
+  // Totals footer at the BOTTOM — the grand total after all the trade cards.
+  var footer = nTradeable>0 ? '<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:13px 16px;margin-top:2px;background:rgba(201,168,76,.06);">'
+    + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(201,168,76,.85);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Plan totals · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
+      + '<div style="flex:1;min-width:110px;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Total trade amount</div><div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(201,168,76,.95);">'+money(totExp)+'</div></div>'
+      + '<div style="flex:1;min-width:110px;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Total profit if all win</div><div style="font-family:var(--mono);font-size:15px;font-weight:700;color:#5de8a0;">+'+money2(totProfit)+'</div></div>'
+      + '<div style="flex:1;min-width:110px;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Total max loss</div><div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+'</div></div>'
+    + '</div></div>' : '';
+  area.innerHTML=summary+cards+footer;
   _todayStartLivePrices();
 }
 // Fine-tune risk on a single card — resize just that trade, keep the rest.
@@ -26123,9 +26131,19 @@ async function adminGrantByEmail(){
 (function(){
   // ── Service Worker Registration ─────────────────
   if('serviceWorker' in navigator){
+    // If an OLD service worker is already controlling this page, reload once when
+    // a NEW one takes over so the freshest app shell is shown (no manual refresh).
+    var _hadController = !!navigator.serviceWorker.controller;
+    var _swRefreshed = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function(){
+      if(!_hadController || _swRefreshed) return;
+      _swRefreshed = true;
+      window.location.reload();
+    });
     navigator.serviceWorker.register('/sw.js', {scope: '/'})
       .then(function(reg){
         console.log('[PWA] Service Worker registered');
+        try{ reg.update(); }catch(e){}
         // Once SW is ready, try to subscribe to push
         _initPushNotifications(reg);
       })
