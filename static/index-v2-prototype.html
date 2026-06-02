@@ -10581,8 +10581,14 @@ function _todaySizeTrade(o, acct, riskPct){
   else if(o.asset==='index'){ unitLabel=units.toFixed(2)+' contracts'; }
   else if(o.asset==='commodity'){ unitLabel=units.toFixed(2)+' lots'; }
   else { var sh=Math.round(units); unitLabel=sh.toLocaleString()+(sh===1?' share':' shares'); }
+  // Cash actually committed: spot (crypto/stock) = full notional; leveraged (forex/
+  // index/commodity) = notional / leverage. Broker doesn't report leverage, so 1:100 est.
+  var leveraged = !(o.asset==='crypto'||o.asset==='stock');
+  var lev = leveraged ? (window._todayLeverage||100) : 1;
+  var marginReq = notional/lev;
   return { units:units, notional:notional, tradeable:tradeable, minLot:SPEC.min, riskPctReq:(riskPct||1),
            netLoss:netLoss, netTP1:netTP1, grossRisk:grossRisk, rr:rr,
+           leveraged:leveraged, lev:lev, marginReq:marginReq,
            riskPctOfAcct: acct>0?(grossRisk/acct*100):0,
            notionalPctOfAcct: acct>0?(notional/acct*100):0,
            spreadD:spreadD, feeD:feeD, slipD:slipD, costD:costD, unitLabel:unitLabel };
@@ -10625,7 +10631,7 @@ function showToday(){
       + '<div class="sz-card-title">Plan settings</div>'
       + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">'
         + fld('Account $', inp('todayAcct', c.acct||'', 90))
-        + fld('Risk / trade %', '<input id="todayRisk" value="'+c.riskPct+'" onchange="_todaySetGlobalRisk(this.value)" style="width:60px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">')
+        + fld('Risk / trade %', '<input id="todayRisk" type="number" step="0.25" min="0.1" value="'+c.riskPct+'" oninput="_todaySetGlobalRisk(this.value)" style="width:60px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">')
         + fld('Max per class', '<select id="todayMaxPer" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 / class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2 / class</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3 / class</option></select>')
         + fld('Max trades', inp('todayMaxTrades', c.maxTrades, 56))
       + '</div>'
@@ -10719,8 +10725,8 @@ function _todayRenderPlan(){
   if(!plan.length){ area.innerHTML='<div style="padding:30px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);line-height:1.7;">No high-quality setups in your markets right now. <br>That is a normal, correct outcome — DotVerse will not invent trades to fill a quota. Try again later or widen your markets above.</div>'; return; }
   var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
   var money2=function(v){ var a=Math.abs(v); return (v<0?'-$':'$')+(a<100?a.toFixed(2):Math.round(a).toLocaleString()); };
-  var totExp=0, totRisk=0, totProfit=0, longs=0, shorts=0, clsSet={}, nTradeable=0, nTooSmall=0;
-  plan.forEach(function(o){ var s=o._size; if(!s.tradeable){ nTooSmall++; return; } totExp+=s.notional; totRisk+=s.netLoss; totProfit+=s.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; nTradeable++; });
+  var totExp=0, totCashIn=0, totRisk=0, totProfit=0, longs=0, shorts=0, clsSet={}, nTradeable=0, nTooSmall=0;
+  plan.forEach(function(o){ var s=o._size; if(!s.tradeable){ nTooSmall++; return; } totExp+=s.notional; totCashIn+=s.marginReq; totRisk+=s.netLoss; totProfit+=s.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; nTradeable++; });
   var autoLbl={be:'Break-even',trail:'Trailing',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
   var cards=plan.map(function(o,idx){
     var dirCol=o.sig==='BUY'?'#5de8a0':'#e8706e'; var s=o._size;
@@ -10746,7 +10752,9 @@ function _todayRenderPlan(){
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:8px;">'
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Max loss (after costs)</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#e8706e;">'+money2(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.riskPctOfAcct.toFixed(2)+'% of account</div></div>'
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Net profit if TP1</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">+'+money2(s.netTP1)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">reward 1 : '+(s.rr||0).toFixed(1)+'</div></div>'
-        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Trade amount</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money(s.notional)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+(s.notionalPctOfAcct>110?' · leveraged (you risk only the max loss)':'')+'</div></div>'
+        + (s.leveraged
+            ? '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Margin (cash in)</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">≈'+money(s.marginReq)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+' · controls '+money(s.notional)+' (est 1:'+s.lev+')</div></div>'
+            : '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Trade amount</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money(s.notional)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+'</div></div>')
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Broker cost</div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.6);">'+money2(s.costD)+'</div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.35);">spread '+money2(s.spreadD)+' · fee '+money2(s.feeD)+' · slip '+money2(s.slipD)+'</div></div>'
       + '</div>'
       + (autos?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">'+autos+'</div>':'')
@@ -10767,7 +10775,7 @@ function _todayRenderPlan(){
   var summary='<div style="border:1px solid rgba(93,232,160,.25);border-radius:9px;padding:13px 15px;margin-bottom:12px;background:linear-gradient(90deg,rgba(93,232,160,.06),rgba(201,168,76,.04));">'
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;"><span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(93,232,160,.75);font-weight:700;text-transform:uppercase;">Today\'s plan · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</span><span style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;color:'+health.c+';">'+health.t+'</span></div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.7);margin-bottom:8px;">'
-      + '<span>Total trade amount: <strong>'+money(totExp)+'</strong></span>'
+      + '<span>Total cash in: <strong>≈'+money(totCashIn)+'</strong></span>'
       + '<span>Total max loss: <strong style="color:'+riskCol+';">'+money2(-totRisk)+' ('+riskPct.toFixed(2)+'% of account)</strong></span>'
       + '<span>Total profit if all hit TP1: <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong></span>'
       + '<span>'+nCls+' class'+(nCls===1?'':'es')+' · '+longs+' long / '+shorts+' short</span>'
@@ -10782,7 +10790,7 @@ function _todayRenderPlan(){
   var footer = nTradeable>0 ? '<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:13px 16px;margin-top:2px;background:rgba(201,168,76,.06);">'
     + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(201,168,76,.85);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Plan totals · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
-      + '<div style="flex:1;min-width:110px;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Total trade amount</div><div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(201,168,76,.95);">'+money(totExp)+'</div></div>'
+      + '<div style="flex:1;min-width:110px;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Total cash in</div><div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(201,168,76,.95);">≈'+money(totCashIn)+'</div></div>'
       + '<div style="flex:1;min-width:110px;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Total profit if all win</div><div style="font-family:var(--mono);font-size:15px;font-weight:700;color:#5de8a0;">+'+money2(totProfit)+'</div></div>'
       + '<div style="flex:1;min-width:110px;"><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Total max loss</div><div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+'</div></div>'
     + '</div></div>' : '';
