@@ -9891,6 +9891,27 @@ function updateFlowBadge() {
   var _curTotalRisk = 0; for (var _li = 0; _li < _nTrades; _li++) _curTotalRisk += (_legs2[_li] || 0);
   var _scaleToSug = _curTotalRisk > 0 ? (sugRisk / _curTotalRisk) : 1;
   var _isLadder = _nTrades > 1;
+  // In ladder mode the corner grade should reflect where the ladder ACTUALLY is
+  // vs the suggestion — so after the trader applies (current == suggested) it
+  // reads AT TARGET instead of a stale SCALE UP.
+  if (_isLadder && _curTotalRisk > 0) {
+    var _eps = 0.03;
+    if (_curTotalRisk < sugRisk*(1-_eps)) {
+      grade='SCALE UP'; gradeCol='var(--grn)'; gradeBg='rgba(61,190,108,.07)'; gradeBdr='rgba(61,190,108,.3)';
+      btnCol='rgba(61,190,108,.95)'; btnBdr='rgba(61,190,108,.45)'; btnBg='rgba(61,190,108,.1)'; btnHover='rgba(61,190,108,.2)'; iconStroke='var(--grn)';
+    } else if (_curTotalRisk > sugRisk*(1+_eps)) {
+      grade='SCALE DOWN'; gradeCol='rgba(237,232,216,.8)'; gradeBg='rgba(237,232,216,.05)'; gradeBdr='rgba(237,232,216,.2)';
+      btnCol='rgba(237,232,216,.9)'; btnBdr='rgba(237,232,216,.35)'; btnBg='rgba(237,232,216,.08)'; btnHover='rgba(237,232,216,.16)'; iconStroke='rgba(237,232,216,.8)';
+    } else {
+      grade='AT TARGET'; gradeCol='var(--amb)'; gradeBg='rgba(212,135,10,.07)'; gradeBdr='rgba(212,135,10,.3)';
+      btnCol='rgba(212,135,10,.95)'; btnBdr='rgba(212,135,10,.45)'; btnBg='rgba(212,135,10,.1)'; btnHover='rgba(212,135,10,.2)'; iconStroke='var(--amb)';
+    }
+    // Keep the reasoning verdict consistent with the ladder grade.
+    _gradeBlurb = 'Verdict: ' + grade + ' — your ' + _nTrades + ' trades currently risk ' + _curTotalRisk.toFixed(2)
+      + '% of the account in total; DotVerse suggests ' + sugRisk.toFixed(1) + '% based on signal quality (confluence '
+      + confPct + '%, R:R ' + rr.toFixed(1) + ':1, volume ' + vr.toFixed(1) + '×).'
+      + (grade === 'AT TARGET' ? ' Your ladder is already at the suggested size.' : grade === 'SCALE UP' ? ' Tap Apply to scale every trade up to it.' : ' Tap Apply to bring every trade down to it.');
+  }
   var _ladderRows = '';
   if (_isLadder) {
     for (var _lj = 0; _lj < _nTrades; _lj++) {
@@ -18887,7 +18908,7 @@ function showSize(){
         <!-- Trade Size -->
         <div class="sz-field full" data-guide="trade-size-field">
           <label class="sz-lbl">Trade Size ($) <span style="font-size:9px;color:var(--mut);font-weight:400;">— how much you want to put in</span></label>
-          <input class="sz-inp" id="szTradeSize" type="number" placeholder="auto-filled from account × risk%" oninput="window._szTradeSizeManual=true;szCalc()">
+          <input class="sz-inp" id="szTradeSize" type="number" placeholder="auto-filled from account × risk%" oninput="window._szTradeSizeManual=true;window._szLadderUserSized=false;szCalc()">
           <div class="sz-hint" id="szTradeSizePct" style="display:none;color:var(--gold);font-family:var(--mono);font-size:9px;"></div>
         </div>
         <!-- Asset Type + Leverage -->
@@ -19196,6 +19217,8 @@ function showSize(){
   // chip highlight + teaching panel. Done after the DOM is built.
   if(typeof szRiskRestore === 'function') szRiskRestore();
   szCalc();
+  // Auto-optimise every trade on entry so the trader doesn't click each row.
+  if (typeof szAutoRecommendAll === 'function') { try { szAutoRecommendAll(); } catch(e){} }
   if (typeof _szLivePriceStart === 'function') _szLivePriceStart();
   // Fetch live open position count once for the portfolio context panel.
   // Stored in window._szOpenPositions so szPortfolioCtx() can read it without
@@ -19436,6 +19459,8 @@ function szLadderTargetUpdate(i, val) {
   window._szLadderTargets[i] = val;
   window._szTargetsUserModified = true;
   szLadderRender();
+  // Target changed → that trade's automations are stale; re-optimise it automatically.
+  if (typeof szAutoRecommend === 'function') { try { szAutoRecommend(i); } catch(e){} }
 }
 // Compute DotVerse-recommended exit targets based on signal timeframe + confidence.
 // Returns { targets: [...], explanation: '...', type: 'Swing', confLabel: 'CONFIRMED' }
@@ -19554,6 +19579,8 @@ function szSetMode(mode) {
   // immediately (single = 1 trade, multi = all ladder legs) instead of showing
   // stale single-trade values until the next input change.
   if (typeof updateFlowBadge === 'function') { try { updateFlowBadge(); } catch(e){} }
+  // Auto-optimise every trade so the trader doesn't click each row.
+  if (typeof szAutoRecommendAll === 'function') { try { szAutoRecommendAll(); } catch(e){} }
 }
 
 function szLadderRender() {
@@ -19848,6 +19875,8 @@ function szAutoRecommend(rowIdx) {
   }
   // Which exit target does this row use?
   const target = (window._szLadderTargets && window._szLadderTargets[rowIdx]) || _szDefaultTarget(rowIdx);
+  if (!window._szRowRecTarget) window._szRowRecTarget = [];
+  window._szRowRecTarget[rowIdx] = target;
   window._szRowRecLoading[rowIdx] = true;
   window._szRowRec[rowIdx] = null;
   szLadderRender();
@@ -19893,6 +19922,26 @@ function szAutoRecommend(rowIdx) {
   });
 }
 
+// Optimise EVERY trade in the ladder automatically — the trader shouldn't have
+// to click each row. Skips rows already optimised for their current target and
+// resets when the signal changes. Per-row Optimise buttons remain for manual re-runs.
+function szAutoRecommendAll() {
+  const sig = window._activeSignal;
+  if (!sig || !sig.sig || sig.sig === 'HOLD') return;
+  const sigKey = (sig.sym||'') + '|' + (sig.sig||'') + '|' + (sig.tf||'');
+  if (window._szRowRecSigKey !== sigKey) {
+    window._szRowRec = []; window._szRowRecTarget = []; window._szRowRecLoading = [];
+    window._szRowRecSigKey = sigKey;
+  }
+  const isSingle = (window._szMode || 'single') === 'single';
+  const n = isSingle ? 1 : (window._szLadder || []).length;
+  for (let i = 0; i < n; i++) {
+    const target = (window._szLadderTargets && window._szLadderTargets[i]) || _szDefaultTarget(i);
+    const done    = window._szRowRec && window._szRowRec[i] && !window._szRowRec[i].error && window._szRowRecTarget[i] === target;
+    const loading = window._szRowRecLoading && window._szRowRecLoading[i];
+    if (!done && !loading) szAutoRecommend(i);
+  }
+}
 function szLadderUpdate(i, v) {
   const n = parseFloat(v);
   if (isFinite(n) && n > 0) { window._szLadder[i] = n; window._szLadderUserSized = true; szLadderRender(); }
@@ -20199,7 +20248,33 @@ function szCalc(){
     lots=null;
   }
 
-  const slLoss=moneyAtRisk;
+  // ── Unify the tab on the amount the trader entered ──
+  // When a Trade Size is set, size the position from it (the dollars they put in)
+  // so the top boxes show the SAME profit as the ladder below — not a larger
+  // risk-%-based position. Risk becomes a derived figure.
+  let _moneyAtRiskEff = moneyAtRisk;
+  let _riskPctShown   = riskPct;
+  if (window._szTradeSizeManual && tradeSize > 0 && entry > 0) {
+    posVal  = tradeSize;
+    posSize = tradeSize / entry;
+    margin  = posVal / (lev || 1);
+    if (assetType === 'forex') {
+      lots = posSize / (contractSize || 1);
+      lotsDisplay = lots < 0.01 ? lots.toFixed(4)+' lots' : lots.toFixed(2)+' lots';
+    } else if (assetType === 'crypto') {
+      lots = posSize;
+      lotsDisplay = posSize >= 1 ? posSize.toFixed(4)+' units' : posSize.toFixed(6)+' units';
+    } else {
+      lots = null;
+      lotsDisplay = posSize.toFixed(2) + (assetType==='index' ? ' contracts' : ' shares');
+    }
+    _moneyAtRiskEff = posSize * slDist;
+    _riskPctShown   = acct > 0 ? (_moneyAtRiskEff / acct * 100) : 0;
+    _s('szMoneyAtRisk', '$'+_moneyAtRiskEff.toFixed(2));
+    _s('szRiskDisp', _riskPctShown.toFixed(1)+'%');
+  }
+
+  const slLoss = _moneyAtRiskEff;
 
   _s('szSonarSize', lotsDisplay);
   _s('szSonarMargin', margin?'~$'+Math.round(margin).toLocaleString():'—');
@@ -20211,7 +20286,7 @@ function szCalc(){
     _s('szSonarRR','1 : '+rrVal);
   } else _s('szSonarRR','—');
 
-  _s('szStopLine','SL is '+Math.round(slPips)+' '+pipLabel+' from entry · lose $'+slLoss.toFixed(2)+' if hit ('+riskPct+'% of account)');
+  _s('szStopLine','SL is '+Math.round(slPips)+' '+pipLabel+' from entry · lose $'+slLoss.toFixed(2)+' if hit ('+_riskPctShown.toFixed(_riskPctShown<1?2:1)+'% of account)');
 
   // Trade size row — hidden (risk-based P&L shown in TP boxes below)
   const tsRow=document.getElementById('szTradeSizeRow');
@@ -20265,7 +20340,7 @@ function szCalc(){
       }
     }
     _s('szTP'+n+'RR',    'R:R 1 : '+t.rr);
-    _s('szTP'+n+'Profit', moneyAtRisk>0?'+$'+t.net.toFixed(0)+' net':'—');
+    _s('szTP'+n+'Profit', (posSize>0)?'+$'+t.net.toFixed(0)+' net':'—');
     _s('szTP'+n+'Dist',  t.tpPips.toFixed(0)+' '+pipLabel);
     _s('szTP'+n+'Pct',   assetType==='forex'?t.tpPips.toFixed(1)+' pips':(t.pct.startsWith('-')?'':'+')+t.pct+'%');
     // Gross row — show spread breakdown when spread data is available
@@ -20275,7 +20350,7 @@ function szCalc(){
     _s('szTP'+n+'Gross', _grossLine);
     _s('szTP'+n+'Acct',  '+'+t.acctNet+'% net  /  +'+t.acctGross+'% gross');
     // RR bar — sub-label shows raw alongside R:R when spread present
-    _s('szRRTP'+n, moneyAtRisk>0?'+$'+t.net.toFixed(0):'—');
+    _s('szRRTP'+n, (posSize>0)?'+$'+t.net.toFixed(0):'—');
     _s('szRRTP'+n+'RR', (_spreadUnits>0&&moneyAtRisk>0)?'raw +$'+t.rawGross.toFixed(0)+'  ·  1:'+t.rr:'1 : '+t.rr);
     // Distance bars
     const bf=document.getElementById('szBarTP'+n);
