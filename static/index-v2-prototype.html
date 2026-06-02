@@ -10588,7 +10588,7 @@ function _todaySizeTrade(o, acct, riskPct){
   var marginReq = notional/lev;
   return { units:units, notional:notional, tradeable:tradeable, minLot:SPEC.min, riskPctReq:(riskPct||1),
            netLoss:netLoss, netTP1:netTP1, grossRisk:grossRisk, rr:rr,
-           leveraged:leveraged, lev:lev, marginReq:marginReq,
+           leveraged:leveraged, lev:lev, levReal:!!window._todayLeverageReal, marginReq:marginReq,
            riskPctOfAcct: acct>0?(grossRisk/acct*100):0,
            notionalPctOfAcct: acct>0?(notional/acct*100):0,
            spreadD:spreadD, feeD:feeD, slipD:slipD, costD:costD, unitLabel:unitLabel };
@@ -10645,8 +10645,11 @@ function showToday(){
   _todayStopLivePrices(); window._todaySorted=false;
   if(!c.acct){
     dvFetch('/api/mt5/state').then(function(d){
-      var b=(d&&d.account&&d.account.balance)?parseFloat(d.account.balance):0;
-      if(b>0){ c.acct=b; var a=document.getElementById('todayAcct'); if(a && !a.value) a.value=Math.round(b); }
+      if(d&&d.account){
+        var lv=parseInt(d.account.leverage); if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; }
+        var b=parseFloat(d.account.balance)||0;
+        if(b>0){ c.acct=b; var a=document.getElementById('todayAcct'); if(a && !a.value) a.value=Math.round(b); }
+      }
     }).catch(function(){});
   }
 }
@@ -10658,10 +10661,16 @@ async function _todayBuildPlan(){
   c.riskPct = parseFloat(document.getElementById('todayRisk')?.value)||c.riskPct||1;
   c.maxPerClass = parseInt(document.getElementById('todayMaxPer')?.value)||1;
   c.maxTrades = parseInt(document.getElementById('todayMaxTrades')?.value)||5;
-  // Need a real account size to size trades — pull from the live broker balance.
-  if(!c.acct){
-    try{ var st=await dvFetch('/api/mt5/state'); var b=(st&&st.account&&st.account.balance)?parseFloat(st.account.balance):0; if(b>0){ c.acct=b; var ai=document.getElementById('todayAcct'); if(ai) ai.value=Math.round(b); } }catch(e){}
-  }
+  // Pull the live broker account: real balance AND real leverage (for accurate margin).
+  try{
+    var st=await dvFetch('/api/mt5/state');
+    if(st && st.account){
+      var lv=parseInt(st.account.leverage);
+      if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; }
+      var b=parseFloat(st.account.balance)||0;
+      if(!c.acct && b>0){ c.acct=b; var ai=document.getElementById('todayAcct'); if(ai) ai.value=Math.round(b); }
+    }
+  }catch(e){}
   if(!c.acct){ area.innerHTML='<div style="padding:26px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:#e8706e;line-height:1.7;">Enter your account size above so DotVerse can size each trade safely.</div>'; return; }
   window._todayFreeMargin = window._mt5AccountBalance || c.acct;
   area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning your markets for the best setups… 20–30s</div></div>';
@@ -10753,7 +10762,7 @@ function _todayRenderPlan(){
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Max loss (after costs)</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#e8706e;">'+money2(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.riskPctOfAcct.toFixed(2)+'% of account</div></div>'
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Net profit if TP1</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">+'+money2(s.netTP1)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">reward 1 : '+(s.rr||0).toFixed(1)+'</div></div>'
         + (s.leveraged
-            ? '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Margin (cash in)</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">≈'+money(s.marginReq)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+' · controls '+money(s.notional)+' (est 1:'+s.lev+')</div></div>'
+            ? '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Margin (cash in)</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">≈'+money(s.marginReq)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+' · controls '+money(s.notional)+' ('+(s.levReal?'1:'+s.lev:'est 1:'+s.lev)+')</div></div>'
             : '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Trade amount</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money(s.notional)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+'</div></div>')
         + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Broker cost</div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.6);">'+money2(s.costD)+'</div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.35);">spread '+money2(s.spreadD)+' · fee '+money2(s.feeD)+' · slip '+money2(s.slipD)+'</div></div>'
       + '</div>'

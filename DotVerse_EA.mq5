@@ -324,6 +324,7 @@ void PushState()
    double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    double profit     = AccountInfoDouble(ACCOUNT_PROFIT);
    string currency   = AccountInfoString(ACCOUNT_CURRENCY);
+   int    leverage   = (int)AccountInfoInteger(ACCOUNT_LEVERAGE);  // e.g. 100 = 1:100
 
    // --- Open positions ---
    string posJson = "[";
@@ -357,9 +358,9 @@ void PushState()
    string body = StringFormat(
       "{\"user_id\":\"%s\","
       "\"account\":{\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,"
-                   "\"free_margin\":%.2f,\"profit\":%.2f,\"currency\":\"%s\"},"
+                   "\"free_margin\":%.2f,\"profit\":%.2f,\"currency\":\"%s\",\"leverage\":%d},"
       "\"positions\":%s}",
-      g_userId, balance, equity, margin, freeMargin, profit, currency, posJson
+      g_userId, balance, equity, margin, freeMargin, profit, currency, leverage, posJson
    );
 
    HttpPost("/api/mt5/push", body);
