@@ -20028,7 +20028,93 @@ function szLadderPreset(kind) {
   window._szLadderUserSized = true;
   szLadderRender();
 }
-async function szLadderSubmitAll() {
+// ── Pre-trade safety: GO / CAUTION / SKIP verdict ──────────────────────────
+// Synthesises the signals already on the page into ONE plain-English call so a
+// scared beginner doesn't have to assemble the judgement themselves.
+function _szTradeVerdict(){
+  var sig = window._activeSignal || {};
+  var dir = (sig.sig||'').toUpperCase();
+  if (dir==='HOLD' || !dir) return {v:'SKIP',label:'SKIP — no trade right now',col:'#e8706e',reasons:['This signal is a HOLD — there is no trade to take. Wait for a BUY or SELL.']};
+  if (window._szLiveState==='red') return {v:'SKIP',label:'SKIP — setup expired',col:'#e8706e',reasons:['The live price has moved past your entry or stop — this setup is no longer valid. Wait for the next one.']};
+  var entry=parseFloat(sig.entry)||0, sl=parseFloat(sig.sl)||0, tp1=parseFloat(sig.tp||sig.tp1)||0;
+  var rr = (entry&&sl&&tp1) ? Math.abs(tp1-entry)/Math.abs(entry-sl) : null;
+  var conf = parseFloat(sig.conf||sig.confidence) || (sig.confLbl==='CONFIRMED'?80:sig.confLbl==='LIKELY'?66:55);
+  var v='GO', reasons=[];
+  if (rr!=null){
+    if (rr>=1.5) reasons.push('Reward beats risk ('+rr.toFixed(1)+':1) — the math is in your favour.');
+    else if (rr>=1){ reasons.push('Reward only just beats risk ('+rr.toFixed(1)+':1) — thinner than ideal.'); if(v==='GO')v='WAIT'; }
+    else { reasons.push('Risk is bigger than the reward ('+rr.toFixed(1)+':1) — the odds are against you.'); v='SKIP'; }
+  }
+  if (conf>=75) reasons.push('Strong indicator agreement ('+Math.round(conf)+'%).');
+  else if (conf>=62){ reasons.push('Only moderate indicator agreement ('+Math.round(conf)+'%).'); if(v==='GO')v='WAIT'; }
+  else { reasons.push('Weak indicator agreement ('+Math.round(conf)+'%) — little conviction.'); if(v!=='SKIP')v='WAIT'; }
+  if (window._szLiveState==='green') reasons.push('Live price is right at your entry — good timing.');
+  else if (window._szLiveState==='amber'){ reasons.push('Price has drifted a little from the entry — still okay, not perfect.'); if(v==='GO')v='WAIT'; }
+  var label = v==='GO'?'GO — this trade looks good':v==='WAIT'?'CAUTION — your call':'SKIP — DotVerse would wait';
+  var col = v==='GO'?'#5de8a0':v==='WAIT'?'#c9a84c':'#e8706e';
+  return {v:v,label:label,col:col,reasons:reasons};
+}
+// ── Pre-trade confirmation card — the safety net at the moment of the click ──
+function _szConfirmTrade(onConfirm){
+  var sig = window._activeSignal||{};
+  if(!sig.sym){ if(typeof _dvToast==='function') _dvToast('Load a signal first','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
+  var entry=parseFloat(sig.entry)||0, sl=parseFloat(sig.sl)||0;
+  var acct=parseFloat(document.getElementById('szAcct')?.value)||10000;
+  var slDist=Math.abs(entry-sl)||1;
+  var tp1=parseFloat(sig.tp||sig.tp1)||0, tp2=parseFloat(sig.tp2)||0, tp3=parseFloat(sig.tp3)||0;
+  var d1=tp1?Math.abs(tp1-entry):0, d2=tp2?Math.abs(tp2-entry):0, d3=tp3?Math.abs(tp3-entry):0;
+  var isMulti=(window._szMode||'single')==='multi';
+  var legs=isMulti?(window._szLadder||[]):(window._szLadder||[]).slice(0,1);
+  if(!legs.length) legs=[parseFloat(document.getElementById('szRisk')?.value)||1];
+  var totRisk=0, totNotional=0, totScale=0;
+  legs.forEach(function(r){ var m=acct*((parseFloat(r)||0)/100); var u=m/slDist; totRisk+=m; totNotional+=u*entry; totScale+=u*(0.5*(d1||d2||d3)+0.3*(d2||d3||d1)+0.2*(d3||d2||d1)); });
+  var dir=(sig.sig||'BUY').toUpperCase();
+  var verdict=_szTradeVerdict(); var go=verdict.v;
+  var nT=legs.length;
+  var money=function(v){return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString();};
+  var vbg=go==='GO'?'rgba(93,232,160,.1)':go==='WAIT'?'rgba(201,168,76,.1)':'rgba(232,112,110,.1)';
+  var ov=document.createElement('div'); ov.id='szConfirmOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(4,5,8,.78);display:flex;align-items:center;justify-content:center;padding:18px;';
+  ov.innerHTML='<div style="max-width:440px;width:100%;background:#0a0e16;border:1px solid '+verdict.col+';border-radius:14px;padding:20px 22px;max-height:92vh;overflow:auto;">'
+    +'<div style="font-family:var(--syne,sans-serif);font-size:17px;font-weight:600;margin-bottom:3px;color:#ede8d8;">Confirm your trade</div>'
+    +'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);margin-bottom:14px;line-height:1.5;">This places a <strong style="color:rgba(237,232,216,.82)">real order</strong> with your broker (MT5). You can close it anytime from the ACT tab — you are never stuck.</div>'
+    +'<div style="background:'+vbg+';border:1px solid '+verdict.col+';border-radius:9px;padding:11px 13px;margin-bottom:13px;">'
+      +'<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:'+verdict.col+';letter-spacing:.03em;margin-bottom:6px;">DotVerse says: '+verdict.label+'</div>'
+      +'<ul style="margin:0;padding-left:16px;font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);line-height:1.6;">'+verdict.reasons.map(function(r){return '<li>'+r+'</li>';}).join('')+'</ul>'
+    +'</div>'
+    +'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.78);line-height:2;margin-bottom:13px;">'
+      +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Trade</span><span><strong>'+sig.sym+'</strong> · '+dir+' · '+nT+(nT>1?' trades':' trade')+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Capital deployed</span><span>'+money(totNotional)+'</span></div>'
+      +(totScale>0?'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">If it works (typical exit)</span><span style="color:#5de8a0;">+'+money(totScale)+'</span></div>':'')
+    +'</div>'
+    +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin-bottom:16px;">'
+      +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">The most you can lose</div>'
+      +'<div style="font-family:var(--mono);font-size:24px;font-weight:700;color:#e8706e;line-height:1;">'+money(-totRisk)+'</div>'
+      +'<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.6);margin-top:6px;line-height:1.5;">That is '+(acct>0?(totRisk/acct*100).toFixed(2):'0')+'% of your account. DotVerse auto-closes at your stop loss — <strong style="color:rgba(237,232,216,.85)">you cannot lose more than this.</strong></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:10px;">'
+      +'<button id="szConfirmCancel" style="flex:1;padding:12px;border-radius:8px;border:1px solid rgba(237,232,216,.2);background:transparent;color:rgba(237,232,216,.7);font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">Cancel</button>'
+      +'<button id="szConfirmGo" style="flex:1.4;padding:12px;border-radius:8px;border:none;background:'+(go==='SKIP'?'rgba(232,112,110,.85)':go==='WAIT'?'#c9a84c':'#5de8a0')+';color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em;">'+(go==='SKIP'?'Place it anyway':'Place this trade →')+'</button>'
+    +'</div>'
+  +'</div>';
+  document.body.appendChild(ov);
+  function close(){ if(ov&&ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
+  document.getElementById('szConfirmCancel').onclick=close;
+  document.getElementById('szConfirmGo').onclick=function(){ close(); try{ onConfirm(); }catch(e){} };
+}
+// Trade buttons now go through the confirmation card first.
+function szLadderSubmitAll(){
+  var sig=window._activeSignal;
+  if(!sig||!sig.sym||!sig.entry||!sig.sl||!sig.tp){ if(typeof _dvToast==='function') _dvToast('Need a full signal (entry/SL/TP) before laddering','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
+  _szConfirmTrade(_szLadderSubmitGo);
+}
+function actExecute(){
+  var sig=window._activeSignal||{};
+  if(!sig.sym){ var st=document.getElementById('mt5ExecStatus'); if(st) st.innerHTML='<span style="color:rgba(224,85,85,.9);">No signal loaded</span>'; return; }
+  _szConfirmTrade(_actExecuteGo);
+}
+async function _szLadderSubmitGo() {
   const sig = window._activeSignal;
   if (!sig || !sig.sym || !sig.entry || !sig.sl || !sig.tp) {
     if (typeof _dvToast === 'function') _dvToast('Need a full signal (entry/SL/TP) before laddering','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
@@ -21377,7 +21463,7 @@ async function mt5Execute() {
   if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
 }
 
-function actExecute(){
+function _actExecuteGo(){
   const platform=document.getElementById('actPlatform')?.value||'';
   if(platform.includes('MT5')){
     const btn=document.getElementById('mt5ExecBtn');
