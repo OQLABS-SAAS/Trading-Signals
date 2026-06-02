@@ -17817,6 +17817,7 @@ function szSetRiskPreset(value, btn){
     szRiskPersist(value);
     window._userBaseRisk = parseFloat(value);  // explicit user choice — update the base preference
     if(typeof window._szTradeSizeManual !== 'undefined') window._szTradeSizeManual = false;
+    window._szLadderUserSized = false;  // risk % is the driver now — let the ladder re-follow
     if(typeof szCalc === 'function') szCalc();
   }
   szRiskHighlightChip(value);
@@ -18835,13 +18836,13 @@ function showSize(){
         <!-- Entry Price -->
         <div class="sz-field full">
           <label class="sz-lbl">Entry Price <span class="sz-req crys">*</span></label>
-          <input class="sz-inp sz-entry-inp" id="szEntry" type="text" inputmode="decimal" placeholder="e.g. 68240" value="${String(pf.entry||sig.entry||'').replace(/,/g,'')}" oninput="szCalc()" autocomplete="off">
+          <input class="sz-inp sz-entry-inp" id="szEntry" type="text" inputmode="decimal" placeholder="e.g. 68240" value="${String(pf.entry||sig.entry||'').replace(/,/g,'')}" oninput="window._szLadderUserSized=false;szCalc()" autocomplete="off">
           ${(sig.entry||pf.entry)?`<div class="sz-hint" style="color:rgba(237,232,216,.5);">← From signal · adjust if your order fills at a different price</div>`:`<div class="sz-hint">The price at which you enter the trade</div>`}
         </div>
         <!-- SL -->
         <div class="sz-field">
           <label class="sz-lbl">Stop Loss <span class="sz-req red">*</span></label>
-          <input class="sz-inp" id="szSL" type="text" inputmode="decimal" placeholder="e.g. 65800" value="${String(pf.sl||sig.sl||'').replace(/,/g,'')}" oninput="szCalc()">
+          <input class="sz-inp" id="szSL" type="text" inputmode="decimal" placeholder="e.g. 65800" value="${String(pf.sl||sig.sl||'').replace(/,/g,'')}" oninput="window._szLadderUserSized=false;szCalc()">
           ${(sig.sl||pf.sl)?`<div class="sz-hint" style="color:rgba(232,112,110,.5);">← From signal · auto-exit if price hits this</div>`:`<div class="sz-hint">Auto-exit price · your maximum loss point</div>`}
         </div>
         <!-- Current Price -->
@@ -18874,7 +18875,7 @@ function showSize(){
         <!-- Account -->
         <div class="sz-field" data-guide="calc-account">
           <label class="sz-lbl">Account Size ($)</label>
-          <input class="sz-inp" id="szAcct" type="number" placeholder="10000" value="10000" oninput="window._szTradeSizeManual=false;szCalc()">
+          <input class="sz-inp" id="szAcct" type="number" placeholder="10000" value="10000" oninput="window._szTradeSizeManual=false;window._szLadderUserSized=false;szCalc()">
         </div>
         <!-- Risk % — beginner-first preset selector with plain-English teaching -->
         <div class="sz-field" data-guide="calc-risk-pct">
@@ -18898,7 +18899,7 @@ function showSize(){
               <div style="letter-spacing:.04em;">CUSTOM</div><div style="font-size:11.5px;margin-top:2px;">Type</div>
             </button>
           </div>
-          <input class="sz-inp" id="szRisk" type="number" placeholder="1" value="1" step="0.5" min="0.1" max="50" oninput="window._szTradeSizeManual=false;szRiskOnInput();szCalc()">
+          <input class="sz-inp" id="szRisk" type="number" placeholder="1" value="1" step="0.5" min="0.1" max="50" oninput="window._szTradeSizeManual=false;window._szLadderUserSized=false;szRiskOnInput();szCalc()">
           <!-- Plain-English teaching panel — updates as the user changes the value -->
           <div id="szRiskTeach" data-guide="risk-teach-panel" style="margin-top:7px;padding:9px 11px;border-radius:5px;background:rgba(255,248,230,.04);border:1px solid rgba(201,168,76,.18);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.6;"></div>
           <div class="sz-hint" id="szRiskHint" style="color:var(--crys);"></div>
@@ -18914,7 +18915,7 @@ function showSize(){
         <!-- Asset Type + Leverage -->
         <div class="sz-field" data-guide="asset-type">
           <label class="sz-lbl">Asset Type</label>
-          <select class="sz-inp" id="szType" onchange="szTypeChange();szCalc()">
+          <select class="sz-inp" id="szType" onchange="window._szLadderUserSized=false;szTypeChange();szCalc()">
             <option value="crypto">Crypto</option>
             <option value="forex">Forex</option>
             <option value="stock">Stock / Equity</option>
@@ -18924,7 +18925,7 @@ function showSize(){
         </div>
         <div class="sz-field" data-guide="calc-leverage" id="szLevField">
           <label class="sz-lbl" id="szLevLabel">Leverage</label>
-          <select class="sz-inp" id="szLev" data-guide="contract-size" onchange="szCalc()">
+          <select class="sz-inp" id="szLev" data-guide="contract-size" onchange="window._szLadderUserSized=false;szCalc()">
             <option value="100000">Standard (100,000)</option>
             <option value="10000">Mini (10,000)</option>
             <option value="1000">Micro (1,000)</option>
@@ -20167,9 +20168,15 @@ function szCalc(){
   const sig        = window._activeSignal;
 
   let tradeSize = parseFloat(document.getElementById('szTradeSize')?.value)||0;
-  // Always sync trade size to acct × risk% unless user manually overrode it
+  // When risk % is the driver (not a manually typed Trade Size), auto-fill the
+  // Trade Size field with the actual CAPITAL deployed (notional) that risks that
+  // % — not the risk dollars — so the Risk % and Trade Size fields, the top
+  // boxes, and the ladder all describe the same position.
   if(!window._szTradeSizeManual && acct>0 && riskPct>0){
-    const auto=parseFloat((acct*riskPct/100).toFixed(2));
+    const _slD = Math.abs(entry - sl);
+    const auto = (_slD>0 && entry>0)
+      ? parseFloat((acct*(riskPct/100)/_slD*entry).toFixed(2))   // capital deployed (notional)
+      : parseFloat((acct*riskPct/100).toFixed(2));               // fallback before levels are set
     const el=document.getElementById('szTradeSize');
     if(el) el.value=auto;
     tradeSize=auto;
