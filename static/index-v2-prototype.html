@@ -17818,10 +17818,13 @@ function szSetRiskPreset(value, btn){
     window._userBaseRisk = parseFloat(value);  // explicit user choice — update the base preference
     if(typeof window._szTradeSizeManual !== 'undefined') window._szTradeSizeManual = false;
     window._szLadderUserSized = false;  // risk % is the driver now — let the ladder re-follow
-    // In the ladder, a preset sets EACH trade's risk % (per-trade), so the total
-    // = preset × number of trades. Trader can still adjust each leg afterwards.
+    // In the ladder, a preset is the MAX per-trade risk (carried by the safest
+    // TP1 trade); ambitious trades are scaled DOWN from it. Varied, not uniform.
     if ((window._szMode||'single')==='multi' && Array.isArray(window._szLadder) && window._szLadder.length) {
-      window._szLadder = window._szLadder.map(function(){ return parseFloat(value); });
+      window._szLadder = window._szLadder.map(function(_, i){
+        var t = (window._szLadderTargets && window._szLadderTargets[i]) || _szDefaultTarget(i);
+        return _szDefaultLegRisk(t, parseFloat(value));
+      });
     }
     if(typeof szCalc === 'function') szCalc();
   }
@@ -19572,6 +19575,15 @@ function _szAutoAllocate() {
   }
   return notional;
 }
+// DotVerse per-trade default risk % — scaled by how ambitious the trade's exit
+// is. The nearest, highest-probability target (TP1) carries the chosen risk;
+// each more ambitious target carries less, so the ladder leans on the trade
+// most likely to win. Trader can override any leg.
+function _szDefaultLegRisk(target, base){
+  base = parseFloat(base) || 1;
+  var mult = ({ tp1:1.0, tp2:0.7, tp3:0.5, trail:0.5 })[target] || 0.7;
+  return Math.max(0.1, Math.round(base * mult * 10) / 10);
+}
 // Switch between Single Trade and Scale-Out Ladder modes.
 // Single: renders only row 0 and hides the Add/Preset/Submit buttons bar.
 // Multi:  renders all rows and shows the full buttons bar.
@@ -19598,12 +19610,18 @@ function szSetMode(mode) {
     }
   }
   window._szLadderUserSized = false;
-  // Entering the ladder: start every trade at the trader's chosen per-trade risk %
-  // (independent risks they can then adjust per leg) — not a divided total.
+  // Entering the ladder: DotVerse sets an INTELLIGENT, VARIED per-trade risk —
+  // the highest-probability trade (TP1) carries the most, the ambitious ones
+  // (TP3 / trail) carry less. This reduces losses and gives genuine "multiple
+  // risk percentages." Each is still independently editable.
   if (mode === 'multi') {
     var _rpDef = parseFloat(document.getElementById('szRisk')?.value) || 1;
+    var _tg = (typeof _szRecommendTargets==='function' && window._szLadder) ? ((_szRecommendTargets(window._szLadder.length)||{}).targets) : null;
     if (Array.isArray(window._szLadder) && window._szLadder.length) {
-      window._szLadder = window._szLadder.map(function(){ return _rpDef; });
+      window._szLadder = window._szLadder.map(function(_, i){
+        var t = (_tg && _tg[i]) || (window._szLadderTargets && window._szLadderTargets[i]) || _szDefaultTarget(i);
+        return _szDefaultLegRisk(t, _rpDef);
+      });
     }
   }
   szLadderRender();
@@ -19727,7 +19745,7 @@ function szLadderRender() {
     const auto = (window._szLadderAuto && window._szLadderAuto[i]) || _szDefaultAuto();
     // Build automation sub-row pills
     const _autoPillDefs = [
-      {key:'be',      label:'BE',      short:'Lock in risk-free', desc:'Moves your stop loss to your entry price once TP1 is hit — your maximum loss on this trade becomes zero.'},
+      {key:'be',      label:'BE',      short:'Lock once in profit', desc:'AFTER your trade reaches TP1, your stop moves to your entry price — so if it then reverses you lose about $0. It does NOT protect a trade that goes against you before TP1: until then, your stop loss is your real (full) risk.'},
       {key:'trail',   label:'TRAIL',   short:'Run the winner',    desc:'An ATR-based trailing stop that follows price upward as it moves in your favour — locks in profit automatically.'},
       {key:'macro',   label:'MACRO',   short:'Major news shield', desc:'Automatically pauses or tightens this trade if a major scheduled economic event fires while the trade is live.'},
       {key:'inval',   label:'INVAL',   short:'Key break guard',   desc:'Tightens your stop the moment price breaks a key structure level that invalidates the reason you entered this trade.'},
@@ -23729,7 +23747,7 @@ async function showAutomations() {
   var GUIDES = {
     breakeven: {
       what: 'Once price reaches Target 1, your stop loss automatically moves to your entry price. You can no longer lose money on this trade.',
-      when_on: 'Turn ON for every trade. This is one of the most important protections in trading — it turns a winning trade into a risk-free trade.',
+      when_on: 'Turn ON for every trade. Once a trade reaches TP1 it makes that trade risk-free from then on. Important: it only helps AFTER the trade has moved in your favour — a trade that goes against you from the start is still stopped out for its full risk.',
       risk_if_off: 'Price can hit Target 1, reverse all the way back, and trigger your original stop loss — turning a winning trade into a full loss.',
       level: 'SAFE'
     },
@@ -24757,8 +24775,8 @@ window._dvGuide = {
   // ── AUTOMATION TOGGLES (Size tab + Automations tab) ───────────────────────
   'auto-be': {
     title: 'Break Even',
-    body: 'When price moves 1 ATR (one average candle-size) in your favour, DotVerse automatically moves your stop loss from its original position to your exact entry price. Once this fires, you literally cannot lose money on this trade — the worst outcome is you break even. The trade is now risk-free.',
-    example: 'Entry $68,200 · ATR $1,800 → price reaches $70,000 (moved 1 ATR) → stop auto-moves to $68,200 → you cannot lose regardless of what happens next.'
+    body: 'IF price first moves 1 ATR (one average candle-size) in your favour, DotVerse moves your stop loss from its original position to your exact entry. After that fires, the worst outcome on this trade is break-even. But until price moves that far in your favour, your original stop loss is live — if the trade goes against you from the start, you take the full planned loss. Break-even protects a winner; it does not stop a loser.',
+    example: 'Entry $68,200 · ATR $1,800 → IF price first reaches $70,000 (moved 1 ATR), stop auto-moves to $68,200 and you can no longer lose. If price drops to your stop BEFORE reaching $70,000, you take the full loss.'
   },
   'auto-trail': {
     title: 'Trailing Stop',

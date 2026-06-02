@@ -10412,7 +10412,7 @@ def _recommend_automations_from_signal(data):
         tp1     = True         # Always alert at TP1 — you're past your safest exit, good to know
         tp2     = True         # This IS the target — always alert when TP2 is hit
         weekend = is_swing or is_position           # Swing/position TP2 rows cross weekends
-        if be:    reasons.append("Break Even: stop moves to entry once price moves 1 ATR in your favour.")
+        if be:    reasons.append("Break Even: once price moves 1 ATR in your favour your stop moves to entry, making the trade risk-free FROM THAT POINT. Until then your original stop is your full risk.")
         reasons.append("No Trailing Stop — this row exits at the fixed TP2 price.")
         if macro: reasons.append("Macro Guard: this row stays open long enough to cross news events.")
         if inval: reasons.append("Technical Invalidation: watches for EMA/Supertrend reversal on closed candles.")
@@ -10431,7 +10431,7 @@ def _recommend_automations_from_signal(data):
         tp1     = True         # This IS the exit — always alert when TP1 is hit
         tp2     = False        # TP1 row does not hold to TP2
         weekend = is_swing or is_position           # Swing/position TP1 rows can still span weekends
-        if be:    reasons.append("Break Even: stop moves to entry once 1 ATR profit is reached — zero loss possible.")
+        if be:    reasons.append("Break Even: once 1 ATR of profit is reached your stop moves to entry — zero loss on this trade FROM THEN ON. It does not protect a trade that goes against you before that; your stop loss is the real safety net.")
         reasons.append("No Trailing Stop — TP1 row is a quick, high-probability exit. Trailing delays it.")
         if macro: reasons.append("Macro Guard active — trade type means this row may cross a news event.")
         if inval: reasons.append("Technical Invalidation: exits early if the signal structure breaks.")
