@@ -5597,6 +5597,12 @@ button { font-weight: 400 !important; }
       <!-- Step nav items -->
       <div class="dsb-sec">Pipeline</div>
 
+      <div class="nav-item" data-nav="today" onclick="setNav('today');showToday();">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span><span>Today</span><span class="nav-desc">Your plan for today</span></span>
+        <span class="nav-step-tag">★</span>
+      </div>
+
       <div class="nav-item" data-nav="market" onclick="setNav('market');showMarket();">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
         <span><span>Market</span><span class="nav-desc">Is now a good time?</span></span>
@@ -6121,7 +6127,11 @@ async function doLogin(){
 }
 function goDash(u){
   window._dvUser = u || {};
-  showView('vDash'); showMarket(); setNav('market'); startDashClock(); initTier(); _initStratMode();
+  showView('vDash');
+  // Land on Today (the daily plan home); fall back to Market if anything errors.
+  try { if(typeof showToday==='function'){ showToday(); setNav('today'); } else { showMarket(); setNav('market'); } }
+  catch(e){ showMarket(); setNav('market'); }
+  startDashClock(); initTier(); _initStratMode();
   // Update sidebar user info from auth response
   if(u && u.name){ var sn=document.getElementById('sidebarUserName'); if(sn) sn.textContent=u.name;
     var sa=document.getElementById('sidebarUserAv'); if(sa) sa.textContent=u.name.split(' ').map(function(n){return n[0];}).join('').toUpperCase().substring(0,2);
@@ -10517,6 +10527,166 @@ function applyCondFilter(type, label, desc){
   window._sfResultCache = null; // force fresh live scan on signals page
 }
 
+// ═══════════════════════ TODAY — daily plan home ═══════════════════════
+window._todayCfg = window._todayCfg || { acct:2000, riskPct:1, maxPerClass:1, maxTrades:5, classes:['crypto','stock','forex','commodity','index'] };
+window._todayPlan = window._todayPlan || [];
+
+function _todayToggleClass(id, btn){
+  var c=window._todayCfg, i=c.classes.indexOf(id);
+  if(i>=0) c.classes.splice(i,1); else c.classes.push(id);
+  if(btn){ var on=c.classes.indexOf(id)>=0;
+    btn.style.borderColor=on?'rgba(201,168,76,.5)':'rgba(237,232,216,.15)';
+    btn.style.background=on?'rgba(201,168,76,.12)':'transparent';
+    btn.style.color=on?'var(--gold)':'rgba(237,232,216,.4)'; }
+}
+function _todaySizeTrade(o, acct, riskPct){
+  var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0, tp1=parseFloat(o.tp)||0;
+  var slDist=Math.abs(entry-sl)||0;
+  var riskD=acct*(riskPct/100);
+  var units = slDist>0 ? riskD/slDist : 0;
+  var notional = units*entry;
+  var rewardD = tp1 ? Math.abs(tp1-entry)*units : 0;
+  var rr = (slDist>0 && tp1) ? Math.abs(tp1-entry)/slDist : 0;
+  var unitLabel;
+  if(o.asset==='forex'){ var lots=units/100000; unitLabel=(lots<0.01?lots.toFixed(4):lots.toFixed(2))+' lots'; }
+  else if(o.asset==='crypto'){ unitLabel=(units>=1?units.toFixed(4):units.toFixed(6))+' units'; }
+  else if(o.asset==='index'){ unitLabel=units.toFixed(2)+' contracts'; }
+  else { unitLabel=Math.round(units).toLocaleString()+' shares'; }
+  return { units:units, notional:notional, riskD:riskD, rewardD:rewardD, rr:rr, unitLabel:unitLabel };
+}
+function _todayDefaultAutos(tf){
+  var t=(tf||'').toLowerCase();
+  var slow = t.indexOf('1d')>=0 || t.indexOf('1w')>=0 || t.indexOf('4h')>=0 || t.indexOf('1mo')>=0;
+  return { be:true, tp1:true, trail:slow, macro:slow, inval:true, sent:false, tp2:slow, weekend:slow };
+}
+function showToday(){
+  var el=document.getElementById('dashContent'); if(!el) return;
+  var c=window._todayCfg;
+  var classes=[['crypto','Crypto'],['stock','Stocks'],['forex','Forex'],['commodity','Commodities'],['index','Indices']];
+  var chips=classes.map(function(p){ var on=c.classes.indexOf(p[0])>=0;
+    return '<button onclick="_todayToggleClass(\''+p[0]+'\',this)" style="padding:5px 11px;border-radius:5px;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;border:1px solid '+(on?'rgba(201,168,76,.5)':'rgba(237,232,216,.15)')+';background:'+(on?'rgba(201,168,76,.12)':'transparent')+';color:'+(on?'var(--gold)':'rgba(237,232,216,.4)')+';">'+p[1]+'</button>'; }).join('');
+  var fld=function(label,inner){ return '<div><div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.04em;margin-bottom:4px;text-transform:uppercase;">'+label+'</div>'+inner+'</div>'; };
+  var inp=function(id,val,w){ return '<input id="'+id+'" value="'+val+'" style="width:'+(w||64)+'px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">'; };
+  el.innerHTML =
+    '<div class="sf-page-head"><div class="sf-page-title">Today</div><div class="sf-breadcrumb">DotVerse finds today\'s best trades, sizes them to your account, and hands you a plan</div></div>'
+    + '<div class="sz-card" style="margin-bottom:14px;">'
+      + '<div class="sz-card-title">Plan settings</div>'
+      + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">'
+        + fld('Account $', inp('todayAcct', c.acct, 90))
+        + fld('Risk % / trade', inp('todayRisk', c.riskPct, 56))
+        + fld('Max per asset class', '<select id="todayMaxPer" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 — one per class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3</option></select>')
+        + fld('Max trades', inp('todayMaxTrades', c.maxTrades, 56))
+      + '</div>'
+      + '<div style="margin-top:13px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.04em;margin-bottom:6px;text-transform:uppercase;">Markets to include</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+chips+'</div>'
+      + '<button onclick="_todayBuildPlan()" style="margin-top:16px;width:100%;padding:13px;border:none;border-radius:8px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.04em;cursor:pointer;">⚡ Build my plan</button>'
+    + '</div>'
+    + '<div id="todayPlanArea"></div>';
+}
+async function _todayBuildPlan(){
+  var area=document.getElementById('todayPlanArea'); if(!area) return;
+  var c=window._todayCfg;
+  c.acct = parseFloat(document.getElementById('todayAcct')?.value)||c.acct;
+  c.riskPct = parseFloat(document.getElementById('todayRisk')?.value)||1;
+  c.maxPerClass = parseInt(document.getElementById('todayMaxPer')?.value)||1;
+  c.maxTrades = parseInt(document.getElementById('todayMaxTrades')?.value)||5;
+  area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning your markets for the best setups… 20–30s</div></div>';
+  // Light scan: one representative timeframe per enabled class
+  var groups=[
+    {asset:'crypto', tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','LINKUSD'], tf:'4h'},
+    {asset:'stock',  tickers:['NVDA','AAPL','TSLA','AMZN','MSFT','META','AMD'], tf:'4h'},
+    {asset:'forex',  tickers:['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD'], tf:'4h'},
+    {asset:'commodity', tickers:['XAUUSD','XAGUSD','WTI'], tf:'1d'},
+    {asset:'index',  tickers:['SPX','NDX','DJI'], tf:'1d'}
+  ].filter(function(g){ return c.classes.indexOf(g.asset)>=0; });
+  var opps=[];
+  try{
+    for(var gi=0; gi<groups.length; gi++){
+      var g=groups[gi];
+      try{
+        var r=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:g.tickers, asset_type:g.asset, timeframe:g.tf})});
+        var rows=(r&&r.results)||[];
+        rows.forEach(function(row){
+          if(!row.signal||row.error||(row.signal!=='BUY'&&row.signal!=='SELL'))return;
+          if(!row.entry||!(row.stop_loss||row.sl)||!(row.tp1||row.tp))return;
+          opps.push({
+            sym: row.ticker||row.symbol||'', tf:(row.timeframe||g.tf).toUpperCase(), sig:row.signal,
+            entry:row.entry, sl:row.stop_loss||row.sl, tp:row.tp1||row.tp, tp2:row.tp2||null, tp3:row.tp3||null,
+            asset:g.asset, conf: row.confidence_pct!=null?row.confidence_pct:(row.bull_score!=null&&((row.bull_score+row.bear_score)>0)?Math.round(row.bull_score/((row.bull_score||0)+(row.bear_score||0))*100):0),
+            confLbl: row.confidence_label||row.confidence||'LIKELY',
+            qscore: (row.quality&&(row.quality.score!=null?row.quality.score:row.quality))||row.confidence_pct||0,
+            rr1Raw: row.rr1_raw!=null?row.rr1_raw:null, spreadCost:row.spread_cost!=null?row.spread_cost:null, spreadQuality:row.spread_quality||'fair',
+            bullCount:row.bull_score||0, bearCount:row.bear_score||0, volRatio:row.vol_ratio||1.0, reason:row.reason||row.summary||'Live DotVerse signal',
+            quality: row.quality||null, smc_structures: row.smc_structures||null, regime_context: row.regime_context||''
+          });
+        });
+      }catch(e){}
+    }
+  }catch(e){}
+  // Rank by quality/confidence, then diversify (max per class, de-dupe symbol)
+  opps.sort(function(a,b){ return (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0); });
+  var plan=[], perClass={}, seen={};
+  for(var i=0;i<opps.length;i++){
+    var o=opps[i], cls=o.asset, key=o.sym;
+    if(seen[key]) continue;
+    if((perClass[cls]||0) >= c.maxPerClass) continue;
+    if(plan.length >= c.maxTrades) break;
+    o._size=_todaySizeTrade(o, c.acct, c.riskPct);
+    o._autos=_todayDefaultAutos(o.tf);
+    plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
+  }
+  window._todayPlan=plan;
+  _todayRenderPlan();
+}
+function _todayRenderPlan(){
+  var area=document.getElementById('todayPlanArea'); if(!area) return;
+  var plan=window._todayPlan||[], c=window._todayCfg;
+  if(!plan.length){ area.innerHTML='<div style="padding:30px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);line-height:1.7;">No high-quality setups in your markets right now. <br>That is a normal, correct outcome — DotVerse will not invent trades to fill a quota. Try again later or widen your markets above.</div>'; return; }
+  var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
+  var totDeploy=0, totRisk=0, totRewardBest=0, longs=0, shorts=0, clsSet={};
+  plan.forEach(function(o){ totDeploy+=o._size.notional; totRisk+=o._size.riskD; totRewardBest+=o._size.rewardD; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; });
+  var autoLbl={be:'BE',trail:'Trail',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
+  var cards=plan.map(function(o,idx){
+    var dirCol=o.sig==='BUY'?'#5de8a0':'#e8706e';
+    var autos=Object.keys(o._autos).filter(function(k){return o._autos[k];}).map(function(k){return '<span style="font-family:var(--mono);font-size:8px;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);">'+autoLbl[k]+'</span>';}).join(' ');
+    return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(237,232,216,.02);">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;flex-wrap:wrap;">'
+        + '<span style="font-family:var(--syne);font-size:15px;font-weight:600;">'+o.sym+'</span>'
+        + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:'+dirCol+'22;color:'+dirCol+';">'+o.sig+'</span>'
+        + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);text-transform:capitalize;">'+o.asset+' · '+o.tf+'</span>'
+        + '<span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.7);">edge 1 : '+(o._size.rr||0).toFixed(1)+'</span>'
+      + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:9px;">'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Size</div><div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.9);">'+o._size.unitLabel+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+money(o._size.notional)+'</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">Max loss</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#e8706e;">'+money(-o._size.riskD)+'</div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;">If TP1 hits</div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#5de8a0;">+'+money(o._size.rewardD)+'</div></div>'
+      + '</div>'
+      + (autos?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;">'+autos+'</div>':'')
+      + '<button onclick="_todayPlaceTrade('+idx+')" style="width:100%;padding:9px;border:none;border-radius:6px;background:rgba(93,232,160,.14);border:1px solid rgba(93,232,160,.35);color:#5de8a0;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Review &amp; place →</button>'
+    + '</div>';
+  }).join('');
+  var riskPct=c.acct>0?(totRisk/c.acct*100):0;
+  var riskCol=riskPct<=3?'#5de8a0':riskPct<=6?'#c9a84c':'#e8706e';
+  var summary='<div style="border:1px solid rgba(93,232,160,.25);border-radius:9px;padding:13px 15px;margin-bottom:12px;background:linear-gradient(90deg,rgba(93,232,160,.06),rgba(201,168,76,.04));">'
+    + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(93,232,160,.75);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Today\'s plan · '+plan.length+' trade'+(plan.length>1?'s':'')+'</div>'
+    + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.7);margin-bottom:8px;">'
+      + '<span>Capital: <strong>'+money(totDeploy)+'</strong></span>'
+      + '<span>Total at risk: <strong style="color:'+riskCol+';">'+money(-totRisk)+' ('+riskPct.toFixed(2)+'%)</strong></span>'
+      + '<span>'+Object.keys(clsSet).length+' classes · '+longs+' long / '+shorts+' short</span>'
+    + '</div>'
+    + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money(totRewardBest)+'</strong>; if all hit their stop you would lose <strong style="color:#e8706e;">'+money(-totRisk)+'</strong>. Reality lands between — some win, some lose. This is the odds working over many trades, not a promise.</div>'
+    + (riskPct>6?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Your total risk is above 6% — consider fewer trades or a lower risk %.</div>':'')
+  + '</div>';
+  area.innerHTML=summary+cards;
+}
+function _todayPlaceTrade(idx){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  if(typeof loadSignalContext==='function') loadSignalContext(o);
+  window._szLadderAuto=[Object.assign(_szDefaultAuto(), o._autos||{})];
+  window._szLadderUserSized=false;
+  if(typeof setNav==='function') setNav('size');
+  if(typeof showSize==='function') showSize();
+}
 function showSignalFeed(){
   _sfStopLivePrices();   // clear any running price-refresh interval from previous view
   // Reset trade type filter to 'all' every time Signals tab is opened
