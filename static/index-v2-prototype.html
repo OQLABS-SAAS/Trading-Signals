@@ -10659,8 +10659,8 @@ function showToday(){
       + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">'
         + fld('Account $', '<input id="todayAcct" value="'+(c.acct||'')+'" oninput="_todaySetAccount(this.value)" style="width:90px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">', 'Your account balance — auto-filled from your connected broker. Every trade is sized to this; change it and the whole plan re-sizes live.')
         + fld('Total risk %', '<input id="todayRisk" type="number" step="0.25" min="0.1" value="'+c.riskPct+'" oninput="_todaySetGlobalRisk(this.value)" style="width:60px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">', 'Your TOTAL risk budget for the whole plan. DotVerse splits it evenly across the trades — 1% across 3 trades is about 0.33% each, so the whole plan risks 1%, not 3%. You can fine-tune each trade on its card.')
-        + fld('Max per class', '<select id="todayMaxPer" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 / class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2 / class</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3 / class</option></select>', 'How many trades from one asset class (e.g. crypto) the plan may include. Keeps you diversified.')
-        + fld('Max trades', inp('todayMaxTrades', c.maxTrades, 56), 'The most trades the plan will build. Total risk = this many × your risk per trade.')
+        + fld('Max per class', '<select id="todayMaxPer" onchange="_todaySetMaxPerClass(this.value)" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 / class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2 / class</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3 / class</option></select>', 'How many trades from one asset class (e.g. crypto) the plan may include. Change it and the plan updates instantly — no rebuild needed.')
+        + fld('Max trades', '<input id="todayMaxTrades" value="'+c.maxTrades+'" onchange="_todaySetMaxTrades(this.value)" style="width:56px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">', 'The most trades the plan will include. Change it and the plan updates instantly — no rebuild needed.')
       + '</div>'
       + '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);line-height:1.5;">Risk / trade = how much of your account you lose if the stop hits — this is the size driver, so every trade risks the same. You can fine-tune risk on each card after building, and run more than one per class.</div>'
       + '<div style="margin-top:13px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.04em;margin-bottom:6px;text-transform:uppercase;">Markets to include</div>'
@@ -10770,6 +10770,9 @@ async function _todayBuildPlan(){
   // Total qualifying setups the SAME scanner found (this is what the Signals tab lists).
   // Today curates this down to the diversified, account-sized picks below.
   window._todayScanCount = opps.length;
+  // Cache the full ranked candidate pool so changing Max-per-class / Max-trades can
+  // re-select INSTANTLY without a fresh scan.
+  window._todayOpps = ranked;
   // How many quality setups we had to leave out of the plan (caps / diversification).
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=QFLOOR;}).reduce(function(acc,o){ if(!acc.seen[o.sym]){acc.seen[o.sym]=1;acc.n++;} return acc; },{seen:{},n:0}).n - plan.length);
   // RISK BUDGET MODEL — the top % is the TOTAL risk for the day, split evenly across
@@ -10945,6 +10948,29 @@ function _todaySetAccount(val){
 // Top control = the day's TOTAL risk budget. Splits evenly across all trades.
 // Suggest-a-higher-budget: set the budget input and re-size the whole plan to it.
 function _todayRaiseBudget(x){ var i=document.getElementById('todayRisk'); if(i) i.value=x; _todaySetGlobalRisk(x); }
+// Re-pick the diversified plan from the cached candidate pool using the CURRENT caps,
+// then re-size and re-render — instant, no re-scan. Lets Max-per-class / Max-trades take
+// effect immediately instead of only on the next Build.
+function _todayReselect(){
+  var c=window._todayCfg; var opps=window._todayOpps||[];
+  if(!opps.length) return;
+  var plan=[], perClass={}, seen={};
+  for(var i=0;i<opps.length;i++){
+    var o=opps[i], cls=o.asset, key=o.sym;
+    if(seen[key]) continue;
+    if((perClass[cls]||0) >= c.maxPerClass) continue;
+    if(plan.length >= c.maxTrades) break;
+    plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
+  }
+  window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=45;}).reduce(function(a,o){ if(!a.s[o.sym]){a.s[o.sym]=1;a.n++;} return a; },{s:{},n:0}).n - plan.length);
+  plan.forEach(function(o){ o._autos=o._autos||_todayDefaultAutos(o.tf); });
+  _todayAllocate(plan, c.acct, c.riskPct||1);
+  window._todayPlan=plan; window._todaySorted=false;
+  _todayRenderPlan();
+  Promise.all(plan.map(async function(o){ try{ o._autos=await _todayRecommendAutos(o); }catch(e){} })).then(function(){ if(window._todayPlan===plan) _todayRenderPlan(); });
+}
+function _todaySetMaxPerClass(v){ var n=parseInt(v); if(!(n>0))return; window._todayCfg.maxPerClass=n; if((window._todayOpps||[]).length) _todayReselect(); }
+function _todaySetMaxTrades(v){ var n=parseInt(v); if(!(n>0))return; window._todayCfg.maxTrades=n; if((window._todayOpps||[]).length) _todayReselect(); }
 function _todaySetGlobalRisk(val){
   var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
   c.riskPct=r;
