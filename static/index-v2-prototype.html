@@ -10593,7 +10593,7 @@ function _todaySizeTrade(o, acct, riskPct){
   return { units:units, notional:notional, tradeable:tradeable, minLot:SPEC.min, riskPctReq:(riskPct||1),
            netLoss:netLoss, netTP1:netTP1, grossRisk:grossRisk, rr:rr,
            leveraged:leveraged, lev:lev, levReal:!!window._todayLeverageReal, marginReq:marginReq,
-           riskPctOfAcct: acct>0?(grossRisk/acct*100):0,
+           riskPctOfAcct: acct>0?(netLoss/acct*100):0,   /* net of costs — matches the $ max-loss & the plan totals */
            notionalPctOfAcct: acct>0?(notional/acct*100):0,
            spreadD:spreadD, feeD:feeD, slipD:slipD, costD:costD, unitLabel:unitLabel };
 }
@@ -10879,7 +10879,7 @@ function _todayRenderPlan(){
   var buffer=c.acct-totExp, deployPct=c.acct>0?(totExp/c.acct*100):0;
   // Budget awareness: the top % is the total budget; budgetUsed is the pure risk actually allocated.
   var budget=c.riskPct||1;
-  var budgetUsed=c.acct>0?(totGross/c.acct*100):0;
+  var budgetUsed=c.acct>0?(totRisk/c.acct*100):0;   /* net of costs — same basis the allocator fills to, so the banner can't misfire */
   var overBudget=budgetUsed>budget*1.05;
   var underBudget=nTooSmall>0 && budgetUsed<budget*0.6;
   var budgetBanner = overBudget
@@ -11066,7 +11066,7 @@ function _todayLiveBox(o, live){
         return '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:7.5px;">'+leftLab+entryLab+rightLab+'</div>';
       })()
     + '<div style="display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.55);margin-top:6px;">'
-      + '<span>Live R:R <b style="color:rgba(237,232,216,.85);">1:'+(liveRR>0?liveRR.toFixed(1):'—')+'</b></span>'
+      + '<span>Live R:R <b style="color:rgba(237,232,216,.85);">1:'+((isFinite(liveRR)&&liveRR>0)?liveRR.toFixed(1):'—')+'</b></span>'
       + '<span>to stop <b style="color:#e8706e;">'+toStop.toFixed(2)+'%</b></span>'
       + '<span>to target <b style="color:#5de8a0;">'+toTgt.toFixed(2)+'%</b></span>'
     + '</div>'
@@ -11206,13 +11206,21 @@ function _todayConfirmAndPlace(trades){
 }
 // Shared order-submit loop — used by manual confirm AND auto-place. Sends asset_type
 // (so crypto/stock aren't mis-mapped as forex) and timeframe, plus the per-trade automations.
+// Convert our internal position size (units) to the MT5 volume the EA expects (lots),
+// matching EXACTLY what the card/confirm shows. Forex: 100,000 units = 1.00 lot (the card
+// label divides by 100,000). Other classes: the card shows raw units/shares/contracts,
+// which the EA normalises to the broker's lot step/min — so pass them through.
+function _todayMt5Lots(o){
+  var u=(o._size&&o._size.units)||0;
+  return o.asset==='forex' ? u/100000 : u;
+}
 async function _todaySendOrders(trades, onProgress){
   var ok=0, fail=0;
   for(var i=0;i<trades.length;i++){
     var o=trades[i]; var tv=(o.bullCount||0)+(o.bearCount||0);
     try{
       var res=await dvFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        ticker:o.sym, asset_type:o.asset, order_type:'Market', lots:parseFloat((o._size.units).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
+        ticker:o.sym, asset_type:o.asset, order_type:'Market', lots:parseFloat(_todayMt5Lots(o).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
         entry:o.entry, sl:o.sl, tp1:o.tp, tp2:null, tp3:null, timeframe:o.tf||'',
         trailing:!!(o._autos&&o._autos.trail),
         be:!!(o._autos&&o._autos.be), macro:!!(o._autos&&o._autos.macro),
