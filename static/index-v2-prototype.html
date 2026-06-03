@@ -10528,7 +10528,7 @@ function applyCondFilter(type, label, desc){
 }
 
 // ═══════════════════════ TODAY — daily plan home ═══════════════════════
-window._todayCfg = window._todayCfg || { acct:0, riskPct:1, maxPerClass:1, maxTrades:5, autoPlace:false, classes:['crypto','stock','forex','commodity','index'] };
+window._todayCfg = window._todayCfg || { acct:0, riskPct:1, maxPerClass:2, maxTrades:8, autoPlace:false, classes:['crypto','stock','forex','commodity','index'] };
 window._todayPlan = window._todayPlan || [];
 
 function _todayToggleClass(id, btn){
@@ -10690,8 +10690,8 @@ async function _todayBuildPlan(){
   _todayStopLivePrices(); window._todaySorted=false;
   c.acct = parseFloat(document.getElementById('todayAcct')?.value)||c.acct||0;
   c.riskPct = parseFloat(document.getElementById('todayRisk')?.value)||c.riskPct||1;
-  c.maxPerClass = parseInt(document.getElementById('todayMaxPer')?.value)||1;
-  c.maxTrades = parseInt(document.getElementById('todayMaxTrades')?.value)||5;
+  c.maxPerClass = parseInt(document.getElementById('todayMaxPer')?.value)||2;
+  c.maxTrades = parseInt(document.getElementById('todayMaxTrades')?.value)||8;
   var _ap=document.getElementById('todayAutoPlace'); if(_ap) c.autoPlace=!!_ap.checked;
   // Pull the live broker account: real balance AND real leverage (for accurate margin).
   try{
@@ -10767,6 +10767,11 @@ async function _todayBuildPlan(){
     if(plan.length >= c.maxTrades) break;
     plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
   }
+  // Total qualifying setups the SAME scanner found (this is what the Signals tab lists).
+  // Today curates this down to the diversified, account-sized picks below.
+  window._todayScanCount = opps.length;
+  // How many quality setups we had to leave out of the plan (caps / diversification).
+  window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=QFLOOR;}).reduce(function(acc,o){ if(!acc.seen[o.sym]){acc.seen[o.sym]=1;acc.n++;} return acc; },{seen:{},n:0}).n - plan.length);
   // RISK BUDGET MODEL — the top % is the TOTAL risk for the day, split evenly across
   // the chosen trades (1% over 3 trades = ~0.33% each). DotVerse's recommended share
   // is stored so the cards can guide per-trade overrides.
@@ -10828,10 +10833,11 @@ function _todayRenderPlan(){
       + riskInput
     + '</div>';
     if(!s.tradeable){
-      return '<div style="border:1px solid rgba(232,112,110,.25);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(232,112,110,.04);">'
+      var _sug=Math.min(3, Math.round(((window._todayCfg.riskPct||1)+1)*100)/100);
+      return '<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(201,168,76,.045);">'
         + head
-        + '<div style="font-family:var(--mono);font-size:10px;color:#e8706e;line-height:1.55;margin-bottom:9px;">⚠ Too small to place on a '+money(c.acct)+' account at '+(+(o._risk||1).toFixed(2))+'% risk — the position ('+s.unitLabel+') is below your broker’s minimum lot. Raise the risk % on the right, or skip this one.</div>'
-        + '<button disabled style="width:100%;padding:9px;border-radius:6px;background:rgba(237,232,216,.06);border:1px solid rgba(237,232,216,.14);color:rgba(237,232,216,.35);font-family:var(--mono);font-size:11px;font-weight:700;cursor:not-allowed;">Can’t place — too small</button>'
+        + '<div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.9);line-height:1.55;margin-bottom:9px;">★ Strong setup — but the position ('+s.unitLabel+') is below your broker’s minimum lot at '+(+(o._risk||1).toFixed(2))+'% on a '+money(c.acct)+' account. It’s on your menu; give it a little more room to place it.</div>'
+        + '<button onclick="_todayRaiseBudget('+_sug+')" style="width:100%;padding:9px;border-radius:6px;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.4);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Raise budget to '+_sug+'% to place →</button>'
       + '</div>';
     }
     return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(237,232,216,.02);">'
@@ -10877,6 +10883,7 @@ function _todayRenderPlan(){
     : {t:'Mixed',c:'#c9a84c'})));
   var summary='<div style="border:1px solid rgba(93,232,160,.25);border-radius:9px;padding:13px 15px;margin-bottom:12px;background:linear-gradient(90deg,rgba(93,232,160,.06),rgba(201,168,76,.04));">'
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;"><span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(93,232,160,.75);font-weight:700;text-transform:uppercase;">Today\'s plan · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</span><span style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;color:'+health.c+';">'+health.t+'</span></div>'
+    + '<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);line-height:1.5;margin-bottom:8px;">Same scanner as <span onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();" style="color:rgba(93,232,160,.8);border-bottom:1px dotted rgba(93,232,160,.4);cursor:pointer;">Signals ›</span> — Today shows your best <strong>'+nTradeable+'</strong> placeable, diversified pick'+(nTradeable===1?'':'s')+' out of <strong>'+(window._todayScanCount||nTradeable)+'</strong> live setups found. Signals lists every one; Today sizes them to your account.</div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.7);margin-bottom:8px;">'
       + '<span>Total position value: <strong>'+money(totExp)+'</strong></span>'
       + '<span>Total max loss: <strong style="color:'+riskCol+';">'+money2(-totRisk)+' ('+riskPct.toFixed(2)+'% · budget '+budget+'%)</strong></span>'
@@ -10886,7 +10893,7 @@ function _todayRenderPlan(){
     + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">Your '+budget+'% risk budget is split across '+nTradeable+' trade'+(nTradeable===1?'':'s')+'. If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money2(-totRisk)+'</strong>. Reality lands between — some win, some lose.</div>'
     + budgetBanner
     + (riskPct>6 && !overBudget?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower the budget or trade fewer.</div>':'')
-    + (nTooSmall>0&&!underBudget?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);">'+nTooSmall+' setup'+(nTooSmall===1?'':'s')+' too small for your account (below broker minimum) — excluded from totals and place-all.</div>':'')
+    + (nTooSmall>0&&!underBudget ? (function(){ var sug=Math.min(3, Math.round((budget+1)*100)/100); var canRaise=sug>budget+1e-9; return '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nTooSmall+' more good setup'+(nTooSmall===1?'':'s')+' need a little more room to place on a '+money(c.acct)+' account — they’re shown below as opportunities.'+(canRaise?' <button onclick="_todayRaiseBudget('+sug+')" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(201,168,76,.45);background:rgba(201,168,76,.12);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">Raise budget to '+sug+'% →</button>':' Raise the risk % on a card to size it up.')+'</div>'; })() : '')
     + (nTradeable>0?'<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+nTradeable+' →</button>':'')
   + '</div>';
   // Totals footer at the BOTTOM — the grand total after all the trade cards.
@@ -10936,6 +10943,8 @@ function _todaySetAccount(val){
   }
 }
 // Top control = the day's TOTAL risk budget. Splits evenly across all trades.
+// Suggest-a-higher-budget: set the budget input and re-size the whole plan to it.
+function _todayRaiseBudget(x){ var i=document.getElementById('todayRisk'); if(i) i.value=x; _todaySetGlobalRisk(x); }
 function _todaySetGlobalRisk(val){
   var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
   c.riskPct=r;
