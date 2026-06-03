@@ -10840,11 +10840,15 @@ function _todayRenderPlan(){
       + riskInput
     + '</div>';
     if(!s.tradeable){
-      var _sug=Math.min(3, Math.round(((window._todayCfg.riskPct||1)+1)*100)/100);
+      // EXACT risk % this setup needs to clear the broker's minimum lot (fixed target —
+      // not a creeping "+1%" nudge). units = acct*risk%/slDist must reach minLot.
+      var _slD=Math.abs((parseFloat(o.entry)||0)-(parseFloat(o.sl)||0));
+      var _minRisk=(s.minLot&&_slD>0&&c.acct>0)?Math.ceil((s.minLot*_slD/c.acct*100)*100)/100:0;
+      var _canTap=_minRisk>0 && _minRisk<=5;
       return '<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(201,168,76,.045);">'
         + head
-        + '<div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.9);line-height:1.55;margin-bottom:9px;">★ Strong setup — but the position ('+s.unitLabel+') is below your broker’s minimum lot at '+(+(o._risk||1).toFixed(2))+'% on a '+money(c.acct)+' account. It’s on your menu; give it a little more room to place it.</div>'
-        + '<button onclick="_todayRaiseBudget('+_sug+')" style="width:100%;padding:9px;border-radius:6px;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.4);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Raise budget to '+_sug+'% to place →</button>'
+        + '<div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.9);line-height:1.55;margin-bottom:9px;">★ Strong setup — the smallest position your broker allows ('+s.unitLabel+') needs about <strong>'+(_minRisk||'—')+'%</strong> risk on your '+money(c.acct)+' account (vs its current '+(+(o._risk||1).toFixed(2))+'%). '+(_canTap?'One tap sizes it to place.':'That’s a lot of risk for this account — better suited to a larger balance.')+'</div>'
+        + (_canTap?'<button onclick="_todaySetTradeRisk('+idx+','+_minRisk+')" style="width:100%;padding:9px;border-radius:6px;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.4);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Size to place — set this trade to '+_minRisk+'% risk →</button>':'<button disabled style="width:100%;padding:9px;border-radius:6px;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.12);color:rgba(237,232,216,.4);font-family:var(--mono);font-size:11px;font-weight:700;cursor:not-allowed;">Needs ~'+(_minRisk||'—')+'% risk — too large for this account</button>')
       + '</div>';
     }
     return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(237,232,216,.02);">'
@@ -10900,7 +10904,7 @@ function _todayRenderPlan(){
     + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">Your '+budget+'% risk budget is split across '+nTradeable+' trade'+(nTradeable===1?'':'s')+'. If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money2(-totRisk)+'</strong>. Reality lands between — some win, some lose.</div>'
     + budgetBanner
     + (riskPct>6 && !overBudget?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower the budget or trade fewer.</div>':'')
-    + (nTooSmall>0&&!underBudget ? (function(){ var sug=Math.min(3, Math.round((budget+1)*100)/100); var canRaise=sug>budget+1e-9; return '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nTooSmall+' more good setup'+(nTooSmall===1?'':'s')+' need a little more room to place on a '+money(c.acct)+' account — they’re shown below as opportunities.'+(canRaise?' <button onclick="_todayRaiseBudget('+sug+')" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(201,168,76,.45);background:rgba(201,168,76,.12);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">Raise budget to '+sug+'% →</button>':' Raise the risk % on a card to size it up.')+'</div>'; })() : '')
+    + (nTooSmall>0&&!underBudget ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);">'+nTooSmall+' more good setup'+(nTooSmall===1?'':'s')+' shown below as opportunities — each card shows the exact risk % it needs to place on your '+money(c.acct)+' account. A larger balance places more at lower risk.</div>' : '')
     + (nMoved>0?'<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nMoved+' setup'+(nMoved===1?'':'s')+' drifted past the entry since the scan — dropped from your plan so the menu stays current. <button onclick="_todayBuildPlan()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(237,232,216,.25);background:rgba(237,232,216,.06);color:rgba(237,232,216,.8);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">↻ Rebuild for fresh setups</button></div>':'')
     + (nTradeable>0?'<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+nTradeable+' →</button>':'')
   + '</div>';
