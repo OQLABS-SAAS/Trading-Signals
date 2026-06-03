@@ -10822,7 +10822,8 @@ function _todayRenderPlan(){
     }
     return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(237,232,216,.02);">'
       + head
-      + '<div id="today-lp-'+idx+'" title="'+esc(TT.live)+'" style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.4);margin-bottom:8px;min-height:13px;cursor:help;"><span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.25);flex-shrink:0;"></span>checking live price…</div>'
+      + '<div id="today-lp-'+idx+'" title="'+esc(TT.live)+'" style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.4);margin-bottom:6px;min-height:13px;cursor:help;"><span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.25);flex-shrink:0;"></span>checking live price…</div>'
+      + '<div id="today-livebox-'+idx+'" style="margin-bottom:8px;"></div>'
       + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:9px;padding:7px 9px;background:rgba(237,232,216,.03);border-radius:6px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">'
         + '<span title="'+esc('The price DotVerse plans to enter at. The live Now price above is compared to this.')+'" style="cursor:help;">Entry <strong style="color:rgba(237,232,216,.9);">'+pxFmt(o.entry)+'</strong></span>'
         + '<span title="'+esc('If price hits this stop, the trade auto-closes at your max loss. Your safety floor — you cannot lose past it.')+'" style="cursor:help;">Stop <strong style="color:#e8706e;">'+pxFmt(o.sl)+'</strong></span>'
@@ -10947,6 +10948,49 @@ function _todaySetTradeRisk(idx, val){
 }
 // ── Per-card LIVE entry monitor — same live-price feed as the Signal tab ──
 function _todayStopLivePrices(){ if(window._todayLpTimer){ clearInterval(window._todayLpTimer); window._todayLpTimer=null; } if(window._todayAutoTimer){ clearInterval(window._todayAutoTimer); window._todayAutoTimer=null; var _ab=document.getElementById('todayAutoBar'); if(_ab&&_ab.parentNode) _ab.parentNode.removeChild(_ab); } }
+// Build the per-card LIVE monitor: a stop→entry→target price bar with a live marker,
+// live R:R + distance-to-stop/target, and an "if you enter now" panel that re-prices the
+// trade (size, max-loss, profit, R:R) from the CURRENT price — keeping the same risk %.
+function _todayLiveBox(o, live){
+  var s=o._size; if(!s) return '';
+  var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0, tp=parseFloat(o.tp)||0;
+  if(!entry||!sl||!tp||!live) return '';
+  var isBuy=(o.sig||'BUY').toUpperCase()!=='SELL';
+  var money2=function(v){ var a=Math.abs(v); return (v<0?'-$':'$')+(a<100?a.toFixed(2):Math.round(a).toLocaleString()); };
+  var pxFmt=function(v){ v=parseFloat(v); return !isFinite(v)?'—':(v>=1000?v.toLocaleString('en-US',{maximumFractionDigits:2}):v>=1?String(+v.toFixed(4)):String(+v.toPrecision(4))); };
+  var lo=Math.min(sl,tp), hi=Math.max(sl,tp), span=(hi-lo)||1;
+  var pc=function(p){ return Math.max(0,Math.min(100,(p-lo)/span*100)); };
+  var pEntry=pc(entry), pLive=pc(live);
+  var stopAtLeft=(sl===lo);
+  var grad=stopAtLeft
+    ? 'linear-gradient(90deg,rgba(232,112,110,.55),rgba(237,232,216,.12) 50%,rgba(93,232,160,.55))'
+    : 'linear-gradient(90deg,rgba(93,232,160,.55),rgba(237,232,216,.12) 50%,rgba(232,112,110,.55))';
+  var toStop=Math.abs((live-sl)/live*100), toTgt=Math.abs((tp-live)/live*100);
+  var liveRR=isBuy?((tp-live)/(live-sl)):((live-tp)/(sl-live));
+  var stopBreached=isBuy?live<=sl:live>=sl, targetHit=isBuy?live>=tp:live<=tp;
+  var dotCol=stopBreached?'#e8706e':targetHit?'#5de8a0':(liveRR>=1?'rgba(201,168,76,.95)':'#e8706e');
+  // Re-price "if you enter now": clone the trade at the live entry, keep stop/target, same risk %.
+  var clone={asset:o.asset, entry:live, sl:o.sl, tp:o.tp, sig:o.sig, spreadCost:o.spreadCost, atr:o.atr};
+  var ns=_todaySizeTrade(clone,(window._todayCfg&&window._todayCfg.acct)||0,(o._risk||1));
+  var esc=function(t){ return String(t).replace(/"/g,'&quot;'); };
+  var enterNow = ns.tradeable
+    ? '<span style="color:rgba(201,168,76,.85);">If you enter now @ '+pxFmt(live)+':</span> max loss <b style="color:#e8706e;">'+money2(-ns.netLoss)+'</b> · profit <b style="color:#5de8a0;">'+money2(ns.netTP1)+'</b> · R:R <b>1:'+(ns.rr>0?ns.rr.toFixed(1):'—')+'</b> · cash in <b style="color:rgba(201,168,76,.9);">'+money2(ns.marginReq)+'</b>'
+    : '<span style="color:rgba(201,168,76,.85);">If you enter now @ '+pxFmt(live)+':</span> position would be below your broker minimum at this price — too small to place.';
+  return ''
+    + '<div title="'+esc('Live monitor: where the price is right now between your stop and target. The dot moves as price ticks; the panel below re-prices the trade as if you entered at the current price.')+'" style="position:relative;height:8px;border-radius:4px;background:'+grad+';margin:7px 0 4px;cursor:help;">'
+      + '<div style="position:absolute;left:'+pEntry+'%;top:-3px;width:2px;height:14px;background:rgba(237,232,216,.85);transform:translateX(-50%);" title="Planned entry"></div>'
+      + '<div style="position:absolute;left:'+pLive+'%;top:-2px;width:11px;height:11px;border-radius:50%;background:'+dotCol+';border:2px solid #0a0e16;transform:translateX(-50%);box-shadow:0 0 6px '+dotCol+';" title="Live price"></div>'
+    + '</div>'
+    + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.35);">'
+      + '<span>Stop '+pxFmt(sl)+'</span><span>Entry '+pxFmt(entry)+'</span><span>Target '+pxFmt(tp)+'</span>'
+    + '</div>'
+    + '<div style="display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.55);margin-top:6px;">'
+      + '<span>Live R:R <b style="color:rgba(237,232,216,.85);">1:'+(liveRR>0?liveRR.toFixed(1):'—')+'</b></span>'
+      + '<span>to stop <b style="color:#e8706e;">'+toStop.toFixed(2)+'%</b></span>'
+      + '<span>to target <b style="color:#5de8a0;">'+toTgt.toFixed(2)+'%</b></span>'
+    + '</div>'
+    + '<div style="margin-top:6px;padding:6px 8px;border-radius:5px;background:rgba(237,232,216,.03);border:1px dashed rgba(237,232,216,.16);font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.6);line-height:1.5;">'+enterNow+'</div>';
+}
 function _todayStartLivePrices(){
   _todayStopLivePrices();
   var plan=window._todayPlan||[]; if(!plan.length) return;
@@ -10985,6 +11029,7 @@ function _todayStartLivePrices(){
         o._live.invalid = invalid;
         var priceStr=live>=1000?live.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):live>=1?live.toFixed(4):live.toPrecision(4);
         el.innerHTML='<span style="width:5px;height:5px;border-radius:50%;background:'+dot+';flex-shrink:0;animation:lpulse 2s ease-in-out infinite;"></span><span style="color:'+col+';font-weight:600;">Now '+priceStr+'</span><span style="color:rgba(237,232,216,.2);margin:0 4px;">·</span><span style="color:'+col+';">'+label+'</span>';
+        var _lb=document.getElementById('today-livebox-'+idx); if(_lb){ try{ _lb.innerHTML=_todayLiveBox(o, live); }catch(_e){} }
         // Keep the card's button honest with the live status — don't say "place" on a dead setup.
         var cta=document.getElementById('today-cta-'+idx);
         if(cta){
@@ -11016,7 +11061,7 @@ function _todayStartLivePrices(){
       _todayRenderPlan();
     }
   });
-  window._todayLpTimer=setInterval(pass,30000);
+  window._todayLpTimer=setInterval(pass,5000);
 }
 // ── Review & place — single card or the whole basket, one confirmed batch ──
 function _todayPlaceTrade(idx){ var o=(window._todayPlan||[])[idx]; if(!o||!o._size.tradeable) return; _todayConfirmAndPlace([o]); }
