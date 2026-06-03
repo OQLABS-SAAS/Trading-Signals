@@ -13109,7 +13109,12 @@ def scan_list():
                     row = {"ticker": ticker, "error": "no data"}
                 else:
                     ind      = calculate_indicators(df, timeframe, asset_type)
-                    analysis = get_analysis(ticker, asset_type, ind, timeframe)
+                    # Markov regime engine feeds a weighted bull/bear vote into the
+                    # confluence pool. Enable it for the scan ONLY when the EODHD data
+                    # feed is configured — otherwise it's a no-op (returns neutral) and
+                    # we skip the overhead. Results are cached 1h per symbol.
+                    _use_mkv = bool(os.environ.get("EODHD_API_KEY", "").strip())
+                    analysis = get_analysis(ticker, asset_type, ind, timeframe, use_markov=_use_mkv)
                     ct       = detect_counter_trade(ind)
                     row = {
                         "ticker": ticker, "raw_ticker": raw, "asset_type": asset_type,

@@ -10709,45 +10709,59 @@ async function _todayBuildPlan(){
   // Multi-timeframe scan: several timeframes per class so the plan mixes
   // scalp/day/swing/position trades (not all 4h). Best setup per symbol wins.
   var groups=[
-    {asset:'crypto', tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','LINKUSD'], tfs:['1h','4h','1d']},
-    {asset:'stock',  tickers:['NVDA','AAPL','TSLA','AMZN','MSFT','META','AMD'], tfs:['1h','4h','1d']},
-    {asset:'forex',  tickers:['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD'], tfs:['1h','4h','1d']},
-    {asset:'commodity', tickers:['XAUUSD','XAGUSD','WTI'], tfs:['4h','1d']},
-    {asset:'index',  tickers:['SPX','NDX','DJI'], tfs:['4h','1d']}
+    {asset:'crypto', tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','LINKUSD','ADAUSD','AVAXUSD','DOGEUSD','DOTUSD'], tfs:['1h','4h','1d']},
+    {asset:'stock',  tickers:['NVDA','AAPL','TSLA','AMZN','MSFT','META','AMD','GOOGL','NFLX','AVGO'], tfs:['1h','4h','1d']},
+    {asset:'forex',  tickers:['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','EURJPY','GBPJPY'], tfs:['1h','4h','1d']},
+    {asset:'commodity', tickers:['XAUUSD','XAGUSD','WTI','NATGAS'], tfs:['4h','1d']},
+    {asset:'index',  tickers:['SPX','NDX','DJI','RUT'], tfs:['4h','1d']}
   ].filter(function(g){ return c.classes.indexOf(g.asset)>=0; });
+  // Build all (class × timeframe) scan jobs, then run them with LIMITED CONCURRENCY —
+  // a broader universe stays fast, but we cap parallel calls so we don't trip Yahoo's
+  // rate limit on cloud IPs (which would silently drop signals).
+  var jobs=[];
+  groups.forEach(function(g){ g.tfs.forEach(function(gtf){ jobs.push({asset:g.asset, tickers:g.tickers, tf:gtf}); }); });
   var opps=[];
-  try{
-    for(var gi=0; gi<groups.length; gi++){
-      var g=groups[gi];
-      for(var ti=0; ti<g.tfs.length; ti++){
-       var gtf=g.tfs[ti];
-       try{
-        var r=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:g.tickers, asset_type:g.asset, timeframe:gtf})});
-        var rows=(r&&r.results)||[];
-        rows.forEach(function(row){
-          if(!row.signal||row.error||(row.signal!=='BUY'&&row.signal!=='SELL'))return;
-          if(!row.entry||!(row.stop_loss||row.sl)||!(row.tp1||row.tp))return;
-          opps.push({
-            sym: row.ticker||row.symbol||'', tf:(row.timeframe||gtf).toUpperCase(), sig:row.signal,
-            entry:row.entry, sl:row.stop_loss||row.sl, tp:row.tp1||row.tp, tp2:row.tp2||null, tp3:row.tp3||null,
-            asset:g.asset, conf: row.confidence_pct!=null?row.confidence_pct:(row.bull_score!=null&&((row.bull_score+row.bear_score)>0)?Math.round(row.bull_score/((row.bull_score||0)+(row.bear_score||0))*100):0),
-            confLbl: row.confidence_label||row.confidence||'LIKELY',
-            qscore: (row.quality&&(row.quality.score!=null?row.quality.score:row.quality))||row.confidence_pct||0,
-            rr1Raw: row.rr1_raw!=null?row.rr1_raw:null, spreadCost:row.spread_cost!=null?row.spread_cost:null, spreadQuality:row.spread_quality||'fair',
-            bullCount:row.bull_score||0, bearCount:row.bear_score||0, volRatio:row.vol_ratio||1.0, reason:row.reason||row.summary||'Live DotVerse signal',
-            atr: row.atr!=null?row.atr:(row.atr_value!=null?row.atr_value:null), rsi: row.rsi!=null?row.rsi:50,
-            quality: row.quality||null, smc_structures: row.smc_structures||null, regime_context: row.regime_context||''
-          });
-        });
-       }catch(e){}
-      }
+  function _ingest(rows, gtf, gasset){
+    (rows||[]).forEach(function(row){
+      if(!row.signal||row.error||(row.signal!=='BUY'&&row.signal!=='SELL'))return;
+      if(!row.entry||!(row.stop_loss||row.sl)||!(row.tp1||row.tp))return;
+      opps.push({
+        sym: row.ticker||row.symbol||'', tf:(row.timeframe||gtf).toUpperCase(), sig:row.signal,
+        entry:row.entry, sl:row.stop_loss||row.sl, tp:row.tp1||row.tp, tp2:row.tp2||null, tp3:row.tp3||null,
+        asset:gasset, conf: row.confidence_pct!=null?row.confidence_pct:(row.bull_score!=null&&((row.bull_score+row.bear_score)>0)?Math.round(row.bull_score/((row.bull_score||0)+(row.bear_score||0))*100):0),
+        confLbl: row.confidence_label||row.confidence||'LIKELY',
+        qscore: (row.quality&&(row.quality.score!=null?row.quality.score:row.quality))||row.confidence_pct||0,
+        rr1Raw: row.rr1_raw!=null?row.rr1_raw:null, spreadCost:row.spread_cost!=null?row.spread_cost:null, spreadQuality:row.spread_quality||'fair',
+        bullCount:row.bull_score||0, bearCount:row.bear_score||0, volRatio:row.vol_ratio||1.0, reason:row.reason||row.summary||'Live DotVerse signal',
+        atr: row.atr!=null?row.atr:(row.atr_value!=null?row.atr_value:null), rsi: row.rsi!=null?row.rsi:50,
+        quality: row.quality||null, smc_structures: row.smc_structures||null, regime_context: row.regime_context||''
+      });
+    });
+  }
+  var _ji=0;
+  async function _scanWorker(){
+    while(_ji<jobs.length){
+      var job=jobs[_ji++];
+      try{
+        var r=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:job.tickers, asset_type:job.asset, timeframe:job.tf})});
+        _ingest((r&&r.results)||[], job.tf, job.asset);
+      }catch(e){}
     }
+  }
+  try{
+    var _pool=[]; for(var _k=0;_k<Math.min(4,jobs.length);_k++) _pool.push(_scanWorker());
+    await Promise.all(_pool);
   }catch(e){}
-  // Rank by quality/confidence, then diversify (max per class, de-dupe symbol)
+  // Quality-FIRST ranking: composite quality score, then confidence.
   opps.sort(function(a,b){ return (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0); });
+  // Prefer setups that clear a quality floor; only fall below it if we'd otherwise have too
+  // few to fill the plan — DotVerse won't place low-quality trades just to hit a quota.
+  var QFLOOR=45;
+  var ranked = opps.filter(function(o){ return (o.qscore||0)>=QFLOOR; })
+               .concat(opps.filter(function(o){ return (o.qscore||0)<QFLOOR; }));
   var plan=[], perClass={}, seen={};
-  for(var i=0;i<opps.length;i++){
-    var o=opps[i], cls=o.asset, key=o.sym;
+  for(var i=0;i<ranked.length;i++){
+    var o=ranked[i], cls=o.asset, key=o.sym;
     if(seen[key]) continue;
     if((perClass[cls]||0) >= c.maxPerClass) continue;
     if(plan.length >= c.maxTrades) break;
