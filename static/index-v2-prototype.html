@@ -10785,7 +10785,7 @@ function _todayRenderPlan(){
     riskpct:'That max loss as a percentage of your account balance.',
     profit:'Your profit if price reaches the first take-profit (TP1), after all trading costs.',
     reward:'Reward-to-risk ratio — dollars you make for every $1 you risk. 1:2 means risk $10 to make $20.',
-    cashin:'The total position value you control. The actual cash you put up — shown beside it — is less for leveraged assets where the broker provides the rest.',
+    cashin:'The cash you actually put up to open this trade. For leveraged assets that cash controls a larger position — shown beside it as “controls $…”. Your real risk is still only the Max loss.',
     tradeamt:'The cash you put in to open this position (spot — no leverage).',
     margin:'The cash actually tied up to open this trade. With leverage you control a larger position than the cash you put up.',
     controls:'The full position value you control. You only put up the margin shown; the broker provides the rest via leverage.',
@@ -10891,11 +10891,24 @@ function _todayRenderPlan(){
 // whole budget is deployed (trades too small to place don't waste budget).
 function _todayAllocate(plan, acct, budget){
   if(!plan||!plan.length) return;
-  var per0 = budget/plan.length;
-  plan.forEach(function(o){ o._size=_todaySizeTrade(o, acct, per0); });
-  var nT = plan.filter(function(o){ return o._size.tradeable; }).length || plan.length;
-  var per = budget/nT;
-  plan.forEach(function(o){ o._recRisk=per; o._risk=per; o._size=_todaySizeTrade(o, acct, per); });
+  var budgetD = (acct||0)*((budget||0)/100);   // the $ the WHOLE plan may lose
+  // Find the LARGEST equal per-trade risk whose TOTAL max-loss (net of costs) still fits
+  // the budget. Total loss rises with per (bigger positions, and more trades cross the
+  // broker's minimum lot), so we scan per upward and keep the last value that stays within
+  // budget. This deploys as much of the budget as possible and NEVER exceeds it — even when
+  // a higher per would let an extra trade in and tip the plan over.
+  var best=null;
+  var steps=240;
+  for(var i=1;i<=steps;i++){
+    var per=budget*i/steps;
+    plan.forEach(function(o){ o._size=_todaySizeTrade(o, acct, per); });
+    var tr=plan.filter(function(o){ return o._size.tradeable; });
+    if(!tr.length) continue;
+    var totNet=tr.reduce(function(a,o){ return a+o._size.netLoss; },0);
+    if(totNet<=budgetD+1e-9){ best=per; }
+  }
+  var perFinal = (best!=null) ? best : budget/plan.length;
+  plan.forEach(function(o){ o._recRisk=perFinal; o._risk=perFinal; o._size=_todaySizeTrade(o, acct, perFinal); });
 }
 // Account box: re-size the WHOLE current plan to a new account balance, instantly.
 function _todaySetAccount(val){
