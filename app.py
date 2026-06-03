@@ -404,6 +404,27 @@ class MarkovEngine:
 # and this weight scales how much it affects the vote counts.
 MARKOV_DEFAULT_WEIGHT = 0.3
 
+def _markov_tf_multiplier(timeframe):
+    """Taper the Markov vote by timeframe.
+
+    Markov is computed from DAILY data, so its regime read is genuinely relevant
+    to higher-timeframe (position/swing) trades but is a poor fit for intraday
+    scalps. We scale its influence down on short timeframes so a great 1h setup is
+    judged on its own confluence and isn't dragged by a daily regime bias:
+        1d/1w/1mo (position) → full (×1.0  → ~0.30 vote)
+        4h/2h/...  (swing)   → ×0.67       → ~0.20 vote
+        1h and below (intraday/scalp) → ×0.167 → ~0.05 vote
+    """
+    tf = (timeframe or "").strip().lower()
+    if tf in ("1d", "d", "1day", "daily", "1w", "w", "1week", "weekly",
+              "1mo", "1mon", "1month", "monthly"):
+        return 1.0
+    if tf in ("4h", "2h", "3h", "6h", "8h", "12h"):
+        return 0.67
+    if tf in ("1h", "60m", "45m", "30m", "15m", "10m", "5m", "3m", "2m", "1m", "scalp"):
+        return 0.167
+    return 0.5  # unknown timeframe → mild taper, neither full nor off
+
 # Cache Markov results for 1 hour since they use daily data
 _markov_cache      = {}
 _markov_cache_lock = threading.Lock()
@@ -4422,7 +4443,11 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     _markov_result = None
     if use_markov:
         _markov_result = _get_markov_signal(ticker, asset_type, weight=markov_weight)
-        _mv = _markov_result.get("weighted_vote", 0.0)
+        # Timeframe-tapered vote: use the weight-independent signal_value (the cache is
+        # keyed by ticker only, so we must scale here, not via the cached weighted_vote)
+        # and apply less Markov influence on short timeframes.
+        _eff_weight = markov_weight * _markov_tf_multiplier(timeframe)
+        _mv = (_markov_result.get("signal_value", 0.0) or 0.0) * _eff_weight
         if _mv > 0:
             bullish_count += _mv
             _markov_desc = (
