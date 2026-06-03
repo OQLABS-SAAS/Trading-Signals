@@ -10819,10 +10819,12 @@ function _todayRenderPlan(){
     edge:'Reward-to-risk for this setup — how many dollars of reward per dollar of risk.'
   };
   var autoTip={ be:'Break-even: after TP1 hits, your stop moves to entry so the trade can no longer turn into a loss.', trail:'Trailing stop: the stop follows price as it runs, locking in more profit.', macro:'News watch: flags high-impact economic news that could move this trade.', inval:'Invalidation: auto-exits if the original signal conditions break down.', sent:'Sentiment: monitors crowd positioning and sentiment shifts.', tp1:'TP1 alert: notifies you when price reaches the first take-profit.', tp2:'TP2 alert: notifies you when price reaches the second take-profit.', weekend:'Weekend guard: manages risk before the weekend market gap.' };
-  var totExp=0, totCashIn=0, totRisk=0, totGross=0, totProfit=0, longs=0, shorts=0, clsSet={}, nTradeable=0, nTooSmall=0;
-  plan.forEach(function(o){ var s=o._size; if(!s.tradeable){ nTooSmall++; return; } totExp+=s.notional; totCashIn+=s.marginReq; totRisk+=s.netLoss; totGross+=s.grossRisk; totProfit+=s.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; nTradeable++; });
+  var totExp=0, totCashIn=0, totRisk=0, totGross=0, totProfit=0, longs=0, shorts=0, clsSet={}, nTradeable=0, nTooSmall=0, nMoved=0;
+  plan.forEach(function(o){ var s=o._size; if(o._live&&o._live.invalid){ nMoved++; return; } if(!s.tradeable){ nTooSmall++; return; } totExp+=s.notional; totCashIn+=s.marginReq; totRisk+=s.netLoss; totGross+=s.grossRisk; totProfit+=s.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; nTradeable++; });
   var autoLbl={be:'Break-even',trail:'Trailing',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
   var cards=plan.map(function(o,idx){
+    // Moved past entry/stop since the scan — drop from the menu (summarised below instead).
+    if(o._live && o._live.invalid) return '';
     var dirCol=o.sig==='BUY'?'#5de8a0':'#e8706e'; var s=o._size;
     var autos=Object.keys(o._autos).filter(function(k){return o._autos[k]&&autoLbl[k];}).map(function(k){return '<span title="'+esc(autoTip[k]||autoLbl[k])+'" style="font-family:var(--mono);font-size:8px;padding:2px 7px;border-radius:3px;background:rgba(93,232,160,.12);border:1px solid rgba(93,232,160,.3);color:rgba(93,232,160,.9);cursor:help;">✓ '+autoLbl[k]+'</span>';}).join(' ');
     var _overridden = Math.abs((o._risk||0)-(o._recRisk||0))>0.01;
@@ -10899,6 +10901,7 @@ function _todayRenderPlan(){
     + budgetBanner
     + (riskPct>6 && !overBudget?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower the budget or trade fewer.</div>':'')
     + (nTooSmall>0&&!underBudget ? (function(){ var sug=Math.min(3, Math.round((budget+1)*100)/100); var canRaise=sug>budget+1e-9; return '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nTooSmall+' more good setup'+(nTooSmall===1?'':'s')+' need a little more room to place on a '+money(c.acct)+' account — they’re shown below as opportunities.'+(canRaise?' <button onclick="_todayRaiseBudget('+sug+')" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(201,168,76,.45);background:rgba(201,168,76,.12);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">Raise budget to '+sug+'% →</button>':' Raise the risk % on a card to size it up.')+'</div>'; })() : '')
+    + (nMoved>0?'<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nMoved+' setup'+(nMoved===1?'':'s')+' drifted past the entry since the scan — dropped from your plan so the menu stays current. <button onclick="_todayBuildPlan()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(237,232,216,.25);background:rgba(237,232,216,.06);color:rgba(237,232,216,.8);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">↻ Rebuild for fresh setups</button></div>':'')
     + (nTradeable>0?'<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+nTradeable+' →</button>':'')
   + '</div>';
   // Totals footer at the BOTTOM — the grand total after all the trade cards.
@@ -10911,6 +10914,9 @@ function _todayRenderPlan(){
       + '<div style="flex:1;min-width:104px;">'+lab('Total risk · all trades','Your TOTAL portfolio risk if every trade hits its stop — the sum of every trade\'s risk, versus your chosen budget.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+' <span style="font-size:11px;font-weight:600;">('+riskPct.toFixed(2)+'% · budget '+budget+'%)</span></div></div>'
     + '</div></div>' : '';
   area.innerHTML=summary+cards+footer;
+  // Record which setups are currently dropped-as-moved, so the live loop only re-renders
+  // when that set actually changes (a setup newly drifts past entry) — no needless reshuffle.
+  window._todayLastInvalid = (plan||[]).reduce(function(a,o,i){ if(o._live&&o._live.invalid)a.push(i); return a; },[]).join(',');
   _todayStartLivePrices();
   _dvTapTipInit();
 }
@@ -11132,7 +11138,13 @@ function _todayStartLivePrices(){
       _todayRenderPlan();
     }
   });
-  window._todayLpTimer=setInterval(pass,5000);
+  window._todayLpTimer=setInterval(function(){
+    pass().then(function(){
+      var inv=(window._todayPlan||[]).reduce(function(a,o,i){ if(o._live&&o._live.invalid)a.push(i); return a; },[]).join(',');
+      // A setup newly drifted past entry (or recovered) → re-render so the menu drops/keeps it.
+      if(window._todayLastInvalid!==undefined && inv!==window._todayLastInvalid){ _todayRenderPlan(); }
+    });
+  },5000);
 }
 // ── Review & place — single card or the whole basket, one confirmed batch ──
 function _todayPlaceTrade(idx){ var o=(window._todayPlan||[])[idx]; if(!o||!o._size.tradeable) return; _todayConfirmAndPlace([o]); }
