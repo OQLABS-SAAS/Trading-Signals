@@ -8467,6 +8467,14 @@ def mt5_submit_order():
             timeframe        = timeframe or None,
             entry_confluence = float(entry_confluence) if entry_confluence is not None else None,
             entry_atr        = float(entry_atr)        if entry_atr        is not None else None,
+            trailing         = bool(body.get("trailing", False)),
+            be               = bool(body.get("be", False)),
+            macro            = bool(body.get("macro", False)),
+            inval            = bool(body.get("inval", False)),
+            sent             = bool(body.get("sent", False)),
+            tp1_alert        = bool(body.get("tp1_alert", False)),
+            tp2_alert        = bool(body.get("tp2_alert", False)),
+            weekend          = bool(body.get("weekend", False)),
             status           = "pending",
             comment          = f"DotVerse {ticker} {direction}",
         )
@@ -8557,6 +8565,14 @@ def mt5_get_pending():
                 "tp3":          o.tp3,
                 "action":       o.action or "open",
                 "close_ticket": o.close_ticket,
+                "trailing":     bool(o.trailing),
+                "be":           bool(o.be),
+                "macro":        bool(o.macro),
+                "inval":        bool(o.inval),
+                "sent":         bool(o.sent),
+                "tp1_alert":    bool(o.tp1_alert),
+                "tp2_alert":    bool(o.tp2_alert),
+                "weekend":      bool(o.weekend),
             })
             if o.order_type == "TRAILING":
                 o.status = "filled"
@@ -14836,6 +14852,14 @@ class MT5Order(_Base):
     comment          = Column(String(128),nullable=True)
     entry_confluence = Column(Float,      nullable=True)   # bull_pct at time of submission (0.0–1.0)
     entry_atr        = Column(Float,      nullable=True)   # ATR price distance at time of submission
+    trailing         = Column(Boolean,    nullable=True, default=False)   # trailing stop requested
+    be               = Column(Boolean,    nullable=True, default=False)   # break-even after TP1
+    macro            = Column(Boolean,    nullable=True, default=False)   # macro news watch
+    inval            = Column(Boolean,    nullable=True, default=False)   # invalidation monitor
+    sent             = Column(Boolean,    nullable=True, default=False)   # sentiment monitor
+    tp1_alert        = Column(Boolean,    nullable=True, default=False)   # TP1 hit alert
+    tp2_alert        = Column(Boolean,    nullable=True, default=False)   # TP2 hit alert
+    weekend          = Column(Boolean,    nullable=True, default=False)   # weekend guard
     account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=True, index=True)
     created_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
     filled_at   = Column(DateTime,   nullable=True)
@@ -15175,6 +15199,15 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS mt5_ticket INTEGER"))
                 # Widen action column — original VARCHAR(8) too short for "modify_sl" (9 chars)
                 _conn.execute(text("ALTER TABLE mt5_orders ALTER COLUMN action TYPE VARCHAR(32)"))
+                # Automation flag columns for TODAY tab — sent with orders so EA can apply per-trade automations
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS trailing BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS be BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS macro BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS inval BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS sent BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp1_alert BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp2_alert BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS weekend BOOLEAN DEFAULT FALSE"))
                 # Phase A/B/C/D automation tables (idempotent)
                 _conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS notifications (
