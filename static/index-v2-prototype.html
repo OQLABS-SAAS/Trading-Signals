@@ -10621,8 +10621,31 @@ async function _todayRecommendAutos(o){
   }catch(e){}
   return _todayDefaultAutos(o.tf);
 }
+// Make every hover tooltip (dotted ⓘ labels) ALSO open on tap/click — so the
+// plain-English explanations are reachable on mobile and discoverable on desktop.
+function _dvTapTipInit(){
+  if(window.__dvTapTip) return; window.__dvTapTip=true;
+  var pop=document.createElement('div'); pop.id='dvTapTip';
+  pop.style.cssText='position:fixed;z-index:99999;max-width:280px;padding:10px 12px;border-radius:8px;background:#0a0e16;border:1px solid rgba(201,168,76,.55);color:#ede8d8;font-family:var(--mono),monospace;font-size:11px;line-height:1.55;box-shadow:0 10px 34px rgba(0,0,0,.55);display:none;';
+  document.body.appendChild(pop);
+  function hide(){ pop.style.display='none'; }
+  document.addEventListener('click',function(e){
+    var el=(e.target&&e.target.closest)?e.target.closest('[title]'):null;
+    if(el && el.getAttribute('title') && getComputedStyle(el).cursor==='help'){
+      pop.textContent=el.getAttribute('title');
+      pop.style.display='block'; pop.style.left='0px'; pop.style.top='-9999px';
+      var pw=pop.offsetWidth, ph=pop.offsetHeight, r=el.getBoundingClientRect();
+      var left=Math.min(Math.max(8,r.left), Math.max(8, window.innerWidth-pw-8));
+      var top=r.bottom+8; if(top+ph>window.innerHeight-8) top=Math.max(8, r.top-ph-8);
+      pop.style.left=left+'px'; pop.style.top=top+'px'; e.preventDefault();
+    } else if(e.target!==pop && !pop.contains(e.target)){ hide(); }
+  });
+  document.addEventListener('scroll',hide,true);
+  window.addEventListener('resize',hide);
+}
 function showToday(){
   var el=document.getElementById('dashContent'); if(!el) return;
+  _dvTapTipInit();
   var c=window._todayCfg;
   var classes=[['crypto','Crypto'],['stock','Stocks'],['forex','Forex'],['commodity','Commodities'],['index','Indices']];
   var chips=classes.map(function(p){ var on=c.classes.indexOf(p[0])>=0;
@@ -10777,7 +10800,7 @@ function _todayRenderPlan(){
   var autoLbl={be:'Break-even',trail:'Trailing',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
   var cards=plan.map(function(o,idx){
     var dirCol=o.sig==='BUY'?'#5de8a0':'#e8706e'; var s=o._size;
-    var autos=Object.keys(o._autos).filter(function(k){return o._autos[k]&&autoLbl[k];}).map(function(k){return '<span title="'+esc(autoTip[k]||autoLbl[k])+'" style="font-family:var(--mono);font-size:8px;padding:2px 6px;border-radius:3px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:rgba(201,168,76,.85);cursor:help;">'+autoLbl[k]+'</span>';}).join(' ');
+    var autos=Object.keys(o._autos).filter(function(k){return o._autos[k]&&autoLbl[k];}).map(function(k){return '<span title="'+esc(autoTip[k]||autoLbl[k])+'" style="font-family:var(--mono);font-size:8px;padding:2px 7px;border-radius:3px;background:rgba(93,232,160,.12);border:1px solid rgba(93,232,160,.3);color:rgba(93,232,160,.9);cursor:help;">✓ '+autoLbl[k]+'</span>';}).join(' ');
     var _overridden = Math.abs((o._risk||0)-(o._recRisk||0))>0.01;
     var riskInput='<span title="'+esc(TT.riskinput)+'" style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);cursor:help;">risk <input type="number" step="0.05" min="0.05" value="'+(+(o._risk||1).toFixed(2))+'" onchange="_todaySetTradeRisk('+idx+',this.value)" title="'+esc(TT.riskinput)+'" style="width:50px;padding:3px 5px;font-family:var(--mono);font-size:10px;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.18);border-radius:4px;color:rgba(237,232,216,.9);outline:none;">%'
       + (_overridden?'<span title="'+esc('DotVerse recommends an equal share of your budget: '+(o._recRisk||0).toFixed(2)+'%.')+'" style="margin-left:3px;color:rgba(201,168,76,.75);cursor:help;">· rec '+(o._recRisk||0).toFixed(2)+'%</span>':'')
@@ -10808,10 +10831,13 @@ function _todayRenderPlan(){
       + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:8px 10px;margin-bottom:8px;">'
         + '<div>'+lab('Max loss (after costs)',TT.maxloss)+'<div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#e8706e;">'+money2(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+sub(s.riskPctOfAcct.toFixed(2)+'% of account',TT.riskpct)+'</div></div>'
         + '<div>'+lab('Net profit if TP1',TT.profit)+'<div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">+'+money2(s.netTP1)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+sub('reward 1 : '+(s.rr||0).toFixed(1),TT.reward)+'</div></div>'
-        + '<div>'+lab('Cash in',TT.cashin)+'<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money(s.marginReq)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+(s.leveraged?' · '+sub('controls '+money(s.notional)+(s.levReal?'':' (est 1:'+s.lev+')'),TT.controls):' · full amount')+'</div></div>'
+        + '<div>'+lab('Cash in',TT.cashin)+'<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money2(s.marginReq)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+(s.leveraged?' · '+sub('controls '+money2(s.notional)+(s.levReal?'':' (est 1:'+s.lev+')'),TT.controls):' · full amount')+'</div></div>'
         + '<div>'+lab('Broker cost',TT.cost)+'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.6);">'+money2(s.costD)+'</div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.35);">spread '+money2(s.spreadD)+' · fee '+money2(s.feeD)+' · slip '+money2(s.slipD)+'</div></div>'
       + '</div>'
-      + (autos?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">'+autos+'</div>':'')
+      + (autos?'<div style="margin-bottom:8px;padding:7px 9px;background:rgba(93,232,160,.04);border:1px solid rgba(93,232,160,.14);border-radius:6px;">'
+          + '<div title="'+esc('These safety automations are ARMED for this trade. The moment you place it, DotVerse runs them automatically at your broker — even if you close the app. Tap any chip to see what it does.')+'" style="font-family:var(--mono);font-size:8px;color:rgba(93,232,160,.8);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;cursor:help;border-bottom:1px dotted rgba(93,232,160,.3);display:inline-block;">⚙ Automations armed — run automatically once you place ⓘ</div>'
+          + '<div style="display:flex;gap:4px;flex-wrap:wrap;">'+autos+'</div>'
+        +'</div>':'')
       + '<div style="font-family:var(--mono);font-size:8px;color:rgba(93,232,160,.55);margin-bottom:9px;line-height:1.4;">🛡 Stop sits at your broker — it protects you even if you close DotVerse or lose internet.</div>'
       + '<button id="today-cta-'+idx+'" onclick="_todayPlaceTrade('+idx+')" style="width:100%;padding:9px;border-radius:6px;background:rgba(93,232,160,.14);border:1px solid rgba(93,232,160,.35);color:#5de8a0;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Review &amp; place →</button>'
     + '</div>';
@@ -10852,13 +10878,14 @@ function _todayRenderPlan(){
   var footer = nTradeable>0 ? '<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:13px 16px;margin-top:2px;background:rgba(201,168,76,.06);">'
     + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(201,168,76,.85);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Plan totals · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
-      + '<div style="flex:1;min-width:104px;">'+lab('Total margin','Combined margin across all trades — what you actually put up. For leveraged trades the full position value is bigger.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(201,168,76,.95);">'+money(totCashIn)+'</div></div>'
-      + '<div style="flex:1;min-width:104px;">'+lab('Total position value','The total size you control across all trades. With leverage this can exceed your cash — your risk is still only the max loss.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(237,232,216,.75);">'+money(totExp)+'</div></div>'
+      + '<div style="flex:1;min-width:104px;">'+lab('Total margin','Combined margin across all trades — what you actually put up. Equals the sum of every card’s Cash in. For leveraged trades the full position value is bigger.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(201,168,76,.95);">'+money2(totCashIn)+'</div></div>'
+      + '<div style="flex:1;min-width:104px;">'+lab('Total position value','The total size you control across all trades. With leverage this can exceed your cash — your risk is still only the max loss.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(237,232,216,.75);">'+money2(totExp)+'</div></div>'
       + '<div style="flex:1;min-width:104px;">'+lab('Total profit if all win','Combined profit if every trade reaches TP1, after costs. Not a promise — some trades will lose; this is the best case.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:#5de8a0;">+'+money2(totProfit)+'</div></div>'
       + '<div style="flex:1;min-width:104px;">'+lab('Total risk · all trades','Your TOTAL portfolio risk if every trade hits its stop — the sum of every trade\'s risk, versus your chosen budget.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+' <span style="font-size:11px;font-weight:600;">('+riskPct.toFixed(2)+'% · budget '+budget+'%)</span></div></div>'
     + '</div></div>' : '';
   area.innerHTML=summary+cards+footer;
   _todayStartLivePrices();
+  _dvTapTipInit();
 }
 // Split a TOTAL risk budget across the trades that can actually be placed, so the
 // whole budget is deployed (trades too small to place don't waste budget).
