@@ -10555,8 +10555,18 @@ function applyCondFilter(type, label, desc){
 }
 
 // ═══════════════════════ TODAY — daily plan home ═══════════════════════
-window._todayCfg = window._todayCfg || { acct:0, riskPct:1, maxPerClass:2, maxTrades:8, autoPlace:false, classes:['crypto','stock','forex','commodity','index'] };
+window._todayCfg = window._todayCfg || { acct:0, riskPct:1, profitGoal:500, maxPerClass:2, maxTrades:8, ladderMode:'beginner', autoPlace:false, classes:['crypto','stock','forex','commodity','index'] };
 window._todayPlan = window._todayPlan || [];
+window._todayLeverage = window._todayLeverage || 100;
+
+function _dvBrokerLeverageOptions(selected){
+  selected = parseInt(selected) || 100;
+  var vals=[100,200,300,400,500];
+  if(vals.indexOf(selected)<0) vals.unshift(selected);
+  return vals.map(function(v){
+    return '<option value="'+v+'"'+(selected===v?' selected':'')+'>1:'+v+'</option>';
+  }).join('');
+}
 
 function _todayToggleClass(id, btn){
   var c=window._todayCfg, i=c.classes.indexOf(id);
@@ -10715,49 +10725,117 @@ function _dvTapTipInit(){
     } else if(e.target!==pop && !pop.contains(e.target)){ hide(); }
   });
   document.addEventListener('scroll',hide,true);
-  window.addEventListener('resize',hide);
+	  window.addEventListener('resize',hide);
+	}
+function _todayEnsureBasketStyles(){
+  if(document.getElementById('todayBasketStyles')) return;
+  var st=document.createElement('style'); st.id='todayBasketStyles';
+  st.textContent = ''
+  + '.today-page .td-pad{padding:16px}.today-page .td-grid{display:grid;gap:12px}.today-page .td-four{grid-template-columns:repeat(4,minmax(0,1fr))}.today-page .td-two{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}'
+  + '.today-page .td-stack{display:flex;gap:7px;flex-wrap:wrap;align-items:center}.today-page .td-sub{font-size:12px;color:rgba(237,232,216,.62);line-height:1.55}.today-page .td-mini{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:rgba(237,232,216,.3)}'
+  + '.today-page .td-btn{border:1px solid rgba(237,232,216,.105);border-radius:5px;background:rgba(237,232,216,.035);color:rgba(237,232,216,.62);font-family:var(--mono);font-size:10px;padding:7px 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:.15s ease;cursor:pointer}.today-page .td-btn:hover{background:rgba(237,232,216,.065);color:#ede8d8}.today-page .td-btn.primary{color:#07100b;background:#5de8a0;border-color:rgba(93,232,160,.7);font-weight:700}.today-page .td-btn.gold{color:#c9a84c;border-color:rgba(201,168,76,.28);background:rgba(201,168,76,.075)}.today-page .td-btn.ghost{background:transparent}.today-page .td-btn.red{color:#e8706e;border-color:rgba(232,112,110,.26);background:rgba(232,112,110,.08)}'
+  + '.today-page .td-field{display:grid;gap:5px}.today-page .td-field label{font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42);letter-spacing:.08em;text-transform:uppercase}.today-page .td-field input,.today-page .td-field select{height:32px;border:1px solid rgba(237,232,216,.105);border-radius:5px;background:rgba(237,232,216,.04);color:#ede8d8;font-family:var(--mono);font-size:11px;padding:0 9px;outline:0}'
+  + '.today-page .td-card{background:rgba(237,232,216,.026);border:1px solid rgba(237,232,216,.105);border-radius:7px;overflow:hidden}.today-page .td-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;border-bottom:1px solid rgba(237,232,216,.07)}.today-page .td-card-head h2,.today-page .td-card-title{font-family:var(--syne);font-size:15px;font-weight:500;letter-spacing:-.02em;color:#ede8d8;margin:0}'
+  + '.today-page .td-pill{display:inline-flex;align-items:center;border:1px solid rgba(237,232,216,.105);border-radius:999px;background:rgba(237,232,216,.026);padding:4px 9px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.62);white-space:nowrap}.today-page .td-pill.green{color:#5de8a0;border-color:rgba(93,232,160,.24);background:rgba(93,232,160,.08)}.today-page .td-pill.gold{color:#c9a84c;border-color:rgba(201,168,76,.28);background:rgba(201,168,76,.075)}.today-page .td-pill.blue{color:#7eb7ff;border-color:rgba(126,183,255,.24);background:rgba(126,183,255,.06)}.today-page .td-pill.red{color:#e8706e;border-color:rgba(232,112,110,.26);background:rgba(232,112,110,.08)}'
+  + '.today-page .td-metric{min-height:78px;text-align:left;background:rgba(237,232,216,.032);border:1px solid rgba(237,232,216,.085);border-radius:6px;padding:11px;color:#ede8d8}.today-page .td-metric b{display:block;font-family:var(--mono);font-size:20px;margin:5px 0 2px}.today-page .green{color:#5de8a0}.today-page .red{color:#e8706e}.today-page .gold{color:#c9a84c}.today-page .blue{color:#7eb7ff}'
+  + '.today-page .basket-total{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-bottom:12px}.today-page .risk-preset-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;padding:11px 12px;border:1px solid rgba(201,168,76,.16);background:rgba(201,168,76,.035);border-radius:7px}.today-page .risk-preset-copy{min-width:220px;flex:1}.today-page .risk-preset-copy b{display:block;font-family:var(--mono);font-size:11px;color:#c9a84c;text-transform:uppercase;letter-spacing:.06em}.today-page .risk-preset-copy span{display:block;font-size:11px;color:rgba(237,232,216,.42);margin-top:3px}.today-page .risk-preset-actions{display:flex;gap:7px;flex-wrap:wrap}.today-page .risk-preset-actions .td-btn{min-width:112px}'
+  + '.today-page .fire-panel{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(93,232,160,.22);background:linear-gradient(135deg,rgba(93,232,160,.075),rgba(237,232,216,.018));border-radius:7px;padding:13px 15px;margin-bottom:12px}'
+  + '.today-page .td-table-wrap{overflow:auto}.today-page .td-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10.5px}.today-page .td-table th,.today-page .td-table td{border-bottom:1px solid rgba(237,232,216,.07);padding:9px 8px;text-align:left;color:rgba(237,232,216,.62);vertical-align:middle}.today-page .td-table th{font-size:8.5px;color:rgba(237,232,216,.42);text-transform:uppercase;font-weight:500}.today-page .td-table tr:hover td{background:rgba(237,232,216,.025)}'
+  + '.today-page .trade-detail{border:1px solid rgba(237,232,216,.075);border-radius:6px;background:rgba(237,232,216,.018);padding:9px 10px;margin-top:8px}.today-page .mini-ladder{display:grid;grid-template-columns:40px 1fr 52px 52px 78px;gap:6px;align-items:center;font-family:var(--mono);font-size:9px;margin-top:7px}.today-page .mini-ladder.head{font-size:8px;color:rgba(237,232,216,.42);text-transform:uppercase;letter-spacing:.05em}.today-page .mini-ladder div{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  + '.today-page .td-sig-card{position:relative;background:rgba(237,232,216,.026);border:1px solid rgba(237,232,216,.105);border-radius:7px;padding:15px;text-align:left;overflow:hidden}.today-page .td-sig-card:before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,rgba(93,232,160,.65),transparent)}.today-page .td-sig-card.short:before{background:linear-gradient(90deg,rgba(232,112,110,.65),transparent)}.today-page .sig-symbol{font-family:var(--syne);font-size:21px;font-weight:500}.today-page .sig-meta{font-size:11px;color:rgba(237,232,216,.42);margin-top:2px}.today-page .sig-live{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid rgba(93,232,160,.15);border-radius:6px;background:rgba(93,232,160,.045);padding:8px 10px;margin-top:11px}.today-page .sig-live span{font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42);text-transform:uppercase;letter-spacing:.06em}.today-page .sig-live b{font-family:var(--mono);font-size:16px;color:#5de8a0}.today-page .sig-levels,.today-page .sig-detail-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.today-page .sig-level,.today-page .sig-mini{border:1px solid rgba(237,232,216,.07);border-radius:5px;background:rgba(237,232,216,.025);padding:8px;min-width:0}.today-page .sig-level b,.today-page .sig-mini b{display:block;font-family:var(--mono);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.today-page .sig-level span,.today-page .sig-mini span{display:block;font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.42);text-transform:uppercase;margin-bottom:3px}'
+  + '.today-page .flow-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:22px;padding:15px 18px;background:rgba(237,232,216,.026);border:1px solid rgba(237,232,216,.105);border-radius:8px}.today-page .flow-footer-step{font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.42);letter-spacing:.08em;text-transform:uppercase}.today-page .flow-footer-msg{font-size:13px;color:rgba(237,232,216,.62)}'
+  + '@media(max-width:1100px){.today-page .basket-total{grid-template-columns:repeat(2,minmax(0,1fr))}.today-page .td-two{grid-template-columns:1fr}.today-page .td-four{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.today-page .basket-total,.today-page .td-four,.today-page .sig-levels,.today-page .sig-detail-grid{grid-template-columns:1fr}.today-page .fire-panel,.today-page .flow-footer{align-items:stretch;flex-direction:column}.today-page .mini-ladder{grid-template-columns:34px 1fr 48px}}';
+  document.head.appendChild(st);
 }
+function _todayPill(text,tone){ return '<span class="td-pill '+(tone||'')+'">'+text+'</span>'; }
+function _todayMetric(label,value,sub,tone){ return '<div class="td-metric"><span class="td-mini">'+label+'</span><b class="'+(tone||'')+'">'+value+'</b><span class="td-sub">'+sub+'</span></div>'; }
+function _todayPreset(mode){
+  mode=(mode||'beginner').toLowerCase();
+  if(mode==='conservative') return {id:'conservative', label:'Conservative', riskPct:1.25, note:'Lowest stress. Smaller size while learning the setup.'};
+  if(mode==='aggressive') return {id:'aggressive', label:'Aggressive', riskPct:5, note:'High exposure. Visible but clearly marked for experienced traders only.'};
+  return {id:'beginner', label:'Beginner', riskPct:2.6, note:'Balanced learning mode. Enough upside for the weekly goal without oversizing.'};
+}
+function _todayRiskPresetBar(){
+  var c=window._todayCfg||{}, p=_todayPreset(c.ladderMode);
+  var btn=function(id,label,tone){ var on=(p.id===id); return '<button class="td-btn '+(on?(tone||'gold'):'ghost')+'" onclick="_todaySetRiskPreset(\''+id+'\')">'+label+'</button>'; };
+  return '<div class="risk-preset-bar"><div class="risk-preset-copy"><b>'+p.label+' risk preset</b><span>'+p.note+'</span></div><div class="risk-preset-actions">'+btn('conservative','Conservative','gold')+btn('beginner','Beginner','primary')+btn('aggressive','Aggressive','red')+'</div></div>';
+}
+function _todaySetRiskPreset(mode){
+  var c=window._todayCfg||{}; var p=_todayPreset(mode);
+  c.ladderMode=p.id; c.riskPct=p.riskPct;
+  var r=document.getElementById('todayRisk'); if(r) r.value=p.riskPct;
+  var lm=document.getElementById('todayLadderMode'); if(lm) lm.value=p.id;
+  var plan=window._todayPlan||[];
+  plan.forEach(function(o){ o._ladderMode=p.id; });
+  if(plan.length){ _todayAllocate(plan,c.acct,p.riskPct); window._todaySorted=false; showToday(); _todayRenderPlan(); }
+  else showToday();
+}
+function _todaySetMarketPreset(v){
+  var c=window._todayCfg||{};
+  c.classes = v==='forex' ? ['forex','commodity'] : v==='crypto' ? ['crypto'] : ['crypto','stock','forex','commodity','index'];
+  showToday();
+}
+function _todaySelectTrade(idx){ window._todaySelectedIdx=idx; window._todayExpandedIdx=idx; _todayRenderPlan(); }
+function _todayToggleTrade(idx){ window._todayExpandedIdx=(window._todayExpandedIdx===idx?null:idx); window._todaySelectedIdx=idx; _todayRenderPlan(); }
 function showToday(){
-  var el=document.getElementById('dashContent'); if(!el) return;
-  _dvTapTipInit();
-  var c=window._todayCfg;
-  var classes=[['crypto','Crypto'],['stock','Stocks'],['forex','Forex'],['commodity','Commodities'],['index','Indices']];
+	  var el=document.getElementById('dashContent'); if(!el) return;
+	  _todayEnsureBasketStyles();
+	  _dvTapTipInit();
+	  var c=window._todayCfg;
+	  var classes=[['crypto','Crypto'],['stock','Stocks'],['forex','Forex'],['commodity','Commodities'],['index','Indices']];
   var chips=classes.map(function(p){ var on=c.classes.indexOf(p[0])>=0;
     return '<button onclick="_todayToggleClass(\''+p[0]+'\',this)" style="padding:5px 11px;border-radius:5px;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;border:1px solid '+(on?'rgba(201,168,76,.5)':'rgba(237,232,216,.15)')+';background:'+(on?'rgba(201,168,76,.12)':'transparent')+';color:'+(on?'var(--gold)':'rgba(237,232,216,.4)')+';">'+p[1]+'</button>'; }).join('');
-  var fld=function(label,inner,tip){ return '<div><div'+(tip?' title="'+String(tip).replace(/"/g,'&quot;')+'" style="cursor:help;border-bottom:1px dotted rgba(237,232,216,.25);display:inline-block;':' style="')+'font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.04em;margin-bottom:4px;text-transform:uppercase;">'+label+(tip?' ⓘ':'')+'</div>'+inner+'</div>'; };
-  var inp=function(id,val,w){ return '<input id="'+id+'" value="'+val+'" style="width:'+(w||64)+'px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">'; };
-  el.innerHTML =
-    '<div class="sf-page-head"><div class="sf-page-title">Today</div><div class="sf-breadcrumb">DotVerse finds today\'s best trades, sizes them to your account, and hands you a plan</div></div>'
-    + '<div class="sz-card" style="margin-bottom:14px;">'
-      + '<div class="sz-card-title">Plan settings</div>'
-      + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">'
-        + fld('Account $', '<input id="todayAcct" value="'+(c.acct||'')+'" oninput="_todaySetAccount(this.value)" style="width:90px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">', 'Your account balance — auto-filled from your connected broker. Every trade is sized to this; change it and the whole plan re-sizes live.')
-        + fld('Total risk %', '<input id="todayRisk" type="number" step="0.25" min="0.1" value="'+c.riskPct+'" oninput="_todaySetGlobalRisk(this.value)" style="width:60px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">', 'Your TOTAL risk budget for the whole plan. DotVerse splits it evenly across the trades — 1% across 3 trades is about 0.33% each, so the whole plan risks 1%, not 3%. You can fine-tune each trade on its card.')
-        + fld('Leverage 1:', '<input id="todayLev" type="number" step="1" min="1" value="'+(window._todayLeverage||100)+'" oninput="_todaySetLeverage(this.value)" style="width:64px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">'+(window._todayLeverageSource==='broker'?' <span style="font-family:var(--mono);font-size:8px;color:rgba(93,232,160,.7);">✓ from broker</span>':window._todayLeverageSource==='user'?' <span style="font-family:var(--mono);font-size:8px;color:rgba(93,232,160,.7);">✓ set by you</span>':' <span style="font-family:var(--mono);font-size:8px;color:rgba(201,168,76,.7);">est — set yours</span>'), 'Your broker’s leverage (e.g. 100 = 1:100, 500 = 1:500) — set the real number from your MT5 / broker. DotVerse auto-detects it when your EA reports it. Leverage changes ONLY the cash tied up (margin) to hold a trade — never your position size or max loss, because DotVerse sizes by the risk % you set, not by margin. A higher ceiling like 1:400–500 just frees up margin; it cannot make a trade riskier here.')
-        + fld('Max per class', '<select id="todayMaxPer" onchange="_todaySetMaxPerClass(this.value)" style="padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;"><option value="1"'+(c.maxPerClass===1?' selected':'')+'>1 / class</option><option value="2"'+(c.maxPerClass===2?' selected':'')+'>2 / class</option><option value="3"'+(c.maxPerClass===3?' selected':'')+'>3 / class</option></select>', 'How many trades from one asset class (e.g. crypto) the plan may include. Change it and the plan updates instantly — no rebuild needed.')
-        + fld('Max trades', '<input id="todayMaxTrades" value="'+c.maxTrades+'" onchange="_todaySetMaxTrades(this.value)" style="width:56px;padding:7px 8px;font-family:var(--mono);font-size:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:5px;color:rgba(237,232,216,.9);outline:none;">', 'The most trades the plan will include. Change it and the plan updates instantly — no rebuild needed.')
-      + '</div>'
-      + '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);line-height:1.5;">Risk / trade = how much of your account you lose if the stop hits — this is the size driver, so every trade risks the same. You can fine-tune risk on each card after building, and run more than one per class.</div>'
-      + '<div style="margin-top:13px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);letter-spacing:.04em;margin-bottom:6px;text-transform:uppercase;">Markets to include</div>'
-      + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+chips+'</div>'
-      + '<label title="When ON, DotVerse places every valid trade in the plan automatically after a short countdown you can cancel — no manual clicking. Too-small and moved-entry trades are still skipped. These are REAL orders; leave OFF if you want to review each one first." style="margin-top:14px;display:flex;align-items:center;gap:9px;cursor:pointer;padding:10px 12px;border:1px solid '+(c.autoPlace?'rgba(232,112,110,.4)':'rgba(237,232,216,.14)')+';border-radius:7px;background:'+(c.autoPlace?'rgba(232,112,110,.07)':'rgba(237,232,216,.02)')+';">'
-        + '<input type="checkbox" id="todayAutoPlace"'+(c.autoPlace?' checked':'')+' onchange="_todaySetAutoPlace(this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:#e8706e;">'
-        + '<span style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.8);line-height:1.45;"><strong style="color:'+(c.autoPlace?'#e8706e':'rgba(237,232,216,.9)')+';">Auto-place plan</strong> — fire all valid trades automatically (cancelable countdown). <span style="color:rgba(237,232,216,.45);">Real-money orders · off by default</span></span>'
-      + '</label>'
-      + '<button onclick="_todayBuildPlan()" style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:8px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.04em;cursor:pointer;">⚡ Build my plan</button>'
-    + '</div>'
-    + '<div id="todayPlanArea"></div>';
+	  var p=_todayPreset(c.ladderMode);
+	  el.innerHTML =
+	    '<div class="today-page">'
+	    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">Tell DotVerse your weekly profit target. It returns a live basket, sizes every trade, expands each ladder, and lets you fire the whole plan only after review.</div></div><div class="pg-hd-right">'+_todayPill('Practice-first','green')+_todayPill('Live prices monitored','gold')+'</div></div>'
+	    + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>Plan criteria</h2><button class="td-btn primary" onclick="_todayBuildPlan()">Find trades</button></div><div class="td-pad">'
+	      + '<div class="td-grid td-four">'
+	        + '<div class="td-field"><label>Weekly profit target</label><input id="todayProfitGoal" type="number" step="10" min="0" value="'+(c.profitGoal||500)+'" oninput="_todaySetProfitGoal(this.value)"></div>'
+	        + '<div class="td-field"><label>Total risk budget</label><input id="todayRisk" type="number" step="0.25" min="0.1" value="'+(c.riskPct||p.riskPct)+'" oninput="_todaySetGlobalRisk(this.value)"></div>'
+	        + '<div class="td-field"><label>Markets</label><select onchange="_todaySetMarketPreset(this.value)"><option value="all">Forex, gold, crypto, indices</option><option value="forex">Forex only</option><option value="crypto">Crypto only</option></select></div>'
+	        + '<div class="td-field"><label>Broker leverage</label><select id="todayLev" onchange="_todaySetLeverage(this.value)">'+_dvBrokerLeverageOptions(window._todayLeverage||100)+'</select></div>'
+	      + '</div>'
+	      + '<div style="display:none;"><input id="todayAcct" value="'+(c.acct||'')+'"><select id="todayLadderMode"><option value="'+(c.ladderMode||'beginner')+'" selected></option></select><input id="todayMaxTrades" value="'+c.maxTrades+'"><select id="todayMaxPer"><option value="'+c.maxPerClass+'" selected></option></select><input type="checkbox" id="todayAutoPlace"'+(c.autoPlace?' checked':'')+'></div>'
+	      + _todayRiskPresetBar()
+	      + '<div class="td-sub" style="margin-top:10px">Dynamic basket mode: quality first, target second. The totals update the moment a risk preset, trade, timeframe, or ladder is changed.</div>'
+	      + '<div style="margin-top:13px"><div class="td-mini" style="margin-bottom:6px;">Markets to include</div><div class="td-stack">'+chips+'</div></div>'
+	    + '</div></div>'
+	    + '<div id="todayPlanArea"></div></div>';
   // Stop any live monitor from a previous plan, and pull the real broker balance.
   _todayStopLivePrices(); window._todaySorted=false;
   if(!c.acct){
     dvFetch('/api/mt5/state').then(function(d){
       if(d&&d.account){
-        var lv=parseInt(d.account.leverage); if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; }
+	        var lv=parseInt(d.account.leverage); if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; var le=document.getElementById('todayLev'); if(le){ le.innerHTML=_dvBrokerLeverageOptions(lv); le.value=String(lv); } }
         var b=parseFloat(d.account.balance)||0;
         if(b>0){ c.acct=b; var a=document.getElementById('todayAcct'); if(a && !a.value) a.value=Math.round(b); }
       }
     }).catch(function(){});
   }
+}
+function _todayPlanTotals(plan, acct){
+  var out={profit:0,risk:0,margin:0,notional:0,tradeable:0};
+  (plan||[]).forEach(function(o){
+    var s=o&&o._size; if(!s||!s.tradeable) return;
+    out.profit+=s.netTP1||0; out.risk+=s.netLoss||0; out.margin+=s.marginReq||0; out.notional+=s.notional||0; out.tradeable++;
+  });
+  out.riskPct=acct>0?(out.risk/acct*100):0;
+  return out;
+}
+function _todaySelectPlan(ranked, cfg){
+  var plan=[], perClass={}, seen={}, goal=parseFloat(cfg.profitGoal)||0;
+  for(var i=0;i<(ranked||[]).length;i++){
+    var o=ranked[i], cls=o.asset, key=o.sym;
+    if(seen[key]) continue;
+    if((perClass[cls]||0) >= cfg.maxPerClass) continue;
+    if(plan.length >= cfg.maxTrades) break;
+    plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
+    _todayAllocate(plan, cfg.acct, cfg.riskPct||1);
+    if(goal>0 && _todayPlanTotals(plan,cfg.acct).profit>=goal) break;
+  }
+  _todayAllocate(plan, cfg.acct, cfg.riskPct||1);
+  return plan;
 }
 async function _todayBuildPlan(){
   var area=document.getElementById('todayPlanArea'); if(!area) return;
@@ -10765,15 +10843,18 @@ async function _todayBuildPlan(){
   _todayStopLivePrices(); window._todaySorted=false;
   c.acct = parseFloat(document.getElementById('todayAcct')?.value)||c.acct||0;
   c.riskPct = parseFloat(document.getElementById('todayRisk')?.value)||c.riskPct||1;
+  c.profitGoal = parseFloat(document.getElementById('todayProfitGoal')?.value)||0;
   c.maxPerClass = parseInt(document.getElementById('todayMaxPer')?.value)||2;
   c.maxTrades = parseInt(document.getElementById('todayMaxTrades')?.value)||8;
+  c.ladderMode = document.getElementById('todayLadderMode')?.value || c.ladderMode || 'beginner';
+  var _levSel=parseInt(document.getElementById('todayLev')?.value); if(_levSel>0) window._todayLeverage=_levSel;
   var _ap=document.getElementById('todayAutoPlace'); if(_ap) c.autoPlace=!!_ap.checked;
   // Pull the live broker account: real balance AND real leverage (for accurate margin).
   try{
     var st=await dvFetch('/api/mt5/state');
     if(st && st.account){
       var lv=parseInt(st.account.leverage);
-      if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; }
+	      if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; var le=document.getElementById('todayLev'); if(le){ le.innerHTML=_dvBrokerLeverageOptions(lv); le.value=String(lv); } }
       var b=parseFloat(st.account.balance)||0;
       if(!c.acct && b>0){ c.acct=b; var ai=document.getElementById('todayAcct'); if(ai) ai.value=Math.round(b); }
     }
@@ -10782,15 +10863,18 @@ async function _todayBuildPlan(){
   window._todayFreeMargin = window._mt5AccountBalance || c.acct;
   try{ await _refreshForexRates(); }catch(e){}   // load quote→USD rates BEFORE sizing (JPY pairs etc.)
   area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning your markets for the best setups… 20–30s</div></div>';
-  // Multi-timeframe scan: several timeframes per class so the plan mixes
-  // scalp/day/swing/position trades (not all 4h). Best setup per symbol wins.
-  var groups=[
-    {asset:'crypto', tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','LINKUSD','ADAUSD','AVAXUSD','DOGEUSD','DOTUSD'], tfs:['1h','4h','1d']},
-    {asset:'stock',  tickers:['NVDA','AAPL','TSLA','AMZN','MSFT','META','AMD','GOOGL','NFLX','AVGO'], tfs:['1h','4h','1d']},
-    {asset:'forex',  tickers:['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','EURJPY','GBPJPY'], tfs:['1h','4h','1d']},
-    {asset:'commodity', tickers:['XAUUSD','XAGUSD','WTI','NATGAS'], tfs:['4h','1d']},
-    {asset:'index',  tickers:['SPX','NDX','DJI','RUT'], tfs:['4h','1d']}
-  ].filter(function(g){ return c.classes.indexOf(g.asset)>=0; });
+  // Multi-timeframe scan: use the same full universe as the shared scanner so Today
+  // can choose from the same broad opportunity pool, then narrow it to an account-fit plan.
+  var baseGroups=(typeof ALL_SCAN_GROUPS!=='undefined'?ALL_SCAN_GROUPS:[]).map(function(g){
+    return {asset:g.asset_type, tickers:g.tickers, tfs:g.daily_only?['1d']:['15m','30m','1h','4h','1d','1w']};
+  });
+  var groups=(baseGroups.length?baseGroups:[
+    {asset:'crypto', tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','LINKUSD','ADAUSD','AVAXUSD','DOGEUSD','DOTUSD'], tfs:['15m','30m','1h','4h','1d','1w']},
+    {asset:'stock',  tickers:['NVDA','AAPL','TSLA','AMZN','MSFT','META','AMD','GOOGL','NFLX','AVGO'], tfs:['15m','30m','1h','4h','1d','1w']},
+    {asset:'forex',  tickers:['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','EURJPY','GBPJPY'], tfs:['15m','30m','1h','4h','1d','1w']},
+    {asset:'commodity', tickers:['XAUUSD','XAGUSD','WTI','NATGAS'], tfs:['1d']},
+    {asset:'index',  tickers:['SPX','NDX','DJI','RUT'], tfs:['1d']}
+  ]).filter(function(g){ return c.classes.indexOf(g.asset)>=0; });
   // Build all (class × timeframe) scan jobs, then run them with LIMITED CONCURRENCY —
   // a broader universe stays fast, but we cap parallel calls so we don't trip Yahoo's
   // rate limit on cloud IPs (which would silently drop signals).
@@ -10836,14 +10920,7 @@ async function _todayBuildPlan(){
   var QFLOOR=45;
   var ranked = opps.filter(function(o){ return (o.qscore||0)>=QFLOOR; })
                .concat(opps.filter(function(o){ return (o.qscore||0)<QFLOOR; }));
-  var plan=[], perClass={}, seen={};
-  for(var i=0;i<ranked.length;i++){
-    var o=ranked[i], cls=o.asset, key=o.sym;
-    if(seen[key]) continue;
-    if((perClass[cls]||0) >= c.maxPerClass) continue;
-    if(plan.length >= c.maxTrades) break;
-    plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
-  }
+  var plan=_todaySelectPlan(ranked, c);
   // Total qualifying setups found — counted as UNIQUE SYMBOLS, not symbol×timeframe.
   // We scan each symbol on 3 timeframes, so opps.length triple-counts (e.g. ETHUSD 1h/4h/1d
   // = 3). Showing "73 setups" when there are 35 real opportunities was misleading vs Signals.
@@ -10856,8 +10933,7 @@ async function _todayBuildPlan(){
   // RISK BUDGET MODEL — the top % is the TOTAL risk for the day, split evenly across
   // the chosen trades (1% over 3 trades = ~0.33% each). DotVerse's recommended share
   // is stored so the cards can guide per-trade overrides.
-  _todayAllocate(plan, c.acct, c.riskPct);
-  plan.forEach(function(o){ o._autos=_todayDefaultAutos(o.tf); });
+  plan.forEach(function(o){ o._autos=_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; });
   window._todayPlan=plan;
   _todayRenderPlan();   // show immediately with sensible defaults
   // Upgrade each card to DotVerse's SMART per-trade automations, then re-render.
@@ -10887,6 +10963,58 @@ function _todayHonestConf(o){
     c=Math.min(c, n<=0?70:(n<10?75:85));    // unproven → cautious ceiling
   }
   return Math.round(c);
+}
+function _todayLadderProfile(mode){
+  mode=(mode||'beginner').toLowerCase();
+  if(mode==='conservative') return {label:'Conservative', legs:[{share:.60,target:'tp1'},{share:.25,target:'tp2'},{share:.15,target:'tp3'}]};
+  if(mode==='aggressive') return {label:'Aggressive', legs:[{share:.40,target:'tp1'},{share:.25,target:'tp2'},{share:.20,target:'tp3'},{share:.15,target:'trail'}]};
+  return {label:'Beginner', legs:[{share:.50,target:'tp1'},{share:.30,target:'tp2'},{share:.20,target:'tp3'}]};
+}
+function _todayTargetPrice(o,target){
+  if(target==='tp2') return o.tp2||o.tp;
+  if(target==='tp3') return o.tp3||o.tp2||o.tp;
+  if(target==='trail') return null;
+  return o.tp;
+}
+function _todayLadderLegs(o){
+  var s=o&&o._size; if(!o||!s||!s.tradeable) return [];
+  var prof=_todayLadderProfile(o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner');
+  var spec=_TODAY_LOTSPEC[o.asset]||{lotMin:0.01};
+  var minLot=spec.lotMin||0;
+  var lots=s.lots||_todayMt5Lots(o);
+  var entry=parseFloat(o.entry)||0, fx=_todayUsdPerQuote(o), isSell=(o.sig||'BUY').toUpperCase()==='SELL';
+  var legs=prof.legs.map(function(l,idx){
+    var tp=_todayTargetPrice(o,l.target), dist=tp?Math.abs(parseFloat(tp)-entry):Math.abs(parseFloat(o.tp3||o.tp2||o.tp||entry)-entry);
+    var units=(s.units||0)*l.share, gross=dist*units*fx, profit=Math.max(0,gross-(s.costD||0)*l.share);
+    return {idx:idx+1, mode:prof.label, share:l.share, target:l.target, tp:tp, trailing:l.target==='trail',
+      lots:lots*l.share, units:units, margin:s.marginReq*l.share, notional:s.notional*l.share,
+      risk:s.netLoss*l.share, profit:profit };
+  });
+  if(minLot>0 && legs.some(function(l){ return l.lots>0 && l.lots<minLot; })){
+    return [{idx:1, mode:'Single', share:1, target:'tp1', tp:o.tp, trailing:false, lots:lots, units:s.units, margin:s.marginReq, notional:s.notional, risk:s.netLoss, profit:s.netTP1, tooSmallSplit:true}];
+  }
+  return legs;
+}
+function _todayLadderHtml(o, idx, pxFmt, money2, esc){
+  var legs=_todayLadderLegs(o), mode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
+  var btn=function(m,label){ var on=mode===m; return '<button onclick="_todaySetTradeLadder('+idx+',\''+m+'\')" style="padding:4px 8px;border-radius:4px;border:1px solid '+(on?'rgba(93,232,160,.35)':'rgba(237,232,216,.14)')+';background:'+(on?'rgba(93,232,160,.1)':'transparent')+';color:'+(on?'rgba(93,232,160,.9)':'rgba(237,232,216,.45)')+';font-family:var(--mono);font-size:8.5px;font-weight:700;cursor:pointer;">'+label+'</button>'; };
+  var totals=legs.reduce(function(a,l){ a.margin+=l.margin; a.notional+=l.notional; a.risk+=l.risk; a.profit+=l.profit; return a; },{margin:0,notional:0,risk:0,profit:0});
+  var rows=legs.map(function(l){
+    var tgt=l.trailing?'TRAIL':l.target.toUpperCase()+' '+pxFmt(l.tp);
+    return '<div style="display:grid;grid-template-columns:38px 1fr 1fr 1fr 1fr;gap:6px;align-items:center;padding:5px 0;border-top:1px solid rgba(237,232,216,.06);font-family:var(--mono);font-size:8.8px;color:rgba(237,232,216,.62);">'
+      + '<span>#'+l.idx+'</span><span>'+Math.round(l.share*100)+'% · '+(l.lots<0.01?l.lots.toFixed(4):l.lots.toFixed(2))+' lots</span><span>'+tgt+'</span><span style="color:#e8706e;">'+money2(-l.risk)+'</span><span style="color:#5de8a0;">+'+money2(l.profit)+'</span></div>';
+  }).join('');
+  return '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(237,232,216,.025);border:1px solid rgba(237,232,216,.1);">'
+    + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px;"><span style="font-family:var(--mono);font-size:8px;color:rgba(201,168,76,.78);font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Multi-ladder</span>'+btn('conservative','Conservative')+btn('beginner','Beginner')+btn('aggressive','Aggressive')+'</div>'
+    + rows
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:7px;font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.5);">'
+      + '<span>money in <strong style="color:rgba(201,168,76,.9);">'+money2(totals.margin)+'</strong></span>'
+      + '<span>trade size <strong>'+money2(totals.notional)+'</strong></span>'
+      + '<span>risk <strong style="color:#e8706e;">'+money2(-totals.risk)+'</strong></span>'
+      + '<span>profit plan <strong style="color:#5de8a0;">+'+money2(totals.profit)+'</strong></span>'
+    + '</div>'
+    + (legs[0]&&legs[0].tooSmallSplit?'<div style="margin-top:6px;font-family:var(--mono);font-size:8px;color:rgba(201,168,76,.75);">Broker minimum lot is too large for a split, so this trade will submit as one safe order.</div>':'')
+  + '</div>';
 }
 function _todayRenderPlan(){
   var area=document.getElementById('todayPlanArea'); if(!area) return;
@@ -10993,11 +11121,12 @@ function _todayRenderPlan(){
           + 'Broker cost '+money2(s.costD)+' (spread + fee + slippage — already in the numbers above)<br>'
           + 'Position value '+money2(s.notional)+(s.leveraged?' · leverage 1:'+s.lev+(s.levReal?'':' (est)'):' · no leverage')+'<br>'
           + (_pipSize?('Stop ≈ '+Math.round(_slPips)+' pips · pip value ≈ '+money2(_pipVal)+' per pip<br>'):'')
-          + 'Targets: '+_tps.map(function(t,i){ var d=o.sig==='SELL'?(_entryN-parseFloat(t)):(parseFloat(t)-_entryN); var net=Math.abs(d)*s.units*_fx-(s.costD||0); return 'TP'+(i+1)+' '+pxFmt(t)+' (+'+money2(net)+')'; }).join(' · ')+' <span style="opacity:.6;">· after costs</span><br>'
-          + '🛡 Stop sits at your broker — protects you even if you close DotVerse or lose internet.'
-        + '</div>'
-        + '<div id="today-livebox-'+idx+'" style="margin-top:6px;"></div>'
-      + '</details>'
+	          + 'Targets: '+_tps.map(function(t,i){ var d=o.sig==='SELL'?(_entryN-parseFloat(t)):(parseFloat(t)-_entryN); var net=Math.abs(d)*s.units*_fx-(s.costD||0); return 'TP'+(i+1)+' '+pxFmt(t)+' (+'+money2(net)+')'; }).join(' · ')+' <span style="opacity:.6;">· after costs</span><br>'
+	          + '🛡 Stop sits at your broker — protects you even if you close DotVerse or lose internet.'
+	        + '</div>'
+	        + _todayLadderHtml(o, idx, pxFmt, money2, esc)
+	        + '<div id="today-livebox-'+idx+'" style="margin-top:6px;"></div>'
+	      + '</details>'
       + '<button id="today-cta-'+idx+'" onclick="_todayPlaceTrade('+idx+')" style="width:100%;padding:10px;border-radius:7px;background:#5de8a0;color:#06140c;border:none;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Place this trade →</button>'
     + '</div>';
   }).join('');
@@ -11005,8 +11134,11 @@ function _todayRenderPlan(){
   var riskCol=riskPct<=3?'#5de8a0':riskPct<=6?'#c9a84c':'#e8706e';
   var buffer=c.acct-totExp, deployPct=c.acct>0?(totExp/c.acct*100):0;
   // Budget awareness: the top % is the total budget; budgetUsed is the pure risk actually allocated.
-  var budget=c.riskPct||1;
-  var budgetUsed=c.acct>0?(totRisk/c.acct*100):0;   /* net of costs — same basis the allocator fills to, so the banner can't misfire */
+	  var budget=c.riskPct||1;
+	  var goal=parseFloat(c.profitGoal)||0;
+	  var goalHit=goal>0 && totProfit>=goal;
+	  var goalBanner = goal>0 ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:'+(goalHit?'rgba(93,232,160,.82)':'rgba(201,168,76,.85)')+';line-height:1.55;">Weekly goal: <strong>'+money2(goal)+'</strong>. This plan targets <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> at TP1 across '+nTradeable+' trade'+(nTradeable===1?'':'s')+' '+(goalHit?'— target covered.':'— short by <strong>'+money2(goal-totProfit)+'</strong>; raise max trades, widen markets, or wait for stronger setups.')+'</div>' : '';
+	  var budgetUsed=c.acct>0?(totRisk/c.acct*100):0;   /* net of costs — same basis the allocator fills to, so the banner can't misfire */
   var _flex=!!window._todayBudgetFlex;
   var overBudget=!_flex && budgetUsed>budget*1.05;
   var underBudget=!_flex && nTooSmall>0 && budgetUsed<budget*0.6;
@@ -11031,23 +11163,77 @@ function _todayRenderPlan(){
       + '<span>'+nCls+' class'+(nCls===1?'':'es')+' · '+longs+' long / '+shorts+' short</span>'
     + '</div>'
     + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">Your '+budget+'% risk budget is split across '+nTradeable+' trade'+(nTradeable===1?'':'s')+'. If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money2(-totRisk)+'</strong>. Reality lands between — some win, some lose.</div>'
-    + budgetBanner
+	    + goalBanner
+	    + budgetBanner
     + flexBanner
     + (riskPct>6 && !overBudget?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower the budget or trade fewer.</div>':'')
     + (nTooSmall>0&&!underBudget ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);">'+nTooSmall+' setup'+(nTooSmall===1?'':'s')+' didn’t fit your '+money(c.acct)+' account at safe risk and '+(nTooSmall===1?'was':'were')+' skipped. A larger balance places more.</div>' : '')
     + (nMoved>0?'<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nMoved+' setup'+(nMoved===1?'':'s')+' drifted past the entry since the scan — dropped from your plan so the menu stays current. <button onclick="_todayBuildPlan()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(237,232,216,.25);background:rgba(237,232,216,.06);color:rgba(237,232,216,.8);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">↻ Rebuild for fresh setups</button></div>':'')
     + (nTradeable>0?'<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+nTradeable+' →</button>':'')
   + '</div>';
-  // Totals footer at the BOTTOM — the grand total after all the trade cards.
-  var footer = nTradeable>0 ? '<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:13px 16px;margin-top:2px;background:rgba(201,168,76,.06);">'
-    + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(201,168,76,.85);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Plan totals · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</div>'
+	  // Totals footer at the BOTTOM — the grand total after all the trade cards.
+	  var footer = nTradeable>0 ? '<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:13px 16px;margin-top:2px;background:rgba(201,168,76,.06);">'
+	    + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(201,168,76,.85);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Plan totals · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
       + '<div style="flex:1;min-width:104px;">'+lab('Total margin','Combined margin across all trades — what you actually put up. Equals the sum of every card’s Cash in. For leveraged trades the full position value is bigger.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(201,168,76,.95);">'+money2(totCashIn)+'</div></div>'
       + '<div style="flex:1;min-width:104px;">'+lab('Total position value','The total size you control across all trades. With leverage this can exceed your cash — your risk is still only the max loss.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(237,232,216,.75);">'+money2(totExp)+'</div></div>'
       + '<div style="flex:1;min-width:104px;">'+lab('Total profit if all win','Combined profit if every trade reaches TP1, after costs. Not a promise — some trades will lose; this is the best case.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:#5de8a0;">+'+money2(totProfit)+'</div></div>'
-      + '<div style="flex:1;min-width:104px;">'+lab('Total risk · all trades','Your TOTAL portfolio risk if every trade hits its stop — the sum of every trade\'s risk, versus your chosen budget.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+' <span style="font-size:11px;font-weight:600;">('+riskPct.toFixed(2)+'% · budget '+budget+'%)</span></div></div>'
-    + '</div></div>' : '';
-  // HONEST EMPTY STATE: candidates exist but none fit the budget on this account. One clear
+	      + '<div style="flex:1;min-width:104px;">'+lab('Total risk · all trades','Your TOTAL portfolio risk if every trade hits its stop — the sum of every trade\'s risk, versus your chosen budget.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+' <span style="font-size:11px;font-weight:600;">('+riskPct.toFixed(2)+'% · budget '+budget+'%)</span></div></div>'
+	    + '</div></div>' : '';
+	  var usable=[];
+	  plan.forEach(function(o,idx){ if(o&&o._size&&o._size.tradeable&&!(o._live&&o._live.invalid)) usable.push({o:o,idx:idx}); });
+	  if(usable.length && (window._todaySelectedIdx==null || !plan[window._todaySelectedIdx] || !(plan[window._todaySelectedIdx]._size||{}).tradeable)) window._todaySelectedIdx=usable[0].idx;
+	  if(window._todayExpandedIdx==null && usable.length) window._todayExpandedIdx=usable[0].idx;
+	  var selected=plan[window._todaySelectedIdx]&&plan[window._todaySelectedIdx]._size&&plan[window._todaySelectedIdx]._size.tradeable?{o:plan[window._todaySelectedIdx],idx:window._todaySelectedIdx}:usable[0];
+	  var pset=_todayPreset(c.ladderMode);
+	  function _pct(v){ return c.acct>0?(v/c.acct*100).toFixed(2)+'%':'0.00%'; }
+	  function _lots(o){ var l=_todayMt5Lots(o); return l<0.01?l.toFixed(4):l.toFixed(2); }
+	  function _quality(o){ var q=(o.quality&&o.quality.score!=null)?o.quality.score:(o.qscore||o.conf||0); return Math.round(q)+'%'; }
+	  function _tradeLadderRow(item){
+	    var o=item.o, idx=item.idx, open=window._todayExpandedIdx===idx, legs=_todayLadderLegs(o);
+	    var rows=legs.map(function(l){
+	      return '<button class="mini-ladder" style="width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:4px 0" onclick="event.stopPropagation();_todaySetTradeLadder('+idx+',\''+(o._ladderMode||c.ladderMode||'beginner')+'\')"><div class="gold">#'+l.idx+'</div><div>'+Math.round(l.share*100)+'% of '+o.sym+'</div><div class="red">'+money2(-l.risk)+'</div><div>'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+'</div><div class="green">'+(l.trailing?'Trail':(l.target||'tp1').toUpperCase())+'</div></button>';
+	    }).join('');
+	    return '<div class="trade-detail"><button class="td-btn ghost" style="width:100%;justify-content:space-between" onclick="_todayToggleTrade('+idx+')"><span>'+(open?'Hide':'Show')+' '+o.sym+' multi-ladder · '+_todayLadderProfile(o._ladderMode||c.ladderMode).label+'</span><span class="gold">'+(open?'open':'expand')+'</span></button>'
+	      + (open?'<div style="margin-top:9px"><div class="mini-ladder head"><div>Leg</div><div>Purpose</div><div>Risk</div><div>Lots</div><div>Exit</div></div>'+rows+'<div class="td-sub" style="margin-top:8px">Per-trade ladder: '+o.sym+' keeps its own lots, SL, exits, automations, and risk cap. Changing the global preset recalculates these rows.</div></div>':'')
+	    + '</div>';
+	  }
+	  function _tableRows(){
+	    return usable.map(function(item){
+	      var o=item.o, s=o._size, idx=item.idx, dir=o.sig==='BUY'?'green':'red';
+	      return '<tr><td><strong style="color:#ede8d8">'+o.sym+'</strong> <span class="'+dir+'">'+o.sig+'</span></td><td>'+o.tf+'</td><td><span id="today-lp-'+idx+'" class="green">checking live price…</span></td><td>'+_lots(o)+'</td><td>'+money(s.notional)+'</td><td class="red">'+money2(-s.netLoss)+'</td><td class="green">+'+money2(s.netTP1)+'</td><td class="gold">'+_quality(o)+'</td><td><button class="td-btn ghost" onclick="_todaySelectTrade('+idx+')">open</button></td></tr><tr><td colspan="9">'+_tradeLadderRow(item)+'</td></tr>';
+	    }).join('');
+	  }
+	  function _selectedSignalCard(item){
+	    if(!item) return '';
+	    var o=item.o, s=o._size, idx=item.idx, dir=o.sig==='BUY'?'green':'red', short=o.sig==='SELL'?' short':'';
+	    var tps=[o.tp,o.tp2,o.tp3].filter(function(x){return x;});
+	    return '<div class="td-sig-card'+short+'"><div class="td-stack" style="justify-content:space-between"><div><div class="sig-symbol">'+o.sym+'</div><div class="sig-meta">'+o.asset+' · '+o.tf+' · '+o.sig+'</div></div>'+_todayPill(o.sig,dir)+'</div>'
+	      + '<div class="sig-live"><span>Live entry monitor</span><b>'+((o._live&&o._live.price)?pxFmt(o._live.price):pxFmt(o.entry))+'</b><span class="'+dir+'">'+(o._live&&o._live.status?o._live.status:'entry active')+'</span></div>'
+	      + '<div class="sig-levels"><button class="sig-level"><span>Entry</span><b>'+pxFmt(o.entry)+'</b></button><button class="sig-level"><span>SL</span><b class="red">'+pxFmt(o.sl)+'</b></button><button class="sig-level"><span>TP1</span><b class="green">'+pxFmt(o.tp)+'</b></button><button class="sig-level"><span>TP2 / TP3</span><b class="green">'+(tps[1]?pxFmt(tps[1]):'—')+' / '+(tps[2]?pxFmt(tps[2]):'—')+'</b></button></div>'
+	      + '<div class="sig-detail-grid"><button class="sig-mini"><span>R:R</span><b>1:'+(s.rr||0).toFixed(1)+'</b></button><button class="sig-mini"><span>Lot size</span><b>'+_lots(o)+'</b></button><button class="sig-mini"><span>Dollar size</span><b>'+money(s.notional)+'</b></button><button class="sig-mini"><span>Max loss</span><b class="red">'+money2(-s.netLoss)+'</b></button></div>'
+	      + '<p class="td-sub">'+(o.reason||'DotVerse selected this setup because quality, risk, and timeframe fit the current basket goal.')+'</p>'
+	      + '<button id="today-cta-'+idx+'" class="td-btn primary" style="margin-top:10px;width:100%" onclick="_todayPlaceTrade('+idx+')">Place this trade</button><div id="today-livebox-'+idx+'" style="margin-top:8px"></div></div>';
+	  }
+	  function _selectedLadderPanel(item){
+	    if(!item) return '';
+	    var o=item.o, legs=_todayLadderLegs(o), prof=_todayLadderProfile(o._ladderMode||c.ladderMode);
+	    return '<div class="td-card"><div class="td-card-head"><h2>Selected trade ladder</h2><div class="td-stack"><button class="td-btn '+(prof.label==='Conservative'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'conservative\')">Conservative</button><button class="td-btn '+(prof.label==='Beginner'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'beginner\')">Beginner</button><button class="td-btn '+(prof.label==='Aggressive'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'aggressive\')">Aggressive</button></div></div><div class="td-pad"><p class="td-sub">Flow-sized scaling. Each leg keeps its own lots, TP target, risk, and profit math.</p><div style="margin-top:12px"><div class="mini-ladder head"><div>Leg</div><div>Purpose</div><div>Risk</div><div>Lots</div><div>Exit</div></div>'+legs.map(function(l){return '<div class="mini-ladder"><div class="gold">#'+l.idx+'</div><div>'+Math.round(l.share*100)+'% scale-out</div><div class="red">'+money2(-l.risk)+'</div><div>'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+'</div><div class="green">'+(l.trailing?'Trail':(l.target||'tp1').toUpperCase())+'</div></div>';}).join('')+'</div><div class="td-sub" style="margin-top:10px">Total ladder risk follows the selected basket preset: '+pset.label+'.</div></div></div>';
+	  }
+	  var basket = '<div class="basket-total">'
+	    + _todayMetric('Combined profit','+'+money2(totProfit),'Sum of all planned TP1 targets','green')
+	    + _todayMetric('Profit %','+'+_pct(totProfit),'Profit against the account','green')
+	    + _todayMetric('Combined loss',money2(-totRisk),'Worst case if all stops hit','red')
+	    + _todayMetric('Risk %',riskPct.toFixed(2)+'%','Risk against the account','red')
+	    + _todayMetric('Total trade size',money(totExp),'All trade sizes added together','gold')
+	    + _todayMetric('Margin needed',money2(totCashIn),'Cash tied up by leverage','blue')
+	    + _todayMetric('Trades',nTradeable+' live','All with ladders below','green')
+	  + '</div>'
+	  + '<div class="fire-panel"><div><div class="td-mini">Basket command · '+pset.label+' preset</div><h2 style="font-family:var(--syne);font-size:18px;font-weight:500;margin-top:3px">Ready to fire all '+nTradeable+' selected trade'+(nTradeable===1?'':'s')+' together</h2><p class="td-sub">One action queues every selected trade, each with its own TP ladder, SL, lot size, and automation rules. Total size '+money(totExp)+', target +'+money2(totProfit)+', risk '+money2(-totRisk)+' / '+riskPct.toFixed(2)+'%.</p>'+goalBanner+budgetBanner+flexBanner+'</div><div class="td-stack"><button class="td-btn gold" onclick="_todayPlaceAll()">Review all</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all</button></div></div>'
+	  + '<div class="td-grid td-two"><div class="td-card"><div class="td-card-head"><h2>Best setups basket</h2><div class="td-stack">'+_todayPill('Multi-TF','gold')+_todayPill('Multi-ladder kept','green')+_todayPill(pset.label+' risk','blue')+'</div></div><div class="td-pad td-table-wrap"><table class="td-table"><tr><th>Trade</th><th>TF</th><th>Live</th><th>Lots</th><th>Trade size</th><th>Loss</th><th>Profit</th><th>Quality</th><th></th></tr>'+_tableRows()+'</table></div></div><div class="td-grid">'+_selectedSignalCard(selected)+_selectedLadderPanel(selected)+'</div></div>'
+	  + '<div class="td-card" style="margin-top:12px"><div class="td-card-head"><h2>Final basket totals</h2><div class="td-stack">'+_todayPill(pset.label+' preset','gold')+_todayPill('All '+nTradeable+' trades combined','green')+'</div></div><div class="td-pad"><div class="td-grid td-four">'+_todayMetric('All trade amounts',money(totExp),'Total position value across the basket','gold')+_todayMetric('Combined profit','+'+money2(totProfit)+' / +'+_pct(totProfit),'Total planned upside from every trade','green')+_todayMetric('Combined risk',money2(-totRisk)+' / '+riskPct.toFixed(2)+'%','Total loss if every stop is hit','red')+_todayMetric('Margin required',money2(totCashIn),'Cash needed at broker after leverage','blue')+'</div><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(237,232,216,.065);margin-top:10px"><span>Total basket command</span><b>'+money(totExp)+' trade size · +'+money2(totProfit)+' profit · '+money2(-totRisk)+' risk</b></div><div class="td-stack" style="margin-top:10px"><button class="td-btn gold" onclick="_todayPlaceAll()">Review totals</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all '+nTradeable+'</button></div></div></div>'
+	  + '<div class="flow-footer"><div><div class="flow-footer-step">Step 0 of 6 · TODAY</div><div class="flow-footer-msg">Goal basket is built. Next: check whether market conditions support the basket.</div></div><div class="td-stack"><button class="td-btn ghost" onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();">Signals feed</button><button class="td-btn primary" onclick="setNav(\'market\');showMarket&&showMarket();">Review Market →</button></div></div>';
+	  // HONEST EMPTY STATE: candidates exist but none fit the budget on this account. One clear
   // message + a single capped raise-budget action (NOT per-card nags), or "larger account".
   if(nTradeable===0 && plan.length>0){
     var _cheapest=Math.min.apply(null, plan.map(function(o){ return (o._minRiskPlace!=null&&isFinite(o._minRiskPlace))?o._minRiskPlace:999; }));
@@ -11062,7 +11248,7 @@ function _todayRenderPlan(){
     _dvTapTipInit();
     return;
   }
-  area.innerHTML=summary+cards+footer;
+	  area.innerHTML=basket;
   // Record which setups are currently dropped-as-moved, so the live loop only re-renders
   // when that set actually changes (a setup newly drifts past entry) — no needless reshuffle.
   window._todayLastInvalid = (plan||[]).reduce(function(a,o,i){ if(o._live&&o._live.invalid)a.push(i); return a; },[]).join(',');
@@ -11160,23 +11346,26 @@ function _todayRaiseBudget(x){ var i=document.getElementById('todayRisk'); if(i)
 function _todayReselect(){
   var c=window._todayCfg; var opps=window._todayOpps||[];
   if(!opps.length) return;
-  var plan=[], perClass={}, seen={};
-  for(var i=0;i<opps.length;i++){
-    var o=opps[i], cls=o.asset, key=o.sym;
-    if(seen[key]) continue;
-    if((perClass[cls]||0) >= c.maxPerClass) continue;
-    if(plan.length >= c.maxTrades) break;
-    plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
-  }
+  var plan=_todaySelectPlan(opps, c);
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=45;}).reduce(function(a,o){ if(!a.s[o.sym]){a.s[o.sym]=1;a.n++;} return a; },{s:{},n:0}).n - plan.length);
-  plan.forEach(function(o){ o._autos=o._autos||_todayDefaultAutos(o.tf); });
-  _todayAllocate(plan, c.acct, c.riskPct||1);
+  plan.forEach(function(o){ o._autos=o._autos||_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; });
   window._todayPlan=plan; window._todaySorted=false;
   _todayRenderPlan();
   Promise.all(plan.map(async function(o){ try{ o._autos=await _todayRecommendAutos(o); }catch(e){} })).then(function(){ if(window._todayPlan===plan) _todayRenderPlan(); });
 }
 function _todaySetMaxPerClass(v){ var n=parseInt(v); if(!(n>0))return; window._todayCfg.maxPerClass=n; if((window._todayOpps||[]).length) _todayReselect(); }
 function _todaySetMaxTrades(v){ var n=parseInt(v); if(!(n>0))return; window._todayCfg.maxTrades=n; if((window._todayOpps||[]).length) _todayReselect(); }
+function _todaySetProfitGoal(v){ var n=parseFloat(v)||0; window._todayCfg.profitGoal=n; if((window._todayOpps||[]).length) _todayReselect(); }
+function _todaySetGlobalLadder(mode){
+  var c=window._todayCfg; c.ladderMode=mode||'beginner';
+  (window._todayPlan||[]).forEach(function(o){ o._ladderMode=c.ladderMode; });
+  if((window._todayPlan||[]).length) _todayRenderPlan();
+}
+function _todaySetTradeLadder(idx, mode){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._ladderMode=mode||'beginner';
+  window._todaySorted=true; _todayRenderPlan();
+}
 function _todaySetGlobalRisk(val){
   var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
   c.riskPct=r;
@@ -11403,10 +11592,11 @@ function _todayConfirmAndPlace(trades){
   var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
   var totLoss=0, totCap=0, totMargin=0;
   trades.forEach(function(o){ totLoss+=o._size.netLoss; totCap+=o._size.notional; totMargin+=o._size.marginReq; });
-  var rows=trades.map(function(o){
-    var dir=(o.sig||'BUY').toUpperCase(), dc=o.sig==='BUY'?'#5de8a0':'#e8706e';
-    return '<div style="display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:10.5px;padding:5px 0;border-bottom:1px solid rgba(237,232,216,.07);"><span><strong>'+o.sym+'</strong> <span style="color:'+dc+';">'+dir+'</span> · '+o._size.unitLabel+'</span><span style="color:#e8706e;">'+money(-o._size.netLoss)+'</span></div>';
-  }).join('');
+	  var rows=trades.map(function(o){
+	    var dir=(o.sig||'BUY').toUpperCase(), dc=o.sig==='BUY'?'#5de8a0':'#e8706e';
+	    var legs=_todayLadderLegs(o);
+	    return '<div style="display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:10.5px;padding:5px 0;border-bottom:1px solid rgba(237,232,216,.07);"><span><strong>'+o.sym+'</strong> <span style="color:'+dc+';">'+dir+'</span> · '+o._size.unitLabel+' · '+legs.length+' ladder order'+(legs.length===1?'':'s')+'</span><span style="color:#e8706e;">'+money(-o._size.netLoss)+'</span></div>';
+	  }).join('');
   var pct=acct>0?(totLoss/acct*100):0;
   var ov=document.createElement('div'); ov.id='todayConfirmOverlay';
   ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(4,5,8,.78);display:flex;align-items:center;justify-content:center;padding:18px;';
@@ -11458,26 +11648,30 @@ function _todayMt5Lots(o){
   return u/cs;
 }
 async function _todaySendOrders(trades, onProgress){
-  var ok=0, fail=0;
-  for(var i=0;i<trades.length;i++){
-    var o=trades[i]; var tv=(o.bullCount||0)+(o.bearCount||0);
-    try{
-      var res=await dvFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        ticker:o.sym, asset_type:o.asset, order_type:'Market', lots:parseFloat(_todayMt5Lots(o).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
-        entry:o.entry, sl:o.sl, tp1:o.tp, tp2:null, tp3:null, timeframe:o.tf||'',
-        trailing:!!(o._autos&&o._autos.trail),
-        be:!!(o._autos&&o._autos.be), macro:!!(o._autos&&o._autos.macro),
-        inval:!!(o._autos&&o._autos.inval), sent:!!(o._autos&&o._autos.sent),
-        tp1_alert:!!(o._autos&&o._autos.tp1), tp2_alert:!!(o._autos&&o._autos.tp2),
-        weekend:!!(o._autos&&o._autos.weekend),
-        comment:'DotVerse Today '+(o.sig||'')+' '+o.sym,
-        entry_confluence: tv>0?((o.bullCount||0)/tv):null, entry_atr:o.atr||null
-      })});
-      if(res&&res.order_id) ok++; else fail++;
-    }catch(e){ fail++; }
-    if(onProgress) onProgress(ok+fail, trades.length);
-  }
-  return {ok:ok, fail:fail};
+	var ok=0, fail=0;
+	var queue=[];
+	(trades||[]).forEach(function(o){
+	  _todayLadderLegs(o).forEach(function(l){ queue.push({trade:o, leg:l}); });
+	});
+	for(var i=0;i<queue.length;i++){
+	  var o=queue[i].trade, leg=queue[i].leg; var tv=(o.bullCount||0)+(o.bearCount||0);
+	  try{
+	    var res=await dvFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+	      ticker:o.sym, asset_type:o.asset, order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
+	      entry:o.entry, sl:o.sl, tp1:leg.tp||o.tp, tp2:null, tp3:null, timeframe:o.tf||'',
+	      trailing:!!(leg.trailing||(o._autos&&o._autos.trail)),
+	      be:!!(o._autos&&o._autos.be), macro:!!(o._autos&&o._autos.macro),
+	      inval:!!(o._autos&&o._autos.inval), sent:!!(o._autos&&o._autos.sent),
+	      tp1_alert:!!(o._autos&&o._autos.tp1), tp2_alert:!!(o._autos&&o._autos.tp2),
+	      weekend:!!(o._autos&&o._autos.weekend),
+	      comment:'DotVerse Today L#'+leg.idx+' '+(leg.target||'tp1').toUpperCase()+' '+(o.sig||'')+' '+o.sym,
+	      entry_confluence: tv>0?((o.bullCount||0)/tv):null, entry_atr:o.atr||null
+	    })});
+	    if(res&&res.order_id) ok++; else fail++;
+	  }catch(e){ fail++; }
+	  if(onProgress) onProgress(ok+fail, queue.length);
+	}
+	return {ok:ok, fail:fail};
 }
 function _todaySetAutoPlace(on){ window._todayCfg.autoPlace=!!on; var l=document.getElementById('todayAutoPlace'); if(l&&l.parentNode){ var box=l.parentNode; box.style.borderColor=on?'rgba(232,112,110,.4)':'rgba(237,232,216,.14)'; box.style.background=on?'rgba(232,112,110,.07)':'rgba(237,232,216,.02)'; } }
 // Auto-place: fire every valid trade automatically after a short, cancelable countdown.
@@ -11598,7 +11792,7 @@ async function _runScanBase(groups, signal) {
   var _scanTotal = 0;
   // Build the list of request descriptors (no longer wrap in individual Promises)
   const _requests = groups.flatMap(function(g){
-    var tfs = g.daily_only ? ['1d'] : ALL_SCAN_TFS;
+    var tfs = g.tfs || (g.daily_only ? ['1d'] : ALL_SCAN_TFS);
     return tfs.map(function(tf){
       _scanTotal++;
       return {
@@ -11679,26 +11873,29 @@ async function _sfFetchSignals(){
   _sfSetProgress(null, null, 5, 'Scanning markets for live signals — takes 20–30s…');
   if(list) list.innerHTML = '<div style="padding:36px 20px;text-align:center">'
     + '<div style="width:32px;height:32px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 14px"></div>'
-    + '<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Running DotVerse analysis on BTC, ETH, NVDA, AAPL, EUR/USD, Gold…</div>'
+    + '<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Running DotVerse analysis across the shared scanner universe…</div>'
     + '<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.3);margin-top:6px;">This takes 20–30 seconds. Hang tight.</div>'
     + '</div>';
 
   let rawOpps = null;
+  var _scanErrors = [];
+  var _scanTotal = 0;
   try {
     // Group tickers by asset type so backend normalise_ticker routes each one
-    // correctly (crypto -> -USD, forex -> =X, commodity -> futures map). A
-    // single batch with one asset_type would mangle 4 of 6 tickers and the
-    // errored rows get silently filtered, leaving an empty Signals tab.
-    const _allGroups = [
-      { tickers: ['BTCUSD','ETHUSD','SOLUSD'], asset_type: 'crypto'    },
-      { tickers: ['NVDA','AAPL'],              asset_type: 'stock'     },
-      { tickers: ['EURUSD'],                   asset_type: 'forex'     },
-      { tickers: ['XAUUSD'],                   asset_type: 'commodity', daily_only: true }
+    // correctly. Signals and Today now start from the same shared scan universe;
+    // Signals lists opportunities, Today narrows them into a sized plan.
+    const _fallbackGroups = [
+      { tickers: ['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','ADAUSD','DOGEUSD','DOTUSD','AVAXUSD','LINKUSD'], asset_type: 'crypto' },
+      { tickers: ['NVDA','AAPL','TSLA','AMZN','MSFT','GOOGL','META','AMD','NFLX','JPM','COIN','SHOP'], asset_type: 'stock' },
+      { tickers: ['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','USDCHF','NZDUSD','EURGBP','EURJPY','GBPJPY'], asset_type: 'forex' },
+      { tickers: ['XAUUSD','XAGUSD','WTI','BRENT','NATGAS','COPPER','XPTUSD','XPDUSD'], asset_type: 'commodity', daily_only: true },
+      { tickers: ['SPX','NDX','DJI','RUT','DAX','FTSE','NIKKEI','HSI','VIX'], asset_type: 'index', daily_only: true }
     ];
+    const _allGroups = (typeof ALL_SCAN_GROUPS !== 'undefined' && ALL_SCAN_GROUPS.length) ? ALL_SCAN_GROUPS : _fallbackGroups;
     // F1.2 — filter scan groups by user's Asset Preferences. The Settings UI uses
     // ids 'stocks','crypto','forex','macro'... map them to the scan asset_type values.
-    const _UI_TO_SCAN = {stocks:'stock', crypto:'crypto', forex:'forex', macro:'commodity'};
-    const _enabledScanTypes = (typeof _settAssets !== 'undefined' && Array.isArray(_settAssets) ? _settAssets : ['stocks','crypto','forex'])
+    const _UI_TO_SCAN = {stocks:'stock', crypto:'crypto', forex:'forex', macro:'commodity', indices:'index', index:'index'};
+    const _enabledScanTypes = (typeof _settAssets !== 'undefined' && Array.isArray(_settAssets) ? _settAssets : ['stocks','crypto','forex','macro','index'])
       .map(function(id){ return _UI_TO_SCAN[id]; })
       .filter(Boolean);
     const _filtered = _allGroups.filter(function(g){ return _enabledScanTypes.indexOf(g.asset_type) !== -1; });
@@ -11707,46 +11904,19 @@ async function _sfFetchSignals(){
     // Scan multiple timeframes per group — a weak 4H signal might be a strong 1D signal
     var _modeToScanTf = {scalp:'15m', day:'1h', swing:'4h', position:'1d'};
     var _singleTf = _modeToScanTf[window._stratMode||'all'];
-    const _scanTfs = _singleTf ? [_singleTf] : ['1h','4h','1d'];
+    const _scanTfs = _singleTf ? [_singleTf] : ['15m','30m','1h','4h','1d','1w'];
     // Commodity intraday rarely has data — skip 1h/4h, only scan 1d
-    const groups = _filtered.length ? _filtered : _allGroups;
-    var _scanErrors = [];
-    var _scanTotal = 0;
-    const _requests = groups.flatMap(function(g){
-      var tfs = g.daily_only ? ['1d'] : (_scanTfs || ['1h','4h','1d']);
-      return tfs.map(function(tf){
-        _scanTotal++;
-        return new Promise(function(resolve){
-          dvFetch('/api/scan-list', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({ tickers: g.tickers, asset_type: g.asset_type, timeframe: tf })
-          }).then(function(r){
-            if(r && r.results) resolve(r);
-            else {
-              if(r && r.error) _scanErrors.push(r.error);
-              resolve({results:[]});
-            }
-          })
-          .catch(function(e){
-            _scanErrors.push(e?.message || 'fetch error');
-            resolve({results:[]});
-          });
-          setTimeout(function(){
-            _scanErrors.push('timeout after 45s');
-            resolve({results:[]});
-          }, 45000);
-        });
-      });
+    const groups = (_filtered.length ? _filtered : _allGroups).map(function(g){
+      return {
+        tickers: g.tickers,
+        asset_type: g.asset_type,
+        daily_only: !!g.daily_only,
+        tfs: g.daily_only ? ['1d'] : _scanTfs
+      };
     });
-    var _settled = await Promise.allSettled(_requests);
-    var _results = [];
-    _settled.forEach(function(s){
-      if(s.status === 'fulfilled' && s.value && s.value.results){
-        _results = _results.concat(s.value.results);
-      }
-    });
-    var res = { results: _results };
+    var res = await _runScanBase(groups);
+    _scanErrors = res.errors || [];
+    _scanTotal = res.total || 0;
     if(res && res.results && res.results.length > 0){
       rawOpps = res.results
         .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
@@ -11764,7 +11934,7 @@ async function _sfFetchSignals(){
             rr:      r.rr1 || r.rr || '--',
             conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
             confLbl: r.confidence_label || r.confidence || 'LIKELY',
-            asset:   r.asset_type || 'equity',
+            asset:   r.asset_type || 'stock',
             reason:  r.reason || r.summary || 'Live DotVerse signal',
             // Per-signal confluence + volume — feeds Flow-Scaled Sizing so the
             // multiplier varies per signal instead of falling back to 65%/1.0×.
@@ -11785,7 +11955,13 @@ async function _sfFetchSignals(){
             regime_context: r.regime_context || ''
           };
         });
-      // Multi-TF scan — keep all timeframes so users can compare
+      // Multi-TF scan — keep all timeframes so users can compare, but rank
+      // the cards by actual setup quality before showing the top 10.
+      rawOpps.sort(function(a,b){
+        var aq = a.quality && a.quality.score != null ? a.quality.score : (a.quality || 0);
+        var bq = b.quality && b.quality.score != null ? b.quality.score : (b.quality || 0);
+        return (bq-aq) || ((b.conf||0)-(a.conf||0));
+      });
     }
   } catch(e){ /* silent */ }
 
@@ -11963,7 +12139,7 @@ async function _sfFetchSignals(){
   /* ── Phase 4: Render verified signal cards ── */
   const visibleOpps = window._condFilter
     ? verifiedOpps.filter(window._condFilter.filterFn)
-    : verifiedOpps.slice(0, 8);
+    : verifiedOpps.slice(0, 10);
 
   // Verified Only filter — show only signals with ≥45% backtest win rate
   const displayOpps = window._sfVerifiedOnly
@@ -12121,7 +12297,7 @@ async function _sfFetchSignals(){
           : '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>')
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
-      + '<button onclick="event.stopPropagation();tradeThisSignal(&quot;' + (o.sym||'') + '&quot;,&quot;' + (o.sig||'BUY').toLowerCase() + '&quot;,&quot;' + (o.entry||'') + '&quot;,&quot;' + (o.sl||'') + '&quot;,&quot;' + (o.tp||'') + '&quot;,&quot;crypto&quot;,&quot;' + (o.rr||'2.5') + '&quot;,&quot;' + (o.tf||'1h') + '&quot;)" style="padding:7px 12px;border-radius:5px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:#c9a84c;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;" onmouseover="this.style.background=\'rgba(201,168,76,.18)\'" onmouseout="this.style.background=\'rgba(201,168,76,.1)\'">Trade This Signal</button>'
+      + '<button onclick="event.stopPropagation();tradeThisSignal(&quot;' + (o.sym||'') + '&quot;,&quot;' + (o.sig||'BUY').toLowerCase() + '&quot;,&quot;' + (o.entry||'') + '&quot;,&quot;' + (o.sl||'') + '&quot;,&quot;' + (o.tp||'') + '&quot;,&quot;' + (o.asset==='equity'?'stock':(o.asset||'stock')) + '&quot;,&quot;' + (o.rr||'2.5') + '&quot;,&quot;' + (o.tf||'1h') + '&quot;)" style="padding:7px 12px;border-radius:5px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:#c9a84c;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;" onmouseover="this.style.background=\'rgba(201,168,76,.18)\'" onmouseout="this.style.background=\'rgba(201,168,76,.1)\'">Trade This Signal</button>'
       + '</div></div>';
   }).join('');
 
