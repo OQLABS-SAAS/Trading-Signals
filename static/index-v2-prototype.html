@@ -10866,38 +10866,61 @@ function _todayRenderPlan(){
     // A setup that can't be placed within safe risk on this account is NOT shown as a card
     // (no nag, no scary %) — it's silently excluded and counted in a small footnote below.
     if(!s.tradeable){ return ''; }
-    return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(237,232,216,.02);">'
-      + head
-      + '<div id="today-lp-'+idx+'" title="'+esc(TT.live)+'" style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.4);margin-bottom:6px;min-height:13px;cursor:help;"><span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.25);flex-shrink:0;"></span>checking live price…</div>'
-      + '<div id="today-livebox-'+idx+'" style="margin-bottom:8px;"></div>'
-      + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:9px;padding:7px 9px;background:rgba(237,232,216,.03);border-radius:6px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">'
-        + '<span title="'+esc('The price DotVerse plans to enter at. The live Now price above is compared to this.')+'" style="cursor:help;">Entry <strong style="color:rgba(237,232,216,.9);">'+pxFmt(o.entry)+'</strong></span>'
-        + '<span title="'+esc('If price hits this stop, the trade auto-closes at your max loss. Your safety floor — you cannot lose past it.')+'" style="cursor:help;">Stop <strong style="color:#e8706e;">'+pxFmt(o.sl)+'</strong></span>'
-        + (function(){ var tps=[o.tp,o.tp2,o.tp3].filter(function(t){return t;}); return '<span title="'+esc('Take-profit '+(tps.length>1?'levels':'level')+' where the trade banks profit. TP1 is the first target.')+'" style="cursor:help;">Target'+(tps.length>1?'s':'')+' <strong style="color:#5de8a0;">'+tps.map(pxFmt).join(' / ')+'</strong></span>'; })()
+    // ── Calm card (Omar-approved layout): guidance · live monitor + levels ·
+    //    editable risk%/size with DotVerse-suggested · money in/make/lose · auto-protect · Details ──
+    var _acct=c.acct||0;
+    var _wr=o.winRate, _wrn=o.winRateN||0, _wrOk=(_wr!=null && _wrn>=30);
+    var _qual=_wrOk?(_wr>=60?'Strong':_wr>=50?'Solid':'Speculative'):'New';
+    var _wrCol=!_wrOk?'rgba(237,232,216,.55)':(_wr>=55?'#5de8a0':_wr>=50?'rgba(201,168,76,.95)':'#e8706e');
+    var _wrText=_wrOk?('✓ '+_qual+' · '+_wr+'% win'):'New · limited history';
+    var _dirWord=o.sig==='SELL'?'short':'long';
+    var _recR=+(o._recRisk||o._risk||1).toFixed(2);
+    var _recUsd=_acct*_recR/100;
+    var _entryN=parseFloat(o.entry)||0, _slN=parseFloat(o.sl)||0;
+    var _slPctAway=_entryN>0?Math.abs((_entryN-_slN)/_entryN*100):0;
+    var _tps=[o.tp,o.tp2,o.tp3].filter(function(t){return t;});
+    var _fx=_todayUsdPerQuote(o);
+    var _pipSize=o.asset==='forex'?((/JPY$/.test((o.sym||'').toUpperCase()))?0.01:0.0001):0;
+    var _pipVal=_pipSize?(s.units*_pipSize*_fx):0, _slPips=_pipSize?(Math.abs(_entryN-_slN)/_pipSize):0;
+    return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:10px;padding:14px 16px;margin-bottom:10px;background:rgba(237,232,216,.02);">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">'
+        + '<span style="font-family:var(--syne);font-size:16px;font-weight:600;">'+o.sym+'</span>'
+        + '<span style="font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+dirCol+'22;color:'+dirCol+';">'+o.sig+'</span>'
+        + '<span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.4);text-transform:capitalize;">'+o.asset+' · '+o.tf+'</span>'
+        + '<span title="'+esc('Historical win rate for this setup over '+_wrn+' past trades (backtest). More samples = more reliable.')+'" style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+(_wrOk&&_wr>=55?'rgba(93,232,160,.12)':'rgba(237,232,216,.06)')+';color:'+_wrCol+';cursor:help;">'+_wrText+'</span>'
       + '</div>'
-      + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(124px,1fr));gap:8px 10px;margin-bottom:6px;">'
-        // 1) TRADE SIZE — editable, shown as lots/units AND dollar value
-        + '<div>'+lab('Trade size',TT.tradesize)
-          + '<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);display:flex;align-items:center;gap:4px;">'
-            + '<input type="number" step="'+_szStep+'" min="0" value="'+(+_natVal.toFixed(_szDec))+'" onchange="_todaySetTradeSize('+idx+',this.value)" title="'+esc('Type your trade size in '+_natUnit+' — margin, profit and risk update.')+'" style="width:66px;padding:2px 5px;font-family:var(--mono);font-size:13px;font-weight:700;background:rgba(237,232,216,.06);border:1px solid rgba(201,168,76,.35);border-radius:4px;color:rgba(201,168,76,.95);outline:none;">'
-            + '<span style="font-size:9px;color:rgba(237,232,216,.5);font-weight:600;">'+_natUnit+'</span>'
-          + '</div>'
-          + '<div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.45);">= '+money2(s.notional)+' position</div>'
+      + '<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.62);line-height:1.55;margin-bottom:10px;">'+_qual+' '+_dirWord+' setup. DotVerse suggests risking <strong style="color:rgba(93,232,160,.85);">'+_recR+'%</strong> ('+money2(_recUsd)+') here — you can change it below.</div>'
+      + '<div style="background:rgba(237,232,216,.03);border-radius:7px;padding:9px 11px;margin-bottom:10px;">'
+        + '<div id="today-lp-'+idx+'" title="'+esc(TT.live)+'" style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.4);margin-bottom:7px;min-height:13px;cursor:help;"><span style="width:6px;height:6px;border-radius:50%;background:rgba(237,232,216,.25);flex-shrink:0;"></span>checking live price…</div>'
+        + '<div style="display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.62);margin-bottom:5px;">'
+          + '<span title="'+esc('The price DotVerse plans to enter at.')+'" style="cursor:help;">Entry <strong style="color:rgba(237,232,216,.92);">'+pxFmt(o.entry)+'</strong></span>'
+          + '<span title="'+esc('Auto-closes here at your max loss — '+_slPctAway.toFixed(1)+'% from entry.')+'" style="cursor:help;">Stop <strong style="color:#e8706e;">'+pxFmt(o.sl)+'</strong> <span style="color:rgba(237,232,216,.4);">('+_slPctAway.toFixed(1)+'% away)</span></span>'
+          + '<span title="'+esc(TT.reward)+'" style="cursor:help;">R:R <strong style="color:rgba(237,232,216,.92);">1 : '+(s.rr||0).toFixed(1)+'</strong></span>'
         + '</div>'
-        // 2) MARGIN — cash the broker locks up
-        + '<div>'+lab('Margin (broker)',TT.cashin)+'<div style="font-family:var(--mono);font-size:14px;font-weight:700;color:rgba(237,232,216,.85);">'+money2(s.marginReq)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+(s.leveraged?sub('broker locks · 1:'+s.lev+(s.levReal?'':' est'),s.levReal?TT.controls:TT.controlsEst):'no leverage · full amount')+'</div></div>'
-        // 3) PROFIT — money made if target hit
-        + '<div>'+lab('Profit if target hit',TT.profit)+'<div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">+'+money2(s.netTP1)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+sub('reward 1 : '+(s.rr||0).toFixed(1),TT.reward)+'</div></div>'
-        // 4) RISK — max loss in $ and %
-        + '<div>'+lab('Risk (max loss)',TT.maxloss)+'<div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#e8706e;">'+money2(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+sub(s.riskPctOfAcct.toFixed(2)+'% of account',TT.riskpct)+'</div></div>'
+        + '<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.55);">Targets&nbsp; '+_tps.map(function(t,i){return 'TP'+(i+1)+' <span style="color:#5de8a0;">'+pxFmt(t)+'</span>';}).join(' · ')+'</div>'
       + '</div>'
-      + '<div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.35);margin-bottom:8px;">Broker cost '+money2(s.costD)+' (spread + fee + slippage — already included in the numbers above)</div>'
-      + (autos?'<div style="margin-bottom:8px;padding:7px 9px;background:rgba(93,232,160,.04);border:1px solid rgba(93,232,160,.14);border-radius:6px;">'
-          + '<div title="'+esc('These safety automations are ARMED for this trade. The moment you place it, DotVerse runs them automatically at your broker — even if you close the app. Tap any chip to see what it does.')+'" style="font-family:var(--mono);font-size:8px;color:rgba(93,232,160,.8);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;cursor:help;border-bottom:1px dotted rgba(93,232,160,.3);display:inline-block;">⚙ Automations armed — run automatically once you place ⓘ</div>'
-          + '<div style="display:flex;gap:4px;flex-wrap:wrap;">'+autos+'</div>'
-        +'</div>':'')
-      + '<div style="font-family:var(--mono);font-size:8px;color:rgba(93,232,160,.55);margin-bottom:9px;line-height:1.4;">🛡 Stop sits at your broker — it protects you even if you close DotVerse or lose internet.</div>'
-      + '<button id="today-cta-'+idx+'" onclick="_todayPlaceTrade('+idx+')" style="width:100%;padding:9px;border-radius:6px;background:rgba(93,232,160,.14);border:1px solid rgba(93,232,160,.35);color:#5de8a0;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Review &amp; place →</button>'
+      + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:5px;">'
+        + '<div><div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.45);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;">Risk per trade</div><div style="display:flex;align-items:center;gap:3px;"><input type="number" step="0.05" min="0.05" value="'+(+(o._risk||1).toFixed(2))+'" onchange="_todaySetTradeRisk('+idx+',this.value)" title="'+esc('Your risk % for this trade — size, money in, profit and max loss update.')+'" style="width:58px;padding:4px 6px;font-family:var(--mono);font-size:12px;font-weight:700;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.2);border-radius:4px;color:rgba(237,232,216,.92);outline:none;"><span style="font-size:11px;color:rgba(237,232,216,.5);">%</span></div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.45);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;">Trade size</div><div style="display:flex;align-items:center;gap:3px;"><input type="number" step="'+_szStep+'" min="0" value="'+(+_natVal.toFixed(_szDec))+'" onchange="_todaySetTradeSize('+idx+',this.value)" title="'+esc('Your trade size in '+_natUnit+' — risk %, money in and profit update.')+'" style="width:66px;padding:4px 6px;font-family:var(--mono);font-size:12px;font-weight:700;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.2);border-radius:4px;color:rgba(237,232,216,.92);outline:none;"><span style="font-size:11px;color:rgba(237,232,216,.5);">'+_natUnit+'</span></div></div>'
+      + '</div>'
+      + '<div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.4);margin-bottom:10px;">✦ DotVerse suggests <span style="color:rgba(93,232,160,.8);font-weight:700;">'+_recR+'%</span> · set risk or size — the other follows</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">'
+        + '<div style="background:rgba(237,232,216,.04);border-radius:6px;padding:9px 10px;">'+lab('Money in',TT.cashin)+'<div style="font-family:var(--mono);font-size:17px;font-weight:700;color:rgba(201,168,76,.95);">'+money2(s.marginReq)+'</div>'+(s.leveraged?'<div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">controls '+money2(s.notional)+'</div>':'')+'</div>'
+        + '<div style="background:rgba(237,232,216,.04);border-radius:6px;padding:9px 10px;">'+lab('Could make',TT.profit)+'<div style="font-family:var(--mono);font-size:17px;font-weight:700;color:#5de8a0;">+'+money2(s.netTP1)+'</div></div>'
+        + '<div style="background:rgba(237,232,216,.04);border-radius:6px;padding:9px 10px;">'+lab('Could lose',TT.maxloss)+'<div style="font-family:var(--mono);font-size:17px;font-weight:700;color:#e8706e;">'+money2(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.riskPctOfAcct.toFixed(2)+'% of account</div></div>'
+      + '</div>'
+      + (autos?'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0;border-top:1px solid rgba(237,232,216,.08);margin-bottom:8px;"><span title="'+esc('These run automatically once you place — even if you close DotVerse or lose internet. Tap a chip to see what it does.')+'" style="font-family:var(--mono);font-size:8.5px;color:rgba(93,232,160,.8);cursor:help;">🛡 Auto-protect on:</span>'+autos+'</div>':'')
+      + '<details style="margin-bottom:10px;"><summary style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);cursor:pointer;outline:none;">Details</summary>'
+        + '<div style="padding:8px 2px 2px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.55);line-height:1.75;">'
+          + 'Broker cost '+money2(s.costD)+' (spread + fee + slippage — already in the numbers above)<br>'
+          + 'Position value '+money2(s.notional)+(s.leveraged?' · leverage 1:'+s.lev+(s.levReal?'':' (est)'):' · no leverage')+'<br>'
+          + (_pipSize?('Stop ≈ '+Math.round(_slPips)+' pips · pip value ≈ '+money2(_pipVal)+' per pip<br>'):'')
+          + 'Targets: '+_tps.map(function(t,i){ var d=o.sig==='SELL'?(_entryN-parseFloat(t)):(parseFloat(t)-_entryN); return 'TP'+(i+1)+' '+pxFmt(t)+' (+'+money2(Math.abs(d)*s.units*_fx)+')'; }).join(' · ')+'<br>'
+          + '🛡 Stop sits at your broker — protects you even if you close DotVerse or lose internet.'
+        + '</div>'
+        + '<div id="today-livebox-'+idx+'" style="margin-top:6px;"></div>'
+      + '</details>'
+      + '<button id="today-cta-'+idx+'" onclick="_todayPlaceTrade('+idx+')" style="width:100%;padding:10px;border-radius:7px;background:#5de8a0;color:#06140c;border:none;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Place this trade →</button>'
     + '</div>';
   }).join('');
   var riskPct=c.acct>0?(totRisk/c.acct*100):0;
@@ -10906,8 +10929,10 @@ function _todayRenderPlan(){
   // Budget awareness: the top % is the total budget; budgetUsed is the pure risk actually allocated.
   var budget=c.riskPct||1;
   var budgetUsed=c.acct>0?(totRisk/c.acct*100):0;   /* net of costs — same basis the allocator fills to, so the banner can't misfire */
-  var overBudget=budgetUsed>budget*1.05;
-  var underBudget=nTooSmall>0 && budgetUsed<budget*0.6;
+  var _flex=!!window._todayBudgetFlex;
+  var overBudget=!_flex && budgetUsed>budget*1.05;
+  var underBudget=!_flex && nTooSmall>0 && budgetUsed<budget*0.6;
+  var flexBanner = _flex ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);line-height:1.5;">This is the smallest tradeable plan on your '+money(c.acct)+' account — it risks <strong>'+budgetUsed.toFixed(2)+'%</strong>, a little above your '+budget+'% target, because that’s the minimum lot your broker allows. Lower the risk on a card, add funds, or accept it.</div>' : '';
   var budgetBanner = overBudget
     ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:#e8706e;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">⚠ Your trades now risk <strong>'+budgetUsed.toFixed(2)+'%</strong> — above your '+budget+'% budget. <button onclick="_todayRebalance()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(232,112,110,.5);background:rgba(232,112,110,.12);color:#e8706e;font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">Rebalance to '+budget+'%</button></div>'
     : (underBudget ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.8);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">Using <strong>'+budgetUsed.toFixed(2)+'%</strong> of your '+budget+'% budget — some setups were too small to place. <button onclick="_todayRebalance()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(201,168,76,.4);background:rgba(201,168,76,.1);color:rgba(201,168,76,.9);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">Spread across the rest</button></div>' : '');
@@ -10929,6 +10954,7 @@ function _todayRenderPlan(){
     + '</div>'
     + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">Your '+budget+'% risk budget is split across '+nTradeable+' trade'+(nTradeable===1?'':'s')+'. If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money2(-totRisk)+'</strong>. Reality lands between — some win, some lose.</div>'
     + budgetBanner
+    + flexBanner
     + (riskPct>6 && !overBudget?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower the budget or trade fewer.</div>':'')
     + (nTooSmall>0&&!underBudget ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);">'+nTooSmall+' setup'+(nTooSmall===1?'':'s')+' didn’t fit your '+money(c.acct)+' account at safe risk and '+(nTooSmall===1?'was':'were')+' skipped. A larger balance places more.</div>' : '')
     + (nMoved>0?'<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nMoved+' setup'+(nMoved===1?'':'s')+' drifted past the entry since the scan — dropped from your plan so the menu stays current. <button onclick="_todayBuildPlan()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(237,232,216,.25);background:rgba(237,232,216,.06);color:rgba(237,232,216,.8);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">↻ Rebuild for fresh setups</button></div>':'')
@@ -10992,9 +11018,23 @@ function _todayAllocate(plan, acct, budget){
     if(used+o._minRiskPlace>budget+1e-9) continue;          // wouldn't fit the remaining budget
     chosen.push(o); used+=o._minRiskPlace;
   }
+  // 2b) FLEX FALLBACK: if NOTHING fits the budget but the best setups can be placed within the
+  //     per-trade safety cap, show them anyway (sized at their minimum) rather than an empty plan.
+  //     Total may exceed the user's budget target — the render flags this clearly.
+  var flex=false;
+  if(chosen.length===0){
+    flex=true; var ft=0;
+    for(var j=0;j<plan.length;j++){
+      var of=plan[j];
+      if(of._minRiskPlace>_TODAY_PER_CAP+1e-9) continue;        // can't place even within the cap
+      if(ft+of._minRiskPlace>_TODAY_PER_CAP+1e-9) continue;     // keep the flex plan's TOTAL within one cap's worth
+      chosen.push(of); ft+=of._minRiskPlace;
+    }
+  }
+  window._todayBudgetFlex = flex && chosen.length>0;   // plan exceeds the budget target to stay tradeable
   // 3) Start each chosen at its minimum, then distribute leftover budget equally up to the cap.
   var per={}; chosen.forEach(function(o){ o._tid=o.sym+'|'+o.tf; per[o._tid]=o._minRiskPlace; });
-  var pool=Math.max(0, budget-used);
+  var pool=flex?0:Math.max(0, budget-used);   // in flex mode keep each at its minimum (don't inflate)
   for(var pass=0; pass<5 && pool>1e-6; pass++){
     var elig=chosen.filter(function(o){ return per[o._tid] < _TODAY_PER_CAP-1e-9; });
     if(!elig.length) break;
@@ -11009,7 +11049,7 @@ function _todayAllocate(plan, acct, budget){
   // 5) Final guard: total NET loss (incl costs) must not exceed the budget — scale down once if it does.
   var trd=plan.filter(function(o){ return o._size.tradeable; });
   var totNet=trd.reduce(function(a,o){ return a+o._size.netLoss; },0);
-  if(totNet>budgetD && totNet>0){
+  if(!flex && totNet>budgetD && totNet>0){   // flex mode is intentionally above budget — don't scale it away
     var k=budgetD/totNet;
     plan.forEach(function(o){ if(chosen.indexOf(o)>=0){ var r=per[o._tid]*k; o._risk=r; o._recRisk=r; o._size=_todaySizeTrade(o,acct,r); } });
   }
