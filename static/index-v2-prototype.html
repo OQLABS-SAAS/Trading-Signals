@@ -10952,26 +10952,52 @@ function _todayRenderPlan(){
 }
 // Split a TOTAL risk budget across the trades that can actually be placed, so the
 // whole budget is deployed (trades too small to place don't waste budget).
+// ACCOUNT-AWARE sizing (F2). Each trade gets the risk it actually NEEDS to clear the broker
+// minimum on THIS account (its floor), capped at a safe per-trade max. We include the best
+// setups in quality order while their combined risk fits the budget, then spread any leftover
+// budget across them up to the cap. Trades that can't be placed within the cap/budget are
+// excluded silently. Never exceeds the budget; percentages and $ stay consistent.
+var _TODAY_PER_CAP = 2.0;   // hard max risk % per single trade
 function _todayAllocate(plan, acct, budget){
   if(!plan||!plan.length) return;
-  var budgetD = (acct||0)*((budget||0)/100);   // the $ the WHOLE plan may lose
-  // Find the LARGEST equal per-trade risk whose TOTAL max-loss (net of costs) still fits
-  // the budget. Total loss rises with per (bigger positions, and more trades cross the
-  // broker's minimum lot), so we scan per upward and keep the last value that stays within
-  // budget. This deploys as much of the budget as possible and NEVER exceeds it — even when
-  // a higher per would let an extra trade in and tip the plan over.
-  var best=null;
-  var steps=240;
-  for(var i=1;i<=steps;i++){
-    var per=budget*i/steps;
-    plan.forEach(function(o){ o._size=_todaySizeTrade(o, acct, per); });
-    var tr=plan.filter(function(o){ return o._size.tradeable; });
-    if(!tr.length) continue;
-    var totNet=tr.reduce(function(a,o){ return a+o._size.netLoss; },0);
-    if(totNet<=budgetD+1e-9){ best=per; }
+  var budgetD=(acct||0)*((budget||0)/100);
+  // 1) Minimum risk % to place each candidate (reach its broker minimum lot), currency-correct.
+  plan.forEach(function(o){
+    var slD=Math.abs((parseFloat(o.entry)||0)-(parseFloat(o.sl)||0));
+    var fx=_todayUsdPerQuote(o);
+    var SPEC=_TODAY_LOT[o.asset]||{min:0.0001};
+    o._minRiskPlace=(slD>0&&acct>0)?(SPEC.min*slD*fx/acct*100):999;
+  });
+  // 2) Greedily include best-quality setups (plan is already quality-ranked) whose cumulative
+  //    minimum risk fits the budget and whose own minimum is within the per-trade cap.
+  var chosen=[], used=0;
+  for(var i=0;i<plan.length;i++){
+    var o=plan[i];
+    if(o._minRiskPlace>_TODAY_PER_CAP+1e-9) continue;       // needs more than the cap → unsuitable
+    if(used+o._minRiskPlace>budget+1e-9) continue;          // wouldn't fit the remaining budget
+    chosen.push(o); used+=o._minRiskPlace;
   }
-  var perFinal = (best!=null) ? best : budget/plan.length;
-  plan.forEach(function(o){ o._recRisk=perFinal; o._risk=perFinal; o._size=_todaySizeTrade(o, acct, perFinal); });
+  // 3) Start each chosen at its minimum, then distribute leftover budget equally up to the cap.
+  var per={}; chosen.forEach(function(o){ o._tid=o.sym+'|'+o.tf; per[o._tid]=o._minRiskPlace; });
+  var pool=Math.max(0, budget-used);
+  for(var pass=0; pass<5 && pool>1e-6; pass++){
+    var elig=chosen.filter(function(o){ return per[o._tid] < _TODAY_PER_CAP-1e-9; });
+    if(!elig.length) break;
+    var add=pool/elig.length; pool=0;
+    elig.forEach(function(o){ var room=_TODAY_PER_CAP-per[o._tid]; var give=Math.min(add,room); per[o._tid]+=give; pool+=(add-give); });
+  }
+  // 4) Size chosen at their per; exclude the rest (0 risk → 0 units → not tradeable → skipped).
+  plan.forEach(function(o){
+    if(chosen.indexOf(o)>=0){ var r=per[o._tid]; o._risk=r; o._recRisk=r; o._size=_todaySizeTrade(o,acct,r); }
+    else { o._risk=0; o._recRisk=0; o._size=_todaySizeTrade(o,acct,o._minRiskPlace||0.01); o._size.tradeable=false; }  /* explicitly excluded (riskPct||1 means 0 won't zero it) */
+  });
+  // 5) Final guard: total NET loss (incl costs) must not exceed the budget — scale down once if it does.
+  var trd=plan.filter(function(o){ return o._size.tradeable; });
+  var totNet=trd.reduce(function(a,o){ return a+o._size.netLoss; },0);
+  if(totNet>budgetD && totNet>0){
+    var k=budgetD/totNet;
+    plan.forEach(function(o){ if(chosen.indexOf(o)>=0){ var r=per[o._tid]*k; o._risk=r; o._recRisk=r; o._size=_todaySizeTrade(o,acct,r); } });
+  }
 }
 // Account box: re-size the WHOLE current plan to a new account balance, instantly.
 function _todaySetAccount(val){
