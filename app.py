@@ -4442,35 +4442,44 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     # No special-casing needed — it's just another vote.
     _markov_result = None
     if use_markov:
-        _markov_result = _get_markov_signal(ticker, asset_type, weight=markov_weight)
+        _markov_result = _get_markov_signal(ticker, asset_type, weight=markov_weight) or {}
         # Timeframe-tapered vote: use the weight-independent signal_value (the cache is
         # keyed by ticker only, so we must scale here, not via the cached weighted_vote)
         # and apply less Markov influence on short timeframes.
-        _eff_weight = markov_weight * _markov_tf_multiplier(timeframe)
+        _eff_weight = (markov_weight or 0.0) * _markov_tf_multiplier(timeframe)
         _mv = (_markov_result.get("signal_value", 0.0) or 0.0) * _eff_weight
-        if _mv > 0:
+        # bull_pct / bear_pct are None when the Markov feed has no data for this
+        # symbol (e.g. EODHD doesn't cover this crypto/commodity/index) or the engine
+        # errored. The vote is already 0 in that case — but we must NOT format None as
+        # a percentage: `None * 100` raised a TypeError that the scan swallowed, which
+        # silently dropped every crypto/commodity/index row from the Today plan.
+        _bp = _markov_result.get("bull_pct")
+        _rp = _markov_result.get("bear_pct")
+        _have_pcts = isinstance(_bp, (int, float)) and isinstance(_rp, (int, float))
+        if _mv > 0 and _have_pcts:
             bullish_count += _mv
             _markov_desc = (
                 f"Markov regime analysis adds a bullish bias "
                 f"(+{abs(_mv):.2f} vote): stationary distribution shows "
-                f"Bull={_markov_result['bull_pct']*100:.0f}% vs "
-                f"Bear={_markov_result['bear_pct']*100:.0f}%."
+                f"Bull={_bp*100:.0f}% vs Bear={_rp*100:.0f}%."
             )
-        elif _mv < 0:
+        elif _mv < 0 and _have_pcts:
             bearish_count += abs(_mv)
             _markov_desc = (
                 f"Markov regime analysis adds a bearish bias "
                 f"(-{abs(_mv):.2f} vote): stationary distribution shows "
-                f"Bear={_markov_result['bear_pct']*100:.0f}% vs "
-                f"Bull={_markov_result['bull_pct']*100:.0f}%."
+                f"Bear={_rp*100:.0f}% vs Bull={_bp*100:.0f}%."
             )
-        else:
+        elif _have_pcts:
             _markov_desc = (
                 f"Markov regime analysis is neutral: stationary distribution "
-                f"shows Bull={_markov_result.get('bull_pct', 0)*100:.0f}% vs "
-                f"Bear={_markov_result.get('bear_pct', 0)*100:.0f}% — no directional edge."
+                f"shows Bull={_bp*100:.0f}% vs Bear={_rp*100:.0f}% — no directional edge."
             )
-        print(f"[markov-integration] {ticker}: {_markov_desc}")
+        else:
+            # No Markov data for this symbol — it simply abstains (no vote, no line).
+            _markov_desc = ""
+        if _markov_desc:
+            print(f"[markov-integration] {ticker}: {_markov_desc}")
     else:
         _markov_desc = ""
 
