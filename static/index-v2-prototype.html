@@ -10673,12 +10673,23 @@ function _todayUsdPerQuote(o){
   var def={JPY:1/155, CAD:1/1.37, CHF:1/0.90, AUD:0.66, NZD:0.60, GBP:1.27, EUR:1.08, INR:1/83, CNH:1/7.2, MXN:1/17};
   return def[quote]!=null?def[quote]:1;
 }
+function _todayRiskModel(o){
+  var entry=parseFloat(o&&o.entry)||0, sl=parseFloat(o&&o.sl)||0;
+  var slDist=Math.abs(entry-sl)||0;
+  var fx=_todayUsdPerQuote(o);
+  var spreadFrac = {crypto:0.0005, stock:0.0005, forex:0.0001, commodity:0.0005, index:0.0005}[(o&&o.asset)||'']||0.0005;
+  var spreadUnits = (o&&o.spreadCost!=null && o.spreadCost>0) ? o.spreadCost : entry*spreadFrac;
+  var feeRate = (o&&o.asset)==='crypto'?0.001 : (o&&o.asset)==='stock'?0.0005 : 0.00003;
+  var slipFrac = (o&&o.asset)==='forex'?0.00007:0.0004;
+  var riskPerUnit = (slDist + spreadUnits + (entry*feeRate) + (entry*slipFrac)) * fx;
+  return {entry:entry, slDist:slDist, fx:fx, spreadUnits:spreadUnits, feeRate:feeRate, slipFrac:slipFrac, riskPerUnit:riskPerUnit};
+}
 function _todaySizeTrade(o, acct, riskPct){
   var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0, tp1=parseFloat(o.tp)||0;
-  var slDist=Math.abs(entry-sl)||0;
-  var fx=_todayUsdPerQuote(o);                  // USD per 1 unit of quote currency
+  var rm=_todayRiskModel(o), slDist=rm.slDist;
+  var fx=rm.fx;                                 // USD per 1 unit of quote currency
   var riskD=(acct||0)*((riskPct||1)/100);       // USD the trader risks
-  var unitsRaw = (slDist>0 && fx>0) ? riskD/(slDist*fx) : 0;   // instrument units that risk riskD in USD
+  var unitsRaw = (rm.riskPerUnit>0) ? riskD/rm.riskPerUnit : 0; // instrument units whose FINAL loss incl costs fits riskD
   var LOT = _todayLotUnits(o);             // {cs, stepUnits, minUnits} — broker step/min in units
   // Round DOWN to the broker lot step (in units) so actual risk never EXCEEDS the target.
   // Epsilon guards floating-point boundaries (e.g. 999.9999 that should be 1000).
@@ -10688,15 +10699,9 @@ function _todaySizeTrade(o, acct, riskPct){
   var tradeable = units>0 && units>=LOT.minUnits;
   var notional = units*entry*fx;           // USD position value
   // Broker costs
-  var spreadFrac = {crypto:0.0005, stock:0.0005, forex:0.0001, commodity:0.0005, index:0.0005}[o.asset]||0.0005;
-  var spreadUnits = (o.spreadCost!=null && o.spreadCost>0) ? o.spreadCost : entry*spreadFrac;
-  // Commission: crypto ~0.1%, stocks ~0.05% of notional; forex/index/commodity are
-  // spread-based (tiny per-lot commission), so cost there is dominated by the spread.
-  var feeRate = o.asset==='crypto'?0.001 : o.asset==='stock'?0.0005 : 0.00003;
-  var slipFrac = o.asset==='forex'?0.00007:0.0004;
-  var spreadD = spreadUnits*units*fx;      // all costs in USD (fx converts quote→USD)
-  var feeD = notional*feeRate;             // notional already USD
-  var slipD = entry*slipFrac*units*fx;
+  var spreadD = rm.spreadUnits*units*fx;   // all costs in USD (fx converts quote→USD)
+  var feeD = notional*rm.feeRate;          // notional already USD
+  var slipD = entry*rm.slipFrac*units*fx;
   var costD = spreadD+feeD+slipD;
   var grossRisk = units*slDist*fx;         // USD risk after lot rounding
   var netLoss = grossRisk+costD;
@@ -11085,6 +11090,20 @@ function _todaySetLadderShare(idx, legIdx, pct){
   o._ladder[legIdx].share=v/100;
   _todayNormalizeLadder(o); window._todayExpandedIdx=idx; window._todaySelectedIdx=idx; _todayRenderPlan();
 }
+function _todaySetLadderTradeAmount(idx, legIdx, amount){
+  var o=(window._todayPlan||[])[idx]; if(!o || !o._size) return;
+  _todayEnsureLadder(o);
+  var total=parseFloat(o._size.notional)||0, amt=parseFloat(amount);
+  if(!(total>0) || !(amt>0) || !o._ladder[legIdx]) return;
+  var target=Math.max(0.01, Math.min(0.95, amt/total));
+  var others=o._ladder.reduce(function(a,l,i){ return a+(i===legIdx?0:(parseFloat(l.share)||0)); },0);
+  o._ladder[legIdx].share=target;
+  if(others>0){
+    var remain=Math.max(0.01, 1-target);
+    o._ladder.forEach(function(l,i){ if(i!==legIdx) l.share=((parseFloat(l.share)||0)/others)*remain; });
+  }
+  _todayNormalizeLadder(o); window._todayExpandedIdx=idx; window._todaySelectedIdx=idx; _todayRenderPlan();
+}
 function _todaySetLadderTarget(idx, legIdx, target){
   var o=(window._todayPlan||[])[idx]; if(!o) return;
   _todayEnsureLadder(o);
@@ -11105,7 +11124,7 @@ function _todayLadderHtml(o, idx, pxFmt, money2, esc){
   var rows=legs.map(function(l){
     var tgt=l.trailing?'TRAIL':l.target.toUpperCase()+' '+pxFmt(l.tp);
     return '<div style="display:grid;grid-template-columns:38px 1fr 1fr 1fr 1fr;gap:6px;align-items:center;padding:5px 0;border-top:1px solid rgba(237,232,216,.06);font-family:var(--mono);font-size:8.8px;color:rgba(237,232,216,.62);">'
-      + '<span>#'+l.idx+'</span><span>'+Math.round(l.share*100)+'% · '+(l.lots<0.01?l.lots.toFixed(4):l.lots.toFixed(2))+' lots</span><span>'+tgt+'</span><span style="color:#e8706e;">'+money2(-l.risk)+'</span><span style="color:#5de8a0;">+'+money2(l.profit)+'</span></div>';
+      + '<span>#'+l.idx+'</span><span>'+money2(l.notional)+' trade · '+(l.lots<0.01?l.lots.toFixed(4):l.lots.toFixed(2))+' lots</span><span>'+tgt+'</span><span style="color:#e8706e;">'+money2(-l.risk)+'</span><span style="color:#5de8a0;">+'+money2(l.profit)+'</span></div>';
   }).join('');
   return '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(237,232,216,.025);border:1px solid rgba(237,232,216,.1);">'
     + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px;"><span style="font-family:var(--mono);font-size:8px;color:rgba(201,168,76,.78);font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Multi-ladder</span>'+btn('conservative','Conservative')+btn('beginner','Beginner')+btn('aggressive','Aggressive')+'</div>'
@@ -11213,7 +11232,8 @@ function _todayRenderPlan(){
         + '<div><div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.45);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;">Trade size</div><div style="display:flex;align-items:center;gap:3px;"><input type="number" step="'+_szStep+'" min="0" value="'+(+_natVal.toFixed(_szDec))+'" onchange="_todaySetTradeSize('+idx+',this.value)" title="'+esc('Your trade size in '+_natUnit+' — risk %, money in and profit update.')+'" style="width:66px;padding:4px 6px;font-family:var(--mono);font-size:12px;font-weight:700;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.2);border-radius:4px;color:rgba(237,232,216,.92);outline:none;"><span style="font-size:11px;color:rgba(237,232,216,.5);">'+_natUnit+'</span></div></div>'
       + '</div>'
       + '<div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.4);margin-bottom:10px;">✦ DotVerse suggests <span style="color:rgba(93,232,160,.8);font-weight:700;">'+_recR+'%</span> · set risk or size — the other follows</div>'
-      + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">'
+      + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;">'
+        + '<div style="background:rgba(237,232,216,.04);border-radius:6px;padding:9px 10px;">'+lab('Trade size',TT.tradesize)+'<div style="font-family:var(--mono);font-size:17px;font-weight:700;color:rgba(237,232,216,.85);">'+money2(s.notional)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.unitLabel+'</div></div>'
         + '<div style="background:rgba(237,232,216,.04);border-radius:6px;padding:9px 10px;">'+lab('Money in',TT.cashin)+'<div style="font-family:var(--mono);font-size:17px;font-weight:700;color:rgba(201,168,76,.95);">'+money2(s.marginReq)+'</div>'+(s.leveraged?'<div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">controls '+money2(s.notional)+'</div>':'')+'</div>'
         + '<div style="background:rgba(237,232,216,.04);border-radius:6px;padding:9px 10px;">'+lab('Could make',TT.profit)+'<div style="font-family:var(--mono);font-size:17px;font-weight:700;color:#5de8a0;">+'+money2(s.netTP1)+'</div></div>'
         + '<div style="background:rgba(237,232,216,.04);border-radius:6px;padding:9px 10px;">'+lab('Could lose',TT.maxloss)+'<div style="font-family:var(--mono);font-size:17px;font-weight:700;color:#e8706e;">'+money2(-s.netLoss)+'</div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);">'+s.riskPctOfAcct.toFixed(2)+'% of account</div></div>'
@@ -11319,12 +11339,13 @@ function _todayRenderPlan(){
 	  function _ladderEditor(item, compact){
 	    var o=item.o, idx=item.idx, legs=_todayLadderLegs(o), lt=_todayLadderTotals(o);
 	    var rows=legs.map(function(l,legIdx){
+	      var lpct=c.acct>0?(l.risk/c.acct*100):0;
 	      return '<div class="ladder-editor-row">'
 	        + '<div class="gold">#'+l.idx+'</div>'
-	        + '<div><input type="number" step="1" min="1" max="100" value="'+Math.round(l.share*100)+'" onchange="_todaySetLadderShare('+idx+','+legIdx+',this.value)"><div class="td-mini">share</div></div>'
+	        + '<div><input type="number" step="1" min="1" value="'+Math.max(1,Math.round(l.notional||0))+'" onchange="_todaySetLadderTradeAmount('+idx+','+legIdx+',this.value)"><div class="td-mini">trade size $</div></div>'
 	        + '<div><select onchange="_todaySetLadderTarget('+idx+','+legIdx+',this.value)">'+_targetOptions(l.target)+'</select><div class="td-mini">exit</div></div>'
-	        + '<div class="wide td-sub">'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+' lots · '+money2(l.margin)+' margin · '+money2(l.notional)+' trade size</div>'
-	        + '<div><span class="red">'+money2(-l.risk)+'</span><br><span class="green">+'+money2(l.profit)+'</span></div>'
+	        + '<div class="wide td-sub">'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+' lots · '+money2(l.margin)+' margin · '+Math.round(l.share*100)+'% of setup</div>'
+	        + '<div><span class="red">'+money2(-l.risk)+' / '+lpct.toFixed(2)+'%</span><br><span class="green">+'+money2(l.profit)+'</span></div>'
 	        + '<button class="td-btn red" style="padding:4px;width:24px;height:24px" onclick="_todayRemoveLadderLeg('+idx+','+legIdx+')">×</button>'
 	      + '</div>';
 	    }).join('');
@@ -11410,10 +11431,9 @@ function _todayAllocate(plan, acct, budget){
   var budgetD=(acct||0)*((budget||0)/100);
   // 1) Minimum risk % to place each candidate (reach its broker minimum lot), currency-correct.
   plan.forEach(function(o){
-    var slD=Math.abs((parseFloat(o.entry)||0)-(parseFloat(o.sl)||0));
-    var fx=_todayUsdPerQuote(o);
+    var rm=_todayRiskModel(o);
     var LOT=_todayLotUnits(o);   // broker minimum in instrument units (lots × contract size)
-    o._minRiskPlace=(slD>0&&acct>0)?(LOT.minUnits*slD*fx/acct*100):999;
+    o._minRiskPlace=(rm.riskPerUnit>0&&acct>0)?(LOT.minUnits*rm.riskPerUnit/acct*100):999;
   });
   // 2) Greedily include best-quality setups (plan is already quality-ranked) whose cumulative
   //    minimum risk fits the budget and whose own minimum is within the per-trade cap.
@@ -11537,8 +11557,8 @@ function _todaySetTradeSize(idx, val){
   var acct=(window._todayCfg&&window._todayCfg.acct)||0;
   if(!(slDist>0)||!(acct>0)) return;
   var units=_todayNativeToUnits(o, nv);
-  var fx=_todayUsdPerQuote(o);
-  var risk = units*slDist*fx/acct*100;             // size → equivalent USD risk %
+  var rm=_todayRiskModel(o);
+  var risk = units*rm.riskPerUnit/acct*100;        // size → FINAL max-loss risk %, including costs
   // Enforce the per-trade hard cap on manual sizing too — typing a bigger size must not
   // push a single trade past 2% of the account (the stated hard cap).
   if(risk > _TODAY_PER_CAP){ risk = _TODAY_PER_CAP; if(typeof _dvToast==='function') _dvToast('Capped at '+_TODAY_PER_CAP+'% — the per-trade safety limit','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); }
