@@ -10025,6 +10025,10 @@ function applyKellyRisk(btn) {
   var inp = document.getElementById('szRisk');
   if (!inp || window._kellyPct == null) return;
   inp.value = window._kellyPct.toFixed(1);
+  // Applying Flow-Scaled Sizing means risk is now the driver again. If the user
+  // previously typed a fixed Trade Size, do not leave that stale dollar amount
+  // controlling the calculation after the Flow button says "applied".
+  window._szTradeSizeManual = false;
   // Flow-scaling recommendation reaches the whole ladder: when the trader
   // chooses to apply it in Scale-Out Ladder mode, scale EVERY leg proportionally
   // so the ladder's total risk equals the suggested %. Recommend-only — only
@@ -10742,9 +10746,10 @@ function _todayEnsureBasketStyles(){
   + '.today-page .fire-panel{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(93,232,160,.22);background:linear-gradient(135deg,rgba(93,232,160,.075),rgba(237,232,216,.018));border-radius:7px;padding:13px 15px;margin-bottom:12px}'
   + '.today-page .td-table-wrap{overflow:auto}.today-page .td-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10.5px}.today-page .td-table th,.today-page .td-table td{border-bottom:1px solid rgba(237,232,216,.07);padding:9px 8px;text-align:left;color:rgba(237,232,216,.62);vertical-align:middle}.today-page .td-table th{font-size:8.5px;color:rgba(237,232,216,.42);text-transform:uppercase;font-weight:500}.today-page .td-table tr:hover td{background:rgba(237,232,216,.025)}'
   + '.today-page .trade-detail{border:1px solid rgba(237,232,216,.075);border-radius:6px;background:rgba(237,232,216,.018);padding:9px 10px;margin-top:8px}.today-page .mini-ladder{display:grid;grid-template-columns:40px 1fr 52px 52px 78px;gap:6px;align-items:center;font-family:var(--mono);font-size:9px;margin-top:7px}.today-page .mini-ladder.head{font-size:8px;color:rgba(237,232,216,.42);text-transform:uppercase;letter-spacing:.05em}.today-page .mini-ladder div{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  + '.today-page .ladder-editor{display:grid;gap:7px;margin-top:10px}.today-page .ladder-editor-row{display:grid;grid-template-columns:34px 78px 90px 1fr 72px 24px;gap:7px;align-items:center;border:1px solid rgba(237,232,216,.075);background:rgba(0,0,0,.16);border-radius:6px;padding:7px}.today-page .ladder-editor-row input,.today-page .ladder-editor-row select{height:28px;border:1px solid rgba(237,232,216,.12);background:rgba(237,232,216,.04);border-radius:4px;color:#ede8d8;font-family:var(--mono);font-size:10px;padding:0 6px;outline:0}.today-page .auto-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:9px}.today-page .auto-chip{border:1px solid rgba(237,232,216,.105);border-radius:5px;background:rgba(237,232,216,.028);color:rgba(237,232,216,.42);font-family:var(--mono);font-size:8.5px;text-align:left;padding:7px;cursor:pointer}.today-page .auto-chip.on{border-color:rgba(93,232,160,.3);background:rgba(93,232,160,.075);color:rgba(93,232,160,.92)}.today-page .auto-chip b{display:block;font-size:9.5px;margin-bottom:2px}.today-page .auto-chip span{display:block;font-size:7.5px;line-height:1.25;opacity:.72}'
   + '.today-page .td-sig-card{position:relative;background:rgba(237,232,216,.026);border:1px solid rgba(237,232,216,.105);border-radius:7px;padding:15px;text-align:left;overflow:hidden}.today-page .td-sig-card:before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,rgba(93,232,160,.65),transparent)}.today-page .td-sig-card.short:before{background:linear-gradient(90deg,rgba(232,112,110,.65),transparent)}.today-page .sig-symbol{font-family:var(--syne);font-size:21px;font-weight:500}.today-page .sig-meta{font-size:11px;color:rgba(237,232,216,.42);margin-top:2px}.today-page .sig-live{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid rgba(93,232,160,.15);border-radius:6px;background:rgba(93,232,160,.045);padding:8px 10px;margin-top:11px}.today-page .sig-live span{font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42);text-transform:uppercase;letter-spacing:.06em}.today-page .sig-live b{font-family:var(--mono);font-size:16px;color:#5de8a0}.today-page .sig-levels,.today-page .sig-detail-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.today-page .sig-level,.today-page .sig-mini{border:1px solid rgba(237,232,216,.07);border-radius:5px;background:rgba(237,232,216,.025);padding:8px;min-width:0}.today-page .sig-level b,.today-page .sig-mini b{display:block;font-family:var(--mono);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.today-page .sig-level span,.today-page .sig-mini span{display:block;font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.42);text-transform:uppercase;margin-bottom:3px}'
   + '.today-page .flow-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:22px;padding:15px 18px;background:rgba(237,232,216,.026);border:1px solid rgba(237,232,216,.105);border-radius:8px}.today-page .flow-footer-step{font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.42);letter-spacing:.08em;text-transform:uppercase}.today-page .flow-footer-msg{font-size:13px;color:rgba(237,232,216,.62)}'
-  + '@media(max-width:1100px){.today-page .basket-total{grid-template-columns:repeat(2,minmax(0,1fr))}.today-page .td-two{grid-template-columns:1fr}.today-page .td-four{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.today-page .basket-total,.today-page .td-four,.today-page .sig-levels,.today-page .sig-detail-grid{grid-template-columns:1fr}.today-page .fire-panel,.today-page .flow-footer{align-items:stretch;flex-direction:column}.today-page .mini-ladder{grid-template-columns:34px 1fr 48px}}';
+  + '@media(max-width:1100px){.today-page .basket-total{grid-template-columns:repeat(2,minmax(0,1fr))}.today-page .td-two{grid-template-columns:1fr}.today-page .td-four{grid-template-columns:repeat(2,minmax(0,1fr))}.today-page .auto-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.today-page .basket-total,.today-page .td-four,.today-page .sig-levels,.today-page .sig-detail-grid,.today-page .auto-grid{grid-template-columns:1fr}.today-page .fire-panel,.today-page .flow-footer{align-items:stretch;flex-direction:column}.today-page .mini-ladder{grid-template-columns:34px 1fr 48px}.today-page .ladder-editor-row{grid-template-columns:32px 1fr 1fr}.today-page .ladder-editor-row .wide{grid-column:1/-1}}';
   document.head.appendChild(st);
 }
 function _todayPill(text,tone){ return '<span class="td-pill '+(tone||'')+'">'+text+'</span>'; }
@@ -10766,7 +10771,7 @@ function _todaySetRiskPreset(mode){
   var r=document.getElementById('todayRisk'); if(r) r.value=p.riskPct;
   var lm=document.getElementById('todayLadderMode'); if(lm) lm.value=p.id;
   var plan=window._todayPlan||[];
-  plan.forEach(function(o){ o._ladderMode=p.id; });
+  plan.forEach(function(o){ o._ladderMode=p.id; o._ladder=_todayDefaultLadder(p.id); });
   if(plan.length){ _todayAllocate(plan,c.acct,p.riskPct); window._todaySorted=false; showToday(); _todayRenderPlan(); }
   else showToday();
 }
@@ -10776,7 +10781,7 @@ function _todaySetMarketPreset(v){
   showToday();
 }
 function _todaySelectTrade(idx){ window._todaySelectedIdx=idx; window._todayExpandedIdx=idx; _todayRenderPlan(); }
-function _todayToggleTrade(idx){ window._todayExpandedIdx=(window._todayExpandedIdx===idx?null:idx); window._todaySelectedIdx=idx; _todayRenderPlan(); }
+function _todayToggleTrade(idx){ window._todayExpandedIdx=(window._todayExpandedIdx===idx?-1:idx); window._todaySelectedIdx=idx; _todayRenderPlan(); }
 function showToday(){
 	  var el=document.getElementById('dashContent'); if(!el) return;
 	  _todayEnsureBasketStyles();
@@ -10791,12 +10796,13 @@ function showToday(){
 	    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">Tell DotVerse your weekly profit target. It returns a live basket, sizes every trade, expands each ladder, and lets you fire the whole plan only after review.</div></div><div class="pg-hd-right">'+_todayPill('Practice-first','green')+_todayPill('Live prices monitored','gold')+'</div></div>'
 	    + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>Plan criteria</h2><button class="td-btn primary" onclick="_todayBuildPlan()">Find trades</button></div><div class="td-pad">'
 	      + '<div class="td-grid td-four">'
+	        + '<div class="td-field"><label>Account size</label><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)"></div>'
 	        + '<div class="td-field"><label>Weekly profit target</label><input id="todayProfitGoal" type="number" step="10" min="0" value="'+(c.profitGoal||500)+'" oninput="_todaySetProfitGoal(this.value)"></div>'
 	        + '<div class="td-field"><label>Total risk budget</label><input id="todayRisk" type="number" step="0.25" min="0.1" value="'+(c.riskPct||p.riskPct)+'" oninput="_todaySetGlobalRisk(this.value)"></div>'
 	        + '<div class="td-field"><label>Markets</label><select onchange="_todaySetMarketPreset(this.value)"><option value="all">Forex, gold, crypto, indices</option><option value="forex">Forex only</option><option value="crypto">Crypto only</option></select></div>'
 	        + '<div class="td-field"><label>Broker leverage</label><select id="todayLev" onchange="_todaySetLeverage(this.value)">'+_dvBrokerLeverageOptions(window._todayLeverage||100)+'</select></div>'
 	      + '</div>'
-	      + '<div style="display:none;"><input id="todayAcct" value="'+(c.acct||'')+'"><select id="todayLadderMode"><option value="'+(c.ladderMode||'beginner')+'" selected></option></select><input id="todayMaxTrades" value="'+c.maxTrades+'"><select id="todayMaxPer"><option value="'+c.maxPerClass+'" selected></option></select><input type="checkbox" id="todayAutoPlace"'+(c.autoPlace?' checked':'')+'></div>'
+	      + '<div style="display:none;"><select id="todayLadderMode"><option value="'+(c.ladderMode||'beginner')+'" selected></option></select><input id="todayMaxTrades" value="'+c.maxTrades+'"><select id="todayMaxPer"><option value="'+c.maxPerClass+'" selected></option></select><input type="checkbox" id="todayAutoPlace"'+(c.autoPlace?' checked':'')+'></div>'
 	      + _todayRiskPresetBar()
 	      + '<div class="td-sub" style="margin-top:10px">Dynamic basket mode: quality first, target second. The totals update the moment a risk preset, trade, timeframe, or ladder is changed.</div>'
 	      + '<div style="margin-top:13px"><div class="td-mini" style="margin-bottom:6px;">Markets to include</div><div class="td-stack">'+chips+'</div></div>'
@@ -10804,21 +10810,20 @@ function showToday(){
 	    + '<div id="todayPlanArea"></div></div>';
   // Stop any live monitor from a previous plan, and pull the real broker balance.
   _todayStopLivePrices(); window._todaySorted=false;
-  if(!c.acct){
-    dvFetch('/api/mt5/state').then(function(d){
-      if(d&&d.account){
-	        var lv=parseInt(d.account.leverage); if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; var le=document.getElementById('todayLev'); if(le){ le.innerHTML=_dvBrokerLeverageOptions(lv); le.value=String(lv); } }
-        var b=parseFloat(d.account.balance)||0;
-        if(b>0){ c.acct=b; var a=document.getElementById('todayAcct'); if(a && !a.value) a.value=Math.round(b); }
-      }
-    }).catch(function(){});
-  }
+  dvFetch('/api/mt5/state').then(function(d){
+    if(d&&d.account){
+      var lv=parseInt(d.account.leverage); if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; var le=document.getElementById('todayLev'); if(le){ le.innerHTML=_dvBrokerLeverageOptions(lv); le.value=String(lv); } }
+      var b=parseFloat(d.account.balance)||0;
+      if(b>0 && !window._todayAcctManual){ c.acct=b; var a=document.getElementById('todayAcct'); if(a) a.value=Math.round(b); }
+    }
+  }).catch(function(){});
 }
 function _todayPlanTotals(plan, acct){
   var out={profit:0,risk:0,margin:0,notional:0,tradeable:0};
   (plan||[]).forEach(function(o){
     var s=o&&o._size; if(!s||!s.tradeable) return;
-    out.profit+=s.netTP1||0; out.risk+=s.netLoss||0; out.margin+=s.marginReq||0; out.notional+=s.notional||0; out.tradeable++;
+    var lt=_todayLadderTotals(o);
+    out.profit+=lt.profit||s.netTP1||0; out.risk+=lt.risk||s.netLoss||0; out.margin+=lt.margin||s.marginReq||0; out.notional+=lt.notional||s.notional||0; out.tradeable++;
   });
   out.riskPct=acct>0?(out.risk/acct*100):0;
   return out;
@@ -10856,7 +10861,7 @@ async function _todayBuildPlan(){
       var lv=parseInt(st.account.leverage);
 	      if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; var le=document.getElementById('todayLev'); if(le){ le.innerHTML=_dvBrokerLeverageOptions(lv); le.value=String(lv); } }
       var b=parseFloat(st.account.balance)||0;
-      if(!c.acct && b>0){ c.acct=b; var ai=document.getElementById('todayAcct'); if(ai) ai.value=Math.round(b); }
+      if(b>0 && !window._todayAcctManual){ c.acct=b; var ai=document.getElementById('todayAcct'); if(ai) ai.value=Math.round(b); }
     }
   }catch(e){}
   if(!c.acct){ area.innerHTML='<div style="padding:26px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:#e8706e;line-height:1.7;">Enter your account size above so DotVerse can size each trade safely.</div>'; return; }
@@ -10933,7 +10938,7 @@ async function _todayBuildPlan(){
   // RISK BUDGET MODEL — the top % is the TOTAL risk for the day, split evenly across
   // the chosen trades (1% over 3 trades = ~0.33% each). DotVerse's recommended share
   // is stored so the cards can guide per-trade overrides.
-  plan.forEach(function(o){ o._autos=_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; });
+  plan.forEach(function(o){ o._autos=_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; o._ladder=_todayDefaultLadder(o._ladderMode); });
   window._todayPlan=plan;
   _todayRenderPlan();   // show immediately with sensible defaults
   // Upgrade each card to DotVerse's SMART per-trade automations, then re-render.
@@ -10976,6 +10981,25 @@ function _todayTargetPrice(o,target){
   if(target==='trail') return null;
   return o.tp;
 }
+function _todayDefaultLadder(mode){
+  return _todayLadderProfile(mode).legs.map(function(l){ return {share:l.share,target:l.target}; });
+}
+function _todayEnsureLadder(o){
+  if(!o) return [];
+  if(!Array.isArray(o._ladder) || !o._ladder.length){
+    o._ladder=_todayDefaultLadder(o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner');
+  }
+  _todayNormalizeLadder(o);
+  return o._ladder;
+}
+function _todayNormalizeLadder(o){
+  if(!o || !Array.isArray(o._ladder)) return;
+  o._ladder=o._ladder.filter(function(l){ return l && (parseFloat(l.share)>0); }).slice(0,10);
+  if(!o._ladder.length) o._ladder=_todayDefaultLadder(o._ladderMode||'beginner');
+  var sum=o._ladder.reduce(function(a,l){ return a+(parseFloat(l.share)||0); },0);
+  if(!(sum>0)){ var each=1/o._ladder.length; o._ladder.forEach(function(l){ l.share=each; }); return; }
+  o._ladder.forEach(function(l){ l.share=(parseFloat(l.share)||0)/sum; l.target=l.target||'tp1'; });
+}
 function _todayLadderLegs(o){
   var s=o&&o._size; if(!o||!s||!s.tradeable) return [];
   var prof=_todayLadderProfile(o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner');
@@ -10983,7 +11007,8 @@ function _todayLadderLegs(o){
   var minLot=spec.lotMin||0;
   var lots=s.lots||_todayMt5Lots(o);
   var entry=parseFloat(o.entry)||0, fx=_todayUsdPerQuote(o), isSell=(o.sig||'BUY').toUpperCase()==='SELL';
-  var legs=prof.legs.map(function(l,idx){
+  var ladder=_todayEnsureLadder(o);
+  var legs=ladder.map(function(l,idx){
     var tp=_todayTargetPrice(o,l.target), dist=tp?Math.abs(parseFloat(tp)-entry):Math.abs(parseFloat(o.tp3||o.tp2||o.tp||entry)-entry);
     var units=(s.units||0)*l.share, gross=dist*units*fx, profit=Math.max(0,gross-(s.costD||0)*l.share);
     return {idx:idx+1, mode:prof.label, share:l.share, target:l.target, tp:tp, trailing:l.target==='trail',
@@ -10994,6 +11019,48 @@ function _todayLadderLegs(o){
     return [{idx:1, mode:'Single', share:1, target:'tp1', tp:o.tp, trailing:false, lots:lots, units:s.units, margin:s.marginReq, notional:s.notional, risk:s.netLoss, profit:s.netTP1, tooSmallSplit:true}];
   }
   return legs;
+}
+function _todayLadderTotals(o){
+  return _todayLadderLegs(o).reduce(function(a,l){ a.margin+=l.margin||0; a.notional+=l.notional||0; a.risk+=l.risk||0; a.profit+=l.profit||0; a.orders++; return a; },{margin:0,notional:0,risk:0,profit:0,orders:0});
+}
+function _todaySetTradeLadder(idx, mode){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._ladderMode=mode||'beginner';
+  o._ladder=_todayDefaultLadder(o._ladderMode);
+  window._todaySorted=true; _todayRenderPlan();
+}
+function _todayAddLadderLeg(idx){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  _todayEnsureLadder(o);
+  if(o._ladder.length>=10){ if(typeof _dvToast==='function') _dvToast('Maximum 10 ladder trades per setup','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); return; }
+  o._ladder.push({share:.15,target:o._ladder.length<2?'tp2':'tp3'});
+  _todayNormalizeLadder(o); window._todayExpandedIdx=idx; window._todaySelectedIdx=idx; _todayRenderPlan();
+}
+function _todayRemoveLadderLeg(idx, legIdx){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  _todayEnsureLadder(o);
+  if(o._ladder.length<=1){ if(typeof _dvToast==='function') _dvToast('At least one trade is required','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); return; }
+  o._ladder.splice(legIdx,1); _todayNormalizeLadder(o); window._todayExpandedIdx=idx; window._todaySelectedIdx=idx; _todayRenderPlan();
+}
+function _todaySetLadderShare(idx, legIdx, pct){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  _todayEnsureLadder(o);
+  var v=parseFloat(pct); if(!(v>0)) return;
+  o._ladder[legIdx].share=v/100;
+  _todayNormalizeLadder(o); window._todayExpandedIdx=idx; window._todaySelectedIdx=idx; _todayRenderPlan();
+}
+function _todaySetLadderTarget(idx, legIdx, target){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  _todayEnsureLadder(o);
+  o._ladder[legIdx].target=target||'tp1';
+  window._todayExpandedIdx=idx; window._todaySelectedIdx=idx; _todayRenderPlan();
+  try{ _todayRecommendAutos(o).then(function(a){ if(a){ o._autos=a; _todayRenderPlan(); } }); }catch(e){}
+}
+function _todayToggleAuto(idx,key){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._autos=o._autos||_todayDefaultAutos(o.tf);
+  o._autos[key]=!o._autos[key];
+  window._todaySelectedIdx=idx; _todayRenderPlan();
 }
 function _todayLadderHtml(o, idx, pxFmt, money2, esc){
   var legs=_todayLadderLegs(o), mode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
@@ -11045,7 +11112,7 @@ function _todayRenderPlan(){
   };
   var autoTip={ be:'Break-even: after TP1 hits, your stop moves to entry so the trade can no longer turn into a loss.', trail:'Trailing stop: the stop follows price as it runs, locking in more profit.', macro:'News watch: flags high-impact economic news that could move this trade.', inval:'Invalidation: auto-exits if the original signal conditions break down.', sent:'Sentiment: monitors crowd positioning and sentiment shifts.', tp1:'TP1 alert: notifies you when price reaches the first take-profit.', tp2:'TP2 alert: notifies you when price reaches the second take-profit.', weekend:'Weekend guard: manages risk before the weekend market gap.' };
   var totExp=0, totCashIn=0, totRisk=0, totGross=0, totProfit=0, longs=0, shorts=0, clsSet={}, nTradeable=0, nTooSmall=0, nMoved=0;
-  plan.forEach(function(o){ var s=o._size; if(o._live&&o._live.invalid){ nMoved++; return; } if(!s.tradeable){ nTooSmall++; return; } totExp+=s.notional; totCashIn+=s.marginReq; totRisk+=s.netLoss; totGross+=s.grossRisk; totProfit+=s.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; nTradeable++; });
+	  plan.forEach(function(o){ var s=o._size; if(o._live&&o._live.invalid){ nMoved++; return; } if(!s.tradeable){ nTooSmall++; return; } var lt=_todayLadderTotals(o); totExp+=lt.notional||s.notional; totCashIn+=lt.margin||s.marginReq; totRisk+=lt.risk||s.netLoss; totGross+=s.grossRisk; totProfit+=lt.profit||s.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; nTradeable++; });
   var autoLbl={be:'Break-even',trail:'Trailing',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
   var cards=plan.map(function(o,idx){
     // Moved past entry/stop since the scan — drop from the menu (summarised below instead).
@@ -11189,13 +11256,51 @@ function _todayRenderPlan(){
 	  function _pct(v){ return c.acct>0?(v/c.acct*100).toFixed(2)+'%':'0.00%'; }
 	  function _lots(o){ var l=_todayMt5Lots(o); return l<0.01?l.toFixed(4):l.toFixed(2); }
 	  function _quality(o){ var q=(o.quality&&o.quality.score!=null)?o.quality.score:(o.qscore||o.conf||0); return Math.round(q)+'%'; }
+	  function _targetOptions(target){
+	    var labs={tp1:'TP1',tp2:'TP2',tp3:'TP3',trail:'TRAIL'};
+	    return ['tp1','tp2','tp3','trail'].map(function(v){ return '<option value="'+v+'"'+(target===v?' selected':'')+'>'+labs[v]+'</option>'; }).join('');
+	  }
+	  function _autoControls(item){
+	    if(!item) return '';
+	    var o=item.o, idx=item.idx; o._autos=o._autos||_todayDefaultAutos(o.tf);
+	    var defs=[
+	      ['be','Break-even','Move SL to entry after TP1'],
+	      ['trail','Trailing','ATR trailing stop'],
+	      ['macro','News','High-impact event shield'],
+	      ['inval','Invalidation','Exit if setup breaks'],
+	      ['sent','Sentiment','Mood / headline shield'],
+	      ['tp1','TP1 alert','Notify at first target'],
+	      ['tp2','TP2 alert','Notify at second target'],
+	      ['weekend','Weekend','Gap-risk guard']
+	    ];
+	    var chips=defs.map(function(d){
+	      var on=!!o._autos[d[0]];
+	      return '<button class="auto-chip '+(on?'on':'')+'" onclick="_todayToggleAuto('+idx+',\''+d[0]+'\')" title="'+esc(autoTip[d[0]]||d[2])+'"><b>'+(on?'ON ':'OFF ')+d[1]+'</b><span>'+d[2]+'</span></button>';
+	    }).join('');
+	    var active=defs.filter(function(d){ return !!o._autos[d[0]]; }).length;
+	    return '<div style="margin-top:12px;padding-top:11px;border-top:1px solid rgba(237,232,216,.07)"><div class="td-stack" style="justify-content:space-between"><div><div class="td-mini">Per-trade automations</div><div class="td-sub">These flags are sent with '+o.sym+' when you place this trade.</div></div>'+_todayPill(active+' active',active?'green':'red')+'</div><div class="auto-grid">'+chips+'</div>'+(o._autoWhy?'<div class="td-sub" style="margin-top:8px;color:rgba(126,183,255,.72)">'+esc(o._autoWhy)+'</div>':'')+'</div>';
+	  }
+	  function _ladderEditor(item, compact){
+	    var o=item.o, idx=item.idx, legs=_todayLadderLegs(o), lt=_todayLadderTotals(o);
+	    var rows=legs.map(function(l,legIdx){
+	      return '<div class="ladder-editor-row">'
+	        + '<div class="gold">#'+l.idx+'</div>'
+	        + '<div><input type="number" step="1" min="1" max="100" value="'+Math.round(l.share*100)+'" onchange="_todaySetLadderShare('+idx+','+legIdx+',this.value)"><div class="td-mini">share</div></div>'
+	        + '<div><select onchange="_todaySetLadderTarget('+idx+','+legIdx+',this.value)">'+_targetOptions(l.target)+'</select><div class="td-mini">exit</div></div>'
+	        + '<div class="wide td-sub">'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+' lots · '+money2(l.margin)+' margin · '+money2(l.notional)+' trade size</div>'
+	        + '<div><span class="red">'+money2(-l.risk)+'</span><br><span class="green">+'+money2(l.profit)+'</span></div>'
+	        + '<button class="td-btn red" style="padding:4px;width:24px;height:24px" onclick="_todayRemoveLadderLeg('+idx+','+legIdx+')">×</button>'
+	      + '</div>';
+	    }).join('');
+	    return '<div class="ladder-editor">'+rows+'</div>'
+	      + '<div class="td-stack" style="margin-top:9px"><button class="td-btn gold" onclick="_todayAddLadderLeg('+idx+')">+ Add trade</button><button class="td-btn ghost" onclick="_todaySetTradeLadder('+idx+',\'conservative\')">Conservative</button><button class="td-btn ghost" onclick="_todaySetTradeLadder('+idx+',\'beginner\')">Beginner</button><button class="td-btn ghost" onclick="_todaySetTradeLadder('+idx+',\'aggressive\')">Aggressive</button></div>'
+	      + '<div class="td-stack" style="margin-top:8px">'+_todayPill(legs.length+' MT5 order'+(legs.length===1?'':'s'),'gold')+_todayPill('size '+money2(lt.notional),'blue')+_todayPill('risk '+money2(-lt.risk),'red')+_todayPill('profit +'+money2(lt.profit),'green')+'</div>'
+	      + (legs[0]&&legs[0].tooSmallSplit?'<div class="td-sub gold" style="margin-top:7px">Broker minimum lot is too large for this split. Increase trade size/risk if you want multiple executable orders.</div>':'');
+	  }
 	  function _tradeLadderRow(item){
 	    var o=item.o, idx=item.idx, open=window._todayExpandedIdx===idx, legs=_todayLadderLegs(o);
-	    var rows=legs.map(function(l){
-	      return '<button class="mini-ladder" style="width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:4px 0" onclick="event.stopPropagation();_todaySetTradeLadder('+idx+',\''+(o._ladderMode||c.ladderMode||'beginner')+'\')"><div class="gold">#'+l.idx+'</div><div>'+Math.round(l.share*100)+'% of '+o.sym+'</div><div class="red">'+money2(-l.risk)+'</div><div>'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+'</div><div class="green">'+(l.trailing?'Trail':(l.target||'tp1').toUpperCase())+'</div></button>';
-	    }).join('');
 	    return '<div class="trade-detail"><button class="td-btn ghost" style="width:100%;justify-content:space-between" onclick="_todayToggleTrade('+idx+')"><span>'+(open?'Hide':'Show')+' '+o.sym+' multi-ladder · '+_todayLadderProfile(o._ladderMode||c.ladderMode).label+'</span><span class="gold">'+(open?'open':'expand')+'</span></button>'
-	      + (open?'<div style="margin-top:9px"><div class="mini-ladder head"><div>Leg</div><div>Purpose</div><div>Risk</div><div>Lots</div><div>Exit</div></div>'+rows+'<div class="td-sub" style="margin-top:8px">Per-trade ladder: '+o.sym+' keeps its own lots, SL, exits, automations, and risk cap. Changing the global preset recalculates these rows.</div></div>':'')
+	      + (open?'<div style="margin-top:9px">'+_ladderEditor(item,true)+_autoControls(item)+'<div class="td-sub" style="margin-top:8px">Per-trade ladder: '+o.sym+' keeps its own lots, SL, exits, automations, and risk cap. Use Add trade to split one setup into multiple MT5 orders.</div></div>':'')
 	    + '</div>';
 	  }
 	  function _tableRows(){
@@ -11213,12 +11318,13 @@ function _todayRenderPlan(){
 	      + '<div class="sig-levels"><button class="sig-level"><span>Entry</span><b>'+pxFmt(o.entry)+'</b></button><button class="sig-level"><span>SL</span><b class="red">'+pxFmt(o.sl)+'</b></button><button class="sig-level"><span>TP1</span><b class="green">'+pxFmt(o.tp)+'</b></button><button class="sig-level"><span>TP2 / TP3</span><b class="green">'+(tps[1]?pxFmt(tps[1]):'—')+' / '+(tps[2]?pxFmt(tps[2]):'—')+'</b></button></div>'
 	      + '<div class="sig-detail-grid"><button class="sig-mini"><span>R:R</span><b>1:'+(s.rr||0).toFixed(1)+'</b></button><button class="sig-mini"><span>Lot size</span><b>'+_lots(o)+'</b></button><button class="sig-mini"><span>Dollar size</span><b>'+money(s.notional)+'</b></button><button class="sig-mini"><span>Max loss</span><b class="red">'+money2(-s.netLoss)+'</b></button></div>'
 	      + '<p class="td-sub">'+(o.reason||'DotVerse selected this setup because quality, risk, and timeframe fit the current basket goal.')+'</p>'
+	      + _autoControls(item)
 	      + '<button id="today-cta-'+idx+'" class="td-btn primary" style="margin-top:10px;width:100%" onclick="_todayPlaceTrade('+idx+')">Place this trade</button><div id="today-livebox-'+idx+'" style="margin-top:8px"></div></div>';
 	  }
 	  function _selectedLadderPanel(item){
 	    if(!item) return '';
 	    var o=item.o, legs=_todayLadderLegs(o), prof=_todayLadderProfile(o._ladderMode||c.ladderMode);
-	    return '<div class="td-card"><div class="td-card-head"><h2>Selected trade ladder</h2><div class="td-stack"><button class="td-btn '+(prof.label==='Conservative'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'conservative\')">Conservative</button><button class="td-btn '+(prof.label==='Beginner'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'beginner\')">Beginner</button><button class="td-btn '+(prof.label==='Aggressive'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'aggressive\')">Aggressive</button></div></div><div class="td-pad"><p class="td-sub">Flow-sized scaling. Each leg keeps its own lots, TP target, risk, and profit math.</p><div style="margin-top:12px"><div class="mini-ladder head"><div>Leg</div><div>Purpose</div><div>Risk</div><div>Lots</div><div>Exit</div></div>'+legs.map(function(l){return '<div class="mini-ladder"><div class="gold">#'+l.idx+'</div><div>'+Math.round(l.share*100)+'% scale-out</div><div class="red">'+money2(-l.risk)+'</div><div>'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+'</div><div class="green">'+(l.trailing?'Trail':(l.target||'tp1').toUpperCase())+'</div></div>';}).join('')+'</div><div class="td-sub" style="margin-top:10px">Total ladder risk follows the selected basket preset: '+pset.label+'.</div></div></div>';
+	    return '<div class="td-card"><div class="td-card-head"><h2>Selected trade ladder</h2><div class="td-stack"><button class="td-btn '+(prof.label==='Conservative'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'conservative\')">Conservative</button><button class="td-btn '+(prof.label==='Beginner'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'beginner\')">Beginner</button><button class="td-btn '+(prof.label==='Aggressive'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'aggressive\')">Aggressive</button></div></div><div class="td-pad"><p class="td-sub">Flow-sized scaling. Add multiple trades under the same setup, choose exits, and the totals below update immediately.</p>'+_ladderEditor(item,false)+_autoControls(item)+'<div class="td-sub" style="margin-top:10px">Total ladder risk follows the selected basket preset: '+pset.label+'.</div></div></div>';
 	  }
 	  var basket = '<div class="basket-total">'
 	    + _todayMetric('Combined profit','+'+money2(totProfit),'Sum of all planned TP1 targets','green')
@@ -11321,6 +11427,7 @@ function _todayAllocate(plan, acct, budget){
 // Account box: re-size the WHOLE current plan to a new account balance, instantly.
 function _todaySetAccount(val){
   var c=window._todayCfg; var a=parseFloat(val); if(!(a>0)) return;
+  window._todayAcctManual=true;
   c.acct=a;
   var plan=window._todayPlan||[];
   if(plan.length){
@@ -11348,7 +11455,7 @@ function _todayReselect(){
   if(!opps.length) return;
   var plan=_todaySelectPlan(opps, c);
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=45;}).reduce(function(a,o){ if(!a.s[o.sym]){a.s[o.sym]=1;a.n++;} return a; },{s:{},n:0}).n - plan.length);
-  plan.forEach(function(o){ o._autos=o._autos||_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; });
+  plan.forEach(function(o){ o._autos=o._autos||_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; o._ladder=o._ladder||_todayDefaultLadder(o._ladderMode); });
   window._todayPlan=plan; window._todaySorted=false;
   _todayRenderPlan();
   Promise.all(plan.map(async function(o){ try{ o._autos=await _todayRecommendAutos(o); }catch(e){} })).then(function(){ if(window._todayPlan===plan) _todayRenderPlan(); });
@@ -11358,13 +11465,8 @@ function _todaySetMaxTrades(v){ var n=parseInt(v); if(!(n>0))return; window._tod
 function _todaySetProfitGoal(v){ var n=parseFloat(v)||0; window._todayCfg.profitGoal=n; if((window._todayOpps||[]).length) _todayReselect(); }
 function _todaySetGlobalLadder(mode){
   var c=window._todayCfg; c.ladderMode=mode||'beginner';
-  (window._todayPlan||[]).forEach(function(o){ o._ladderMode=c.ladderMode; });
+  (window._todayPlan||[]).forEach(function(o){ o._ladderMode=c.ladderMode; o._ladder=_todayDefaultLadder(c.ladderMode); });
   if((window._todayPlan||[]).length) _todayRenderPlan();
-}
-function _todaySetTradeLadder(idx, mode){
-  var o=(window._todayPlan||[])[idx]; if(!o) return;
-  o._ladderMode=mode||'beginner';
-  window._todaySorted=true; _todayRenderPlan();
 }
 function _todaySetGlobalRisk(val){
   var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
@@ -11590,12 +11692,13 @@ function _todayConfirmAndPlace(trades){
   if(!trades||!trades.length) return;
   var c=window._todayCfg, acct=c.acct||0;
   var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
-  var totLoss=0, totCap=0, totMargin=0;
-  trades.forEach(function(o){ totLoss+=o._size.netLoss; totCap+=o._size.notional; totMargin+=o._size.marginReq; });
+  var totLoss=0, totCap=0, totMargin=0, totProfit=0, totOrders=0;
+  trades.forEach(function(o){ var lt=_todayLadderTotals(o); totLoss+=lt.risk||o._size.netLoss; totCap+=lt.notional||o._size.notional; totMargin+=lt.margin||o._size.marginReq; totProfit+=lt.profit||o._size.netTP1; totOrders+=lt.orders||1; });
 	  var rows=trades.map(function(o){
 	    var dir=(o.sig||'BUY').toUpperCase(), dc=o.sig==='BUY'?'#5de8a0':'#e8706e';
-	    var legs=_todayLadderLegs(o);
-	    return '<div style="display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:10.5px;padding:5px 0;border-bottom:1px solid rgba(237,232,216,.07);"><span><strong>'+o.sym+'</strong> <span style="color:'+dc+';">'+dir+'</span> · '+o._size.unitLabel+' · '+legs.length+' ladder order'+(legs.length===1?'':'s')+'</span><span style="color:#e8706e;">'+money(-o._size.netLoss)+'</span></div>';
+	    var legs=_todayLadderLegs(o), lt=_todayLadderTotals(o);
+	    var active=o._autos?Object.keys(o._autos).filter(function(k){return o._autos[k];}).length:0;
+	    return '<div style="font-family:var(--mono);font-size:10.5px;padding:7px 0;border-bottom:1px solid rgba(237,232,216,.07);"><div style="display:flex;justify-content:space-between;gap:8px;"><span><strong>'+o.sym+'</strong> <span style="color:'+dc+';">'+dir+'</span> · '+legs.length+' ladder order'+(legs.length===1?'':'s')+' · '+active+' automation'+(active===1?'':'s')+'</span><span style="color:#e8706e;">'+money(-lt.risk)+'</span></div><div style="margin-top:3px;color:rgba(237,232,216,.45);">trade size '+money(lt.notional)+' · profit plan <span style="color:#5de8a0;">+'+money(lt.profit)+'</span> · margin '+money(lt.margin)+'</div></div>';
 	  }).join('');
   var pct=acct>0?(totLoss/acct*100):0;
   var ov=document.createElement('div'); ov.id='todayConfirmOverlay';
@@ -11606,6 +11709,7 @@ function _todayConfirmAndPlace(trades){
     +'<div style="margin-bottom:12px;">'+rows+'</div>'
     +'<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);margin-bottom:4px;"><span>Cash in (margin)</span><span>'+money(totMargin)+(acct>0?' ('+(totMargin/acct*100).toFixed(0)+'% of account)':'')+'</span></div>'
     +(Math.round(totCap)!==Math.round(totMargin)?'<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.45);margin-bottom:4px;"><span>Position value controlled</span><span>'+money(totCap)+'</span></div>':'')
+    +'<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:rgba(93,232,160,.75);margin-bottom:4px;"><span>Profit plan</span><span>+'+money(totProfit)+' across '+totOrders+' MT5 order'+(totOrders===1?'':'s')+'</span></div>'
     +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin:8px 0 13px;">'
       +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">If '+(trades.length>1?'every trade hits its stop':'it hits the stop')+' you lose</div>'
       +'<div style="font-family:var(--mono);font-size:24px;font-weight:700;color:#e8706e;line-height:1;">'+money(-totLoss)+'</div>'
@@ -19001,10 +19105,10 @@ function szSetRiskPreset(value, btn){
     // focus the input and let the user type — don't change current value
     inp.focus(); inp.select();
   } else {
-    inp.value = value;
-    szRiskPersist(value);
-    window._userBaseRisk = parseFloat(value);  // explicit user choice — update the base preference
-    if(typeof window._szTradeSizeManual !== 'undefined') window._szTradeSizeManual = false;
+	    inp.value = value;
+	    szRiskPersist(value);
+	    window._userBaseRisk = parseFloat(value);  // explicit user choice — update the base preference
+	    window._szTradeSizeManual = false;
     window._szLadderUserSized = false;  // risk % is the driver now — let the ladder re-follow
     // In the ladder, a preset is the MAX per-trade risk (carried by the safest
     // TP1 trade); ambitious trades are scaled DOWN from it. Varied, not uniform.
@@ -20689,7 +20793,7 @@ function szLadderTargetUpdate(i, val) {
   if (!window._szLadderTargets) window._szLadderTargets = [];
   window._szLadderTargets[i] = val;
   window._szTargetsUserModified = true;
-  szLadderRender();
+  szLadderRefresh();
   // Target changed → that trade's automations are stale; re-optimise it automatically.
   if (typeof szAutoRecommend === 'function') { try { szAutoRecommend(i); } catch(e){} }
 }
@@ -20733,7 +20837,7 @@ function szApplyRecommendation() {
   window._szLadderTargets = rec.targets.slice();
   window._szTargetsUserModified = false;
   window._szLadderUserSized = false;
-  szLadderRender();
+  szLadderRefresh();
 }
 // ── DotVerse intelligent ladder allocation ──────────────────────────────────
 // Distributes the trade-size dollars across the ladder legs FRONT-LOADED — the
@@ -20828,11 +20932,9 @@ function szSetMode(mode) {
       });
     }
   }
-  szLadderRender();
-  // Refresh the Flow-Scaled Sizing card so it reflects the new mode's trades
-  // immediately (single = 1 trade, multi = all ladder legs) instead of showing
-  // stale single-trade values until the next input change.
-  if (typeof updateFlowBadge === 'function') { try { updateFlowBadge(); } catch(e){} }
+  // Refresh every dependent Size section immediately: ladder rows, right-side
+  // sizing summary, Flow card, and risk-of-ruin.
+  szLadderRefresh();
   // Auto-optimise every trade so the trader doesn't click each row.
   if (typeof szAutoRecommendAll === 'function') { try { szAutoRecommendAll(); } catch(e){} }
 }
@@ -20867,23 +20969,40 @@ function szLadderRender() {
   const sl    = parseFloat((document.getElementById('szSL')?.value||'').replace(/,/g,''))    || 0;
   const tp1   = parseFloat((document.getElementById('szTP1')?.value||'').replace(/,/g,''))   || 0;
   const tp2   = parseFloat((document.getElementById('szTP2')?.value||'').replace(/,/g,''))   || 0;
-  const tp3   = parseFloat((document.getElementById('szTP3')?.value||'').replace(/,/g,''))   || 0;
-  const slDist = Math.abs(entry - sl) || 1;
+	  const tp3   = parseFloat((document.getElementById('szTP3')?.value||'').replace(/,/g,''))   || 0;
+	  const slDist = Math.abs(entry - sl) || 1;
+	  const assetType = document.getElementById('szType')?.value || 'crypto';
+	  const levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
+	  const contractSize = assetType === 'forex' ? levOrContr : 1;
+	  const marginDivisor = assetType === 'forex' ? 30 : ((assetType === 'crypto' || assetType === 'index' || assetType === 'commodity') ? Math.max(1, levOrContr) : 1);
+	  function _fmtSize(units){
+	    if(assetType === 'forex'){
+	      var lots = units / (contractSize || 1);
+	      return (lots < 0.01 ? lots.toFixed(4) : lots.toFixed(2)) + ' lots';
+	    }
+	    if(assetType === 'crypto') return (units >= 1 ? units.toFixed(4) : units.toFixed(6)) + ' units';
+	    if(assetType === 'index') return units.toFixed(2) + ' contracts';
+	    if(assetType === 'commodity') return units.toFixed(2) + ' lots';
+	    return Math.round(units).toLocaleString() + ' shares';
+	  }
+	  function _nativeLots(units){
+	    return assetType === 'forex' ? units / (contractSize || 1) : units;
+	  }
   // Per-unit gain at each TP level (price distance from entry to TP).
   // For SELL the SL is above entry and TPs below — Math.abs handles both.
   const tp1Dist = tp1 ? Math.abs(tp1 - entry) : 0;
   const tp2Dist = tp2 ? Math.abs(tp2 - entry) : 0;
   const tp3Dist = tp3 ? Math.abs(tp3 - entry) : 0;
-  // ── DotVerse sizing ──
-  // SINGLE mode: the one trade is sized from the Trade Size / risk % (auto).
-  // MULTI mode: each leg carries its OWN independent risk % (the trader can
-  // stack several risks on one entry). We do NOT divide a single total here —
-  // _szLadder holds per-trade risk %, the SUM row shows the running total.
-  if ((window._szMode || 'single') === 'single' && !window._szLadderUserSized) {
-    try { _szAutoAllocate(); } catch(e){}
-  }
-  // Running totals across all rows
-  let totalRisk = 0, totalTp1 = 0, totalTp2 = 0, totalTp3 = 0;
+	  // ── DotVerse sizing ──
+	  // SINGLE mode: the one trade is sized from the Trade Size / risk % (auto).
+	  // MULTI mode: each leg carries its OWN independent risk % (the trader can
+	  // stack several risks on one entry). We do NOT divide a single total here —
+	  // _szLadder holds per-trade risk %, the SUM row shows the running total.
+	  if (!window._szLadderUserSized) {
+	    try { _szAutoAllocate(); } catch(e){}
+	  }
+	  // Running totals across all rows
+	  let totalRisk = 0, totalTp1 = 0, totalTp2 = 0, totalTp3 = 0, totalTradeAmount = 0, totalUnits = 0, totalMargin = 0;
   // Format helper — short for negative + dollar, signed
   const fmt$ = (v) => (v >= 0 ? '+$' : '-$') + Math.abs(v).toLocaleString(undefined, {maximumFractionDigits: 2});
   // Ensure targets array matches current ladder length
@@ -20923,13 +21042,19 @@ function szLadderRender() {
   if (_ladderBtnsBar) _ladderBtnsBar.style.display = _isSingle ? 'none' : 'flex';
 
   wrap.innerHTML = _recBanner + _autoRecSection + _rowsToRender.map((risk, i) => {
-    const moneyAtRisk = acct * (risk/100);
-    const units       = moneyAtRisk / slDist;
-    const lotsStr     = units.toFixed(4);
+	    const moneyAtRisk = acct * (risk/100);
+	    const units       = moneyAtRisk / slDist;
+	    const tradeAmount = entry ? units * entry : 0;
+	    const rowMargin   = tradeAmount / marginDivisor;
+	    const sizeStr     = _fmtSize(units);
+	    const lotsStr     = units.toFixed(4);
     const p1 = tp1Dist ? units * tp1Dist : 0;
     const p2 = tp2Dist ? units * tp2Dist : 0;
     const p3 = tp3Dist ? units * tp3Dist : 0;
-    totalRisk += moneyAtRisk;
+	    totalRisk += moneyAtRisk;
+	    totalTradeAmount += tradeAmount;
+	    totalUnits += units;
+	    totalMargin += rowMargin;
     totalTp1  += p1;
     totalTp2  += p2;
     totalTp3  += p3;
@@ -21006,20 +21131,24 @@ function szLadderRender() {
       ? '<div style="font-family:var(--mono);font-size:8px;color:rgba(232,112,110,.65);max-width:280px;">'+_rowRec.error+'</div>'
       : '';
     const _legGuide = (typeof _szLegGuidance === 'function') ? _szLegGuidance(i, risk, moneyAtRisk, target) : '';
-    return `<div data-guide="ladder-row" style="margin-bottom:5px;">
-      <div style="display:grid;grid-template-columns:32px 110px 120px 100px 62px 62px 62px 160px 24px;gap:6px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-radius:5px 5px 0 0;">
-        <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <input type="number" step="0.1" min="0.1" max="10" value="${risk}" onchange="szLadderUpdate(${i}, this.value)"
-            style="width:52px;padding:4px 6px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
-          <span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);">%</span>
-        </div>
-        <div style="font-family:var(--mono);font-size:10px;color:rgba(232,112,110,.85);line-height:1.4;">
-          <div style="font-weight:600;">${slFmt}</div>
-          <div style="font-size:8px;color:rgba(237,232,216,.35);">SL price</div>
-          <div style="margin-top:2px;">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
-        </div>
-        <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.85);">${entry?('$'+(units*entry).toLocaleString(undefined,{maximumFractionDigits:0})):lotsStr}<div style="font-size:8px;color:rgba(237,232,216,.4);">${entry?(lotsStr+' units'):'lots'}</div></div>
+	    return `<div data-guide="ladder-row" style="margin-bottom:5px;">
+	      <div style="display:grid;grid-template-columns:32px 100px 118px 118px 96px 62px 62px 62px 160px 24px;gap:6px;align-items:center;padding:6px 9px;background:rgba(237,232,216,.03);border:1px solid ${targetDist?'rgba(237,232,216,.12)':'rgba(237,232,216,.07)'};border-radius:5px 5px 0 0;">
+	        <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);">#${i+1}</div>
+	        <div style="display:flex;align-items:center;gap:6px;">
+	          <input type="number" step="0.1" min="0.1" max="10" value="${risk}" onchange="szLadderUpdate(${i}, this.value)"
+	            style="width:52px;padding:4px 6px;font-family:var(--mono);font-size:11px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.16);border-radius:4px;color:rgba(237,232,216,.9);outline:none;text-align:right;">
+	          <span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);">%</span>
+	        </div>
+	        <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.92);line-height:1.35;">
+	          <div style="font-weight:700;">$${tradeAmount.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+	          <div style="font-size:8px;color:rgba(237,232,216,.38);">trade amount</div>
+	        </div>
+	        <div style="font-family:var(--mono);font-size:10px;color:rgba(232,112,110,.85);line-height:1.4;">
+	          <div style="font-weight:600;">${slFmt}</div>
+	          <div style="font-size:8px;color:rgba(237,232,216,.35);">SL price</div>
+	          <div style="margin-top:2px;">−$${moneyAtRisk.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+	        </div>
+	        <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.85);">${sizeStr}<div style="font-size:8px;color:rgba(237,232,216,.4);">lot / units</div><div style="font-size:8px;color:rgba(237,232,216,.34);">margin ~$${Math.round(rowMargin).toLocaleString()}</div></div>
         ${tpCell(p1, 'TP1')}
         ${tpCell(p2, 'TP2')}
         ${tpCell(p3, 'TP3')}
@@ -21054,10 +21183,11 @@ function szLadderRender() {
     </div>`;
   }).join('') +
   // Totals row — sums across all ladder rows
-  `<div style="display:grid;grid-template-columns:38px 120px 130px 110px 70px 70px 70px 140px 24px;gap:7px;align-items:center;padding:9px 9px;margin-top:4px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.22);border-radius:6px;">
-    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);font-weight:700;letter-spacing:.5px;">SUM</div>
-    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">${_rowsToRender.length} trade(s)</div>
-    <div style="font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.95);font-weight:700;">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:2})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total at risk</div></div>
+	  `<div style="display:grid;grid-template-columns:38px 112px 130px 130px 92px 70px 70px 70px 120px 24px;gap:7px;align-items:center;padding:9px 9px;margin-top:4px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.22);border-radius:6px;">
+	    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);font-weight:700;letter-spacing:.5px;">SUM</div>
+	    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">${_rowsToRender.length} trade(s)</div>
+	    <div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.95);font-weight:700;">$${totalTradeAmount.toLocaleString(undefined,{maximumFractionDigits:0})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total trade amount</div></div>
+	    <div style="font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.95);font-weight:700;">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:2})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total at risk</div></div>
     <div></div>
     <div style="font-family:var(--mono);font-size:11px;color:${tp1Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp1Dist?('+$'+totalTp1.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP1</div></div>
     <div style="font-family:var(--mono);font-size:11px;color:${tp2Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp2Dist?('+$'+totalTp2.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP2</div></div>
@@ -21114,10 +21244,49 @@ function szLadderRender() {
         <span>Best case (all TP3): <strong style="color:rgba(93,232,160,.9);">+$${bestCaseAllTp3.toLocaleString(undefined,{maximumFractionDigits:0})}</strong></span>
       </div>
     </div>`;
-  })();
-  // Disable Add button at 10 rows
-  const addBtn = document.getElementById('szLadderAddBtn');
+	  })();
+	  // Keep the main Trade Size field honest in ladder mode. The rows are the
+	  // source of truth there, so the top amount must equal the SUM of ladder trade
+	  // amounts after risk presets, manual row edits, and Flow Apply.
+	  if ((window._szMode || 'single') === 'multi') {
+	    const tsInput = document.getElementById('szTradeSize');
+	    if (tsInput && isFinite(totalTradeAmount) && totalTradeAmount > 0) {
+	      tsInput.value = Math.round(totalTradeAmount * 100) / 100;
+	      const tsNote = document.getElementById('szTradeSizePct');
+	      if (tsNote && acct > 0) {
+	        tsNote.textContent = '= ' + (totalTradeAmount / acct * 100).toFixed(1) + '% of your account · summed from ladder trades';
+	        tsNote.style.display = 'block';
+	      }
+	    }
+	    const setText = function(id,v){ const e=document.getElementById(id); if(e) e.textContent=v; };
+	    const totalRiskPct = acct > 0 ? totalRisk / acct * 100 : 0;
+	    setText('szRiskDisp', totalRiskPct ? totalRiskPct.toFixed(totalRiskPct<1?2:1)+'%' : '—');
+	    setText('szMoneyAtRisk', totalRisk ? '$'+totalRisk.toFixed(2) : '—');
+	    setText('szSonarSize', totalUnits ? _fmtSize(totalUnits) : '—');
+	    setText('szSonarMargin', totalMargin ? '~$'+Math.round(totalMargin).toLocaleString() : '—');
+	    const stopLine=document.getElementById('szStopLine');
+	    if(stopLine) stopLine.textContent='Ladder total: '+_rowsToRender.length+' trade(s) · trade amount $'+Math.round(totalTradeAmount).toLocaleString()+' · max loss $'+totalRisk.toFixed(2)+' ('+totalRiskPct.toFixed(totalRiskPct<1?2:1)+'% of account)';
+	    window._szLastCalc = {
+	      posSize: totalUnits,
+	      lots: _nativeLots(totalUnits),
+	      lotsDisplay: _fmtSize(totalUnits),
+	      assetType: assetType,
+	      moneyAtRisk: totalRisk,
+	      tradeAmount: totalTradeAmount,
+	      margin: totalMargin,
+	      riskPct: totalRiskPct,
+	      mode: 'multi'
+	    };
+	  }
+	  // Disable Add button at 10 rows
+	  const addBtn = document.getElementById('szLadderAddBtn');
   if (addBtn) addBtn.disabled = (window._szLadder.length >= 10);
+}
+function szLadderRefresh(opts) {
+  opts = opts || {};
+  if (!opts.skipRender) szLadderRender();
+  try { if (typeof updateFlowBadge === 'function') updateFlowBadge(); } catch(e){}
+  try { if (typeof szRoRUpdate === 'function') szRoRUpdate(); } catch(e){}
 }
 function szLadderAdd() {
   if (window._szLadder.length >= 10) return;
@@ -21127,27 +21296,27 @@ function szLadderAdd() {
   window._szLadderTargets.push(_szDefaultTarget(window._szLadder.length - 1));
   if (!window._szLadderAuto) window._szLadderAuto = [];
   window._szLadderAuto.push(_szDefaultAuto());
-  szLadderRender();
+  szLadderRefresh();
 }
 function szLadderRemove(i) {
   window._szLadder.splice(i, 1);
   if (window._szLadderTargets) window._szLadderTargets.splice(i, 1);
   if (window._szLadderAuto) window._szLadderAuto.splice(i, 1);
   if (window._szLadder.length === 0) { window._szLadder = [1.0]; window._szLadderTargets = ['tp1']; window._szLadderAuto = [_szDefaultAuto()]; }
-  szLadderRender();
+  szLadderRefresh();
 }
 function szLadderAutoToggle(rowIdx, key) {
   if (!window._szLadderAuto) window._szLadderAuto = (window._szLadder||[]).map(function(){ return _szDefaultAuto(); });
   if (!window._szLadderAuto[rowIdx]) window._szLadderAuto[rowIdx] = _szDefaultAuto();
   window._szLadderAuto[rowIdx][key] = !window._szLadderAuto[rowIdx][key];
-  szLadderRender();
+  szLadderRefresh();
 }
 function szLadderAutoReset(rowIdx) {
   // Clear the Optimise recommendation and restore this row's automation toggles to default settings.
   if (window._szRowRec)       window._szRowRec[rowIdx]       = null;
   if (window._szRowRecLoading) window._szRowRecLoading[rowIdx] = false;
   if (window._szLadderAuto)   window._szLadderAuto[rowIdx]   = _szDefaultAuto();
-  szLadderRender();
+  szLadderRefresh();
 }
 
 function szAutoRecommend(rowIdx) {
@@ -21160,7 +21329,7 @@ function szAutoRecommend(rowIdx) {
         ? 'Run a signal analysis first — DotVerse needs a live BUY or SELL signal.'
         : 'Current signal is HOLD. Automations only apply to BUY or SELL signals.'
     };
-    szLadderRender();
+    szLadderRefresh();
     return;
   }
   // Which exit target does this row use?
@@ -21169,7 +21338,7 @@ function szAutoRecommend(rowIdx) {
   window._szRowRecTarget[rowIdx] = target;
   window._szRowRecLoading[rowIdx] = true;
   window._szRowRec[rowIdx] = null;
-  szLadderRender();
+  szLadderRefresh();
   dvFetch('/api/recommend-automations', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -21203,12 +21372,12 @@ function szAutoRecommend(rowIdx) {
         weekend: (rec.weekend !== undefined) ? rec.weekend : false
       });
     }
-    szLadderRender();
+    szLadderRefresh();
   })
   .catch(function() {
     window._szRowRecLoading[rowIdx] = false;
     window._szRowRec[rowIdx] = { error: 'Could not reach DotVerse automation engine. Check connection and try again.' };
-    szLadderRender();
+    szLadderRefresh();
   });
 }
 
@@ -21234,7 +21403,7 @@ function szAutoRecommendAll() {
 }
 function szLadderUpdate(i, v) {
   const n = parseFloat(v);
-  if (isFinite(n) && n > 0) { window._szLadder[i] = n; window._szLadderUserSized = true; szLadderRender(); }
+  if (isFinite(n) && n > 0) { window._szLadder[i] = n; window._szLadderUserSized = true; szLadderRefresh(); }
 }
 function szLadderPreset(kind) {
   if (kind === 'conservative') {
@@ -21248,7 +21417,7 @@ function szLadderPreset(kind) {
     window._szLadderTargets = ['tp1','tp2','tp3','tp3','trail'];
   }
   window._szLadderUserSized = true;
-  szLadderRender();
+  szLadderRefresh();
 }
 // ── Pre-trade safety: GO / CAUTION / SKIP verdict ──────────────────────────
 // Synthesises the signals already on the page into ONE plain-English call so a
@@ -21280,10 +21449,13 @@ function _szTradeVerdict(){
 function _szConfirmTrade(onConfirm){
   var sig = window._activeSignal||{};
   if(!sig.sym){ if(typeof _dvToast==='function') _dvToast('Load a signal first','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
-  var entry=parseFloat(sig.entry)||0, sl=parseFloat(sig.sl)||0;
+  var entry=parseFloat((document.getElementById('szEntry')?.value||sig.entry||'').replace(/,/g,''))||0;
+  var sl=parseFloat((document.getElementById('szSL')?.value||sig.sl||'').replace(/,/g,''))||0;
   var acct=parseFloat(document.getElementById('szAcct')?.value)||10000;
   var slDist=Math.abs(entry-sl)||1;
-  var tp1=parseFloat(sig.tp||sig.tp1)||0, tp2=parseFloat(sig.tp2)||0, tp3=parseFloat(sig.tp3)||0;
+  var tp1=parseFloat((document.getElementById('szTP1')?.value||sig.tp||sig.tp1||'').replace(/,/g,''))||0;
+  var tp2=parseFloat((document.getElementById('szTP2')?.value||sig.tp2||'').replace(/,/g,''))||0;
+  var tp3=parseFloat((document.getElementById('szTP3')?.value||sig.tp3||'').replace(/,/g,''))||0;
   var d1=tp1?Math.abs(tp1-entry):0, d2=tp2?Math.abs(tp2-entry):0, d3=tp3?Math.abs(tp3-entry):0;
   var isMulti=(window._szMode||'single')==='multi';
   var legs=isMulti?(window._szLadder||[]):(window._szLadder||[]).slice(0,1);
@@ -21344,7 +21516,14 @@ async function _szLadderSubmitGo() {
   }
   const status = document.getElementById('szLadderStatus');
   const acct   = parseFloat(document.getElementById('szAcct')?.value) || 10000;
-  const slDist = Math.abs(parseFloat(sig.entry) - parseFloat(sig.sl)) || 1;
+  const entry  = parseFloat((document.getElementById('szEntry')?.value||sig.entry||'').replace(/,/g,'')) || parseFloat(sig.entry) || 0;
+  const sl     = parseFloat((document.getElementById('szSL')?.value||sig.sl||'').replace(/,/g,'')) || parseFloat(sig.sl) || 0;
+  const tp1    = parseFloat((document.getElementById('szTP1')?.value||sig.tp||sig.tp1||'').replace(/,/g,'')) || parseFloat(sig.tp||sig.tp1) || 0;
+  const tp2    = parseFloat((document.getElementById('szTP2')?.value||sig.tp2||'').replace(/,/g,'')) || parseFloat(sig.tp2) || null;
+  const tp3    = parseFloat((document.getElementById('szTP3')?.value||sig.tp3||'').replace(/,/g,'')) || parseFloat(sig.tp3) || null;
+  const assetType = document.getElementById('szType')?.value || sig.asset || 'crypto';
+  const contractSize = assetType === 'forex' ? (parseFloat(document.getElementById('szLev')?.value)||100000) : 1;
+  const slDist = Math.abs(entry - sl) || 1;
   const orderType = 'Market';
   const direction = (sig.sig||'BUY').toUpperCase();
   const ladder = (window._szLadder||[]).slice(0, 10);
@@ -21353,16 +21532,17 @@ async function _szLadderSubmitGo() {
   // TP price map — each row sends ONLY its assigned TP to MT5 so it closes at
   // that exact target. SL cascade (breakeven after TP1, lock-TP1 after TP2)
   // is handled automatically by the EA via the /api/mt5/alert endpoint.
-  const tpPriceMap = { tp1: sig.tp, tp2: sig.tp2, tp3: sig.tp3 };
+  const tpPriceMap = { tp1: tp1, tp2: tp2, tp3: tp3 };
   // Snapshot entry confluence (bull_pct) and ATR at submission time so the
   // watch job can detect signal invalidation and ATR expansion post-entry.
   const _totalVotes = (sig.bullCount||0) + (sig.bearCount||0);
   const _entryConf  = _totalVotes > 0 ? ((sig.bullCount||0) / _totalVotes) : null;
   const _entryAtr   = sig.atr || null;
   for (let i = 0; i < ladder.length; i++) {
-    const risk    = ladder[i];
-    const dollars = acct * (risk/100);
-    const lots    = parseFloat((dollars / slDist).toFixed(4));
+	    const risk    = ladder[i];
+	    const dollars = acct * (risk/100);
+	    const units   = dollars / slDist;
+	    const lots    = parseFloat(((assetType === 'forex') ? (units / contractSize) : units).toFixed(6));
     const target  = (window._szLadderTargets && window._szLadderTargets[i]) || (i===0?'tp1':i===1?'tp2':'tp3');
     // Resolve the single TP price this position will close at
     const assignedTp = target === 'trail' ? null : (tpPriceMap[target] || sig.tp);
@@ -21372,8 +21552,9 @@ async function _szLadderSubmitGo() {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
-          ticker: sig.sym, order_type: orderType, lots: lots, direction: direction,
-          entry: sig.entry, sl: sig.sl,
+	          ticker: sig.sym, order_type: orderType, lots: lots, direction: direction,
+	          asset_type: assetType,
+	          entry: entry, sl: sl,
           // Only the assigned TP — not all three — so position closes precisely at target
           tp1: assignedTp, tp2: null, tp3: null,
           trailing: isTrailing,
@@ -21415,7 +21596,7 @@ async function _szLadderSubmitGo() {
 // Render ladder when Size tab template injects (after szCalc populates inputs)
 const _orig_szCalc = (typeof szCalc === 'function') ? szCalc : null;
 if (_orig_szCalc) {
-  szCalc = function() { _orig_szCalc(); try { szLadderRender(); if (typeof updateFlowBadge === 'function') updateFlowBadge(); } catch(e){} };
+  szCalc = function() { _orig_szCalc(); try { szLadderRefresh(); } catch(e){} };
 }
 
 function szTypeChange(){
@@ -21874,7 +22055,7 @@ function szCalc(){
     _s('szDurTime',dur); _s('szDurDate',dateStr); _s('szDurSession',session);
   }
   // Store calculated size so updateFlowBadge can compute recommended lots
-  window._szLastCalc = { posSize, lots, lotsDisplay, assetType, moneyAtRisk };
+  window._szLastCalc = { posSize, lots, lotsDisplay, assetType, moneyAtRisk, tradeAmount: posVal, margin: margin, riskPct: _riskPctShown, mode: 'single' };
   updateFlowBadge();
   if(typeof szRoRUpdate === 'function') szRoRUpdate();
 }
@@ -21899,7 +22080,9 @@ function szRoRUpdate(){
   var panel = document.getElementById('szRoRPanel');
   if(!panel) return;
   var acct = parseFloat((document.getElementById('szAcct')||{}).value) || 0;
-  var risk = parseFloat((document.getElementById('szRisk')||{}).value) || 0;
+  var calc = window._szLastCalc || {};
+  var isCombinedLadder = calc.mode === 'multi' && parseFloat(calc.riskPct) > 0;
+  var risk = isCombinedLadder ? parseFloat(calc.riskPct) : (parseFloat((document.getElementById('szRisk')||{}).value) || 0);
   if(!acct || !risk || risk <= 0){ panel.style.display='none'; return; }
   var r = risk / 100;
   var n50, n99;
@@ -21913,18 +22096,22 @@ function szRoRUpdate(){
   var d50 = Math.round(acct * 0.5).toLocaleString('en-US');
   var d99 = Math.round(acct * 0.99).toLocaleString('en-US');
   var col, bg, border, label, labelCol, explain;
+  var riskText = isCombinedLadder ? risk.toFixed(risk<1?2:1) + '% combined ladder risk' : risk + '% risk per trade';
+  var lossText = isCombinedLadder
+    ? 'This uses the SUM of every ladder trade, because all legs can lose together if the setup hits the stop.'
+    : 'This is calculated from the risk percentage on this trade.';
   if(risk <= 1){
     col='#5de8a0'; bg='rgba(93,232,160,.05)'; border='rgba(93,232,160,.2)';
     label='SAFE'; labelCol='#5de8a0';
-    explain='At <strong style="color:#5de8a0;">'+risk+'% risk</strong> per trade you can absorb <strong style="color:#5de8a0;">'+n50Disp+' losses in a row</strong> before losing half your account. This is the recommended range for beginners — your account survives long enough to learn from mistakes.';
+    explain='At <strong style="color:#5de8a0;">'+riskText+'</strong> you can absorb <strong style="color:#5de8a0;">'+n50Disp+' losses in a row</strong> before losing half your account. This is the recommended range for beginners — your account survives long enough to learn from mistakes. '+lossText;
   } else if(risk <= 3){
     col='#d4870a'; bg='rgba(201,168,76,.05)'; border='rgba(201,168,76,.22)';
     label='CAUTION'; labelCol='#d4870a';
-    explain='At <strong style="color:#d4870a;">'+risk+'% risk</strong> per trade, <strong style="color:#d4870a;">'+n50Disp+' consecutive losses</strong> cuts your account in half. This is manageable for experienced traders but even a moderate losing streak is painful.';
+    explain='At <strong style="color:#d4870a;">'+riskText+'</strong>, <strong style="color:#d4870a;">'+n50Disp+' consecutive losses</strong> cuts your account in half. This is manageable for experienced traders but even a moderate losing streak is painful. '+lossText;
   } else {
     col='#e05555'; bg='rgba(224,85,85,.06)'; border='rgba(224,85,85,.25)';
     label='HIGH RISK'; labelCol='#e05555';
-    explain='At <strong style="color:#e05555;">'+risk+'% risk</strong> per trade, just <strong style="color:#e05555;">'+n50Disp+' losses in a row</strong> halves your account. Every good strategy has losing streaks — at this risk level a normal streak can be account-ending.';
+    explain='At <strong style="color:#e05555;">'+riskText+'</strong>, just <strong style="color:#e05555;">'+n50Disp+' losses in a row</strong> halves your account. Every good strategy has losing streaks — at this risk level a normal streak can be account-ending. '+lossText;
   }
   panel.style.display='block';
   panel.style.background=bg;
