@@ -7992,6 +7992,12 @@ def pwa_apple_icon():
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
+@app.route("/favicon.ico")
+def favicon():
+    resp = send_from_directory("dotverse-pwa", "icon-192.png", mimetype="image/png")
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
 # ─── AUTH ROUTES (no login_required) ─────────────────────────
 
 @app.route("/api/register", methods=["POST"])
@@ -14419,8 +14425,8 @@ def backtest_route():
             "validity_tier": "insufficient",
         }), 400
 
-    wins    = [t for t in trades if t["outcome"] not in ("loss", "timeout_loss")]
-    losses  = [t for t in trades if t["outcome"] in ("loss", "timeout_loss")]
+    wins    = [t for t in trades if t["r"] > 0]
+    losses  = [t for t in trades if t["r"] < 0]
     timeouts= [t for t in trades if t["outcome"] == "timeout"]
     wr      = round(len(wins) / len(trades) * 100)
     total_r  = round(sum(t["r"] for t in trades), 2)
@@ -14435,10 +14441,12 @@ def backtest_route():
     # ── Consecutive win/loss streaks ──────────────────────────────────────
     max_cw = max_cl = cur_cw = cur_cl = 0
     for t in trades:
-        if t["outcome"] not in ("loss", "timeout_loss"):
+        if t["r"] > 0:
             cur_cw += 1; cur_cl = 0
-        else:
+        elif t["r"] < 0:
             cur_cl += 1; cur_cw = 0
+        else:
+            cur_cw = 0; cur_cl = 0
         max_cw = max(max_cw, cur_cw)
         max_cl = max(max_cl, cur_cl)
 
@@ -15206,6 +15214,11 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS pnl FLOAT"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
+                # /api/signals/history 500: model has signal_history.account_id but the
+                # existing table predates it. Add the column (+ index) so the history query
+                # stops failing with "column signal_history.account_id does not exist".
+                _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS account_id INTEGER"))
+                _conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signal_history_account_id ON signal_history(account_id)"))
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user'"))
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS tier VARCHAR(20) DEFAULT 'free'"))
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS trailing_atr_mult FLOAT DEFAULT 1.0"))

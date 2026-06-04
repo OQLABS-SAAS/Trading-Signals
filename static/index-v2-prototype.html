@@ -6122,11 +6122,33 @@ async function doLogin(){
   try{
     const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({email,password:pass})});
     const d=await r.json();
-    if(r.ok && d.status==='ok'){ goDash(d.user||d); }
+    if(r.ok && d.status==='ok'){ window._dvAuthenticated = true; goDash(d.user||d); }
     else{ _showToast(d.error||'Login failed'); if(btn){btn.disabled=false;btn.innerHTML='Sign In to DotVerse &#8594;';} }
   }catch(e){ _showToast('Network error — try again'); if(btn){btn.disabled=false;btn.innerHTML='Sign In to DotVerse &#8594;';} }
 }
 function goDash(u){
+  var _looksAuthed = !!(window._dvAuthenticated || (u && (u.authenticated || u.user_id || u.email || u.status === 'ok')));
+  if(!_looksAuthed){
+    fetch('/api/auth-check', {credentials:'include'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d && d.authenticated){
+          window._dvAuthenticated = true;
+          goDash(d);
+        } else {
+          window._dvAuthenticated = false;
+          showView('vLanding');
+          showAuthPanel('signin');
+        }
+      })
+      .catch(function(){
+        window._dvAuthenticated = false;
+        showView('vLanding');
+        showAuthPanel('signin');
+      });
+    return;
+  }
+  window._dvAuthenticated = true;
   window._dvUser = u || {};
   showView('vDash');
   // Land on Today (the daily plan home); fall back to Market if anything errors.
@@ -10491,7 +10513,11 @@ function renderSigHistoryPanel(){
     </div>`;
   }).join('');
 }
-window.addEventListener('load',()=>{ setTimeout(loadSigHistory,1500); });
+window.addEventListener('load',()=>{
+  if(window._dvAuthenticated && typeof loadSigHistory === 'function'){
+    setTimeout(loadSigHistory,1500);
+  }
+});
 
 function applyCondFilter(type, label, desc){
   const MAP = {
@@ -10541,12 +10567,42 @@ function _todayToggleClass(id, btn){
     btn.style.color=on?'var(--gold)':'rgba(237,232,216,.4)'; }
 }
 // Lot specs per asset class: step = tradeable increment, min = broker minimum.
+// Broker lot specs in LOTS, plus the CONTRACT SIZE (instrument units per 1.0 lot).
+// units = lots × contractSize. This is the fix for the dangerous sizing bug: "1.8 lots
+// of silver" is 1.8 × 5,000 = 9,000 oz, NOT 1.8 oz. Without contract sizes the app
+// sized commodities/indices as single units and then sent that number to MT5 as LOTS —
+// a ~5,000× oversize. Now everything sizes and orders in real lots.
+var _TODAY_LOTSPEC = {
+  forex:     {lotMin:0.01,  lotStep:0.01 },
+  crypto:    {lotMin:0.001, lotStep:0.001},   // 1 lot = 1 coin
+  stock:     {lotMin:1,     lotStep:1    },   // 1 lot = 1 share
+  index:     {lotMin:0.1,   lotStep:0.1  },
+  commodity: {lotMin:0.01,  lotStep:0.01 }
+};
+function _todayContractSize(o){
+  var a=o&&o.asset, s=((o&&o.sym)||'').toUpperCase();
+  if(a==='forex') return 100000;                 // 1 lot = 100,000 base units
+  if(a==='commodity'){
+    if(/XAG/.test(s)) return 5000;               // silver   5,000 oz / lot
+    if(/XAU/.test(s)) return 100;                // gold       100 oz / lot
+    if(/(WTI|USOIL|UKOIL|BRENT|CL)/.test(s)) return 1000;     // crude  1,000 bbl / lot
+    if(/(NATGAS|NGAS)/.test(s) || /^NG/.test(s)) return 10000; // nat gas 10,000 MMBtu / lot
+    return 100;                                  // generic metal/commodity fallback
+  }
+  return 1;                                      // crypto (coin), stock (share), index (unit / $1-pt)
+}
+// Broker minimum / step expressed in INSTRUMENT UNITS = lots × contract size.
+function _todayLotUnits(o){
+  var sp=_TODAY_LOTSPEC[o.asset]||{lotMin:0.01,lotStep:0.01}, cs=_todayContractSize(o);
+  return {cs:cs, stepUnits:sp.lotStep*cs, minUnits:sp.lotMin*cs};
+}
+// Back-compat shim: a few call sites still read _TODAY_LOT[asset].{step,min} in units.
 var _TODAY_LOT = {
-  forex:     {step:1000,   min:1000  },   // 0.01 lot = 1,000 units
-  crypto:    {step:0.0001, min:0.0001},
+  forex:     {step:1000,   min:1000  },
+  crypto:    {step:0.001,  min:0.001 },
   stock:     {step:1,      min:1     },
-  index:     {step:0.01,   min:0.1   },
-  commodity: {step:0.01,   min:0.1   }
+  index:     {step:0.1,    min:0.1   },
+  commodity: {step:0.01,   min:0.01  }
 };
 // RISK-DRIVEN sizing: the loss you control sets the size, so every trade risks
 // the SAME % and positions are meaningful & tradeable across all instruments.
@@ -10572,13 +10628,14 @@ function _todaySizeTrade(o, acct, riskPct){
   var slDist=Math.abs(entry-sl)||0;
   var fx=_todayUsdPerQuote(o);                  // USD per 1 unit of quote currency
   var riskD=(acct||0)*((riskPct||1)/100);       // USD the trader risks
-  var unitsRaw = (slDist>0 && fx>0) ? riskD/(slDist*fx) : 0;   // units that risk riskD in USD
-  var SPEC = _TODAY_LOT[o.asset] || {step:0.0001, min:0.0001};
-  // Round DOWN to the lot step so actual risk never EXCEEDS the target (protects the budget).
+  var unitsRaw = (slDist>0 && fx>0) ? riskD/(slDist*fx) : 0;   // instrument units that risk riskD in USD
+  var LOT = _todayLotUnits(o);             // {cs, stepUnits, minUnits} — broker step/min in units
+  // Round DOWN to the broker lot step (in units) so actual risk never EXCEEDS the target.
   // Epsilon guards floating-point boundaries (e.g. 999.9999 that should be 1000).
-  var units = SPEC.step>0 ? Math.floor(unitsRaw/SPEC.step + 1e-9)*SPEC.step : unitsRaw;
+  var units = LOT.stepUnits>0 ? Math.floor(unitsRaw/LOT.stepUnits + 1e-9)*LOT.stepUnits : unitsRaw;
   units = parseFloat(Math.max(0,units).toFixed(8));
-  var tradeable = units>0 && units>=SPEC.min;
+  var lots = units/LOT.cs;                  // real broker lots (this is what MT5 receives)
+  var tradeable = units>0 && units>=LOT.minUnits;
   var notional = units*entry*fx;           // USD position value
   // Broker costs
   var spreadFrac = {crypto:0.0005, stock:0.0005, forex:0.0001, commodity:0.0005, index:0.0005}[o.asset]||0.0005;
@@ -10597,17 +10654,17 @@ function _todaySizeTrade(o, acct, riskPct){
   var netTP1 = grossTP1-costD;
   var rr = netLoss>0 ? netTP1/netLoss : 0;
   var unitLabel;
-  if(o.asset==='forex'){ unitLabel=(units/100000).toFixed(2)+' lots'; }
+  if(o.asset==='forex'){ unitLabel=lots.toFixed(2)+' lots'; }
   else if(o.asset==='crypto'){ unitLabel=(units>=1?units.toFixed(4):units.toFixed(6))+' units'; }
-  else if(o.asset==='index'){ unitLabel=units.toFixed(2)+' contracts'; }
-  else if(o.asset==='commodity'){ unitLabel=units.toFixed(2)+' lots'; }
+  else if(o.asset==='index'){ unitLabel=lots.toFixed(2)+' contracts'; }
+  else if(o.asset==='commodity'){ unitLabel=lots.toFixed(2)+' lots'; }
   else { var sh=Math.round(units); unitLabel=sh.toLocaleString()+(sh===1?' share':' shares'); }
   // Cash actually committed: spot (crypto/stock) = full notional; leveraged (forex/
   // index/commodity) = notional / leverage. Broker doesn't report leverage, so 1:100 est.
   var leveraged = !(o.asset==='crypto'||o.asset==='stock');
   var lev = leveraged ? (window._todayLeverage||100) : 1;
   var marginReq = notional/lev;
-  return { units:units, notional:notional, tradeable:tradeable, minLot:SPEC.min, riskPctReq:(riskPct||1),
+  return { units:units, lots:lots, contractSize:LOT.cs, notional:notional, tradeable:tradeable, minLot:LOT.minUnits, riskPctReq:(riskPct||1),
            netLoss:netLoss, netTP1:netTP1, grossRisk:grossRisk, rr:rr,
            leveraged:leveraged, lev:lev, levReal:!!window._todayLeverageReal, marginReq:marginReq,
            riskPctOfAcct: acct>0?(netLoss/acct*100):0,   /* net of costs — matches the $ max-loss & the plan totals */
@@ -10787,9 +10844,10 @@ async function _todayBuildPlan(){
     if(plan.length >= c.maxTrades) break;
     plan.push(o); perClass[cls]=(perClass[cls]||0)+1; seen[key]=1;
   }
-  // Total qualifying setups the SAME scanner found (this is what the Signals tab lists).
-  // Today curates this down to the diversified, account-sized picks below.
-  window._todayScanCount = opps.length;
+  // Total qualifying setups found — counted as UNIQUE SYMBOLS, not symbol×timeframe.
+  // We scan each symbol on 3 timeframes, so opps.length triple-counts (e.g. ETHUSD 1h/4h/1d
+  // = 3). Showing "73 setups" when there are 35 real opportunities was misleading vs Signals.
+  window._todayScanCount = (function(){ var seen={},n=0; opps.forEach(function(o){ if(!seen[o.sym]){seen[o.sym]=1;n++;} }); return n; })();
   // Cache the full ranked candidate pool so changing Max-per-class / Max-trades can
   // re-select INSTANTLY without a fresh scan.
   window._todayOpps = ranked;
@@ -10871,7 +10929,7 @@ function _todayRenderPlan(){
       + (_overridden?'<span title="'+esc('DotVerse recommends an equal share of your budget: '+(o._recRisk||0).toFixed(2)+'%.')+'" style="margin-left:3px;color:rgba(201,168,76,.75);cursor:help;">· rec '+(o._recRisk||0).toFixed(2)+'%</span>':'')
     + '</span>';
     var _natUnit=_todayNativeUnit(o.asset);
-    var _natVal=_todayUnitsToNative(o.asset, s.units||0);
+    var _natVal=_todayUnitsToNative(o, s.units||0);
     var _szStep=o.asset==='forex'?0.01:o.asset==='crypto'?0.0001:(o.asset==='index'||o.asset==='commodity')?0.01:1;
     var _szDec=o.asset==='crypto'?4:2;
     var head='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">'
@@ -10935,7 +10993,7 @@ function _todayRenderPlan(){
           + 'Broker cost '+money2(s.costD)+' (spread + fee + slippage — already in the numbers above)<br>'
           + 'Position value '+money2(s.notional)+(s.leveraged?' · leverage 1:'+s.lev+(s.levReal?'':' (est)'):' · no leverage')+'<br>'
           + (_pipSize?('Stop ≈ '+Math.round(_slPips)+' pips · pip value ≈ '+money2(_pipVal)+' per pip<br>'):'')
-          + 'Targets: '+_tps.map(function(t,i){ var d=o.sig==='SELL'?(_entryN-parseFloat(t)):(parseFloat(t)-_entryN); return 'TP'+(i+1)+' '+pxFmt(t)+' (+'+money2(Math.abs(d)*s.units*_fx)+')'; }).join(' · ')+'<br>'
+          + 'Targets: '+_tps.map(function(t,i){ var d=o.sig==='SELL'?(_entryN-parseFloat(t)):(parseFloat(t)-_entryN); var net=Math.abs(d)*s.units*_fx-(s.costD||0); return 'TP'+(i+1)+' '+pxFmt(t)+' (+'+money2(net)+')'; }).join(' · ')+' <span style="opacity:.6;">· after costs</span><br>'
           + '🛡 Stop sits at your broker — protects you even if you close DotVerse or lose internet.'
         + '</div>'
         + '<div id="today-livebox-'+idx+'" style="margin-top:6px;"></div>'
@@ -11026,8 +11084,8 @@ function _todayAllocate(plan, acct, budget){
   plan.forEach(function(o){
     var slD=Math.abs((parseFloat(o.entry)||0)-(parseFloat(o.sl)||0));
     var fx=_todayUsdPerQuote(o);
-    var SPEC=_TODAY_LOT[o.asset]||{min:0.0001};
-    o._minRiskPlace=(slD>0&&acct>0)?(SPEC.min*slD*fx/acct*100):999;
+    var LOT=_todayLotUnits(o);   // broker minimum in instrument units (lots × contract size)
+    o._minRiskPlace=(slD>0&&acct>0)?(LOT.minUnits*slD*fx/acct*100):999;
   });
   // 2) Greedily include best-quality setups (plan is already quality-ranked) whose cumulative
   //    minimum risk fits the budget and whose own minimum is within the per-trade cap.
@@ -11138,8 +11196,11 @@ function _todayRebalance(){
 // Fine-tune risk on a single card — resize just that trade, keep the rest.
 // Trade size = the position volume sent to the broker, in each asset's native unit.
 function _todayNativeUnit(asset){ return asset==='forex'?'lots':asset==='crypto'?'units':asset==='index'?'contracts':asset==='commodity'?'lots':'shares'; }
-function _todayUnitsToNative(asset,u){ return asset==='forex'? (u||0)/100000 : (u||0); }
-function _todayNativeToUnits(asset,v){ return asset==='forex'? v*100000 : v; }
+// Native = what the trader types in the size box: lots for forex/commodity/index, coins
+// for crypto, shares for stock. Convert through the instrument's contract size so the
+// commodity/index size box reads real lots (not raw ounces/points).
+function _todayUnitsToNative(o,u){ var cs=_todayContractSize(o)||1; var a=(o&&o.asset)||o; return (a==='crypto'||a==='stock')? (u||0) : (u||0)/cs; }
+function _todayNativeToUnits(o,v){ var cs=_todayContractSize(o)||1; var a=(o&&o.asset)||o; return (a==='crypto'||a==='stock')? v : v*cs; }
 // Let the trader set TRADE SIZE directly per card. We back-solve the risk % that produces
 // that size, then re-size through the normal path so max-loss / margin / R:R stay consistent.
 function _todaySetTradeSize(idx, val){
@@ -11148,14 +11209,20 @@ function _todaySetTradeSize(idx, val){
   var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0; var slDist=Math.abs(entry-sl);
   var acct=(window._todayCfg&&window._todayCfg.acct)||0;
   if(!(slDist>0)||!(acct>0)) return;
-  var units=_todayNativeToUnits(o.asset, nv);
-  o._risk = units*slDist/acct*100;                 // size → the equivalent risk %
+  var units=_todayNativeToUnits(o, nv);
+  var fx=_todayUsdPerQuote(o);
+  var risk = units*slDist*fx/acct*100;             // size → equivalent USD risk %
+  // Enforce the per-trade hard cap on manual sizing too — typing a bigger size must not
+  // push a single trade past 2% of the account (the stated hard cap).
+  if(risk > _TODAY_PER_CAP){ risk = _TODAY_PER_CAP; if(typeof _dvToast==='function') _dvToast('Capped at '+_TODAY_PER_CAP+'% — the per-trade safety limit','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); }
+  o._risk = risk;
   o._size = _todaySizeTrade(o, acct, o._risk);
   window._todaySorted=true; _todayRenderPlan();
 }
 function _todaySetTradeRisk(idx, val){
   var plan=window._todayPlan||[]; var o=plan[idx]; if(!o) return;
   var r=parseFloat(val); if(!(r>0)) r=o._risk||1;
+  if(r > _TODAY_PER_CAP){ r = _TODAY_PER_CAP; if(typeof _dvToast==='function') _dvToast('Capped at '+_TODAY_PER_CAP+'% — the per-trade safety limit','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); }
   o._risk=r; o._size=_todaySizeTrade(o, window._todayCfg.acct, r);
   window._todaySorted=true;   // a manual tweak should not reshuffle the list
   _todayRenderPlan();
@@ -11235,7 +11302,16 @@ function _todayLiveBox(o, live){
         // Labels follow the bar's actual low→high mapping, so BUY (stop low) and SELL
         // (stop high) both read correctly left-to-right.
         var leftLab=stopAtLeft?stopLab:tgtLab, rightLab=stopAtLeft?tgtLab:stopLab;
-        return '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:7.5px;">'+leftLab+entryLab+rightLab+'</div>';
+        // Position the Entry label UNDER the entry tick (at pEntry%), not centered. Before,
+        // a justify-between row put "Entry" at 50% while the tick/dot sat at the true % (e.g.
+        // 71% when the stop is much closer than the target), so an at-entry trade looked like
+        // it was sitting at the stop. Clamp 8–92% so it never collides with the end labels.
+        var _entLeft=Math.max(8,Math.min(92,pEntry));
+        return '<div style="position:relative;height:11px;font-family:var(--mono);font-size:7.5px;">'
+          + '<span style="position:absolute;left:0;top:0;">'+leftLab+'</span>'
+          + '<span style="position:absolute;left:'+_entLeft+'%;top:0;transform:translateX(-50%);white-space:nowrap;">'+entryLab+'</span>'
+          + '<span style="position:absolute;right:0;top:0;">'+rightLab+'</span>'
+        + '</div>';
       })()
     + '<div style="display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.55);margin-top:6px;">'
       + '<span>Live R:R <b style="color:rgba(237,232,216,.85);">1:'+((isFinite(liveRR)&&liveRR>0)?liveRR.toFixed(1):'—')+'</b></span>'
@@ -11374,8 +11450,12 @@ function _todayConfirmAndPlace(trades){
 // label divides by 100,000). Other classes: the card shows raw units/shares/contracts,
 // which the EA normalises to the broker's lot step/min — so pass them through.
 function _todayMt5Lots(o){
-  var u=(o._size&&o._size.units)||0;
-  return o.asset==='forex' ? u/100000 : u;
+  // The sizer now computes real broker lots (units / contract size) for EVERY asset.
+  // Previously this divided only forex by 100k and sent raw units for commodities/
+  // indices — which the broker reads as LOTS, a ~5,000× oversize on metals.
+  if(o._size && o._size.lots!=null) return o._size.lots;
+  var u=(o._size&&o._size.units)||0, cs=_todayContractSize(o)||1;
+  return u/cs;
 }
 async function _todaySendOrders(trades, onProgress){
   var ok=0, fail=0;
@@ -11447,7 +11527,14 @@ function showSignalFeed(){
   const el=document.getElementById('dashContent');
   el.innerHTML=_sfRender();
   setTimeout(()=>document.addEventListener('click',_sfOutsideClick,{once:true}),10);
-  if(typeof loadSigHistory === 'function') setTimeout(loadSigHistory, 100);
+  if(window._dvAuthenticated && typeof loadSigHistory === 'function'){
+    setTimeout(loadSigHistory, 100);
+  } else {
+    setTimeout(function(){
+      var hist = document.getElementById('sfHistPanel');
+      if(hist) hist.innerHTML = '<div style="color:var(--t3);font-size:11px;text-align:center;padding:14px;">Sign in to view signal history.</div>';
+    }, 100);
+  }
 
   // Restore cached results instantly if less than 5 minutes old — no re-scan needed
   var _cache = window._sfResultCache;
@@ -14590,16 +14677,19 @@ async function loadRecentTrades(){
   var sel = document.getElementById('jrnlTicketSelect');
   if(!sel) return;
   try{
-    var resp = await dvFetch('/api/history/closed?limit=10');
-    if(resp && resp.orders && resp.orders.length){
+    var resp = await dvFetch('/api/trading-agent/trades?status=CLOSED&limit=10');
+    var trades = (resp && Array.isArray(resp.trades)) ? resp.trades : [];
+    if(trades.length){
       sel.innerHTML = '<option value="">-- Select closed trade (optional) --</option>'
-        + resp.orders.map(function(o){
-            var label = (o.ticker||o.symbol||'') + ' #' + (o.mt5_ticket||o.ticket||'') + ' ' + (o.order_type||'') + ' ' + (o.pnl ? (o.pnl>0?'+':'')+o.pnl : '');
-            return '<option value="'+(o.mt5_ticket||o.ticket||'')+'">'+_esc(label)+'</option>';
+        + trades.map(function(o){
+            var pnl = (o.realized_pnl != null ? o.realized_pnl : (o.pnl != null ? o.pnl : null));
+            var ticket = o.mt5_ticket || o.ticket || o.id || '';
+            var label = (o.ticker || o.symbol || '') + (ticket ? ' #' + ticket : '') + ' ' + (o.order_type || o.side || '') + (pnl != null ? ' ' + (pnl > 0 ? '+' : '') + pnl : '');
+            return '<option value="'+ticket+'">'+_esc(label)+'</option>';
           }).join('');
     }
   }catch(e){
-    // Silently fail — closed trades endpoint may not exist
+    // Silently fail — recent closed trades are optional context for journal entries.
   }
 }
 
@@ -16380,13 +16470,16 @@ async function showNews(){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(d && d.authenticated){
+        window._dvAuthenticated = true;
         goDash(d);  // session valid — unlock dashboard immediately
       } else {
+        window._dvAuthenticated = false;
         showView('vLanding');
         showAuthPanel('signin');
       }
     })
     .catch(function(){
+      window._dvAuthenticated = false;
       showView('vLanding');
       showAuthPanel('signin');
     });
@@ -26664,6 +26757,13 @@ async function adminGrantByEmail(){
 <!-- ═══════════════ PWA SERVICE WORKER + SSE + PUSH ═══════════════ -->
 <script>
 (function(){
+  function _runWhenAuthenticated(fn){
+    fetch('/api/auth-check', {credentials:'include'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(d && d.authenticated){ fn(); } })
+      .catch(function(){});
+  }
+
   // ── Service Worker Registration ─────────────────
   if('serviceWorker' in navigator){
     // If an OLD service worker is already controlling this page, reload once when
@@ -26679,8 +26779,13 @@ async function adminGrantByEmail(){
       .then(function(reg){
         console.log('[PWA] Service Worker registered');
         try{ reg.update(); }catch(e){}
-        // Once SW is ready, try to subscribe to push
-        _initPushNotifications(reg);
+        // Push subscriptions are only useful for signed-in users, and PushManager
+        // needs an active worker. Gate both so the public landing page stays quiet.
+        _runWhenAuthenticated(function(){
+          navigator.serviceWorker.ready
+            .then(function(readyReg){ _initPushNotifications(readyReg || reg); })
+            .catch(function(err){ console.warn('[PWA] SW ready failed:', err); });
+        });
       })
       .catch(function(err){ console.warn('[PWA] SW registration failed:', err); });
   }
@@ -26794,8 +26899,9 @@ async function adminGrantByEmail(){
 
   function _esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  // Start SSE connection
-  _connectSSE();
+  // Start signed-in real-time stream only after auth; the logged-out landing page
+  // should not open or reconnect a user notification stream.
+  _runWhenAuthenticated(_connectSSE);
 })();
 </script>
 
