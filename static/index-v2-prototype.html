@@ -10839,13 +10839,13 @@ function showToday(){
 	      + '<div class="td-grid td-four">'
 	        + '<div class="td-field"><label>Account size</label><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)"></div>'
 	        + '<div class="td-field"><label>Weekly profit target</label><input id="todayProfitGoal" type="number" step="10" min="0" value="'+(c.profitGoal||500)+'" oninput="_todaySetProfitGoal(this.value)"></div>'
-	        + '<div class="td-field"><label>Total risk budget</label><input id="todayRisk" type="number" step="0.25" min="0.1" value="'+(c.riskPct||p.riskPct)+'" oninput="_todaySetGlobalRisk(this.value)"></div>'
+	        + '<div class="td-field"><label>Risk per trade</label><input id="todayRisk" type="number" step="0.25" min="0.1" value="'+(c.riskPct||p.riskPct)+'" oninput="_todaySetGlobalRisk(this.value)"></div>'
 	        + '<div class="td-field"><label>Markets</label><select onchange="_todaySetMarketPreset(this.value)"><option value="all">Forex, gold, crypto, indices</option><option value="forex">Forex only</option><option value="crypto">Crypto only</option></select></div>'
 	        + '<div class="td-field"><label>Broker leverage</label><select id="todayLev" onchange="_todaySetLeverage(this.value)">'+_dvBrokerLeverageOptions(window._todayLeverage||100)+'</select></div>'
 	      + '</div>'
 	      + '<div style="display:none;"><select id="todayLadderMode"><option value="'+(c.ladderMode||'beginner')+'" selected></option></select><input id="todayMaxTrades" value="'+c.maxTrades+'"><select id="todayMaxPer"><option value="'+c.maxPerClass+'" selected></option></select><input type="checkbox" id="todayAutoPlace"'+(c.autoPlace?' checked':'')+'></div>'
 	      + _todayRiskPresetBar()
-	      + '<div class="td-sub" style="margin-top:10px">Dynamic basket mode: quality first, target second. The totals update the moment a risk preset, trade, timeframe, or ladder is changed.</div>'
+	      + '<div class="td-sub" style="margin-top:10px">Dynamic basket mode: quality first, target second. The risk value applies to each trade. The bottom totals show the combined basket size, risk, and profit.</div>'
 	      + '<div style="margin-top:13px"><div class="td-mini" style="margin-bottom:6px;">Markets to include</div><div class="td-stack">'+chips+'</div></div>'
 	    + '</div></div>'
 	    + '<div id="todayPlanArea"></div></div>';
@@ -10976,10 +10976,9 @@ async function _todayBuildPlan(){
   window._todayOpps = ranked;
   // How many quality setups we had to leave out of the plan (caps / diversification).
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=QFLOOR;}).reduce(function(acc,o){ if(!acc.seen[o.sym]){acc.seen[o.sym]=1;acc.n++;} return acc; },{seen:{},n:0}).n - plan.length);
-  // RISK BUDGET MODEL — the top % is the TOTAL risk for the day, split evenly across
-  // the chosen trades (1% over 3 trades = ~0.33% each). DotVerse's recommended share
-  // is stored so the cards can guide per-trade overrides.
-  plan.forEach(function(o){ o._autos=_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; o._ladder=_todayDefaultLadder(o._ladderMode); });
+  // RISK PER TRADE MODEL — the top % is applied to each selected setup. Basket
+  // totals below show the combined portfolio risk after all selected trades.
+  plan.forEach(function(o){ o._autos=_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; o._ladder=_todayDefaultLadder(o._ladderMode); o._multiEnabled=true; });
   window._todayPlan=plan;
   _todayRenderPlan();   // show immediately with sensible defaults
   // Upgrade each card to DotVerse's SMART per-trade automations, then re-render.
@@ -11048,6 +11047,9 @@ function _todayLadderLegs(o){
   var minLot=spec.lotMin||0;
   var lots=s.lots||_todayMt5Lots(o);
   var entry=parseFloat(o.entry)||0, fx=_todayUsdPerQuote(o), isSell=(o.sig||'BUY').toUpperCase()==='SELL';
+  if(o._multiEnabled===false){
+    return [{idx:1, mode:'Single', share:1, target:'tp1', tp:o.tp, trailing:false, lots:lots, units:s.units, margin:s.marginReq, notional:s.notional, risk:s.netLoss, profit:s.netTP1}];
+  }
   var ladder=_todayEnsureLadder(o);
   var legs=ladder.map(function(l,idx){
     var tp=_todayTargetPrice(o,l.target), dist=tp?Math.abs(parseFloat(tp)-entry):Math.abs(parseFloat(o.tp3||o.tp2||o.tp||entry)-entry);
@@ -11066,12 +11068,24 @@ function _todayLadderTotals(o){
 }
 function _todaySetTradeLadder(idx, mode){
   var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._multiEnabled=true;
   o._ladderMode=mode||'beginner';
   o._ladder=_todayDefaultLadder(o._ladderMode);
   window._todaySorted=true; _todayRenderPlan();
 }
+function _todaySetMultiTrade(idx, on){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._multiEnabled=!!on;
+  if(o._multiEnabled){
+    o._ladderMode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
+    o._ladder=o._ladder||_todayDefaultLadder(o._ladderMode);
+    _todayNormalizeLadder(o);
+  }
+  window._todayExpandedIdx=idx; window._todaySelectedIdx=idx; _todayRenderPlan();
+}
 function _todayAddLadderLeg(idx){
   var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._multiEnabled=true;
   _todayEnsureLadder(o);
   if(o._ladder.length>=10){ if(typeof _dvToast==='function') _dvToast('Maximum 10 ladder trades per setup','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); return; }
   o._ladder.push({share:.15,target:o._ladder.length<2?'tp2':'tp3'});
@@ -11176,7 +11190,7 @@ function _todayRenderPlan(){
     var autos=Object.keys(o._autos).filter(function(k){return o._autos[k]&&autoLbl[k];}).map(function(k){return '<span title="'+esc(autoTip[k]||autoLbl[k])+'" style="font-family:var(--mono);font-size:8px;padding:2px 7px;border-radius:3px;background:rgba(93,232,160,.12);border:1px solid rgba(93,232,160,.3);color:rgba(93,232,160,.9);cursor:help;">✓ '+autoLbl[k]+'</span>';}).join(' ');
     var _overridden = Math.abs((o._risk||0)-(o._recRisk||0))>0.01;
     var riskInput='<span title="'+esc(TT.riskinput)+'" style="display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);cursor:help;">risk <input type="number" step="0.05" min="0.05" value="'+(+(o._risk||1).toFixed(2))+'" onchange="_todaySetTradeRisk('+idx+',this.value)" title="'+esc(TT.riskinput)+'" style="width:50px;padding:3px 5px;font-family:var(--mono);font-size:10px;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.18);border-radius:4px;color:rgba(237,232,216,.9);outline:none;">%'
-      + (_overridden?'<span title="'+esc('DotVerse recommends an equal share of your budget: '+(o._recRisk||0).toFixed(2)+'%.')+'" style="margin-left:3px;color:rgba(201,168,76,.75);cursor:help;">· rec '+(o._recRisk||0).toFixed(2)+'%</span>':'')
+      + (_overridden?'<span title="'+esc('DotVerse recommends the selected per-trade risk: '+(o._recRisk||0).toFixed(2)+'%.')+'" style="margin-left:3px;color:rgba(201,168,76,.75);cursor:help;">· rec '+(o._recRisk||0).toFixed(2)+'%</span>':'')
     + '</span>';
     var _natUnit=_todayNativeUnit(o.asset);
     var _natVal=_todayUnitsToNative(o, s.units||0);
@@ -11256,19 +11270,13 @@ function _todayRenderPlan(){
   var riskPct=c.acct>0?(totRisk/c.acct*100):0;
   var riskCol=riskPct<=3?'#5de8a0':riskPct<=6?'#c9a84c':'#e8706e';
   var buffer=c.acct-totExp, deployPct=c.acct>0?(totExp/c.acct*100):0;
-  // Budget awareness: the top % is the total budget; budgetUsed is the pure risk actually allocated.
-	  var budget=c.riskPct||1;
+  // Risk awareness: the top % is per trade; combinedRiskPct is the whole basket risk.
+	  var perRisk=c.riskPct||1;
 	  var goal=parseFloat(c.profitGoal)||0;
 	  var goalHit=goal>0 && totProfit>=goal;
 	  var goalBanner = goal>0 ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:'+(goalHit?'rgba(93,232,160,.82)':'rgba(201,168,76,.85)')+';line-height:1.55;">Weekly goal: <strong>'+money2(goal)+'</strong>. This plan targets <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> at TP1 across '+nTradeable+' trade'+(nTradeable===1?'':'s')+' '+(goalHit?'— target covered.':'— short by <strong>'+money2(goal-totProfit)+'</strong>; raise max trades, widen markets, or wait for stronger setups.')+'</div>' : '';
-	  var budgetUsed=c.acct>0?(totRisk/c.acct*100):0;   /* net of costs — same basis the allocator fills to, so the banner can't misfire */
-  var _flex=!!window._todayBudgetFlex;
-  var overBudget=!_flex && budgetUsed>budget*1.05;
-  var underBudget=!_flex && nTooSmall>0 && budgetUsed<budget*0.6;
-  var flexBanner = _flex ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);line-height:1.5;">This is the smallest tradeable plan on your '+money(c.acct)+' account — it risks <strong>'+budgetUsed.toFixed(2)+'%</strong>, a little above your '+budget+'% target, because that’s the minimum lot your broker allows. Lower the risk on a card, add funds, or accept it.</div>' : '';
-  var budgetBanner = overBudget
-    ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:#e8706e;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">⚠ Your trades now risk <strong>'+budgetUsed.toFixed(2)+'%</strong> — above your '+budget+'% budget. <button onclick="_todayRebalance()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(232,112,110,.5);background:rgba(232,112,110,.12);color:#e8706e;font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">Rebalance to '+budget+'%</button></div>'
-    : (underBudget ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.8);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">Using <strong>'+budgetUsed.toFixed(2)+'%</strong> of your '+budget+'% budget — some setups were too small to place. <button onclick="_todayRebalance()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(201,168,76,.4);background:rgba(201,168,76,.1);color:rgba(201,168,76,.9);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">Spread across the rest</button></div>' : '');
+	  var combinedRiskPct=c.acct>0?(totRisk/c.acct*100):0;
+  var riskBanner = nTradeable>0 ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);line-height:1.55;">Risk setting: <strong>'+perRisk+'% per trade</strong>. Combined basket risk is <strong style="color:'+riskCol+';">'+combinedRiskPct.toFixed(2)+'%</strong> if every selected stop is hit.</div>' : '';
   var nCls=Object.keys(clsSet).length;
   var health = nTradeable===0?{t:'No placeable trades',c:'#e8706e'}
     : (nCls>=2 && longs>0 && shorts>0)?{t:'Balanced ✓',c:'#5de8a0'}
@@ -11281,16 +11289,15 @@ function _todayRenderPlan(){
     + '<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);line-height:1.5;margin-bottom:8px;">Same scanner as <span onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();" style="color:rgba(93,232,160,.8);border-bottom:1px dotted rgba(93,232,160,.4);cursor:pointer;">Signals ›</span> — Today shows your best <strong>'+nTradeable+'</strong> placeable, diversified pick'+(nTradeable===1?'':'s')+' out of <strong>'+(window._todayScanCount||nTradeable)+'</strong> live setups found. Signals lists every one; Today sizes them to your account.</div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.7);margin-bottom:8px;">'
       + '<span>Total position value: <strong>'+money(totExp)+'</strong></span>'
-      + '<span>Total max loss: <strong style="color:'+riskCol+';">'+money2(-totRisk)+' ('+riskPct.toFixed(2)+'% · budget '+budget+'%)</strong></span>'
+      + '<span>Total max loss: <strong style="color:'+riskCol+';">'+money2(-totRisk)+' ('+riskPct.toFixed(2)+'% combined · '+perRisk+'% each)</strong></span>'
       + '<span>Total profit if all hit TP1: <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong></span>'
       + '<span>'+nCls+' class'+(nCls===1?'':'es')+' · '+longs+' long / '+shorts+' short</span>'
     + '</div>'
-    + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">Your '+budget+'% risk budget is split across '+nTradeable+' trade'+(nTradeable===1?'':'s')+'. If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money2(-totRisk)+'</strong>. Reality lands between — some win, some lose.</div>'
+    + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">Each selected setup is sized at '+perRisk+'% risk unless you manually edit that card. If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money2(-totRisk)+'</strong>. Reality lands between — some win, some lose.</div>'
 	    + goalBanner
-	    + budgetBanner
-    + flexBanner
-    + (riskPct>6 && !overBudget?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower the budget or trade fewer.</div>':'')
-    + (nTooSmall>0&&!underBudget ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);">'+nTooSmall+' setup'+(nTooSmall===1?'':'s')+' didn’t fit your '+money(c.acct)+' account at safe risk and '+(nTooSmall===1?'was':'were')+' skipped. A larger balance places more.</div>' : '')
+	    + riskBanner
+    + (riskPct>6?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower per-trade risk or trade fewer setups.</div>':'')
+    + (nTooSmall>0 ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);">'+nTooSmall+' setup'+(nTooSmall===1?'':'s')+' didn’t fit your '+money(c.acct)+' account at '+perRisk+'% per-trade risk and '+(nTooSmall===1?'was':'were')+' skipped. A larger balance or higher risk places more.</div>' : '')
     + (nMoved>0?'<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nMoved+' setup'+(nMoved===1?'':'s')+' drifted past the entry since the scan — dropped from your plan so the menu stays current. <button onclick="_todayBuildPlan()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(237,232,216,.25);background:rgba(237,232,216,.06);color:rgba(237,232,216,.8);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">↻ Rebuild for fresh setups</button></div>':'')
     + (nTradeable>0?'<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+nTradeable+' →</button>':'')
   + '</div>';
@@ -11301,7 +11308,7 @@ function _todayRenderPlan(){
       + '<div style="flex:1;min-width:104px;">'+lab('Total margin','Combined margin across all trades — what you actually put up. Equals the sum of every card’s Cash in. For leveraged trades the full position value is bigger.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(201,168,76,.95);">'+money2(totCashIn)+'</div></div>'
       + '<div style="flex:1;min-width:104px;">'+lab('Total position value','The total size you control across all trades. With leverage this can exceed your cash — your risk is still only the max loss.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(237,232,216,.75);">'+money2(totExp)+'</div></div>'
       + '<div style="flex:1;min-width:104px;">'+lab('Total profit if all win','Combined profit if every trade reaches TP1, after costs. Not a promise — some trades will lose; this is the best case.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:#5de8a0;">+'+money2(totProfit)+'</div></div>'
-	      + '<div style="flex:1;min-width:104px;">'+lab('Total risk · all trades','Your TOTAL portfolio risk if every trade hits its stop — the sum of every trade\'s risk, versus your chosen budget.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+' <span style="font-size:11px;font-weight:600;">('+riskPct.toFixed(2)+'% · budget '+budget+'%)</span></div></div>'
+	      + '<div style="flex:1;min-width:104px;">'+lab('Total risk · all trades','Your TOTAL portfolio risk if every trade hits its stop — the sum of every selected trade.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+' <span style="font-size:11px;font-weight:600;">('+riskPct.toFixed(2)+'% combined · '+perRisk+'% each)</span></div></div>'
 	    + '</div></div>' : '';
 	  var usable=[];
 	  plan.forEach(function(o,idx){ if(o&&o._size&&o._size.tradeable&&!(o._live&&o._live.invalid)) usable.push({o:o,idx:idx}); });
@@ -11338,18 +11345,20 @@ function _todayRenderPlan(){
 	  }
 	  function _ladderEditor(item, compact){
 	    var o=item.o, idx=item.idx, legs=_todayLadderLegs(o), lt=_todayLadderTotals(o);
+	    var multiOn=o._multiEnabled!==false;
 	    var rows=legs.map(function(l,legIdx){
 	      var lpct=c.acct>0?(l.risk/c.acct*100):0;
 	      return '<div class="ladder-editor-row">'
 	        + '<div class="gold">#'+l.idx+'</div>'
 	        + '<div><input type="number" step="1" min="1" value="'+Math.max(1,Math.round(l.notional||0))+'" onchange="_todaySetLadderTradeAmount('+idx+','+legIdx+',this.value)"><div class="td-mini">trade size $</div></div>'
 	        + '<div><select onchange="_todaySetLadderTarget('+idx+','+legIdx+',this.value)">'+_targetOptions(l.target)+'</select><div class="td-mini">exit</div></div>'
-	        + '<div class="wide td-sub">'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+' lots · '+money2(l.margin)+' margin · '+Math.round(l.share*100)+'% of setup</div>'
+	        + '<div class="wide td-sub">'+((l.lots||0)<0.01?(l.lots||0).toFixed(4):(l.lots||0).toFixed(2))+' lots · '+money2(l.margin)+' margin · '+Math.round(l.share*100)+'% split</div>'
 	        + '<div><span class="red">'+money2(-l.risk)+' / '+lpct.toFixed(2)+'%</span><br><span class="green">+'+money2(l.profit)+'</span></div>'
 	        + '<button class="td-btn red" style="padding:4px;width:24px;height:24px" onclick="_todayRemoveLadderLeg('+idx+','+legIdx+')">×</button>'
 	      + '</div>';
 	    }).join('');
-	    return '<div class="ladder-editor">'+rows+'</div>'
+	    return '<div class="td-stack" style="margin-bottom:8px"><button class="td-btn '+(multiOn?'gold':'ghost')+'" onclick="_todaySetMultiTrade('+idx+','+(!multiOn)+')">'+(multiOn?'Multi-trade ON':'Multi-trade OFF')+'</button><span class="td-sub">'+(multiOn?'Split this setup into multiple MT5 orders.':'Single MT5 order at full setup size.')+'</span></div>'
+	      + '<div class="ladder-editor">'+rows+'</div>'
 	      + '<div class="td-stack" style="margin-top:9px"><button class="td-btn gold" onclick="_todayAddLadderLeg('+idx+')">+ Add trade</button><button class="td-btn ghost" onclick="_todaySetTradeLadder('+idx+',\'conservative\')">Conservative</button><button class="td-btn ghost" onclick="_todaySetTradeLadder('+idx+',\'beginner\')">Beginner</button><button class="td-btn ghost" onclick="_todaySetTradeLadder('+idx+',\'aggressive\')">Aggressive</button></div>'
 	      + '<div class="td-stack" style="margin-top:8px">'+_todayPill(legs.length+' MT5 order'+(legs.length===1?'':'s'),'gold')+_todayPill('size '+money2(lt.notional),'blue')+_todayPill('risk '+money2(-lt.risk),'red')+_todayPill('profit +'+money2(lt.profit),'green')+'</div>'
 	      + (legs[0]&&legs[0].tooSmallSplit?'<div class="td-sub gold" style="margin-top:7px">Broker minimum lot is too large for this split. Increase trade size/risk if you want multiple executable orders.</div>':'');
@@ -11381,7 +11390,7 @@ function _todayRenderPlan(){
 	  function _selectedLadderPanel(item){
 	    if(!item) return '';
 	    var o=item.o, legs=_todayLadderLegs(o), prof=_todayLadderProfile(o._ladderMode||c.ladderMode);
-	    return '<div class="td-card"><div class="td-card-head"><h2>Selected trade ladder</h2><div class="td-stack"><button class="td-btn '+(prof.label==='Conservative'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'conservative\')">Conservative</button><button class="td-btn '+(prof.label==='Beginner'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'beginner\')">Beginner</button><button class="td-btn '+(prof.label==='Aggressive'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'aggressive\')">Aggressive</button></div></div><div class="td-pad"><p class="td-sub">Flow-sized scaling. Add multiple trades under the same setup, choose exits, and the totals below update immediately.</p>'+_ladderEditor(item,false)+_autoControls(item)+'<div class="td-sub" style="margin-top:10px">Total ladder risk follows the selected basket preset: '+pset.label+'.</div></div></div>';
+	    return '<div class="td-card"><div class="td-card-head"><h2>Selected trade ladder</h2><div class="td-stack"><button class="td-btn '+(prof.label==='Conservative'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'conservative\')">Conservative</button><button class="td-btn '+(prof.label==='Beginner'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'beginner\')">Beginner</button><button class="td-btn '+(prof.label==='Aggressive'?'gold':'ghost')+'" onclick="_todaySetTradeLadder('+item.idx+',\'aggressive\')">Aggressive</button></div></div><div class="td-pad"><p class="td-sub">Flow-sized scaling. Add multiple trades under the same setup, choose exits, and the totals below update immediately.</p>'+_ladderEditor(item,false)+_autoControls(item)+'<div class="td-sub" style="margin-top:10px">This setup uses '+(o._risk||perRisk).toFixed(2)+'% risk. The footer shows combined basket risk.</div></div></div>';
 	  }
 	  var basket = '<div class="basket-total">'
 	    + _todayMetric('Combined profit','+'+money2(totProfit),'Sum of all planned TP1 targets','green')
@@ -11392,20 +11401,19 @@ function _todayRenderPlan(){
 	    + _todayMetric('Margin needed',money2(totCashIn),'Cash tied up by leverage','blue')
 	    + _todayMetric('Trades',nTradeable+' live','All with ladders below','green')
 	  + '</div>'
-	  + '<div class="fire-panel"><div><div class="td-mini">Basket command · '+pset.label+' preset</div><h2 style="font-family:var(--syne);font-size:18px;font-weight:500;margin-top:3px">Ready to fire all '+nTradeable+' selected trade'+(nTradeable===1?'':'s')+' together</h2><p class="td-sub">One action queues every selected trade, each with its own TP ladder, SL, lot size, and automation rules. Total size '+money(totExp)+', target +'+money2(totProfit)+', risk '+money2(-totRisk)+' / '+riskPct.toFixed(2)+'%.</p>'+goalBanner+budgetBanner+flexBanner+'</div><div class="td-stack"><button class="td-btn gold" onclick="_todayPlaceAll()">Review all</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all</button></div></div>'
+	  + '<div class="fire-panel"><div><div class="td-mini">Basket command · '+pset.label+' preset</div><h2 style="font-family:var(--syne);font-size:18px;font-weight:500;margin-top:3px">Ready to fire all '+nTradeable+' selected trade'+(nTradeable===1?'':'s')+' together</h2><p class="td-sub">One action queues every selected trade, each with its own TP ladder, SL, lot size, and automation rules. Total size '+money(totExp)+', target +'+money2(totProfit)+', risk '+money2(-totRisk)+' / '+riskPct.toFixed(2)+'% combined.</p>'+goalBanner+riskBanner+'</div><div class="td-stack"><button class="td-btn gold" onclick="_todayPlaceAll()">Review all</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all</button></div></div>'
 	  + '<div class="td-grid td-two"><div class="td-card"><div class="td-card-head"><h2>Best setups basket</h2><div class="td-stack">'+_todayPill('Multi-TF','gold')+_todayPill('Multi-ladder kept','green')+_todayPill(pset.label+' risk','blue')+'</div></div><div class="td-pad td-table-wrap"><table class="td-table"><tr><th>Trade</th><th>TF</th><th>Live</th><th>Lots</th><th>Trade size</th><th>Loss</th><th>Profit</th><th>Quality</th><th></th></tr>'+_tableRows()+'</table></div></div><div class="td-grid">'+_selectedSignalCard(selected)+_selectedLadderPanel(selected)+'</div></div>'
 	  + '<div class="td-card" style="margin-top:12px"><div class="td-card-head"><h2>Final basket totals</h2><div class="td-stack">'+_todayPill(pset.label+' preset','gold')+_todayPill('All '+nTradeable+' trades combined','green')+'</div></div><div class="td-pad"><div class="td-grid td-four">'+_todayMetric('All trade amounts',money(totExp),'Total position value across the basket','gold')+_todayMetric('Combined profit','+'+money2(totProfit)+' / +'+_pct(totProfit),'Total planned upside from every trade','green')+_todayMetric('Combined risk',money2(-totRisk)+' / '+riskPct.toFixed(2)+'%','Total loss if every stop is hit','red')+_todayMetric('Margin required',money2(totCashIn),'Cash needed at broker after leverage','blue')+'</div><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(237,232,216,.065);margin-top:10px"><span>Total basket command</span><b>'+money(totExp)+' trade size · +'+money2(totProfit)+' profit · '+money2(-totRisk)+' risk</b></div><div class="td-stack" style="margin-top:10px"><button class="td-btn gold" onclick="_todayPlaceAll()">Review totals</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all '+nTradeable+'</button></div></div></div>'
 	  + '<div class="flow-footer"><div><div class="flow-footer-step">Step 0 of 6 · TODAY</div><div class="flow-footer-msg">Goal basket is built. Next: check whether market conditions support the basket.</div></div><div class="td-stack"><button class="td-btn ghost" onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();">Signals feed</button><button class="td-btn primary" onclick="setNav(\'market\');showMarket&&showMarket();">Review Market →</button></div></div>';
-	  // HONEST EMPTY STATE: candidates exist but none fit the budget on this account. One clear
-  // message + a single capped raise-budget action (NOT per-card nags), or "larger account".
+	  // HONEST EMPTY STATE: candidates exist but none fit the selected per-trade risk on this account.
   if(nTradeable===0 && plan.length>0){
     var _cheapest=Math.min.apply(null, plan.map(function(o){ return (o._minRiskPlace!=null&&isFinite(o._minRiskPlace))?o._minRiskPlace:999; }));
     var _fits=_cheapest<=_TODAY_PER_CAP;
     var _sug=Math.min(_TODAY_PER_CAP, Math.ceil(_cheapest*100)/100);
     area.innerHTML='<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:16px 18px;background:rgba(201,168,76,.05);">'
-      + '<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(201,168,76,.9);font-weight:700;text-transform:uppercase;margin-bottom:8px;">No trades fit your '+budget+'% budget today</div>'
-      + '<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);line-height:1.6;">DotVerse found <strong>'+(window._todayScanCount||plan.length)+'</strong> live setups, but on your '+money(c.acct)+' account each needs at least <strong style="color:rgba(201,168,76,.95);">'+(+_cheapest.toFixed(2))+'%</strong> risk to place the smallest lot your broker allows — more than your '+budget+'% budget.</div>'
-      + (_fits? '<button onclick="_todayRaiseBudget('+_sug+')" style="margin-top:12px;padding:9px 14px;border-radius:6px;border:1px solid rgba(201,168,76,.5);background:rgba(201,168,76,.14);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Raise budget to '+_sug+'% to place the best trade →</button>' : '<div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);">These setups suit a larger account — add funds, or check back for cheaper setups.</div>')
+      + '<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(201,168,76,.9);font-weight:700;text-transform:uppercase;margin-bottom:8px;">No trades fit your '+perRisk+'% per-trade risk today</div>'
+      + '<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);line-height:1.6;">DotVerse found <strong>'+(window._todayScanCount||plan.length)+'</strong> live setups, but on your '+money(c.acct)+' account each needs at least <strong style="color:rgba(201,168,76,.95);">'+(+_cheapest.toFixed(2))+'%</strong> risk to place the smallest lot your broker allows — more than your '+perRisk+'% per-trade setting.</div>'
+      + (_fits? '<button onclick="_todayRaiseBudget('+_sug+')" style="margin-top:12px;padding:9px 14px;border-radius:6px;border:1px solid rgba(201,168,76,.5);background:rgba(201,168,76,.14);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Raise per-trade risk to '+_sug+'% to place the best trade →</button>' : '<div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);">These setups suit a larger account — add funds, or check back for cheaper setups.</div>')
       + '<div style="margin-top:11px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);line-height:1.5;">Same scanner as <span onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();" style="color:rgba(93,232,160,.8);cursor:pointer;border-bottom:1px dotted rgba(93,232,160,.4);">Signals ›</span> — Signals lists every setup; Today only shows what fits your account.</div>'
     + '</div>';
     _dvTapTipInit();
@@ -11418,67 +11426,31 @@ function _todayRenderPlan(){
   _todayStartLivePrices();
   _dvTapTipInit();
 }
-// Split a TOTAL risk budget across the trades that can actually be placed, so the
-// whole budget is deployed (trades too small to place don't waste budget).
-// ACCOUNT-AWARE sizing (F2). Each trade gets the risk it actually NEEDS to clear the broker
-// minimum on THIS account (its floor), capped at a safe per-trade max. We include the best
-// setups in quality order while their combined risk fits the budget, then spread any leftover
-// budget across them up to the cap. Trades that can't be placed within the cap/budget are
-// excluded silently. Never exceeds the budget; percentages and $ stay consistent.
-var _TODAY_PER_CAP = 2.0;   // hard max risk % per single trade
-function _todayAllocate(plan, acct, budget){
+// ACCOUNT-AWARE sizing. The selected Today risk is PER TRADE, not a basket split.
+// Each placeable setup receives the same selected risk %, while unplaceable setups
+// are excluded when their broker minimum lot needs more risk than the setting.
+var _TODAY_PER_CAP = 5.0;   // hard max risk % per single trade
+function _todayAllocate(plan, acct, riskPerTrade){
   if(!plan||!plan.length) return;
-  var budgetD=(acct||0)*((budget||0)/100);
-  // 1) Minimum risk % to place each candidate (reach its broker minimum lot), currency-correct.
+  var rSel=Math.min(_TODAY_PER_CAP, Math.max(0, parseFloat(riskPerTrade)||1));
   plan.forEach(function(o){
     var rm=_todayRiskModel(o);
     var LOT=_todayLotUnits(o);   // broker minimum in instrument units (lots × contract size)
     o._minRiskPlace=(rm.riskPerUnit>0&&acct>0)?(LOT.minUnits*rm.riskPerUnit/acct*100):999;
   });
-  // 2) Greedily include best-quality setups (plan is already quality-ranked) whose cumulative
-  //    minimum risk fits the budget and whose own minimum is within the per-trade cap.
-  var chosen=[], used=0;
-  for(var i=0;i<plan.length;i++){
-    var o=plan[i];
-    if(o._minRiskPlace>_TODAY_PER_CAP+1e-9) continue;       // needs more than the cap → unsuitable
-    if(used+o._minRiskPlace>budget+1e-9) continue;          // wouldn't fit the remaining budget
-    chosen.push(o); used+=o._minRiskPlace;
-  }
-  // 2b) FLEX FALLBACK: if NOTHING fits the budget but the best setups can be placed within the
-  //     per-trade safety cap, show them anyway (sized at their minimum) rather than an empty plan.
-  //     Total may exceed the user's budget target — the render flags this clearly.
-  var flex=false;
-  if(chosen.length===0){
-    flex=true; var ft=0;
-    for(var j=0;j<plan.length;j++){
-      var of=plan[j];
-      if(of._minRiskPlace>_TODAY_PER_CAP+1e-9) continue;        // can't place even within the cap
-      if(ft+of._minRiskPlace>_TODAY_PER_CAP+1e-9) continue;     // keep the flex plan's TOTAL within one cap's worth
-      chosen.push(of); ft+=of._minRiskPlace;
-    }
-  }
-  window._todayBudgetFlex = flex && chosen.length>0;   // plan exceeds the budget target to stay tradeable
-  // 3) Start each chosen at its minimum, then distribute leftover budget equally up to the cap.
-  var per={}; chosen.forEach(function(o){ o._tid=o.sym+'|'+o.tf; per[o._tid]=o._minRiskPlace; });
-  var pool=flex?0:Math.max(0, budget-used);   // in flex mode keep each at its minimum (don't inflate)
-  for(var pass=0; pass<5 && pool>1e-6; pass++){
-    var elig=chosen.filter(function(o){ return per[o._tid] < _TODAY_PER_CAP-1e-9; });
-    if(!elig.length) break;
-    var add=pool/elig.length; pool=0;
-    elig.forEach(function(o){ var room=_TODAY_PER_CAP-per[o._tid]; var give=Math.min(add,room); per[o._tid]+=give; pool+=(add-give); });
-  }
-  // 4) Size chosen at their per; exclude the rest (0 risk → 0 units → not tradeable → skipped).
   plan.forEach(function(o){
-    if(chosen.indexOf(o)>=0){ var r=per[o._tid]; o._risk=r; o._recRisk=r; o._size=_todaySizeTrade(o,acct,r); }
-    else { o._risk=0; o._recRisk=0; o._size=_todaySizeTrade(o,acct,o._minRiskPlace||0.01); o._size.tradeable=false; }  /* explicitly excluded (riskPct||1 means 0 won't zero it) */
+    if(o._multiEnabled==null) o._multiEnabled=true;
+    o._recRisk=rSel;
+    if(o._minRiskPlace<=rSel+1e-9){
+      o._risk=rSel;
+      o._size=_todaySizeTrade(o,acct,rSel);
+    } else {
+      o._risk=0;
+      o._size=_todaySizeTrade(o,acct,o._minRiskPlace||0.01);
+      o._size.tradeable=false;
+    }
   });
-  // 5) Final guard: total NET loss (incl costs) must not exceed the budget — scale down once if it does.
-  var trd=plan.filter(function(o){ return o._size.tradeable; });
-  var totNet=trd.reduce(function(a,o){ return a+o._size.netLoss; },0);
-  if(!flex && totNet>budgetD && totNet>0){   // flex mode is intentionally above budget — don't scale it away
-    var k=budgetD/totNet;
-    plan.forEach(function(o){ if(chosen.indexOf(o)>=0){ var r=per[o._tid]*k; o._risk=r; o._recRisk=r; o._size=_todaySizeTrade(o,acct,r); } });
-  }
+  window._todayBudgetFlex = false;
 }
 // Account box: re-size the WHOLE current plan to a new account balance, instantly.
 function _todaySetAccount(val){
@@ -11500,8 +11472,8 @@ function _todaySetLeverage(val){
   plan.forEach(function(o){ o._size=_todaySizeTrade(o, c.acct, o._risk||c.riskPct); });
   window._todaySorted=true; if(plan.length) _todayRenderPlan();
 }
-// Top control = the day's TOTAL risk budget. Splits evenly across all trades.
-// Suggest-a-higher-budget: set the budget input and re-size the whole plan to it.
+// Top control = risk per selected trade.
+// Suggest a higher per-trade risk: set the input and re-size the whole plan to it.
 function _todayRaiseBudget(x){ var i=document.getElementById('todayRisk'); if(i) i.value=x; _todaySetGlobalRisk(x); }
 // Re-pick the diversified plan from the cached candidate pool using the CURRENT caps,
 // then re-size and re-render — instant, no re-scan. Lets Max-per-class / Max-trades take
@@ -11534,7 +11506,7 @@ function _todaySetGlobalRisk(val){
     _todayRenderPlan();
   }
 }
-// Reset every trade back to its recommended share of the budget.
+// Reset every trade back to the selected per-trade risk.
 function _todayRebalance(){
   var c=window._todayCfg; var plan=window._todayPlan||[]; if(!plan.length) return;
   _todayAllocate(plan, c.acct, c.riskPct||1);
@@ -20270,10 +20242,10 @@ function showSize(){
           <!-- Portfolio risk context panel — updates live as risk % changes -->
           <div id="szPortfolioCtx" style="display:none;margin-top:8px;padding:10px 12px;border-radius:6px;border:1px solid rgba(201,168,76,.2);background:rgba(201,168,76,.04);font-family:var(--mono);font-size:10px;color:var(--t2);line-height:1.7;"></div>
         </div>
-        <!-- Trade Size -->
+        <!-- Trade Amount / Cash In -->
         <div class="sz-field full" data-guide="trade-size-field">
-          <label class="sz-lbl">Trade Size ($) <span style="font-size:9px;color:var(--mut);font-weight:400;">— how much you want to put in</span></label>
-          <input class="sz-inp" id="szTradeSize" type="number" placeholder="auto-filled from account × risk%" oninput="window._szTradeSizeManual=true;window._szLadderUserSized=false;szCalc()">
+          <label class="sz-lbl">Trade Amount / Cash In ($) <span style="font-size:9px;color:var(--mut);font-weight:400;">— money you put into the trade</span></label>
+          <input class="sz-inp" id="szTradeSize" type="number" placeholder="auto-filled from risk, stop, and leverage" oninput="window._szTradeSizeManual=true;window._szLadderUserSized=false;szCalc()">
           <div class="sz-hint" id="szTradeSizePct" style="display:none;color:var(--gold);font-family:var(--mono);font-size:9px;"></div>
         </div>
         <!-- Asset Type + Leverage -->
@@ -20909,10 +20881,10 @@ function szApplyRecommendation() {
   szLadderRefresh();
 }
 // ── DotVerse intelligent ladder allocation ──────────────────────────────────
-// Distributes the trade-size dollars across the ladder legs FRONT-LOADED — the
+// Distributes the trade-size cash-in dollars across the ladder legs FRONT-LOADED — the
 // high-probability early leg (TP1) carries the most capital, the ambitious
 // runner the least — then derives each leg's risk % from its dollar slice so
-// trade size and risk % can never disagree. Targets come from the existing
+// cash in, position value and risk % can never disagree. Targets come from the existing
 // timeframe/confidence engine. Returns the per-leg notional array (for display)
 // or null if entry/stop aren't set yet.
 function _szAutoAllocate() {
@@ -20921,14 +20893,17 @@ function _szAutoAllocate() {
   const acct  = parseFloat(document.getElementById('szAcct')?.value) || 10000;
   const slDist = Math.abs(entry - sl);
   if (!entry || !slDist) return null;
+  const assetType = document.getElementById('szType')?.value || 'crypto';
+  const levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
+  const marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
   // Single mode = one trade gets the whole amount; multi = split across all legs.
   const isSingle = (window._szMode || 'single') === 'single';
   if (!Array.isArray(window._szLadder)) window._szLadder = [1.0];
   const N = isSingle ? 1 : (window._szLadder.length || 1);
-  // Total capital to deploy: the trader's Trade Size if they set one, otherwise
-  // a risk-based notional whose total risk equals their Risk % setting.
+  // Total position value to control. If the trader typed Trade Amount / Cash In,
+  // convert it through leverage; otherwise derive position value from Risk %.
   let T = 0;
-  if (window._szTradeSizeManual) T = parseFloat(document.getElementById('szTradeSize')?.value) || 0;
+  if (window._szTradeSizeManual) T = (parseFloat(document.getElementById('szTradeSize')?.value) || 0) * (marginDivisor || 1);
   if (!T) { const rp = parseFloat(document.getElementById('szRisk')?.value) || 1; T = acct * (rp/100) * (entry/slDist); }
   if (!T) return null;
   // Front-loaded weights: N, N-1, … 1  (leg 1 largest).
@@ -21209,8 +21184,9 @@ function szLadderRender() {
 	          <span style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);">%</span>
 	        </div>
 	        <div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.92);line-height:1.35;">
-	          <div style="font-weight:700;">$${tradeAmount.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
-	          <div style="font-size:8px;color:rgba(237,232,216,.38);">trade amount</div>
+	          <div style="font-weight:700;">$${rowMargin.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+	          <div style="font-size:8px;color:rgba(237,232,216,.38);">cash in</div>
+	          <div style="font-size:8px;color:rgba(237,232,216,.32);">pos $${tradeAmount.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
 	        </div>
 	        <div style="font-family:var(--mono);font-size:10px;color:rgba(232,112,110,.85);line-height:1.4;">
 	          <div style="font-weight:600;">${slFmt}</div>
@@ -21255,7 +21231,7 @@ function szLadderRender() {
 	  `<div style="display:grid;grid-template-columns:38px 112px 130px 130px 92px 70px 70px 70px 120px 24px;gap:7px;align-items:center;padding:9px 9px;margin-top:4px;background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.22);border-radius:6px;">
 	    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);font-weight:700;letter-spacing:.5px;">SUM</div>
 	    <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);">${_rowsToRender.length} trade(s)</div>
-	    <div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.95);font-weight:700;">$${totalTradeAmount.toLocaleString(undefined,{maximumFractionDigits:0})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total trade amount</div></div>
+	    <div style="font-family:var(--mono);font-size:11px;color:rgba(201,168,76,.95);font-weight:700;">$${totalMargin.toLocaleString(undefined,{maximumFractionDigits:0})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total cash in</div><div style="font-size:8px;color:rgba(237,232,216,.34);font-weight:400;">pos $${totalTradeAmount.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>
 	    <div style="font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.95);font-weight:700;">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:2})}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total at risk</div></div>
     <div></div>
     <div style="font-family:var(--mono);font-size:11px;color:${tp1Dist?'rgba(93,232,160,.95)':'rgba(237,232,216,.3)'};font-weight:700;text-align:right;">${tp1Dist?('+$'+totalTp1.toLocaleString(undefined,{maximumFractionDigits:0})):'—'}<div style="font-size:8.5px;color:rgba(237,232,216,.45);letter-spacing:.4px;font-weight:400;">total TP1</div></div>
@@ -21314,16 +21290,16 @@ function szLadderRender() {
       </div>
     </div>`;
 	  })();
-	  // Keep the main Trade Size field honest in ladder mode. The rows are the
-	  // source of truth there, so the top amount must equal the SUM of ladder trade
+	  // Keep the main Trade Amount field honest in ladder mode. The rows are the
+	  // source of truth there, so the top amount must equal the SUM of ladder cash-in
 	  // amounts after risk presets, manual row edits, and Flow Apply.
 	  if ((window._szMode || 'single') === 'multi') {
 	    const tsInput = document.getElementById('szTradeSize');
-	    if (tsInput && isFinite(totalTradeAmount) && totalTradeAmount > 0) {
-	      tsInput.value = Math.round(totalTradeAmount * 100) / 100;
+	    if (tsInput && isFinite(totalMargin) && totalMargin > 0) {
+	      tsInput.value = Math.round(totalMargin * 100) / 100;
 	      const tsNote = document.getElementById('szTradeSizePct');
 	      if (tsNote && acct > 0) {
-	        tsNote.textContent = '= ' + (totalTradeAmount / acct * 100).toFixed(1) + '% of your account · summed from ladder trades';
+	        tsNote.textContent = '= ' + (totalMargin / acct * 100).toFixed(1) + '% cash in · controls $' + Math.round(totalTradeAmount).toLocaleString() + ' position value';
 	        tsNote.style.display = 'block';
 	      }
 	    }
@@ -21334,7 +21310,7 @@ function szLadderRender() {
 	    setText('szSonarSize', totalUnits ? _fmtSize(totalUnits) : '—');
 	    setText('szSonarMargin', totalMargin ? '~$'+Math.round(totalMargin).toLocaleString() : '—');
 	    const stopLine=document.getElementById('szStopLine');
-	    if(stopLine) stopLine.textContent='Ladder total: '+_rowsToRender.length+' trade(s) · trade amount $'+Math.round(totalTradeAmount).toLocaleString()+' · max loss $'+totalRisk.toFixed(2)+' ('+totalRiskPct.toFixed(totalRiskPct<1?2:1)+'% of account)';
+	    if(stopLine) stopLine.textContent='Ladder total: '+_rowsToRender.length+' trade(s) · cash in $'+Math.round(totalMargin).toLocaleString()+' · position value $'+Math.round(totalTradeAmount).toLocaleString()+' · max loss $'+totalRisk.toFixed(2)+' ('+totalRiskPct.toFixed(totalRiskPct<1?2:1)+'% of account)';
 	    window._szLastCalc = {
 	      posSize: totalUnits,
 	      lots: _nativeLots(totalUnits),
@@ -21342,6 +21318,7 @@ function szLadderRender() {
 	      assetType: assetType,
 	      moneyAtRisk: totalRisk,
 	      tradeAmount: totalTradeAmount,
+	      cashIn: totalMargin,
 	      margin: totalMargin,
 	      riskPct: totalRiskPct,
 	      mode: 'multi'
@@ -21777,15 +21754,15 @@ function szCalc(){
   const sig        = window._activeSignal;
 
   let tradeSize = parseFloat(document.getElementById('szTradeSize')?.value)||0;
-  // When risk % is the driver (not a manually typed Trade Size), auto-fill the
-  // Trade Size field with the actual CAPITAL deployed (notional) that risks that
-  // % — not the risk dollars — so the Risk % and Trade Size fields, the top
-  // boxes, and the ladder all describe the same position.
+  // When risk % is the driver (not a manually typed Trade Amount), auto-fill the
+  // field with actual cash-in/margin. The larger leveraged position value is
+  // calculated separately, so beginners don't confuse "money put in" with leverage.
   if(!window._szTradeSizeManual && acct>0 && riskPct>0){
     const _slD = Math.abs(entry - sl);
-    const auto = (_slD>0 && entry>0)
-      ? parseFloat((acct*(riskPct/100)/_slD*entry).toFixed(2))   // capital deployed (notional)
-      : parseFloat((acct*riskPct/100).toFixed(2));               // fallback before levels are set
+    const autoPositionValue = (_slD>0 && entry>0)
+      ? acct*(riskPct/100)/_slD*entry
+      : acct*riskPct/100;
+    const auto = parseFloat((autoPositionValue/(marginLev||1)).toFixed(2));
     const el=document.getElementById('szTradeSize');
     if(el) el.value=auto;
     tradeSize=auto;
@@ -21804,7 +21781,7 @@ function szCalc(){
   const tsNote=document.getElementById('szTradeSizePct');
   if(tsNote){
     if(tradeSize>0&&acct>0){
-      tsNote.textContent='= '+(tradeSize/acct*100).toFixed(1)+'% of your account';
+      tsNote.textContent='= '+(tradeSize/acct*100).toFixed(1)+'% cash in from your account';
       tsNote.style.display='block';
     } else tsNote.style.display='none';
   }
@@ -21883,15 +21860,15 @@ function szCalc(){
   }
 
   // ── Unify the tab on the amount the trader entered ──
-  // When a Trade Size is set, size the position from it (the dollars they put in)
+  // When a Trade Amount is set, size the position from cash-in (the dollars they put in)
   // so the top boxes show the SAME profit as the ladder below — not a larger
   // risk-%-based position. Risk becomes a derived figure.
   let _moneyAtRiskEff = moneyAtRisk;
   let _riskPctShown   = riskPct;
   if (window._szTradeSizeManual && tradeSize > 0 && entry > 0) {
-    posVal  = tradeSize;
-    posSize = tradeSize / entry;
-    margin  = posVal / (lev || 1);
+    posVal  = tradeSize * (marginLev || 1);
+    posSize = posVal / entry;
+    margin  = tradeSize;
     if (assetType === 'forex') {
       lots = posSize / (contractSize || 1);
       lotsDisplay = lots < 0.01 ? lots.toFixed(4)+' lots' : lots.toFixed(2)+' lots';
@@ -21920,7 +21897,7 @@ function szCalc(){
     _s('szSonarRR','1 : '+rrVal);
   } else _s('szSonarRR','—');
 
-  _s('szStopLine','SL is '+Math.round(slPips)+' '+pipLabel+' from entry · lose $'+slLoss.toFixed(2)+' if hit ('+_riskPctShown.toFixed(_riskPctShown<1?2:1)+'% of account)');
+  _s('szStopLine','SL is '+Math.round(slPips)+' '+pipLabel+' from entry · cash in $'+Math.round(margin).toLocaleString()+' controls $'+Math.round(posVal).toLocaleString()+' position value · lose $'+slLoss.toFixed(2)+' if hit ('+_riskPctShown.toFixed(_riskPctShown<1?2:1)+'% of account)');
 
   // Trade size row — hidden (risk-based P&L shown in TP boxes below)
   const tsRow=document.getElementById('szTradeSizeRow');
@@ -22126,7 +22103,7 @@ function szCalc(){
     _s('szDurTime',dur); _s('szDurDate',dateStr); _s('szDurSession',session);
   }
   // Store calculated size so updateFlowBadge can compute recommended lots
-  window._szLastCalc = { posSize, lots, lotsDisplay, assetType, moneyAtRisk, tradeAmount: posVal, margin: margin, riskPct: _riskPctShown, mode: 'single' };
+  window._szLastCalc = { posSize, lots, lotsDisplay, assetType, moneyAtRisk: _moneyAtRiskEff, tradeAmount: posVal, cashIn: margin, margin: margin, riskPct: _riskPctShown, mode: 'single' };
   updateFlowBadge();
   if(typeof szRoRUpdate === 'function') szRoRUpdate();
 }
@@ -26135,9 +26112,9 @@ window._dvGuide = {
     example: '$100 at 10× leverage = $1,000 position. If price drops 5%, you lose $50 (50% of your $100) — not just $5.'
   },
   'trade-size-field': {
-    title: 'Trade Size ($)',
-    body: 'How much of your own capital you want to put into this trade (before leverage). This auto-fills from Account Size × Risk % and is the most reliable way to size. You can override it manually but the risk % system is more mathematically sound for beginners.',
-    example: '$10,000 account · 1% risk = $100 trade size. With 10× leverage that controls $1,000 worth of the asset.'
+    title: 'Trade Amount / Cash In ($)',
+    body: 'How much of your own capital or margin you put into this trade. DotVerse auto-fills it from your account, risk %, stop distance, and leverage. The controlled position value can be larger, but this field is the money you actually put up.',
+    example: '$10,000 account · 1% risk · 10× leverage might show $100 cash in controlling a $1,000 position, depending on the stop distance.'
   },
   'asset-type': {
     title: 'Asset Type',
