@@ -10943,6 +10943,21 @@ function _todayRenderPlan(){
       + '<div style="flex:1;min-width:104px;">'+lab('Total profit if all win','Combined profit if every trade reaches TP1, after costs. Not a promise — some trades will lose; this is the best case.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:#5de8a0;">+'+money2(totProfit)+'</div></div>'
       + '<div style="flex:1;min-width:104px;">'+lab('Total risk · all trades','Your TOTAL portfolio risk if every trade hits its stop — the sum of every trade\'s risk, versus your chosen budget.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+' <span style="font-size:11px;font-weight:600;">('+riskPct.toFixed(2)+'% · budget '+budget+'%)</span></div></div>'
     + '</div></div>' : '';
+  // HONEST EMPTY STATE: candidates exist but none fit the budget on this account. One clear
+  // message + a single capped raise-budget action (NOT per-card nags), or "larger account".
+  if(nTradeable===0 && plan.length>0){
+    var _cheapest=Math.min.apply(null, plan.map(function(o){ return (o._minRiskPlace!=null&&isFinite(o._minRiskPlace))?o._minRiskPlace:999; }));
+    var _fits=_cheapest<=_TODAY_PER_CAP;
+    var _sug=Math.min(_TODAY_PER_CAP, Math.ceil(_cheapest*100)/100);
+    area.innerHTML='<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:16px 18px;background:rgba(201,168,76,.05);">'
+      + '<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(201,168,76,.9);font-weight:700;text-transform:uppercase;margin-bottom:8px;">No trades fit your '+budget+'% budget today</div>'
+      + '<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);line-height:1.6;">DotVerse found <strong>'+(window._todayScanCount||plan.length)+'</strong> live setups, but on your '+money(c.acct)+' account each needs at least <strong style="color:rgba(201,168,76,.95);">'+(+_cheapest.toFixed(2))+'%</strong> risk to place the smallest lot your broker allows — more than your '+budget+'% budget.</div>'
+      + (_fits? '<button onclick="_todayRaiseBudget('+_sug+')" style="margin-top:12px;padding:9px 14px;border-radius:6px;border:1px solid rgba(201,168,76,.5);background:rgba(201,168,76,.14);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Raise budget to '+_sug+'% to place the best trade →</button>' : '<div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);">These setups suit a larger account — add funds, or check back for cheaper setups.</div>')
+      + '<div style="margin-top:11px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);line-height:1.5;">Same scanner as <span onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();" style="color:rgba(93,232,160,.8);cursor:pointer;border-bottom:1px dotted rgba(93,232,160,.4);">Signals ›</span> — Signals lists every setup; Today only shows what fits your account.</div>'
+    + '</div>';
+    _dvTapTipInit();
+    return;
+  }
   area.innerHTML=summary+cards+footer;
   // Record which setups are currently dropped-as-moved, so the live loop only re-renders
   // when that set actually changes (a setup newly drifts past entry) — no needless reshuffle.
