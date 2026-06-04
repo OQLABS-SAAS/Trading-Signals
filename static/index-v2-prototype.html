@@ -10562,6 +10562,7 @@ function applyCondFilter(type, label, desc){
 window._todayCfg = window._todayCfg || { acct:0, riskPct:1, profitGoal:500, maxPerClass:2, maxTrades:8, ladderMode:'beginner', autoPlace:false, classes:['crypto','stock','forex','commodity','index'] };
 window._todayPlan = window._todayPlan || [];
 window._todayLeverage = window._todayLeverage || 100;
+window._szBrokerLeverage = window._szBrokerLeverage || window._todayLeverage || 100;
 
 function _dvBrokerLeverageOptions(selected){
   selected = parseInt(selected) || 100;
@@ -10570,6 +10571,41 @@ function _dvBrokerLeverageOptions(selected){
   return vals.map(function(v){
     return '<option value="'+v+'"'+(selected===v?' selected':'')+'>1:'+v+'</option>';
   }).join('');
+}
+function _szBrokerLeverageValue(){
+  var sel = parseInt(document.getElementById('szBrokerLev')?.value);
+  var n = sel || parseInt(window._szBrokerLeverage) || 100;
+  return n > 0 ? n : 100;
+}
+function _szSetBrokerLeverage(val){
+  var n = parseInt(val);
+  if(!(n > 0)) return;
+  window._szBrokerLeverage = n;
+  window._szBrokerLeverageReal = true;
+  window._szBrokerLeverageSource = 'user';
+  var note = document.getElementById('szBrokerLevNote');
+  if(note) note.textContent = 'Manual broker leverage · affects margin only, not max loss';
+  if(typeof szCalc === 'function') szCalc();
+}
+function _szRefreshBrokerLeverage(lv, source){
+  var n = parseInt(lv);
+  if(!(n > 0)) return;
+  window._szBrokerLeverage = n;
+  window._szBrokerLeverageReal = source === 'broker';
+  window._szBrokerLeverageSource = source || 'broker';
+  var sel = document.getElementById('szBrokerLev');
+  if(sel){ sel.innerHTML = _dvBrokerLeverageOptions(n); sel.value = String(n); }
+  var note = document.getElementById('szBrokerLevNote');
+  if(note) note.textContent = (source === 'broker' ? 'From connected MT5 account' : 'Manual broker leverage') + ' · affects margin only, not max loss';
+}
+function _szMarginDivisor(assetType, instrumentLev){
+  var broker = _szBrokerLeverageValue();
+  if(assetType === 'stock') return 1;
+  if(assetType === 'crypto' || assetType === 'index'){
+    var inst = parseFloat(instrumentLev) || broker;
+    return Math.max(1, Math.min(inst, broker));
+  }
+  return Math.max(1, broker);
 }
 
 function _todayToggleClass(id, btn){
@@ -20177,6 +20213,14 @@ function showSize(){
           <label class="sz-lbl">Account Size ($)</label>
           <input class="sz-inp" id="szAcct" type="number" placeholder="10000" value="10000" oninput="window._szAcctManual=true;window._szTradeSizeManual=false;window._szLadderUserSized=false;szCalc()">
         </div>
+        <!-- MT5 Broker Leverage -->
+        <div class="sz-field" data-guide="mt5-broker-leverage">
+          <label class="sz-lbl">MT5 Broker Leverage</label>
+          <select class="sz-inp" id="szBrokerLev" onchange="_szSetBrokerLeverage(this.value)">
+            ${_dvBrokerLeverageOptions(window._szBrokerLeverage||100)}
+          </select>
+          <div class="sz-hint" id="szBrokerLevNote">From MT5 if connected · affects margin only, not max loss</div>
+        </div>
         <!-- Risk % — beginner-first preset selector with plain-English teaching -->
         <div class="sz-field" data-guide="calc-risk-pct">
           <label class="sz-lbl">Risk % <span style="font-size:9px;color:var(--mut);font-weight:400;">— how much of your account you risk per trade</span></label>
@@ -20540,6 +20584,11 @@ function showSize(){
           _ae.value = Math.round(_bal);
           if(typeof szCalc === 'function') szCalc();
         }
+      }
+      var _lev = (d && d.account) ? parseInt(d.account.leverage) : 0;
+      if(_lev > 0){
+        _szRefreshBrokerLeverage(_lev, 'broker');
+        if(typeof szCalc === 'function') szCalc();
       }
     }catch(e){}
     if(typeof szPortfolioCtx === 'function') szPortfolioCtx();
@@ -20974,7 +21023,7 @@ function szLadderRender() {
 	  const assetType = document.getElementById('szType')?.value || 'crypto';
 	  const levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
 	  const contractSize = assetType === 'forex' ? levOrContr : 1;
-	  const marginDivisor = assetType === 'forex' ? 30 : ((assetType === 'crypto' || assetType === 'index' || assetType === 'commodity') ? Math.max(1, levOrContr) : 1);
+	  const marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
 	  function _fmtSize(units){
 	    if(assetType === 'forex'){
 	      var lots = units / (contractSize || 1);
@@ -21695,6 +21744,8 @@ function szCalc(){
   const acct       = parseFloat(document.getElementById('szAcct')?.value)||0;
   const riskPct    = parseFloat(document.getElementById('szRisk')?.value)||0;
   const levOrContr = parseFloat(document.getElementById('szLev')?.value)||1;
+  const brokerLev  = (typeof _szBrokerLeverageValue === 'function') ? _szBrokerLeverageValue() : 100;
+  const marginLev  = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(document.getElementById('szType')?.value||'crypto', levOrContr) : brokerLev;
   const entry      = parseFloat((document.getElementById('szEntry')?.value||'').replace(/,/g,''))||0;
   const sl         = parseFloat((document.getElementById('szSL')?.value||'').replace(/,/g,''))||0;
   const tp1        = parseFloat((document.getElementById('szTP1')?.value||'').replace(/,/g,''))||0;
@@ -21773,7 +21824,7 @@ function szCalc(){
 
   // Position sizing
   const contractSize=(assetType==='forex')?levOrContr:100000;
-  const lev=(assetType==='crypto'||assetType==='index')?levOrContr:1;
+  const lev=marginLev;
   let posSize, posVal, lots, lotsDisplay, margin;
 
   if(assetType==='forex'){
@@ -21795,18 +21846,18 @@ function szCalc(){
     lots=moneyAtRisk/(slPips*pipValPerLot);
     posSize=lots*contractSize;
     posVal=posSize*(assetPrice||entry);
-    margin=posVal/30;
+    margin=posVal/(marginLev||1);
     lotsDisplay=lots<0.01?lots.toFixed(4)+' lots':lots.toFixed(2)+' lots';
   } else if(assetType==='crypto'){
     posSize=moneyAtRisk/(slDist||1);
     posVal=posSize*(assetPrice||entry);
-    margin=posVal/lev;
+    margin=posVal/(marginLev||1);
     lotsDisplay=posSize>=1?posSize.toFixed(4)+' units':posSize.toFixed(6)+' units';
     lots=posSize;
   } else {
     posSize=moneyAtRisk/(slDist||1);
     posVal=posSize*(assetPrice||entry);
-    margin=posVal/(lev||1);
+    margin=posVal/(marginLev||1);
     lotsDisplay=posSize.toFixed(2)+(assetType==='index'?' contracts':' shares');
     lots=null;
   }
