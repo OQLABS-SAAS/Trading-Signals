@@ -7,6 +7,7 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#060e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Quant Verse">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -19801,7 +19802,7 @@ function showSize(){
         <!-- Account -->
         <div class="sz-field" data-guide="calc-account">
           <label class="sz-lbl">Account Size ($)</label>
-          <input class="sz-inp" id="szAcct" type="number" placeholder="10000" value="10000" oninput="window._szTradeSizeManual=false;window._szLadderUserSized=false;szCalc()">
+          <input class="sz-inp" id="szAcct" type="number" placeholder="10000" value="10000" oninput="window._szAcctManual=true;window._szTradeSizeManual=false;window._szLadderUserSized=false;szCalc()">
         </div>
         <!-- Risk % — beginner-first preset selector with plain-English teaching -->
         <div class="sz-field" data-guide="calc-risk-pct">
@@ -20154,6 +20155,20 @@ function showSize(){
   // making a new API call on every keypress.
   dvFetch('/api/mt5/state').then(function(d){
     window._szOpenPositions = (d && d.positions) ? d.positions.length : 0;
+    // Autofill the account size from the CONNECTED MT5 balance. This handler used to
+    // read only d.positions and ignore d.account, so the Size tab stayed pinned to the
+    // hardcoded 10000 even with MT5 connected and reporting a real balance. Only fill
+    // when the user hasn't manually overridden the field.
+    try{
+      var _bal = (d && d.account) ? parseFloat(d.account.balance) : 0;
+      var _ae = document.getElementById('szAcct');
+      if(_ae && isFinite(_bal) && _bal>0 && !window._szAcctManual){
+        if(Math.round(parseFloat(_ae.value)||0) !== Math.round(_bal)){
+          _ae.value = Math.round(_bal);
+          if(typeof szCalc === 'function') szCalc();
+        }
+      }
+    }catch(e){}
     if(typeof szPortfolioCtx === 'function') szPortfolioCtx();
   }).catch(function(){ window._szOpenPositions = 0; if(typeof szPortfolioCtx === 'function') szPortfolioCtx(); });
 }
