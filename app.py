@@ -13141,6 +13141,12 @@ def scan_list():
                     _use_mkv = bool(os.environ.get("EODHD_API_KEY", "").strip())
                     analysis = get_analysis(ticker, asset_type, ind, timeframe, use_markov=_use_mkv)
                     ct       = detect_counter_trade(ind)
+                    # Historical win rate for THIS signal, computed on the df we already have
+                    # (no extra fetch). Feeds the Today card's backtest panel + the edge gate.
+                    try:
+                        _wr = calculate_win_rate(df, analysis.get("signal", "HOLD"))
+                    except Exception:
+                        _wr = {"win_rate": None, "sample_size": 0}
                     row = {
                         "ticker": ticker, "raw_ticker": raw, "asset_type": asset_type,
                         "price": ind["price"], "chg_1d": ind["chg_1d"], "rsi": ind["rsi"],
@@ -13175,6 +13181,9 @@ def scan_list():
                         "smc_structures": analysis.get("smc_structures", {}),
                         # Phase 2.2: Signal Quality Score
                         "quality": analysis.get("quality"),
+                        # Backtest/historical edge for this setup (Today card + gate):
+                        "win_rate":    _wr.get("win_rate"),
+                        "win_rate_n":  _wr.get("sample_size"),
                     }
             except Exception as e:
                 print(f"[scan-list] Error for {ticker}: {e}")
