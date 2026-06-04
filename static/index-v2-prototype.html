@@ -10551,18 +10551,34 @@ var _TODAY_LOT = {
 // the SAME % and positions are meaningful & tradeable across all instruments.
 // Rounds to the broker lot step and flags positions too small for the account.
 // Every figure is NET of spread + fees + estimated slippage.
+// USD value of 1 unit of an instrument's QUOTE currency. Non-forex assets are USD-quoted
+// (BTCUSD, NVDA, XAUUSD, SPX…) → 1. Forex: convert the quote ccy to USD using the live
+// rate cache (window._forexUsdRates), with safe fallbacks so we're never ~150x off.
+function _todayUsdPerQuote(o){
+  if(!o || o.asset!=='forex') return 1;
+  var sym=(o.sym||'').toUpperCase().replace(/[\/\-]/g,'');
+  if(sym.length<6) return 1;
+  var quote=sym.slice(3,6);
+  if(quote==='USD') return 1;
+  var R=window._forexUsdRates||{};
+  if(R[quote+'USD']>0) return R[quote+'USD'];      // GBPUSD, AUDUSD, EURUSD, NZDUSD …
+  if(R['USD'+quote]>0) return 1/R['USD'+quote];    // USDJPY, USDCAD, USDCHF …
+  var def={JPY:1/155, CAD:1/1.37, CHF:1/0.90, AUD:0.66, NZD:0.60, GBP:1.27, EUR:1.08, INR:1/83, CNH:1/7.2, MXN:1/17};
+  return def[quote]!=null?def[quote]:1;
+}
 function _todaySizeTrade(o, acct, riskPct){
   var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0, tp1=parseFloat(o.tp)||0;
   var slDist=Math.abs(entry-sl)||0;
-  var riskD=(acct||0)*((riskPct||1)/100);
-  var unitsRaw = slDist>0 ? riskD/slDist : 0;
+  var fx=_todayUsdPerQuote(o);                  // USD per 1 unit of quote currency
+  var riskD=(acct||0)*((riskPct||1)/100);       // USD the trader risks
+  var unitsRaw = (slDist>0 && fx>0) ? riskD/(slDist*fx) : 0;   // units that risk riskD in USD
   var SPEC = _TODAY_LOT[o.asset] || {step:0.0001, min:0.0001};
   // Round DOWN to the lot step so actual risk never EXCEEDS the target (protects the budget).
   // Epsilon guards floating-point boundaries (e.g. 999.9999 that should be 1000).
   var units = SPEC.step>0 ? Math.floor(unitsRaw/SPEC.step + 1e-9)*SPEC.step : unitsRaw;
   units = parseFloat(Math.max(0,units).toFixed(8));
   var tradeable = units>0 && units>=SPEC.min;
-  var notional = units*entry;
+  var notional = units*entry*fx;           // USD position value
   // Broker costs
   var spreadFrac = {crypto:0.0005, stock:0.0005, forex:0.0001, commodity:0.0005, index:0.0005}[o.asset]||0.0005;
   var spreadUnits = (o.spreadCost!=null && o.spreadCost>0) ? o.spreadCost : entry*spreadFrac;
@@ -10570,13 +10586,13 @@ function _todaySizeTrade(o, acct, riskPct){
   // spread-based (tiny per-lot commission), so cost there is dominated by the spread.
   var feeRate = o.asset==='crypto'?0.001 : o.asset==='stock'?0.0005 : 0.00003;
   var slipFrac = o.asset==='forex'?0.00007:0.0004;
-  var spreadD = spreadUnits*units;
-  var feeD = notional*feeRate;
-  var slipD = entry*slipFrac*units;
+  var spreadD = spreadUnits*units*fx;      // all costs in USD (fx converts quote→USD)
+  var feeD = notional*feeRate;             // notional already USD
+  var slipD = entry*slipFrac*units*fx;
   var costD = spreadD+feeD+slipD;
-  var grossRisk = units*slDist;            // actual risk after lot rounding
+  var grossRisk = units*slDist*fx;         // USD risk after lot rounding
   var netLoss = grossRisk+costD;
-  var grossTP1 = tp1?Math.abs(tp1-entry)*units:0;
+  var grossTP1 = tp1?Math.abs(tp1-entry)*units*fx:0;   // USD
   var netTP1 = grossTP1-costD;
   var rr = netLoss>0 ? netTP1/netLoss : 0;
   var unitLabel;
@@ -10706,6 +10722,7 @@ async function _todayBuildPlan(){
   }catch(e){}
   if(!c.acct){ area.innerHTML='<div style="padding:26px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:#e8706e;line-height:1.7;">Enter your account size above so DotVerse can size each trade safely.</div>'; return; }
   window._todayFreeMargin = window._mt5AccountBalance || c.acct;
+  try{ await _refreshForexRates(); }catch(e){}   // load quote→USD rates BEFORE sizing (JPY pairs etc.)
   area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning your markets for the best setups… 20–30s</div></div>';
   // Multi-timeframe scan: several timeframes per class so the plan mixes
   // scalp/day/swing/position trades (not all 4h). Best setup per symbol wins.
@@ -10845,18 +10862,10 @@ function _todayRenderPlan(){
       + (s.tradeable?'<span title="'+esc(TT.edge)+'" style="margin-left:auto;font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.7);border-bottom:1px dotted rgba(93,232,160,.3);cursor:help;">edge 1 : '+(s.rr||0).toFixed(1)+'</span>':'<span style="margin-left:auto;"></span>')
       + riskInput
     + '</div>';
-    if(!s.tradeable){
-      // EXACT risk % this setup needs to clear the broker's minimum lot (fixed target —
-      // not a creeping "+1%" nudge). units = acct*risk%/slDist must reach minLot.
-      var _slD=Math.abs((parseFloat(o.entry)||0)-(parseFloat(o.sl)||0));
-      var _minRisk=(s.minLot&&_slD>0&&c.acct>0)?Math.ceil((s.minLot*_slD/c.acct*100)*100)/100:0;
-      var _canTap=_minRisk>0 && _minRisk<=5;
-      return '<div style="border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(201,168,76,.045);">'
-        + head
-        + '<div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.9);line-height:1.55;margin-bottom:9px;">★ Strong setup — the smallest position your broker allows ('+s.unitLabel+') needs about <strong>'+(_minRisk||'—')+'%</strong> risk on your '+money(c.acct)+' account (vs its current '+(+(o._risk||1).toFixed(2))+'%). '+(_canTap?'One tap sizes it to place.':'That’s a lot of risk for this account — better suited to a larger balance.')+'</div>'
-        + (_canTap?'<button onclick="_todaySetTradeRisk('+idx+','+_minRisk+')" style="width:100%;padding:9px;border-radius:6px;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.4);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Size to place — set this trade to '+_minRisk+'% risk →</button>':'<button disabled style="width:100%;padding:9px;border-radius:6px;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.12);color:rgba(237,232,216,.4);font-family:var(--mono);font-size:11px;font-weight:700;cursor:not-allowed;">Needs ~'+(_minRisk||'—')+'% risk — too large for this account</button>')
-      + '</div>';
-    }
+    // GOVERNING RULE: Today shows only clean, placeable, account-suitable trades.
+    // A setup that can't be placed within safe risk on this account is NOT shown as a card
+    // (no nag, no scary %) — it's silently excluded and counted in a small footnote below.
+    if(!s.tradeable){ return ''; }
     return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:9px;padding:13px 15px;margin-bottom:9px;background:rgba(237,232,216,.02);">'
       + head
       + '<div id="today-lp-'+idx+'" title="'+esc(TT.live)+'" style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.4);margin-bottom:6px;min-height:13px;cursor:help;"><span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.25);flex-shrink:0;"></span>checking live price…</div>'
@@ -10921,7 +10930,7 @@ function _todayRenderPlan(){
     + '<div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.55);line-height:1.55;">Your '+budget+'% risk budget is split across '+nTradeable+' trade'+(nTradeable===1?'':'s')+'. If every trade reached TP1 you would make <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong> (after costs); if all hit their stop you would lose <strong style="color:#e8706e;">'+money2(-totRisk)+'</strong>. Reality lands between — some win, some lose.</div>'
     + budgetBanner
     + (riskPct>6 && !overBudget?'<div style="margin-top:7px;font-family:var(--mono);font-size:9.5px;color:#e8706e;">⚠ Total risk is above 6% — lower the budget or trade fewer.</div>':'')
-    + (nTooSmall>0&&!underBudget ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.85);">'+nTooSmall+' more good setup'+(nTooSmall===1?'':'s')+' shown below as opportunities — each card shows the exact risk % it needs to place on your '+money(c.acct)+' account. A larger balance places more at lower risk.</div>' : '')
+    + (nTooSmall>0&&!underBudget ? '<div style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);">'+nTooSmall+' setup'+(nTooSmall===1?'':'s')+' didn’t fit your '+money(c.acct)+' account at safe risk and '+(nTooSmall===1?'was':'were')+' skipped. A larger balance places more.</div>' : '')
     + (nMoved>0?'<div style="margin-top:8px;font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+nMoved+' setup'+(nMoved===1?'':'s')+' drifted past the entry since the scan — dropped from your plan so the menu stays current. <button onclick="_todayBuildPlan()" style="padding:4px 9px;border-radius:5px;border:1px solid rgba(237,232,216,.25);background:rgba(237,232,216,.06);color:rgba(237,232,216,.8);font-family:var(--mono);font-size:9px;font-weight:700;cursor:pointer;">↻ Rebuild for fresh setups</button></div>':'')
     + (nTradeable>0?'<button onclick="_todayPlaceAll()" style="margin-top:11px;width:100%;padding:11px;border:none;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.03em;cursor:pointer;">Review &amp; place all '+nTradeable+' →</button>':'')
   + '</div>';
@@ -11074,7 +11083,7 @@ function _todayLiveBox(o, live){
   var stopBreached=isBuy?live<=sl:live>=sl, targetHit=isBuy?live>=tp:live<=tp;
   var dotCol=stopBreached?'#e8706e':targetHit?'#5de8a0':(liveRR>=1?'rgba(201,168,76,.95)':'#e8706e');
   // Re-price "if you enter now": clone the trade at the live entry, keep stop/target, same risk %.
-  var clone={asset:o.asset, entry:live, sl:o.sl, tp:o.tp, sig:o.sig, spreadCost:o.spreadCost, atr:o.atr};
+  var clone={sym:o.sym, asset:o.asset, entry:live, sl:o.sl, tp:o.tp, sig:o.sig, spreadCost:o.spreadCost, atr:o.atr};
   var ns=_todaySizeTrade(clone,(window._todayCfg&&window._todayCfg.acct)||0,(o._risk||1));
   var esc=function(t){ return String(t).replace(/"/g,'&quot;'); };
   var enterNow;
