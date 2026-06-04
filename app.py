@@ -15214,11 +15214,8 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS pnl FLOAT"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
-                # /api/signals/history 500: model has signal_history.account_id but the
-                # existing table predates it. Add the column (+ index) so the history query
-                # stops failing with "column signal_history.account_id does not exist".
-                _conn.execute(text("ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS account_id INTEGER"))
-                _conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signal_history_account_id ON signal_history(account_id)"))
+                # signal_history.account_id is handled by the isolated migration below
+                # (this block can abort as one transaction, which is why it was missing).
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user'"))
                 _conn.execute(text("ALTER TABLE admin_invites ADD COLUMN IF NOT EXISTS tier VARCHAR(20) DEFAULT 'free'"))
                 _conn.execute(text("ALTER TABLE automation_settings ADD COLUMN IF NOT EXISTS trailing_atr_mult FLOAT DEFAULT 1.0"))
@@ -15343,6 +15340,19 @@ def _init_db():
                 _conn.commit()
         except Exception as _e:
             print(f"[db] migration: {_e}")
+        # Isolated, self-committing migrations. The big block above runs as ONE transaction,
+        # so on Postgres a single failing statement aborts it and rolls back everything after
+        # — which is why signal_history.account_id never got added. Run these critical fixes
+        # each in their own transaction so nothing else can block them.
+        for _stmt in [
+            "ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS account_id INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_signal_history_account_id ON signal_history(account_id)",
+        ]:
+            try:
+                with _db_engine.begin() as _c2:
+                    _c2.execute(text(_stmt))
+            except Exception as _e2:
+                print(f"[db] isolated migration failed ({_stmt[:42]}): {_e2}")
     _load_watches_from_db()
 
 with app.app_context():
