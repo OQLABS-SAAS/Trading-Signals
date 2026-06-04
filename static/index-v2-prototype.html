@@ -10811,9 +10811,10 @@ function _todaySetRiskPreset(mode){
   c.ladderMode=p.id; c.riskPct=p.riskPct;
   var r=document.getElementById('todayRisk'); if(r) r.value=p.riskPct;
   var lm=document.getElementById('todayLadderMode'); if(lm) lm.value=p.id;
+  var acct=_todaySyncAccountFromDom();
   var plan=window._todayPlan||[];
   plan.forEach(function(o){ o._ladderMode=p.id; o._ladder=_todayDefaultLadder(p.id); });
-  if(plan.length){ _todayAllocate(plan,c.acct,p.riskPct); window._todaySorted=false; showToday(); _todayRenderPlan(); }
+  if(plan.length && acct>0){ _todayAllocate(plan,acct,p.riskPct); window._todaySorted=false; showToday(); _todayRenderPlan(); }
   else showToday();
 }
 function _todaySetMarketPreset(v){
@@ -11372,7 +11373,7 @@ function _todayRenderPlan(){
 	  function _tableRows(){
 	    return usable.map(function(item){
 	      var o=item.o, s=o._size, idx=item.idx, dir=o.sig==='BUY'?'green':'red';
-	      return '<tr><td><strong style="color:#ede8d8">'+o.sym+'</strong> <span class="'+dir+'">'+o.sig+'</span></td><td>'+o.tf+'</td><td><span id="today-lp-'+idx+'" class="green">checking live price…</span></td><td>'+_lots(o)+'</td><td>'+money(s.notional)+'</td><td class="red">'+money2(-s.netLoss)+'</td><td class="green">+'+money2(s.netTP1)+'</td><td class="gold">'+_quality(o)+'</td><td><button class="td-btn ghost" onclick="_todaySelectTrade('+idx+')">open</button></td></tr><tr><td colspan="9">'+_tradeLadderRow(item)+'</td></tr>';
+	      return '<tr><td><strong style="color:#ede8d8">'+o.sym+'</strong> <span class="'+dir+'">'+o.sig+'</span></td><td>'+o.tf+'</td><td><span id="today-lp-'+idx+'" class="green">checking live price…</span></td><td>'+_lots(o)+'</td><td>'+money(s.notional)+'</td><td class="red">'+money2(-s.netLoss)+'<div class="td-mini">'+(s.riskPctOfAcct||0).toFixed(2)+'%</div></td><td class="green">+'+money2(s.netTP1)+'</td><td class="gold">'+_quality(o)+'</td><td><button class="td-btn ghost" onclick="_todaySelectTrade('+idx+')">open</button></td></tr><tr><td colspan="9">'+_tradeLadderRow(item)+'</td></tr>';
 	    }).join('');
 	  }
 	  function _selectedSignalCard(item){
@@ -11382,7 +11383,7 @@ function _todayRenderPlan(){
 	    return '<div class="td-sig-card'+short+'"><div class="td-stack" style="justify-content:space-between"><div><div class="sig-symbol">'+o.sym+'</div><div class="sig-meta">'+o.asset+' · '+o.tf+' · '+o.sig+'</div></div>'+_todayPill(o.sig,dir)+'</div>'
 	      + '<div class="sig-live"><span>Live entry monitor</span><b>'+((o._live&&o._live.price)?pxFmt(o._live.price):pxFmt(o.entry))+'</b><span class="'+dir+'">'+(o._live&&o._live.status?o._live.status:'entry active')+'</span></div>'
 	      + '<div class="sig-levels"><button class="sig-level"><span>Entry</span><b>'+pxFmt(o.entry)+'</b></button><button class="sig-level"><span>SL</span><b class="red">'+pxFmt(o.sl)+'</b></button><button class="sig-level"><span>TP1</span><b class="green">'+pxFmt(o.tp)+'</b></button><button class="sig-level"><span>TP2 / TP3</span><b class="green">'+(tps[1]?pxFmt(tps[1]):'—')+' / '+(tps[2]?pxFmt(tps[2]):'—')+'</b></button></div>'
-	      + '<div class="sig-detail-grid"><button class="sig-mini"><span>R:R</span><b>1:'+(s.rr||0).toFixed(1)+'</b></button><button class="sig-mini"><span>Lot size</span><b>'+_lots(o)+'</b></button><button class="sig-mini"><span>Dollar size</span><b>'+money(s.notional)+'</b></button><button class="sig-mini"><span>Max loss</span><b class="red">'+money2(-s.netLoss)+'</b></button></div>'
+	      + '<div class="sig-detail-grid"><button class="sig-mini"><span>R:R</span><b>1:'+(s.rr||0).toFixed(1)+'</b></button><button class="sig-mini"><span>Lot size</span><b>'+_lots(o)+'</b></button><button class="sig-mini"><span>Dollar size</span><b>'+money(s.notional)+'</b></button><button class="sig-mini"><span>Max loss</span><b class="red">'+money2(-s.netLoss)+'</b><span class="td-sub">'+(s.riskPctOfAcct||0).toFixed(2)+'% risk</span></button></div>'
 	      + '<p class="td-sub">'+(o.reason||'DotVerse selected this setup because quality, risk, and timeframe fit the current basket goal.')+'</p>'
 	      + _autoControls(item)
 	      + '<button id="today-cta-'+idx+'" class="td-btn primary" style="margin-top:10px;width:100%" onclick="_todayPlaceTrade('+idx+')">Place this trade</button><div id="today-livebox-'+idx+'" style="margin-top:8px"></div></div>';
@@ -11402,7 +11403,7 @@ function _todayRenderPlan(){
 	    + _todayMetric('Trades',nTradeable+' live','All with ladders below','green')
 	  + '</div>'
 	  + '<div class="fire-panel"><div><div class="td-mini">Basket command · '+pset.label+' preset</div><h2 style="font-family:var(--syne);font-size:18px;font-weight:500;margin-top:3px">Ready to fire all '+nTradeable+' selected trade'+(nTradeable===1?'':'s')+' together</h2><p class="td-sub">One action queues every selected trade, each with its own TP ladder, SL, lot size, and automation rules. Total size '+money(totExp)+', target +'+money2(totProfit)+', risk '+money2(-totRisk)+' / '+riskPct.toFixed(2)+'% combined.</p>'+goalBanner+riskBanner+'</div><div class="td-stack"><button class="td-btn gold" onclick="_todayPlaceAll()">Review all</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all</button></div></div>'
-	  + '<div class="td-grid td-two"><div class="td-card"><div class="td-card-head"><h2>Best setups basket</h2><div class="td-stack">'+_todayPill('Multi-TF','gold')+_todayPill('Multi-ladder kept','green')+_todayPill(pset.label+' risk','blue')+'</div></div><div class="td-pad td-table-wrap"><table class="td-table"><tr><th>Trade</th><th>TF</th><th>Live</th><th>Lots</th><th>Trade size</th><th>Loss</th><th>Profit</th><th>Quality</th><th></th></tr>'+_tableRows()+'</table></div></div><div class="td-grid">'+_selectedSignalCard(selected)+_selectedLadderPanel(selected)+'</div></div>'
+	  + '<div class="td-grid td-two"><div class="td-card"><div class="td-card-head"><h2>Best setups basket</h2><div class="td-stack">'+_todayPill('Multi-TF','gold')+_todayPill('Multi-ladder kept','green')+_todayPill(pset.label+' risk','blue')+'</div></div><div class="td-pad td-table-wrap"><table class="td-table"><tr><th>Trade</th><th>TF</th><th>Live</th><th>Lots</th><th>Trade size</th><th>Loss / risk</th><th>Profit</th><th>Quality</th><th></th></tr>'+_tableRows()+'</table></div></div><div class="td-grid">'+_selectedSignalCard(selected)+_selectedLadderPanel(selected)+'</div></div>'
 	  + '<div class="td-card" style="margin-top:12px"><div class="td-card-head"><h2>Final basket totals</h2><div class="td-stack">'+_todayPill(pset.label+' preset','gold')+_todayPill('All '+nTradeable+' trades combined','green')+'</div></div><div class="td-pad"><div class="td-grid td-four">'+_todayMetric('All trade amounts',money(totExp),'Total position value across the basket','gold')+_todayMetric('Combined profit','+'+money2(totProfit)+' / +'+_pct(totProfit),'Total planned upside from every trade','green')+_todayMetric('Combined risk',money2(-totRisk)+' / '+riskPct.toFixed(2)+'%','Total loss if every stop is hit','red')+_todayMetric('Margin required',money2(totCashIn),'Cash needed at broker after leverage','blue')+'</div><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(237,232,216,.065);margin-top:10px"><span>Total basket command</span><b>'+money(totExp)+' trade size · +'+money2(totProfit)+' profit · '+money2(-totRisk)+' risk</b></div><div class="td-stack" style="margin-top:10px"><button class="td-btn gold" onclick="_todayPlaceAll()">Review totals</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all '+nTradeable+'</button></div></div></div>'
 	  + '<div class="flow-footer"><div><div class="flow-footer-step">Step 0 of 6 · TODAY</div><div class="flow-footer-msg">Goal basket is built. Next: check whether market conditions support the basket.</div></div><div class="td-stack"><button class="td-btn ghost" onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();">Signals feed</button><button class="td-btn primary" onclick="setNav(\'market\');showMarket&&showMarket();">Review Market →</button></div></div>';
 	  // HONEST EMPTY STATE: candidates exist but none fit the selected per-trade risk on this account.
@@ -11459,9 +11460,15 @@ function _todaySetAccount(val){
   c.acct=a;
   var plan=window._todayPlan||[];
   if(plan.length){
-    plan.forEach(function(o){ o._size=_todaySizeTrade(o, a, o._risk||c.riskPct); });
+    _todayAllocate(plan, a, c.riskPct||1);
     window._todaySorted=true; _todayRenderPlan();
   }
+}
+function _todaySyncAccountFromDom(){
+  var c=window._todayCfg||{};
+  var a=parseFloat(document.getElementById('todayAcct')?.value);
+  if(a>0) c.acct=a;
+  return c.acct||0;
 }
 // Manual broker-leverage override. Leverage changes ONLY the cash you put up (margin),
 // never your risk/max-loss — so we just re-size to refresh cash-in and re-render.
@@ -11481,6 +11488,7 @@ function _todayRaiseBudget(x){ var i=document.getElementById('todayRisk'); if(i)
 function _todayReselect(){
   var c=window._todayCfg; var opps=window._todayOpps||[];
   if(!opps.length) return;
+  _todaySyncAccountFromDom();
   var plan=_todaySelectPlan(opps, c);
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=45;}).reduce(function(a,o){ if(!a.s[o.sym]){a.s[o.sym]=1;a.n++;} return a; },{s:{},n:0}).n - plan.length);
   plan.forEach(function(o){ o._autos=o._autos||_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; o._ladder=o._ladder||_todayDefaultLadder(o._ladderMode); });
@@ -11499,9 +11507,14 @@ function _todaySetGlobalLadder(mode){
 function _todaySetGlobalRisk(val){
   var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
   c.riskPct=r;
+  var acct=_todaySyncAccountFromDom();
+  if(!(acct>0)){
+    if(typeof _dvToast==='function') _dvToast('Enter account size first so risk % can calculate trade size','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+    return;
+  }
   var plan=window._todayPlan||[];
   if(plan.length){
-    _todayAllocate(plan, c.acct, r);
+    _todayAllocate(plan, acct, r);
     window._todaySorted=true;
     _todayRenderPlan();
   }
@@ -11509,7 +11522,12 @@ function _todaySetGlobalRisk(val){
 // Reset every trade back to the selected per-trade risk.
 function _todayRebalance(){
   var c=window._todayCfg; var plan=window._todayPlan||[]; if(!plan.length) return;
-  _todayAllocate(plan, c.acct, c.riskPct||1);
+  var acct=_todaySyncAccountFromDom();
+  if(!(acct>0)){
+    if(typeof _dvToast==='function') _dvToast('Enter account size first so risk % can calculate trade size','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+    return;
+  }
+  _todayAllocate(plan, acct, c.riskPct||1);
   window._todaySorted=true; _todayRenderPlan();
 }
 // Fine-tune risk on a single card — resize just that trade, keep the rest.
@@ -11532,7 +11550,7 @@ function _todaySetTradeSize(idx, val){
   var rm=_todayRiskModel(o);
   var risk = units*rm.riskPerUnit/acct*100;        // size → FINAL max-loss risk %, including costs
   // Enforce the per-trade hard cap on manual sizing too — typing a bigger size must not
-  // push a single trade past 2% of the account (the stated hard cap).
+  // push a single trade past the configured safety limit.
   if(risk > _TODAY_PER_CAP){ risk = _TODAY_PER_CAP; if(typeof _dvToast==='function') _dvToast('Capped at '+_TODAY_PER_CAP+'% — the per-trade safety limit','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); }
   o._risk = risk;
   o._size = _todaySizeTrade(o, acct, o._risk);
@@ -11542,7 +11560,12 @@ function _todaySetTradeRisk(idx, val){
   var plan=window._todayPlan||[]; var o=plan[idx]; if(!o) return;
   var r=parseFloat(val); if(!(r>0)) r=o._risk||1;
   if(r > _TODAY_PER_CAP){ r = _TODAY_PER_CAP; if(typeof _dvToast==='function') _dvToast('Capped at '+_TODAY_PER_CAP+'% — the per-trade safety limit','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); }
-  o._risk=r; o._size=_todaySizeTrade(o, window._todayCfg.acct, r);
+  var acct=_todaySyncAccountFromDom();
+  if(!(acct>0)){
+    if(typeof _dvToast==='function') _dvToast('Enter account size first so risk % can calculate trade size','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+    return;
+  }
+  o._risk=r; o._size=_todaySizeTrade(o, acct, r);
   window._todaySorted=true;   // a manual tweak should not reshuffle the list
   _todayRenderPlan();
 }
@@ -11709,7 +11732,15 @@ function _todayStartLivePrices(){
   },5000);
 }
 // ── Review & place — single card or the whole basket, one confirmed batch ──
-function _todayPlaceTrade(idx){ var o=(window._todayPlan||[])[idx]; if(!o||!o._size.tradeable) return; _todayConfirmAndPlace([o]); }
+function _todayPlaceTrade(idx){
+  var o=(window._todayPlan||[])[idx];
+  if(!o||!o._size.tradeable) return;
+  if(o._live&&o._live.invalid){
+    if(typeof _dvToast==='function') _dvToast('This setup moved past its valid entry — skip it or rebuild Today','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    return;
+  }
+  _todayConfirmAndPlace([o]);
+}
 function _todayPlaceAll(){
   // Only place trades that are tradeable AND whose live entry is still valid.
   var plan=(window._todayPlan||[]).filter(function(o){ return o._size.tradeable && !(o._live&&o._live.invalid); });
@@ -21491,23 +21522,85 @@ function _szTradeVerdict(){
   var col = v==='GO'?'#5de8a0':v==='WAIT'?'#c9a84c':'#e8706e';
   return {v:v,label:label,col:col,reasons:reasons};
 }
+function _szBuildExecutionLegs(){
+  var sig = window._activeSignal || {};
+  var acct = parseFloat(document.getElementById('szAcct')?.value) || 10000;
+  var entry = parseFloat((document.getElementById('szEntry')?.value || sig.entry || '').replace(/,/g,'')) || parseFloat(sig.entry) || 0;
+  var sl = parseFloat((document.getElementById('szSL')?.value || sig.sl || '').replace(/,/g,'')) || parseFloat(sig.sl) || 0;
+  var tp1 = parseFloat((document.getElementById('szTP1')?.value || sig.tp || sig.tp1 || '').replace(/,/g,'')) || parseFloat(sig.tp || sig.tp1) || 0;
+  var tp2 = parseFloat((document.getElementById('szTP2')?.value || sig.tp2 || '').replace(/,/g,'')) || parseFloat(sig.tp2) || null;
+  var tp3 = parseFloat((document.getElementById('szTP3')?.value || sig.tp3 || '').replace(/,/g,'')) || parseFloat(sig.tp3) || null;
+  var rawAsset = document.getElementById('szType')?.value || sig.asset || 'crypto';
+  var assetType = ({equity:'stock', auto:'stock'})[rawAsset] || rawAsset;
+  var levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
+  var contractSize = assetType === 'forex' ? (levOrContr || 100000) : 1;
+  var marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
+  var slDist = Math.abs(entry - sl);
+  if(!(entry > 0) || !(slDist > 0)) return [];
+  var tpPriceMap = { tp1: tp1, tp2: tp2, tp3: tp3 };
+  var isSingle = (window._szMode || 'single') === 'single';
+  var calc = window._szLastCalc || {};
+  var targets = window._szLadderTargets || [];
+  var out = [];
+  if(isSingle && calc && parseFloat(calc.posSize) > 0){
+    var target0 = targets[0] || 'tp1';
+    var assigned0 = target0 === 'trail' ? null : (tpPriceMap[target0] || tp1 || sig.tp);
+    var dist0 = assigned0 ? Math.abs(parseFloat(assigned0) - entry) : Math.abs(parseFloat(tp3 || tp2 || tp1 || entry) - entry);
+    var units0 = parseFloat(calc.posSize) || 0;
+    out.push({
+      idx: 1,
+      riskPct: parseFloat(calc.riskPct) || parseFloat(document.getElementById('szRisk')?.value) || 0,
+      moneyAtRisk: parseFloat(calc.moneyAtRisk) || 0,
+      units: units0,
+      lots: parseFloat(calc.lots) || (assetType === 'forex' ? units0 / contractSize : units0),
+      notional: parseFloat(calc.tradeAmount) || units0 * entry,
+      margin: parseFloat(calc.cashIn || calc.margin) || 0,
+      assetType: assetType,
+      target: target0,
+      assignedTp: assigned0,
+      trailing: target0 === 'trail',
+      profit: dist0 * units0
+    });
+    return out;
+  }
+  var ladder = ((window._szLadder || []).slice(0, 10));
+  if(!ladder.length) ladder = [parseFloat(document.getElementById('szRisk')?.value) || 1];
+  ladder.forEach(function(risk, i){
+    var r = parseFloat(risk) || 0;
+    if(!(r > 0)) return;
+    var dollars = acct * (r / 100);
+    var units = dollars / slDist;
+    var lots = assetType === 'forex' ? units / contractSize : units;
+    var target = (targets && targets[i]) || (i === 0 ? 'tp1' : i === 1 ? 'tp2' : 'tp3');
+    var assigned = target === 'trail' ? null : (tpPriceMap[target] || tp1 || sig.tp);
+    var dist = assigned ? Math.abs(parseFloat(assigned) - entry) : Math.abs(parseFloat(tp3 || tp2 || tp1 || entry) - entry);
+    var notional = units * entry;
+    out.push({
+      idx: i + 1,
+      riskPct: r,
+      moneyAtRisk: dollars,
+      units: units,
+      lots: lots,
+      notional: notional,
+      margin: notional / (marginDivisor || 1),
+      assetType: assetType,
+      target: target,
+      assignedTp: assigned,
+      trailing: target === 'trail',
+      profit: dist * units
+    });
+  });
+  return out;
+}
 // ── Pre-trade confirmation card — the safety net at the moment of the click ──
 function _szConfirmTrade(onConfirm){
   var sig = window._activeSignal||{};
   if(!sig.sym){ if(typeof _dvToast==='function') _dvToast('Load a signal first','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
-  var entry=parseFloat((document.getElementById('szEntry')?.value||sig.entry||'').replace(/,/g,''))||0;
-  var sl=parseFloat((document.getElementById('szSL')?.value||sig.sl||'').replace(/,/g,''))||0;
   var acct=parseFloat(document.getElementById('szAcct')?.value)||10000;
-  var slDist=Math.abs(entry-sl)||1;
-  var tp1=parseFloat((document.getElementById('szTP1')?.value||sig.tp||sig.tp1||'').replace(/,/g,''))||0;
-  var tp2=parseFloat((document.getElementById('szTP2')?.value||sig.tp2||'').replace(/,/g,''))||0;
-  var tp3=parseFloat((document.getElementById('szTP3')?.value||sig.tp3||'').replace(/,/g,''))||0;
-  var d1=tp1?Math.abs(tp1-entry):0, d2=tp2?Math.abs(tp2-entry):0, d3=tp3?Math.abs(tp3-entry):0;
-  var isMulti=(window._szMode||'single')==='multi';
-  var legs=isMulti?(window._szLadder||[]):(window._szLadder||[]).slice(0,1);
-  if(!legs.length) legs=[parseFloat(document.getElementById('szRisk')?.value)||1];
-  var totRisk=0, totNotional=0, totScale=0;
-  legs.forEach(function(r){ var m=acct*((parseFloat(r)||0)/100); var u=m/slDist; totRisk+=m; totNotional+=u*entry; totScale+=u*(0.5*(d1||d2||d3)+0.3*(d2||d3||d1)+0.2*(d3||d2||d1)); });
+  var legs=_szBuildExecutionLegs();
+  if(!legs.length){ if(typeof _dvToast==='function') _dvToast('Enter entry and stop loss before placing','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
+  var totRisk=0, totNotional=0, totMargin=0, totScale=0;
+  legs.forEach(function(l){ totRisk+=l.moneyAtRisk||0; totNotional+=l.notional||0; totMargin+=l.margin||0; totScale+=l.profit||0; });
   var dir=(sig.sig||'BUY').toUpperCase();
   var verdict=_szTradeVerdict(); var go=verdict.v;
   var nT=legs.length;
@@ -21524,7 +21617,8 @@ function _szConfirmTrade(onConfirm){
     +'</div>'
     +'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.78);line-height:2;margin-bottom:13px;">'
       +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Trade</span><span><strong>'+sig.sym+'</strong> · '+dir+' · '+nT+(nT>1?' trades':' trade')+'</span></div>'
-      +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Capital deployed</span><span>'+money(totNotional)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Cash in</span><span>'+money(totMargin)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Position value</span><span>'+money(totNotional)+'</span></div>'
       +(totScale>0?'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">If it works (typical exit)</span><span style="color:#5de8a0;">+'+money(totScale)+'</span></div>':'')
     +'</div>'
     +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin-bottom:16px;">'
@@ -21561,19 +21655,21 @@ async function _szLadderSubmitGo() {
     return;
   }
   const status = document.getElementById('szLadderStatus');
-  const acct   = parseFloat(document.getElementById('szAcct')?.value) || 10000;
   const entry  = parseFloat((document.getElementById('szEntry')?.value||sig.entry||'').replace(/,/g,'')) || parseFloat(sig.entry) || 0;
   const sl     = parseFloat((document.getElementById('szSL')?.value||sig.sl||'').replace(/,/g,'')) || parseFloat(sig.sl) || 0;
   const tp1    = parseFloat((document.getElementById('szTP1')?.value||sig.tp||sig.tp1||'').replace(/,/g,'')) || parseFloat(sig.tp||sig.tp1) || 0;
   const tp2    = parseFloat((document.getElementById('szTP2')?.value||sig.tp2||'').replace(/,/g,'')) || parseFloat(sig.tp2) || null;
   const tp3    = parseFloat((document.getElementById('szTP3')?.value||sig.tp3||'').replace(/,/g,'')) || parseFloat(sig.tp3) || null;
-  const assetType = document.getElementById('szType')?.value || sig.asset || 'crypto';
-  const contractSize = assetType === 'forex' ? (parseFloat(document.getElementById('szLev')?.value)||100000) : 1;
-  const slDist = Math.abs(entry - sl) || 1;
+  const _rawAssetType = document.getElementById('szType')?.value || sig.asset || 'crypto';
+  const assetType = ({equity:'stock', auto:'stock'})[_rawAssetType] || _rawAssetType;
   const orderType = 'Market';
   const direction = (sig.sig||'BUY').toUpperCase();
-  const ladder = (window._szLadder||[]).slice(0, 10);
-  if (status) status.innerHTML = '<span style="color:rgba(201,168,76,.9);">Submitting ' + ladder.length + ' orders…</span>';
+  const legs = _szBuildExecutionLegs();
+  if (!legs.length) {
+    if (status) status.innerHTML = '<span style="color:rgba(232,112,110,.9);">Enter entry and stop loss before submitting</span>';
+    return;
+  }
+  if (status) status.innerHTML = '<span style="color:rgba(201,168,76,.9);">Submitting ' + legs.length + ' orders…</span>';
   let ok = 0, fail = 0;
   // TP price map — each row sends ONLY its assigned TP to MT5 so it closes at
   // that exact target. SL cascade (breakeven after TP1, lock-TP1 after TP2)
@@ -21584,15 +21680,15 @@ async function _szLadderSubmitGo() {
   const _totalVotes = (sig.bullCount||0) + (sig.bearCount||0);
   const _entryConf  = _totalVotes > 0 ? ((sig.bullCount||0) / _totalVotes) : null;
   const _entryAtr   = sig.atr || null;
-  for (let i = 0; i < ladder.length; i++) {
-	    const risk    = ladder[i];
-	    const dollars = acct * (risk/100);
-	    const units   = dollars / slDist;
-	    const lots    = parseFloat(((assetType === 'forex') ? (units / contractSize) : units).toFixed(6));
-    const target  = (window._szLadderTargets && window._szLadderTargets[i]) || (i===0?'tp1':i===1?'tp2':'tp3');
+  for (let i = 0; i < legs.length; i++) {
+	    const leg = legs[i];
+	    const risk = leg.riskPct;
+	    const lots = parseFloat((leg.lots || 0).toFixed(6));
+    const target  = leg.target || (i===0?'tp1':i===1?'tp2':'tp3');
     // Resolve the single TP price this position will close at
-    const assignedTp = target === 'trail' ? null : (tpPriceMap[target] || sig.tp);
-    const isTrailing = target === 'trail';
+    const assignedTp = leg.assignedTp != null ? leg.assignedTp : (target === 'trail' ? null : (tpPriceMap[target] || sig.tp));
+    const isTrailing = !!leg.trailing;
+    const auto = (window._szLadderAuto && window._szLadderAuto[i]) || _szDefaultAuto();
     try {
       const res = await dvFetch('/api/mt5/order', {
         method:'POST',
@@ -21604,6 +21700,8 @@ async function _szLadderSubmitGo() {
           // Only the assigned TP — not all three — so position closes precisely at target
           tp1: assignedTp, tp2: null, tp3: null,
           trailing: isTrailing,
+          be: !!auto.be, macro: !!auto.macro, inval: !!auto.inval, sent: !!auto.sent,
+          tp1_alert: !!auto.tp1, tp2_alert: !!auto.tp2, weekend: !!auto.weekend,
           comment: 'DotVerse L#' + (i+1) + ' ' + target.toUpperCase() + ' @ ' + risk + '%',
           // Snapshot for signal-invalidation and ATR-expansion detection in watch job
           entry_confluence: _entryConf,
@@ -21759,13 +21857,16 @@ function szCalc(){
   // calculated separately, so beginners don't confuse "money put in" with leverage.
   if(!window._szTradeSizeManual && acct>0 && riskPct>0){
     const _slD = Math.abs(entry - sl);
-    const autoPositionValue = (_slD>0 && entry>0)
-      ? acct*(riskPct/100)/_slD*entry
-      : acct*riskPct/100;
-    const auto = parseFloat((autoPositionValue/(marginLev||1)).toFixed(2));
     const el=document.getElementById('szTradeSize');
-    if(el) el.value=auto;
-    tradeSize=auto;
+    if(_slD>0 && entry>0){
+      const autoPositionValue = acct*(riskPct/100)/_slD*entry;
+      const auto = parseFloat((autoPositionValue/(marginLev||1)).toFixed(2));
+      if(el) el.value=auto;
+      tradeSize=auto;
+    } else {
+      if(el) el.value='';
+      tradeSize=0;
+    }
   }
 
   const moneyAtRisk = acct*(riskPct/100);
@@ -22955,18 +23056,21 @@ function _actExecuteGo(){
     if(!ticker){ if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">No signal loaded</span>'; return; }
     if(btn){ btn.disabled=true; btn.style.opacity='0.6'; }
     if(status) status.innerHTML='<span style="color:#d4b87a;">Sending...</span>';
-    const quantity=parseFloat(document.getElementById('actLots')?.value)||0.1;
-    dvFetch('/api/orders',{
+    const calcLeg=(_szBuildExecutionLegs && _szBuildExecutionLegs()[0]) || {};
+    const quantity=parseFloat(document.getElementById('actLots')?.value)||calcLeg.lots||0.1;
+    dvFetch('/api/mt5/order',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        symbol: sig.sym,
-        side: sig.sig,
-        quantity: quantity,
-        entry_price: parseFloat(sig.entry)||0,
-        stop_loss: parseFloat(sig.sl)||null,
-        take_profit: parseFloat(sig.tp)||null,
+        ticker: sig.sym,
+        asset_type: calcLeg.assetType || (window._szLastCalc&&window._szLastCalc.assetType) || ({equity:'stock', auto:'stock'})[sig.asset] || sig.asset || 'crypto',
+        direction: (sig.sig||'BUY').toUpperCase(),
+        lots: quantity,
+        entry: parseFloat(sig.entry)||0,
+        sl: parseFloat(sig.sl)||null,
+        tp1: parseFloat(sig.tp)||null,
         order_type: window._actExOrderType||'market',
+        timeframe: sig.tf || '',
         signal_id: sig.id||(sig.sym+':'+sig.tf+':'+sig.sig+':'+Date.now())
       })
     }).then(function(res){
