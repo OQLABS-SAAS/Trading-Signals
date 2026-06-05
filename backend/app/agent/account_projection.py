@@ -88,11 +88,31 @@ def find_live_state_for_account(
     account_number: Any,
     live_states: list[dict[str, Any]],
     account_count: int,
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any] | None:
     account_login = str(account_number or "")
+    exact_matches: list[dict[str, Any]] = []
     for candidate in live_states:
         if account_login and mt5_login_from_state(candidate) == account_login:
+            exact_matches.append(candidate)
+
+    for candidate in exact_matches:
+        if is_live_state_connected(candidate, now=now):
             return candidate
+
+    if account_count == 1:
+        connected_states = [
+            candidate
+            for candidate in live_states
+            if is_live_state_connected(candidate, now=now)
+        ]
+        if len(connected_states) == 1:
+            return connected_states[0]
+
+    if exact_matches:
+        return exact_matches[0]
+
     if account_count == 1 and len(live_states) == 1:
         return live_states[0]
     return None
@@ -133,7 +153,7 @@ def project_agent_account(
     today_pnl: float | None = None,
 ) -> dict[str, Any]:
     login = _get(account, "account_number") or ""
-    live_state = find_live_state_for_account(login, live_states, account_count)
+    live_state = find_live_state_for_account(login, live_states, account_count, now=now)
     live_account = live_state.get("account", {}) if live_state else {}
     balance = _to_float(live_account.get("balance"), _to_float(_get(account, "balance"), 0.0))
     equity = _to_float(live_account.get("equity"), _to_float(_get(account, "equity"), balance))

@@ -10718,7 +10718,17 @@ def mark_notifications_read():
 
 def _account_to_dict(a):
     """Serialize a TradingAccount row for API responses. NEVER expose ea_secret."""
-    state = mt5_state.get(str(a.user_id), {})
+    owner_id = str(getattr(a, "user_id", "") or "")
+    query_ids = [owner_id] if owner_id else []
+    if owner_id != "default":
+        query_ids.append("default")
+    with mt5_state_lock:
+        live_states = live_states_for_query_ids(mt5_state, query_ids)
+    state = find_live_state_for_account(
+        getattr(a, "account_number", None),
+        live_states,
+        1,
+    ) or {}
     return serialize_trading_account(a, state)
 
 @app.route("/api/accounts", methods=["GET"])

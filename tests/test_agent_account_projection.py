@@ -77,6 +77,29 @@ def test_project_agent_account_uses_single_live_state_fallback_for_one_account()
     assert projected["leverage"] == "1:200"
 
 
+def test_project_agent_account_prefers_fresh_single_account_state_over_stale_match():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    stale_matching_state = {
+        "account": {"login": "123456", "balance": 100, "equity": 100},
+        "last_seen": (now - timedelta(minutes=5)).isoformat(),
+    }
+    fresh_default_state = {
+        "account": {"login": "different-login", "balance": 5000, "equity": 4990},
+        "last_seen": (now - timedelta(seconds=5)).isoformat(),
+    }
+
+    projected = project_agent_account(
+        _account(account_number="123456"),
+        [stale_matching_state, fresh_default_state],
+        1,
+        now=now,
+    )
+
+    assert projected["balance"] == 5000
+    assert projected["equity"] == 4990
+    assert projected["status"] == "online"
+
+
 def test_project_agent_account_does_not_cross_wire_multi_account_live_state():
     now = datetime(2026, 6, 5, 12, 0, 0)
     live_state = {
