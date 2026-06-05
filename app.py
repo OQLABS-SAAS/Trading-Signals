@@ -10520,6 +10520,66 @@ def recommend_automations():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/today/scout-alert", methods=["POST"])
+@login_required
+def today_scout_alert():
+    """Send a Today scout alert when the weekly target path becomes actionable.
+
+    The Today UI owns the basket math. This endpoint only validates a short
+    alert payload and routes it through the existing Telegram + in-app channels.
+    """
+    data = request.json or {}
+    kind = str(data.get("kind") or "covered")[:32]
+    if kind not in {"covered", "armed"}:
+        return jsonify({"error": "invalid alert kind"}), 400
+
+    user_id = str(session.get("user_id", "default"))
+    goal = float(data.get("goal") or 0)
+    profit = float(data.get("profit") or 0)
+    risk = float(data.get("risk") or 0)
+    eta = str(data.get("eta") or "watchlist scan")[:48]
+    trades = int(data.get("trades") or 0)
+    shortfall = max(0.0, goal - profit)
+
+    if kind == "covered":
+        title = "Today scout found a target path"
+        body = (
+            f"{trades} trade(s) can cover the weekly target: "
+            f"+${profit:,.2f} planned upside vs ${goal:,.2f} goal, "
+            f"risk ${risk:,.2f}, ETA {eta}."
+        )
+    else:
+        title = "Today scout armed"
+        body = (
+            f"DotVerse will keep scanning for a basket that can cover your "
+            f"${goal:,.2f} weekly target. Current shortfall: ${shortfall:,.2f}."
+        )
+
+    dedup_raw = f"{user_id}:{kind}:{round(goal, 2)}:{round(profit, 2)}:{eta}"
+    dedup_key = "today_scout_alert:" + hashlib.sha1(dedup_raw.encode("utf-8")).hexdigest()
+    try:
+        if _redis_client and _redis_client.get(dedup_key):
+            return jsonify({"status": "deduped"})
+    except Exception:
+        pass
+
+    try:
+        send_telegram(f"{title}\n{body}")
+    except Exception as e:
+        print(f"[today_scout] Telegram send failed: {e}")
+
+    _push_notification(user_id, "today_scout", title, body, data={
+        "kind": kind, "goal": goal, "profit": profit, "risk": risk,
+        "eta": eta, "trades": trades, "shortfall": shortfall,
+    })
+    try:
+        if _redis_client:
+            _redis_client.setex(dedup_key, 3600, "1")
+    except Exception:
+        pass
+    return jsonify({"status": "ok", "title": title, "body": body})
+
+
 @app.route("/api/vix", methods=["GET"])
 @login_required
 def vix_status():
