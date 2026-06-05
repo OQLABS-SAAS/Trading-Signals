@@ -10645,7 +10645,7 @@ function applyCondFilter(type, label, desc){
 }
 
 // ═══════════════════════ TODAY — daily plan home ═══════════════════════
-window._todayCfg = window._todayCfg || { acct:0, riskPct:1, profitGoal:500, maxPerClass:2, maxTrades:8, ladderMode:'beginner', autoPlace:false, classes:['crypto','stock','forex','commodity','index'] };
+window._todayCfg = window._todayCfg || { acct:0, riskPct:3, profitGoal:500, maxPerClass:99, maxTrades:6, ladderMode:'beginner', autoPlace:false, classes:['crypto','stock','forex','commodity','index'] };
 window._todayPlan = window._todayPlan || [];
 window._todayLeverage = window._todayLeverage || 100;
 window._szBrokerLeverage = window._szBrokerLeverage || window._todayLeverage || 100;
@@ -12001,6 +12001,236 @@ function _todayAutoPlace(){
   paint();
   window._todayAutoTimer=setInterval(function(){ secs--; if(secs<=0){ fire(); } else { paint(); } },1000);
 }
+// TODAY V2 - command-desk renderer.
+// The existing scanner, sizing, live-price monitor, automation recommender, and
+// MT5 submit path remain the source of truth. This layer changes the trader
+// mental model from "risk per trade" to "basket risk first", then exposes
+// individual trade risk and scale-out controls clearly.
+function _todayEnsureCommandStyles(){
+  if(document.getElementById('todayCommandStyles')) return;
+  var st=document.createElement('style'); st.id='todayCommandStyles';
+  st.textContent = ''
+  + '.today-page.v2{padding-bottom:86px}.today-v2-grid{display:grid;gap:14px}.today-v2-top{display:grid;grid-template-columns:minmax(340px,1.05fr) minmax(460px,.95fr);gap:14px;margin-bottom:14px}.today-v2-verdict{position:relative;min-height:178px;padding:18px;border:1px solid rgba(93,232,160,.24);border-radius:8px;background:linear-gradient(135deg,rgba(93,232,160,.10),rgba(201,168,76,.045));overflow:hidden}.today-v2-verdict:before{content:"";position:absolute;inset:-45%;background:conic-gradient(from 90deg,transparent,rgba(93,232,160,.10),transparent,rgba(201,168,76,.10),transparent);animation:todayOrbit 9s linear infinite}.today-v2-verdict>*{position:relative}@keyframes todayOrbit{to{transform:rotate(360deg)}}'
+  + '.today-v2-verdict h2{font-family:var(--syne);font-size:30px;font-weight:500;letter-spacing:0;margin:6px 0 8px;color:#ede8d8}.today-v2-copy{font-size:13px;color:rgba(237,232,216,.62);line-height:1.55}.today-v2-readiness{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:16px}.today-v2-mini{border:1px solid rgba(237,232,216,.105);background:rgba(6,9,14,.38);border-radius:7px;padding:10px;min-width:0}.today-v2-mini b{display:block;font-family:var(--mono);font-size:14px;margin-top:4px;color:#ede8d8}'
+  + '.today-v2-risk{padding:16px}.today-v2-riskTop{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}.today-v2-field{background:rgba(6,9,14,.42);border:1px solid rgba(237,232,216,.105);border-radius:7px;padding:10px;min-height:62px}.today-v2-value{font-family:var(--mono);font-size:18px;font-weight:600;color:#ede8d8}.today-v2-rail{height:16px;border-radius:999px;background:rgba(237,232,216,.08);overflow:hidden;border:1px solid rgba(237,232,216,.10);display:flex}.today-v2-used{background:linear-gradient(90deg,#c9a84c,#d4870a)}.today-v2-new{background:linear-gradient(90deg,#5de8a0,#35bb79)}.today-v2-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.56)}.today-v2-key{display:flex;gap:6px;align-items:center}.today-v2-sq{width:8px;height:8px;border-radius:2px;background:#5de8a0}.today-v2-sq.gold{background:#c9a84c}'
+  + '.today-v2-setup{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 152px;gap:10px;padding:16px}.today-v2-btn{border:1px solid rgba(93,232,160,.38);background:linear-gradient(180deg,#73f0ae,#4bd98e);color:#06140c;border-radius:7px;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:64px;box-shadow:0 0 28px rgba(93,232,160,.14)}.today-v2-mode{display:flex;background:#080c12;border:1px solid rgba(237,232,216,.105);border-radius:7px;padding:3px;gap:3px;margin:0 16px 16px;width:max-content}.today-v2-mode button{border:0;border-radius:5px;background:transparent;color:rgba(237,232,216,.34);padding:7px 11px;font-family:var(--mono);font-size:10px;cursor:pointer}.today-v2-mode button.on{background:rgba(201,168,76,.10);color:#c9a84c}'
+  + '.today-v2-scan{position:relative;height:34px;margin:0 16px 16px;border:1px solid rgba(201,168,76,.16);border-radius:7px;background:rgba(201,168,76,.035);overflow:hidden;display:flex;align-items:center;gap:9px;padding:0 12px}.today-v2-scan:before{content:"";position:absolute;inset:0;width:130px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.22),transparent);animation:todayScan 3.2s linear infinite}.today-v2-scan span{position:relative;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55)}@keyframes todayScan{from{transform:translateX(-160px)}to{transform:translateX(1180px)}}'
+  + '.today-v2-summary{display:grid;grid-template-columns:1.1fr .9fr .9fr 1fr;gap:12px;margin:14px 0}.today-v2-metric{position:relative;min-height:112px;padding:14px;border-radius:8px;background:rgba(237,232,216,.028);border:1px solid rgba(237,232,216,.105);overflow:hidden}.today-v2-metric:after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,#5de8a0,#c9a84c);opacity:.55}.today-v2-metric b{display:block;font-family:var(--mono);font-size:23px;margin:8px 0 3px}.today-v2-metric p{margin:0;color:rgba(237,232,216,.58);font-size:12px;line-height:1.42}.today-v2-pulse{width:8px;height:8px;border-radius:50%;display:inline-block;background:#5de8a0;box-shadow:0 0 0 0 rgba(93,232,160,.5);animation:todayPulse 1.7s infinite;margin-right:6px}@keyframes todayPulse{to{box-shadow:0 0 0 12px rgba(93,232,160,0)}}'
+  + '.today-v2-main{display:grid;grid-template-columns:minmax(680px,1.25fr) minmax(410px,.75fr);gap:14px}.today-v2-table{width:100%;border-collapse:collapse}.today-v2-table th{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:rgba(237,232,216,.34);text-align:left;padding:11px 12px;border-bottom:1px solid rgba(237,232,216,.075)}.today-v2-table td{padding:12px;border-bottom:1px solid rgba(237,232,216,.055);font-size:12px;color:rgba(237,232,216,.58);vertical-align:middle}.today-v2-row{cursor:pointer;transition:.16s ease}.today-v2-row:hover td{background:rgba(237,232,216,.026)}.today-v2-row.on td{background:linear-gradient(90deg,rgba(93,232,160,.075),rgba(201,168,76,.035));border-bottom-color:rgba(93,232,160,.22)}.today-v2-sym{font-family:var(--syne);font-size:15px;color:#ede8d8;font-weight:600}.today-v2-dir{font-family:var(--mono);font-size:9px;border-radius:4px;padding:2px 7px;font-weight:700}.today-v2-dir.buy{color:#5de8a0;background:rgba(93,232,160,.10)}.today-v2-dir.sell{color:#e8706e;background:rgba(232,112,110,.10)}.today-v2-status{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:#5de8a0}.today-v2-status.wait{color:#c9a84c}.today-v2-status.open{color:#7eb7ff}.today-v2-status.invalid{color:#e8706e}.today-v2-liveDot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:todayPulse 2s infinite}.today-v2-tag{font-family:var(--mono);font-size:9px;border-radius:999px;padding:3px 8px;border:1px solid rgba(237,232,216,.18);white-space:nowrap}.today-v2-tag.scale{color:#5de8a0;border-color:rgba(93,232,160,.28);background:rgba(93,232,160,.10)}.today-v2-tag.single{color:#7eb7ff;border-color:rgba(126,183,255,.28);background:rgba(126,183,255,.09)}'
+  + '.today-v2-detail{padding:16px}.today-v2-selectedTop{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:14px}.today-v2-bigSym{font-family:var(--syne);font-size:28px;font-weight:500;color:#ede8d8}.today-v2-meta{font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.34);margin-top:4px}.today-v2-liveBox{border:1px solid rgba(126,183,255,.22);background:rgba(126,183,255,.045);border-radius:8px;padding:12px;margin-bottom:12px}.today-v2-priceLine{height:9px;border-radius:999px;background:linear-gradient(90deg,#e8706e,rgba(237,232,216,.18) 42%,#5de8a0);position:relative;margin:13px 0 18px}.today-v2-tick{position:absolute;top:-5px;width:2px;height:19px;background:#ede8d8;left:42%;opacity:.75}.today-v2-marker{position:absolute;top:-5px;left:46%;width:19px;height:19px;border-radius:50%;background:#5de8a0;border:4px solid #091018;box-shadow:0 0 20px rgba(93,232,160,.35);animation:todayMarker 3.4s ease-in-out infinite}@keyframes todayMarker{0%,100%{left:44%}50%{left:51%}}'
+  + '.today-v2-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}.today-v2-exec{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.today-v2-choice{position:relative;border:1px solid rgba(237,232,216,.105);background:rgba(237,232,216,.024);border-radius:8px;padding:11px;text-align:left;color:rgba(237,232,216,.58);cursor:pointer;transition:.16s ease}.today-v2-choice b{display:block;font-family:var(--mono);font-size:12px;color:#ede8d8;margin-bottom:4px}.today-v2-choice span{font-size:11px;line-height:1.35;color:rgba(237,232,216,.34)}.today-v2-choice.on{border-color:rgba(93,232,160,.36);background:rgba(93,232,160,.08);box-shadow:0 0 24px rgba(93,232,160,.08)}.today-v2-choice.on:after{content:"ON";position:absolute;right:10px;top:10px;font-family:var(--mono);font-size:9px;color:#5de8a0}.today-v2-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(201,168,76,.22);background:rgba(201,168,76,.055);border-radius:8px;padding:10px 12px;margin:10px 0 12px}.today-v2-toggle{width:48px;height:26px;border-radius:999px;border:1px solid rgba(237,232,216,.18);background:rgba(237,232,216,.07);position:relative;cursor:pointer;flex:0 0 auto}.today-v2-toggle:after{content:"";position:absolute;width:20px;height:20px;left:3px;top:2px;border-radius:50%;background:rgba(237,232,216,.34);transition:.18s ease}.today-v2-toggle.on{background:rgba(93,232,160,.18);border-color:rgba(93,232,160,.45)}.today-v2-toggle.on:after{transform:translateX(22px);background:#5de8a0;box-shadow:0 0 18px rgba(93,232,160,.35)}'
+  + '.today-v2-ladder{display:grid;gap:8px}.today-v2-leg{display:grid;grid-template-columns:76px 1fr 76px 78px;gap:8px;align-items:center;border:1px solid rgba(237,232,216,.105);border-radius:7px;background:rgba(6,9,14,.38);padding:10px}.today-v2-legName{font-family:var(--mono);font-size:11px;color:#ede8d8}.today-v2-legSub{font-size:11px;color:rgba(237,232,216,.34);margin-top:2px}.today-v2-single{border:1px solid rgba(126,183,255,.22);background:rgba(126,183,255,.045);border-radius:8px;padding:12px;margin-top:8px}.today-v2-single b{font-family:var(--mono);font-size:15px;color:#ede8d8}.today-v2-autos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.today-v2-auto{border:1px solid rgba(93,232,160,.24);background:rgba(93,232,160,.06);border-radius:7px;padding:9px;font-size:11px;color:rgba(237,232,216,.68);line-height:1.4}.today-v2-auto b{display:block;font-family:var(--mono);font-size:10px;margin-bottom:3px;color:#5de8a0}.today-v2-auto.optional{border-color:rgba(201,168,76,.24);background:rgba(201,168,76,.06)}.today-v2-auto.optional b{color:#c9a84c}.today-v2-auto.off{border-color:rgba(237,232,216,.105);background:rgba(237,232,216,.02);color:rgba(237,232,216,.38)}.today-v2-auto.off b{color:rgba(237,232,216,.44)}'
+  + '.today-v2-targetBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.today-v2-smallBtn{border:1px solid rgba(237,232,216,.18);background:rgba(237,232,216,.035);color:rgba(237,232,216,.58);border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:10px;cursor:pointer}.today-v2-smallBtn.on{color:#5de8a0;border-color:rgba(93,232,160,.35);background:rgba(93,232,160,.10)}.today-v2-bottom{position:fixed;left:260px;right:26px;bottom:14px;background:rgba(7,9,15,.90);backdrop-filter:blur(20px);border:1px solid rgba(237,232,216,.105);border-radius:9px;padding:11px 14px;display:grid;grid-template-columns:repeat(6,1fr) 190px;gap:10px;align-items:center;z-index:60;box-shadow:0 18px 60px rgba(0,0,0,.34)}.today-v2-bottom .bitem{border-right:1px solid rgba(237,232,216,.08);min-height:42px}.today-v2-bottom b{display:block;font-family:var(--mono);font-size:14px;margin-top:3px}.today-v2-review{height:42px;border:0;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-weight:700;cursor:pointer}'
+  + '@media(max-width:1180px){.today-page.v2{padding-bottom:16px}.today-v2-top,.today-v2-setup,.today-v2-summary,.today-v2-main,.today-v2-bottom{grid-template-columns:1fr}.today-v2-riskTop,.today-v2-readiness,.today-v2-three,.today-v2-autos{grid-template-columns:1fr}.today-v2-bottom{position:static;margin-top:14px}.today-v2-table{min-width:760px}.today-v2-tableWrap{overflow-x:auto}.today-v2-exec{grid-template-columns:1fr}}';
+  document.head.appendChild(st);
+}
+
+function _todayMoney(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v||0)).toLocaleString(); }
+function _todayMoney2(v){ var a=Math.abs(v||0); return (v<0?'-$':'$')+(a<100?a.toFixed(2):Math.round(a).toLocaleString()); }
+function _todayPctOfAcct(v, acct){ return acct>0?(v/acct*100):0; }
+function _todayQualityScore(o){ return (o&&o.quality&&o.quality.score!=null)?o.quality.score:(o&&o.qscore!=null?o.qscore:(o&&o.conf)||0); }
+function _todayTradeReason(o, liveState){
+  var tf=o&&o.tf?o.tf:'TF', rr=(o&&o._size&&o._size.rr)?o._size.rr:0, spread=o&&o.spreadQuality?o.spreadQuality:'normal';
+  if(liveState==='Wait') return 'Good '+tf+' setup, but entry is slightly chased right now.';
+  if(o&&o._multiEnabled===false) return 'Fast setup; single order keeps execution simple.';
+  return tf+' trend quality, '+spread+' spread, clean R:R 1:'+((rr||0).toFixed?rr.toFixed(1):rr)+'.';
+}
+function _todayReadiness(o){
+  if(o&&o._live&&o._live.invalid) return {text:'Invalid', cls:'invalid'};
+  if(o&&o._openMonitor) return {text:o._openMonitor, cls:'open'};
+  if(o&&o._live&&Math.abs(parseFloat(o._live.distPct)||0)>.35) return {text:'Wait', cls:'wait'};
+  return {text:'Enter now', cls:''};
+}
+function _todayCurrentRiskUsed(acct){
+  var used=0;
+  try{
+    if(window._agentAccounts && Array.isArray(window._agentAccounts)){
+      used = window._agentAccounts.reduce(function(a,x){ return a+(parseFloat(x.open_risk_pct)||0); },0);
+    }
+  }catch(e){}
+  return Math.max(0, used || 0.6);
+}
+function _todaySetTargetReached(on){
+  window._todayTargetReached=!!on;
+  var plan=window._todayPlan||[];
+  if(plan.length) _todayRenderPlan(); else showToday();
+}
+function _todayV2Select(idx){ window._todaySelectedIdx=idx; window._todayExpandedIdx=idx; _todayRenderPlan(); }
+function _todayV2SetScale(idx,on){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._multiEnabled=!!on;
+  if(o._multiEnabled){
+    o._ladderMode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
+    o._ladder=o._ladder||_todayDefaultLadder(o._ladderMode);
+    _todayNormalizeLadder(o);
+  }
+  window._todaySelectedIdx=idx; window._todayExpandedIdx=idx;
+  _todayRenderPlan();
+}
+
+function _todayAllocate(plan, acct, basketRisk){
+  if(!plan||!plan.length) return;
+  var cap=Math.min(12, Math.max(0.05, parseFloat(basketRisk)||1));
+  var weights=plan.map(function(o){ return Math.max(0.5, (_todayQualityScore(o)||50)/50); });
+  var sum=weights.reduce(function(a,b){ return a+b; },0)||1;
+  plan.forEach(function(o,i){
+    var rm=_todayRiskModel(o), LOT=_todayLotUnits(o);
+    o._minRiskPlace=(rm.riskPerUnit>0&&acct>0)?(LOT.minUnits*rm.riskPerUnit/acct*100):999;
+    var r=Math.min(_TODAY_PER_CAP, Math.max(0.05, cap*(weights[i]/sum)));
+    if(o._minRiskPlace<=r+1e-9){ o._recRisk=r; o._risk=r; o._size=_todaySizeTrade(o,acct,r); }
+    else { o._recRisk=r; o._risk=0; o._size=_todaySizeTrade(o,acct,o._minRiskPlace||0.01); o._size.tradeable=false; }
+  });
+  window._todayBudgetFlex = false;
+}
+
+function _todaySelectPlan(ranked, cfg){
+  var plan=[], seen={}, goal=parseFloat(cfg.profitGoal)||0, max=parseInt(cfg.maxTrades)||6;
+  for(var i=0;i<(ranked||[]).length;i++){
+    var o=ranked[i], key=(o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'');
+    if(seen[key]) continue;
+    if(plan.length>=max) break;
+    plan.push(o); seen[key]=1;
+    _todayAllocate(plan, cfg.acct, cfg.riskPct||1);
+    if(goal>0 && _todayPlanTotals(plan,cfg.acct).profit>=goal && plan.length>=2) break;
+  }
+  _todayAllocate(plan, cfg.acct, cfg.riskPct||1);
+  return plan;
+}
+
+function _todaySetGlobalRisk(val){
+  var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
+  r=Math.min(12, r); c.riskPct=r;
+  var acct=_todaySyncAccountFromDom();
+  if(!(acct>0)){ if(typeof _dvToast==='function') _dvToast('Enter account size first so DotVerse can split basket risk','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); return; }
+  var plan=window._todayPlan||[];
+  if(plan.length){ _todayAllocate(plan, acct, r); window._todaySorted=true; _todayRenderPlan(); }
+}
+
+function showToday(){
+  var el=document.getElementById('dashContent'); if(!el) return;
+  _todayEnsureBasketStyles(); _todayEnsureCommandStyles(); _dvTapTipInit();
+  var c=window._todayCfg||{};
+  if(!c.riskPct || c.riskPct<1) c.riskPct=3;
+  if(!c.maxTrades || c.maxTrades>6) c.maxTrades=6;
+  var acct=parseFloat(c.acct)||0, used=_todayCurrentRiskUsed(acct), available=Math.max(0,(parseFloat(c.riskPct)||3)-used);
+  el.innerHTML =
+    '<div class="today-page v2">'
+    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">DotVerse answers whether today is worth trading, caps total risk, then turns the best opportunities into a clear basket you can review.</div></div><div class="pg-hd-right">'+_todayPill('Practice-first','green')+_todayPill('Live monitor','blue')+'</div></div>'
+    + '<div id="todayTopArea"></div>'
+    + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>Build today\'s basket</h2><span class="td-pill gold">All assets + all feasible timeframes</span></div>'
+    + '<div class="today-v2-setup">'
+      + '<div class="today-v2-field"><div class="td-mini">Mode</div><div class="today-v2-value gold">Basket risk</div></div>'
+      + '<div class="today-v2-field"><div class="td-mini">Account equity</div><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#ede8d8;font-family:var(--mono);font-size:16px;"></div>'
+      + '<div class="today-v2-field"><div class="td-mini">Weekly target</div><input id="todayProfitGoal" type="number" step="10" min="0" value="'+(c.profitGoal||500)+'" oninput="_todaySetProfitGoal(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#5de8a0;font-family:var(--mono);font-size:16px;"></div>'
+      + '<div class="today-v2-field"><div class="td-mini">Max basket risk</div><input id="todayRisk" type="number" step="0.1" min="0.1" max="12" value="'+(c.riskPct||3)+'" oninput="_todaySetGlobalRisk(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#e8706e;font-family:var(--mono);font-size:16px;"></div>'
+      + '<button class="today-v2-btn" onclick="_todayBuildPlan()">Find safest path</button>'
+    + '</div>'
+    + '<div class="today-v2-mode"><button class="on">Basket risk mode</button><button title="Coming next: keep each trade at the same risk percentage.">Per-trade mode</button><button title="Manual allocation is available inside each selected trade.">Manual allocation</button></div>'
+    + '<div class="today-v2-scan"><span>Scanning forex</span><span>crypto</span><span>stocks</span><span>gold</span><span>indices</span><span>15M</span><span>30M</span><span>1H</span><span>4H</span><span>1D</span><span>1W</span></div>'
+    + '<div style="display:none;"><select id="todayLadderMode"><option value="'+(c.ladderMode||'beginner')+'" selected></option></select><input id="todayMaxTrades" value="'+(c.maxTrades||6)+'"><select id="todayMaxPer"><option value="99" selected></option></select><input type="checkbox" id="todayAutoPlace"'+(c.autoPlace?' checked':'')+'><select id="todayLev">'+_dvBrokerLeverageOptions(window._todayLeverage||100)+'</select></div>'
+    + '</div><div id="todayPlanArea"></div></div>';
+  _todayRenderTop();
+  _todayStopLivePrices(); window._todaySorted=false;
+  dvFetch('/api/mt5/state').then(function(d){
+    if(d&&d.account){
+      var lv=parseInt(d.account.leverage); if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; }
+      var b=parseFloat(d.account.balance)||0;
+      if(b>0 && !window._todayAcctManual){ c.acct=b; var a=document.getElementById('todayAcct'); if(a) a.value=Math.round(b); _todayRenderTop(); }
+    }
+  }).catch(function(){});
+}
+
+function _todayRenderTop(){
+  var host=document.getElementById('todayTopArea'); if(!host) return;
+  var c=window._todayCfg||{}, acct=parseFloat(c.acct)||0, cap=parseFloat(c.riskPct)||3, used=Math.min(cap,_todayCurrentRiskUsed(acct)), avail=Math.max(0,cap-used), usedPct=cap>0?used/cap*100:0, newPct=cap>0?avail/cap*100:0;
+  var target=!!window._todayTargetReached;
+  host.innerHTML =
+    '<div class="today-v2-top">'
+      + '<div class="today-v2-verdict"><div class="td-mini">Should I trade today?</div><h2 class="'+(target?'green':'')+'">'+(target?'Target reached':'Selective only')+'</h2><div class="today-v2-copy">'+(target?'New Today entries are paused. DotVerse recommends protecting open winners: move eligible stops, close weak runners, and only hold trades with reduced downside.':'There are clean setups, but open risk is already using part of the weekly budget. DotVerse will prefer fewer trades, stronger R:R, and protected scale-outs.')+'</div>'
+        + '<div class="today-v2-readiness"><div class="today-v2-mini"><div class="td-mini">Market regime</div><b class="gold">Mixed trend</b></div><div class="today-v2-mini"><div class="td-mini">Spread quality</div><b class="green">Normal</b></div><div class="today-v2-mini"><div class="td-mini">Calibration</div><b class="blue">Learning</b></div></div>'
+        + '<div class="today-v2-targetBtns"><button class="today-v2-smallBtn '+(!target?'on':'')+'" onclick="_todaySetTargetReached(false)">Target not reached</button><button class="today-v2-smallBtn '+(target?'on':'')+'" onclick="_todaySetTargetReached(true)">Show target reached</button></div>'
+      + '</div>'
+      + '<div class="td-card"><div class="td-card-head"><h2>Risk budget</h2><span class="td-pill gold">basket-first</span></div><div class="today-v2-risk">'
+        + '<div class="today-v2-riskTop"><div class="today-v2-field"><div class="td-mini">Account equity</div><div class="today-v2-value">'+(acct?_todayMoney(acct):'--')+'</div></div><div class="today-v2-field"><div class="td-mini">Weekly target</div><div class="today-v2-value green">+'+_todayMoney2(c.profitGoal||500)+'</div></div><div class="today-v2-field"><div class="td-mini">Open risk used</div><div class="today-v2-value gold">'+used.toFixed(1)+'%</div></div><div class="today-v2-field"><div class="td-mini">New risk available</div><div class="today-v2-value green">'+avail.toFixed(1)+'%</div></div></div>'
+        + '<div class="today-v2-rail"><span class="today-v2-used" style="width:'+usedPct+'%"></span><span class="today-v2-new" style="width:'+newPct+'%"></span></div>'
+        + '<div class="today-v2-legend"><span class="today-v2-key"><span class="today-v2-sq gold"></span>'+used.toFixed(1)+'% already open</span><span class="today-v2-key"><span class="today-v2-sq"></span>'+avail.toFixed(1)+'% available for Today</span><span>Max basket cap: <strong class="red">'+cap.toFixed(1)+'%</strong></span></div>'
+        + '<div class="today-v2-copy" style="margin-top:12px">Set one total risk budget. DotVerse splits it across selected trades and still lets you edit any individual trade.</div>'
+      + '</div></div>'
+    + '</div>';
+}
+
+function _todayRenderPlan(){
+  var area=document.getElementById('todayPlanArea'); if(!area) return;
+  _todayRenderTop();
+  var plan=window._todayPlan||[], c=window._todayCfg||{}, acct=c.acct||_todaySyncAccountFromDom();
+  if(!plan.length){
+    area.innerHTML='<div class="td-card"><div class="td-pad" style="text-align:center;padding:34px 20px;"><div style="font-family:var(--syne);font-size:18px;margin-bottom:8px;">Ready when you are.</div><div class="today-v2-copy" style="max-width:520px;margin:0 auto;">Set account equity, weekly target, and max basket risk. DotVerse will scan all supported assets and timeframes, then return a beginner-readable basket.</div></div></div>';
+    return;
+  }
+  var money=_todayMoney, money2=_todayMoney2, pxFmt=function(v){ v=parseFloat(v); return !isFinite(v)?'--':(v>=1000?v.toLocaleString('en-US',{maximumFractionDigits:2}):v>=1?String(+v.toFixed(4)):String(+v.toPrecision(4))); };
+  var usable=[], totExp=0, totMargin=0, totRisk=0, totProfit=0, totOrders=0, readyNow=0, waitCount=0, invalidCount=0;
+  plan.forEach(function(o,idx){
+    if(!o||!o._size||!o._size.tradeable) return;
+    var rd=_todayReadiness(o), lt=_todayLadderTotals(o);
+    if(rd.cls==='invalid'){ invalidCount++; return; }
+    if(rd.cls==='wait') waitCount++; else readyNow++;
+    usable.push({o:o,idx:idx,rd:rd});
+    totExp+=lt.notional||o._size.notional||0; totMargin+=lt.margin||o._size.marginReq||0; totRisk+=lt.risk||o._size.netLoss||0; totProfit+=lt.profit||o._size.netTP1||0; totOrders+=lt.orders||1;
+  });
+  if(!usable.length){
+    area.innerHTML='<div class="td-card"><div class="td-pad" style="padding:24px;text-align:center;color:rgba(237,232,216,.58);">DotVerse found setups, but none are currently placeable inside your basket risk and live-entry rules. Widen risk carefully, wait, or rebuild later.</div></div>';
+    return;
+  }
+  if(window._todaySelectedIdx==null || !plan[window._todaySelectedIdx] || !(plan[window._todaySelectedIdx]._size||{}).tradeable) window._todaySelectedIdx=usable[0].idx;
+  var selected=usable.filter(function(x){ return x.idx===window._todaySelectedIdx; })[0]||usable[0];
+  var riskPct=acct>0?(totRisk/acct*100):0, avgRR=usable.length?usable.reduce(function(a,x){return a+((x.o._size&&x.o._size.rr)||0);},0)/usable.length:0;
+  function row(item){
+    var o=item.o, idx=item.idx, s=o._size, rd=item.rd, dir=o.sig==='SELL'?'sell':'buy', lt=_todayLadderTotals(o), reason=_todayTradeReason(o, rd.text);
+    return '<tr class="today-v2-row '+(idx===selected.idx?'on':'')+'" onclick="_todayV2Select('+idx+')">'
+      + '<td><div class="today-v2-sym">'+o.sym+' <span class="today-v2-dir '+dir+'">'+o.sig+'</span></div><div class="today-v2-meta">'+o.asset+' · '+o.tf+'</div></td>'
+      + '<td><div id="today-lp-'+idx+'" class="today-v2-status '+rd.cls+'"><span class="today-v2-liveDot"></span>'+rd.text+'</div></td>'
+      + '<td>'+money(s.notional)+'</td><td><span class="red">'+money2(-s.netLoss)+'<br>'+(s.riskPctOfAcct||0).toFixed(2)+'%</span></td><td>1:'+(s.rr||0).toFixed(1)+'</td><td><span class="green">+'+money2(lt.profit||s.netTP1)+'</span></td>'
+      + '<td><span class="today-v2-tag '+(o._multiEnabled!==false?'scale':'single')+'">'+(o._multiEnabled!==false?'Scale-out':'Single')+'</span></td><td>'+reason+'</td></tr>';
+  }
+  function detail(item){
+    var o=item.o, idx=item.idx, s=o._size, rd=item.rd, legs=_todayLadderLegs(o), lt=_todayLadderTotals(o), tps=[o.tp,o.tp2,o.tp3].filter(Boolean), scale=o._multiEnabled!==false;
+    var orderText=scale?('DotVerse will send '+legs.length+' MT5 orders for this setup.'):'DotVerse will send 1 MT5 order for this setup.';
+    var ladder=scale
+      ? '<div class="panelTitle" style="margin:14px 0 8px">Scale-out plan</div><div class="today-v2-copy" style="margin-bottom:10px">Scale-out means smaller orders instead of one big order, so you can take profit in parts while total risk stays visible.</div><div class="today-v2-ladder">'+legs.map(function(l){return '<div class="today-v2-leg"><div><div class="today-v2-legName">'+(l.idx===1?'Anchor':l.idx===2?'Partial':'Runner')+'</div><div class="today-v2-legSub">'+(l.trailing?'TRAIL':(l.target||'tp1').toUpperCase())+'</div></div><div class="today-v2-legSub">own TP + shared SL</div><div class="red">'+_todayPctOfAcct(l.risk,acct).toFixed(2)+'%</div><div class="green">+'+money2(l.profit)+'</div></div>';}).join('')+'</div>'
+      : '<div class="today-v2-single"><div class="td-mini">Single order preview</div><b>'+o.sym+' '+o.sig+' · 1 MT5 order · '+money2(-s.netLoss)+' risk · +'+money2(s.netTP1)+' planned profit</b><div class="today-v2-copy" style="margin-top:7px">Simple execution with live monitor, spread guard, news guard, and breakeven still available.</div></div>';
+    return '<div class="today-v2-detail">'
+      + '<div class="today-v2-selectedTop"><div><div class="today-v2-bigSym">'+o.sym+'</div><div class="today-v2-meta">'+o.asset+' · '+o.tf+' · '+o.sig+'</div></div><span class="td-pill '+(rd.cls==='wait'?'gold':rd.cls==='open'?'blue':'green')+'">'+rd.text+'</span></div>'
+      + '<div class="today-v2-liveBox"><div class="td-mini">'+(rd.cls==='open'?'Live trade monitor':'Per-trade live monitor')+'</div><div class="today-v2-priceLine"><span class="today-v2-tick"></span><span class="today-v2-marker"></span></div><div class="today-v2-copy" id="today-livebox-'+idx+'">'+(rd.cls==='open'?'Open trade is monitored here: PnL, current R, stop state, target distance, and automations fired.':'Live price is checked against entry, stop, and target. DotVerse tells you enter now, wait, missed, or invalid. Targets: '+tps.map(function(t,i){return 'TP'+(i+1)+' '+pxFmt(t);}).join(' · '))+'</div></div>'
+      + '<div class="today-v2-three"><div class="today-v2-mini"><div class="td-mini">Amount</div><b>'+money(s.notional)+'</b></div><div class="today-v2-mini"><div class="td-mini">Risk</div><b class="red">'+money2(-s.netLoss)+' / '+(s.riskPctOfAcct||0).toFixed(2)+'%</b></div><div class="today-v2-mini"><div class="td-mini">Can make</div><b class="green">+'+money2(lt.profit||s.netTP1)+'</b></div></div>'
+      + '<div class="panelTitle" style="margin:14px 0 8px">Why DotVerse picked it</div><div class="today-v2-copy">'+_todayTradeReason(o, rd.text)+' Calibration: '+((o.winRateN||0)>=30?'based on '+o.winRateN+' similar historical trades':'limited personal history, using global model until enough outcomes are labeled')+'.</div>'
+      + '<div class="panelTitle" style="margin:14px 0 8px">Execution mode</div><div class="today-v2-copy">Choose how this setup is sent to MT5. Same trade idea, different exit style.</div>'
+      + '<div class="today-v2-exec"><button class="today-v2-choice '+(!scale?'on':'')+'" onclick="_todayV2SetScale('+idx+',false)"><b>Single order</b><span>One entry, one stop, one main target. Best for fast/simple trades.</span></button><button class="today-v2-choice '+(scale?'on':'')+'" onclick="_todayV2SetScale('+idx+',true)"><b>Scale-out plan</b><span>Open smaller parts, take profit early, leave a smaller runner.</span></button></div>'
+      + '<div class="today-v2-switch"><div><div class="td-mini">Scale-out '+(scale?'enabled':'disabled')+'</div><div class="today-v2-copy">'+orderText+'</div></div><button class="today-v2-toggle '+(scale?'on':'')+'" onclick="_todayV2SetScale('+idx+','+(!scale)+')" aria-label="Toggle scale-out plan"></button></div>'
+      + ladder
+      + '<div class="panelTitle" style="margin:16px 0 8px">Good automations</div><div class="today-v2-autos">'
+        + '<div class="today-v2-auto"><b>Recommended</b>Move SL to breakeven after TP1 because downside should reduce once the trade proves itself.</div>'
+        + '<div class="today-v2-auto"><b>Recommended</b>Take partial profit at first target so the weekly goal can be protected earlier.</div>'
+        + '<div class="today-v2-auto optional"><b>Optional</b>Trail the runner if price continues after TP2.</div>'
+        + '<div class="today-v2-auto optional"><b>Optional</b>Protect before major news if event risk appears inside the trade window.</div>'
+        + '<div class="today-v2-auto"><b>Recommended</b>Pause new entries if weekly target is reached.</div>'
+        + '<div class="today-v2-auto off"><b>Off for this trade</b>Sentiment exit waits for enough negative headline clustering.</div>'
+      + '</div><button id="today-cta-'+idx+'" class="today-v2-btn" style="width:100%;margin-top:12px;min-height:44px" onclick="_todayPlaceTrade('+idx+')">Review &amp; place this trade</button></div>';
+  }
+  var target=!!window._todayTargetReached;
+  area.innerHTML =
+    '<div class="today-v2-summary">'
+      + '<div class="today-v2-metric"><div class="td-mini">Basket answer</div><b class="green">'+usable.length+' trades selected</b><p>Target '+(totProfit>=(c.profitGoal||0)?'covered':'not fully covered')+' with '+money2(-totRisk)+' planned risk and +'+money2(totProfit)+' planned upside.</p></div>'
+      + '<div class="today-v2-metric"><div class="td-mini">Live readiness</div><b><span class="today-v2-pulse"></span>'+readyNow+' enter now</b><p>'+waitCount+' setup'+(waitCount===1?'':'s')+' should wait for price instead of chasing.</p></div>'
+      + '<div class="today-v2-metric"><div class="td-mini">If target hits early</div><b class="gold">'+(target?'Protecting':'Protect mode')+'</b><p>Pause new orders, move eligible stops, keep only protected runners.</p></div>'
+      + '<div class="today-v2-metric"><div class="td-mini">Open trade monitor</div><b class="blue">Live after place</b><p>Rows become PnL, current R, stop state, and automation history.</p></div>'
+    + '</div>'
+    + '<div class="today-v2-main"><div class="td-card"><div class="td-card-head"><h2>Review trades</h2><span class="td-pill green">amount · risk · R:R · reason</span></div><div class="today-v2-tableWrap"><table class="today-v2-table"><thead><tr><th>Trade</th><th>Readiness</th><th>Amount</th><th>Risk</th><th>R:R</th><th>Profit</th><th>Mode</th><th>Why selected</th></tr></thead><tbody>'+usable.map(row).join('')+'</tbody></table></div></div><div class="td-card">'+detail(selected)+'</div></div>'
+    + '<div class="today-v2-bottom"><div class="bitem"><div class="td-mini">Trade amounts</div><b>'+money(totExp)+'</b></div><div class="bitem"><div class="td-mini">Margin needed</div><b class="gold">'+money2(totMargin)+'</b></div><div class="bitem"><div class="td-mini">Combined risk</div><b class="red">'+money2(-totRisk)+' / '+riskPct.toFixed(2)+'%</b></div><div class="bitem"><div class="td-mini">Planned profit</div><b class="green">+'+money2(totProfit)+'</b></div><div class="bitem"><div class="td-mini">Avg R:R</div><b>1:'+avgRR.toFixed(2)+'</b></div><div class="bitem"><div class="td-mini">Orders</div><b>'+totOrders+' MT5 order'+(totOrders===1?'':'s')+'</b></div><button class="today-v2-review" onclick="_todayPlaceAll()">Review all orders</button></div>';
+  window._todayLastInvalid = (plan||[]).reduce(function(a,o,i){ if(o._live&&o._live.invalid)a.push(i); return a; },[]).join(',');
+  _todayStartLivePrices();
+  _dvTapTipInit();
+}
+
 function showSignalFeed(){
   _sfStopLivePrices();   // clear any running price-refresh interval from previous view
   // Reset trade type filter to 'all' every time Signals tab is opened
