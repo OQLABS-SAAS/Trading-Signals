@@ -8420,9 +8420,12 @@ def admin_set_tier():
 # ─── MT5 INTEGRATION ─────────────────────────────────────────
 
 def _lookup_user_by_mt5_secret(secret):
-    """Find the user_id whose UserSettings.mt5_api_key_enc decrypts to the given
-    secret. Returns None if no match. O(N) over rows with a saved key — fine for
-    current scale; revisit with a SHA index if user count grows large."""
+    """Find the user_id whose saved MT5/EA secret decrypts to the given secret.
+
+    Accept both the older per-user UserSettings key and the newer per-account
+    TradingAccount EA secret. O(N) over saved secrets is fine for current scale;
+    revisit with a SHA index if user count grows large.
+    """
     if not _DBSession or not secret:
         return None
     db = _DBSession()
@@ -8432,6 +8435,16 @@ def _lookup_user_by_mt5_secret(secret):
             try:
                 if _dec(row.mt5_api_key_enc) == secret:
                     return str(row.user_id)
+            except Exception:
+                continue
+        accounts = db.query(TradingAccount).filter(
+            TradingAccount.is_active == True,
+            TradingAccount.ea_secret_enc.isnot(None),
+        ).all()
+        for account in accounts:
+            try:
+                if _dec(account.ea_secret_enc) == secret:
+                    return str(account.user_id)
             except Exception:
                 continue
         return None
