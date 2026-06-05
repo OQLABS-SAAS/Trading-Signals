@@ -12414,8 +12414,28 @@ function _todayApplyAccountContext(accounts, source){
 
 function _todayBridgeMt5StateToGlobalAccount(d){
   if(d&&d.account) window._todayLastMt5State=d;
-  if(!d||!d.account||!Array.isArray(window._mt5Accounts)||!window._mt5Accounts.length) return;
+  if(!d||!d.account||!Array.isArray(window._mt5Accounts)) return;
   var acct=d.account||{}, login=String(acct.login||acct.account_number||'');
+  if(!window._mt5Accounts.length && d.connected===true){
+    window._mt5Accounts=[{
+      id:'__mt5_live__',
+      name:'MT5 Live',
+      account_number:login,
+      login:login,
+      broker:'MetaTrader 5',
+      account_type:'LIVE',
+      connected:true,
+      online:true,
+      status:'online',
+      balance:acct.balance,
+      equity:acct.equity,
+      leverage:acct.leverage,
+      last_seen:d.last_seen
+    }];
+    if(typeof _updateGlobalConnIndicator==='function') _updateGlobalConnIndicator();
+    return;
+  }
+  if(!window._mt5Accounts.length) return;
   var idx=-1;
   for(var i=0;i<window._mt5Accounts.length;i++){
     var a=window._mt5Accounts[i]||{}, aLogin=String(a.login||a.account_number||'');
