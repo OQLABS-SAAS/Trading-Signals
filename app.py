@@ -10530,7 +10530,7 @@ def today_scout_alert():
     """
     data = request.json or {}
     kind = str(data.get("kind") or "covered")[:32]
-    if kind not in {"covered", "armed"}:
+    if kind not in {"covered", "armed", "protect"}:
         return jsonify({"error": "invalid alert kind"}), 400
 
     user_id = str(session.get("user_id", "default"))
@@ -10547,6 +10547,13 @@ def today_scout_alert():
             f"{trades} trade(s) can cover the weekly target: "
             f"+${profit:,.2f} planned upside vs ${goal:,.2f} goal, "
             f"risk ${risk:,.2f}, ETA {eta}."
+        )
+    elif kind == "protect":
+        title = "Today protect mode active"
+        body = (
+            f"Weekly target is reached or marked reached. DotVerse is pausing "
+            f"new Today entries and monitoring open trades for TP, SL, "
+            f"break-even, trailing, and invalidation events."
         )
     else:
         title = "Today scout armed"
