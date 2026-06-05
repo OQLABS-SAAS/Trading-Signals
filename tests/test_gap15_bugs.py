@@ -31,6 +31,8 @@ import app as dvapp
 
 def _db():
     """Return a fresh DB session."""
+    if dvapp._DBSession is None:
+        pytest.skip("tests/test_gap15_bugs.py requires a real PostgreSQL DATABASE_URL")
     return dvapp._DBSession()
 
 
@@ -120,13 +122,18 @@ def _delete_scan_alert(scan_id):
 def client():
     dvapp.app.config["TESTING"] = True
     dvapp.app.config["SECRET_KEY"] = "test-secret-key-not-for-prod"
+    previous_bypass = dvapp.MT5_BYPASS_USER_IDS
+    dvapp.MT5_BYPASS_USER_IDS = {"testuser"}
     with dvapp.app.test_client() as c:
         # Inject a session so @login_required passes
         with c.session_transaction() as sess:
             sess["user_id"]   = "testuser"
             sess["logged_in"] = True
             sess["user_tier"] = "pro"
-        yield c
+        try:
+            yield c
+        finally:
+            dvapp.MT5_BYPASS_USER_IDS = previous_bypass
 
 
 # ── BUG A ─────────────────────────────────────────────────────────────────────

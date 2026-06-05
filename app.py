@@ -23,6 +23,116 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 
+from backend.app.agent.analytics import (
+    build_daily_metrics_response,
+    build_recomputed_daily_metric_rows,
+    empty_agent_analytics,
+    summarize_agent_analytics,
+)
+from backend.app.agent.ownership import agent_account_mutation_error
+from backend.app.agent.account_projection import (
+    find_live_state_for_account,
+    live_states_for_query_ids,
+    project_agent_account,
+    project_agent_portfolio,
+    project_pending_mt5_account,
+    summarize_agent_dashboard_accounts,
+    summarize_agent_dashboard_trades,
+)
+from backend.app.agent.trade_contracts import (
+    AgentTradeValidationError,
+    build_agent_trade_export_csv,
+    calculate_realized_pnl,
+    normalize_agent_position_query_params,
+    normalize_agent_trade_create_payload,
+    normalize_agent_trade_query_params,
+    normalize_agent_trade_update_payload,
+    project_agent_position,
+    project_agent_trade_detail,
+    project_agent_trade_history_item,
+    serialize_agent_trade,
+)
+from backend.app.accounts.account_contracts import (
+    AccountValidationError,
+    account_added_audit_description,
+    account_archived_audit_description,
+    account_archived_response,
+    account_sync_audit_description,
+    account_sync_response,
+    build_account_create_response,
+    build_agent_account_create_response,
+    normalize_account_create_payload,
+    normalize_account_update_payload,
+    serialize_trading_account,
+)
+from backend.app.intelligence.calibration import fit_isotonic_calibration
+from backend.app.llm.providers import (
+    is_provider_configured,
+    missing_provider_error,
+    parse_json_object,
+)
+from backend.app.llm.review import (
+    build_signal_quality_review_prompt,
+    fallback_quality_review,
+    normalize_quality_review,
+)
+from backend.app.llm.narration import build_openai_narration_prompt, merge_narration_fields
+from backend.app.llm.sentiment import (
+    build_deepseek_sentiment_prompt,
+    extract_negative_sentiment_hits,
+    parse_json_array,
+)
+from backend.app.llm.verdict import (
+    build_fallback_structured,
+    build_verdict_structure_messages,
+)
+from backend.app.mt5.order_request import (
+    OrderValidationError,
+    normalize_broker_order,
+    normalize_mt5_submit_order,
+)
+from backend.app.mt5.order_lifecycle import (
+    dotverse_order_comment,
+    mt5_cancel_response,
+    project_pending_mt5_order,
+    status_after_pending_poll,
+    user_ids_for_mt5_cancel,
+    user_ids_for_pending_poll,
+)
+from backend.app.market.request_contracts import (
+    MarketRequestValidationError,
+    normalize_add_watch_payload,
+    normalize_alert_test_payload,
+    normalize_analyze_payload,
+    normalize_live_price_query,
+    normalize_markov_query,
+    normalize_remove_watch_payload,
+    normalize_scan_list_payload,
+    normalize_screen_payload,
+    normalize_simulate_payload,
+    normalize_prices_payload,
+)
+from backend.app.notifications.notification_contracts import (
+    NotificationValidationError,
+    normalize_mark_notifications_read_payload,
+    serialize_notifications_response,
+)
+from backend.app.notifications.push_contracts import (
+    PushSubscriptionValidationError,
+    normalize_push_subscribe_payload,
+    normalize_push_unsubscribe_payload,
+)
+from backend.app.settings.exchange_key_contracts import (
+    ExchangeKeyValidationError,
+    normalize_exchange_key_create_payload,
+    serialize_exchange_key,
+)
+from backend.app.settings.profile_contracts import normalize_profile_update_payload
+from backend.app.settings.user_settings_contracts import (
+    normalize_user_settings_update_payload,
+    serialize_user_settings,
+)
+
 # ─── BROWSER-LIKE SESSION ─────────────────────────────────────
 # Yahoo Finance and TradingView block plain cloud-server requests.
 # Using a session with real browser headers bypasses bot detection.
@@ -3385,48 +3495,7 @@ def _narrate_data_openai(result, ticker, asset_type, ind, timeframe):
         return result
 
     try:
-        # Build prompt with all exact computed values
-        prompt = f"""You are a data narrator for traders. Your ONLY job is to describe what the numbers below mean in plain English.
-
-STRICT RULES:
-- ONLY reference the exact numbers provided below. Do not invent or estimate any data.
-- Do not predict future price movement. Do not say "price will" or "expect to."
-- Do not add information not present in the data.
-- Your audience is BEGINNER traders. Explain every trading term in simple everyday language.
-- Avoid jargon. If you must use a term (RSI, MACD, etc.), immediately explain what it means.
-- Be concise. Use the actual numbers. Make it feel like a smart friend explaining the chart.
-
-TICKER: {ticker} ({asset_type}, {timeframe} timeframe)
-SIGNAL: {result['signal']} | CONFIDENCE: {result['confidence']}
-PRICE: {ind.get('price')} | CHANGE: {ind.get('chg_1d')}%
-RSI (14): {ind.get('rsi')}
-MACD HISTOGRAM: {ind.get('macd_hist')}
-EMA TREND: {ind.get('ema_trend')} | EMA20: {ind.get('ema20')} | EMA50: {ind.get('ema50')}
-ATR (14): {ind.get('atr')} ({round((ind.get('atr',0)/max(ind.get('price',1),0.01))*100, 2)}% of price)
-VOLUME RATIO: {ind.get('vol_ratio')}x vs 30d avg
-BOLLINGER POSITION: {ind.get('bb_pos')} | BB WIDTH: {ind.get('bb_width')}
-SUPERTREND: {ind.get('supertrend')}
-SUPPORT: {ind.get('support')} | RESISTANCE: {ind.get('resistance')}
-ENTRY: {result.get('entry') or 'N/A (HOLD — no trade setup)'} | STOP LOSS: {result.get('stop_loss') or 'N/A'}
-TP1: {result.get('tp1') or 'N/A'} | TP2: {result.get('tp2') or 'N/A'} | TP3: {result.get('tp3') or 'N/A'}
-
-Return JSON with these keys ONLY:
-- "summary": 2 sentences for a beginner — what is happening with this asset right now, using the numbers above
-- "narrative": 3 sentences explaining the trade setup in simple language, referencing specific values
-- "rsi_assessment": 1 sentence explaining RSI {ind.get('rsi')} in plain English (e.g. "RSI is at 65 — think of it as a momentum meter from 0-100. Right now it shows moderate buying energy, not yet overheated.")
-- "trend_assessment": 1 sentence explaining the EMA trend simply (e.g. "The short-term average price ({ind.get('ema20')}) is above the longer-term average ({ind.get('ema50')}), which means the overall direction is upward.")
-- "macd_assessment": 1 sentence explaining MACD in beginner terms (e.g. "MACD measures if momentum is speeding up or slowing down. The reading of X means...")
-- "volume_assessment": 1 sentence explaining volume ratio simply (e.g. "Trading activity is 1.8x higher than usual — more people are trading this than normal, which adds weight to the signal.")
-- "supertrend_assessment": 1 sentence explaining supertrend simply (e.g. "The Supertrend indicator acts like a safety line — price is currently above it, meaning the uptrend is intact.")
-- "rsi_beginner": 1 sentence — what RSI means for someone who has never traded (no jargon at all)
-- "macd_beginner": 1 sentence — what MACD means for a complete beginner
-- "ema_beginner": 1 sentence — what the EMA trend means for a complete beginner
-- "volume_beginner": 1 sentence — what the volume ratio means for a complete beginner
-- "atr_beginner": 1 sentence — explain ATR as "how much the price typically moves" for a beginner
-- "bb_beginner": 1 sentence — explain Bollinger Bands position in the simplest possible way
-- "overall_beginner": 2 sentences — the big picture in the simplest terms a non-trader would understand
-
-Return ONLY valid JSON. No markdown."""
+        prompt = build_openai_narration_prompt(result, ticker, asset_type, ind, timeframe)
 
         # POST to OpenAI API
         response = requests.post(
@@ -3455,33 +3524,8 @@ Return ONLY valid JSON. No markdown."""
         if not content:
             return result
 
-        # Parse JSON response
-        openai_result = json.loads(content)
-
-        # Extract only allowed text keys
-        allowed_keys = {
-            "summary",
-            "narrative",
-            "rsi_assessment",
-            "trend_assessment",
-            "macd_assessment",
-            "volume_assessment",
-            "supertrend_assessment",
-            "rsi_beginner",
-            "macd_beginner",
-            "ema_beginner",
-            "volume_beginner",
-            "atr_beginner",
-            "bb_beginner",
-            "overall_beginner",
-        }
-
-        # Merge ONLY the text keys into result, preserving all other fields
-        for key in allowed_keys:
-            if key in openai_result and isinstance(openai_result[key], str):
-                result[key] = openai_result[key]
-
-        return result
+        openai_result = parse_json_object(content)
+        return merge_narration_fields(result, openai_result)
 
     except Exception:
         # Silently return result unchanged on any error
@@ -5983,7 +6027,7 @@ def run_watch_job():
                                                 f"Position #{_be_ticket} ({_dir_word})\n\n"
                                                 f"Price moved 1 ATR from your entry ({_be_entry:.5g}). "
                                                 f"Stop loss has been moved to your entry price. "
-                                                f"You cannot lose money on this trade now.\n\n"
+                                                f"Planned downside is reduced, but gaps or slippage can still fill worse.\n\n"
                                                 f"DotVerse will continue monitoring for TP targets.",
                                                 [[{"text": "✓ Understood",
                                                    "callback_data": f"ignore|{_be_ticket}|{_be_sym}|be_ack"}]]
@@ -6173,20 +6217,7 @@ def run_watch_job():
                                 print(f"[sent] {ticker}: no headlines in last 2h")
                             else:
                                 # ── Step 2: DeepSeek batch sentiment ─────────────────
-                                # Build numbered list for the prompt
-                                _hl_block = "\n".join(
-                                    f"{i+1}. {h}" for i, h in enumerate(_sent_headlines[:10])
-                                )
-                                _ds_prompt = (
-                                    "You are a financial news sentiment classifier. "
-                                    "For each numbered headline below, return ONLY a JSON array "
-                                    "where each element is an object with exactly three keys: "
-                                    "\"score\" (float from -1.0 to +1.0), "
-                                    "\"sentiment\" (one of: positive, neutral, negative), "
-                                    "\"reasoning\" (one plain-English sentence explaining why, max 15 words). "
-                                    "Do not add any text outside the JSON array. "
-                                    "Headlines:\n" + _hl_block
-                                )
+                                _ds_prompt = build_deepseek_sentiment_prompt(_sent_headlines)
                                 _ds_results = []
                                 try:
                                     import openai as _oai
@@ -6201,42 +6232,13 @@ def run_watch_job():
                                         max_tokens=600,
                                     )
                                     _ds_text = _ds_resp.choices[0].message.content.strip()
-                                    # Strip markdown fences if present
-                                    if _ds_text.startswith("```"):
-                                        _ds_text = _ds_text.split("```")[1]
-                                        if _ds_text.startswith("json"):
-                                            _ds_text = _ds_text[4:]
-                                    _ds_results = json.loads(_ds_text)
-                                    if not isinstance(_ds_results, list):
-                                        _ds_results = []
+                                    _ds_results = parse_json_array(_ds_text)
                                 except Exception as _ds_err:
                                     print(f"[sent] {ticker}: DeepSeek error: {_ds_err}")
                                     _ds_results = []
 
                                 # ── Step 3: Validate output + count negatives ─────────
-                                _sent_negatives = []
-                                for _i, _item in enumerate(_ds_results):
-                                    if not isinstance(_item, dict):
-                                        continue
-                                    try:
-                                        _sc  = float(_item.get("score", 0))
-                                        _snt = str(_item.get("sentiment", "")).lower().strip()
-                                        _rsn = str(_item.get("reasoning", "")).strip()
-                                    except (TypeError, ValueError):
-                                        continue
-                                    # Both conditions required — score range guard + label guard
-                                    if not (-1.0 <= _sc <= 1.0):
-                                        continue  # reject out-of-range hallucination
-                                    if _snt != "negative" or _sc >= -0.3:
-                                        continue  # not genuinely negative
-                                    # Cross-reference: headline must exist
-                                    if _i >= len(_sent_headlines):
-                                        continue
-                                    _sent_negatives.append({
-                                        "score":     _sc,
-                                        "headline":  _sent_headlines[_i],
-                                        "reasoning": _rsn,
-                                    })
+                                _sent_negatives = extract_negative_sentiment_hits(_ds_results, _sent_headlines)
 
                                 if len(_sent_negatives) < 3:
                                     print(f"[sent] {ticker}: only {len(_sent_negatives)} validated negatives — threshold not met")
@@ -6818,7 +6820,7 @@ def run_watch_job():
                                             f"DotVerse recommendation:\n{_f2_rec_body}\n\n"
                                             f"What each option does:\n"
                                             f"Close trade — exits now, whatever you have is yours.\n"
-                                            f"Move stop to entry — worst case break even, best case ride the news.\n"
+                                            f"Move stop to entry — reduces planned downside while you ride the news; gaps and slippage can still fill worse.\n"
                                             f"Tighten trailing stop — locks in most of your profit, still in the trade.\n"
                                             f"Do nothing — full exposure to the news event. Your call."
                                         )
@@ -8107,6 +8109,8 @@ def auth_check():
     if session.get("authenticated"):
         return jsonify({"authenticated": True, "password_required": False, "role": "admin", "tier": "elite"})
     if not APP_PASSWORD and not _DBSession:
+        session["authenticated"] = True
+        session.permanent = True
         return jsonify({"authenticated": True, "password_required": False})
     return jsonify({"authenticated": False, "password_required": True})
 
@@ -8472,51 +8476,37 @@ def mt5_submit_order():
     """User submits a trade order — saved as pending, EA picks it up."""
     if not _DBSession:
         return jsonify({"error": "Database not available"}), 503
-    body       = request.json or {}
     user_id    = str(session.get("user_id"))
-    ticker     = body.get("ticker", "").upper().strip()
-    asset_type = body.get("asset_type", "forex")
-    direction  = body.get("direction", "").upper()
-    # Accept the field names the Size-tab frontend actually sends as aliases so
-    # the calculated position size, entry, and TP1 are not dropped:
-    #   frontend `lots`  → volume   |  `entry` → price   |  `tp1` → tp
-    volume     = float(body.get("volume") or body.get("lots") or 0.01)
-    price      = float(body.get("price")  or body.get("entry") or 0)
-    sl         = body.get("sl")
-    tp         = body.get("tp") or body.get("tp1")
-    tp2              = body.get("tp2")
-    tp3              = body.get("tp3")
-    timeframe        = body.get("timeframe", "")
-    entry_confluence = body.get("entry_confluence")   # bull_pct (0.0–1.0) at signal time
-    entry_atr        = body.get("entry_atr")          # ATR price distance at signal time
-    if not ticker or direction not in ("BUY", "SELL") or volume <= 0:
-        return jsonify({"error": "ticker, direction (BUY/SELL), and volume required"}), 400
-    symbol = _mt5_symbol(ticker, asset_type)
+    try:
+        order_request = normalize_mt5_submit_order(request.json)
+    except OrderValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+    symbol = _mt5_symbol(order_request.ticker, order_request.asset_type)
     db = _DBSession()
     try:
         order = MT5Order(
             user_id          = user_id,
             symbol           = symbol,
-            order_type       = direction,
-            volume           = volume,
-            price            = price,
-            sl               = float(sl)  if sl  else None,
-            tp               = float(tp)  if tp  else None,
-            tp2              = float(tp2) if tp2 else None,
-            tp3              = float(tp3) if tp3 else None,
-            timeframe        = timeframe or None,
-            entry_confluence = float(entry_confluence) if entry_confluence is not None else None,
-            entry_atr        = float(entry_atr)        if entry_atr        is not None else None,
-            trailing         = bool(body.get("trailing", False)),
-            be               = bool(body.get("be", False)),
-            macro            = bool(body.get("macro", False)),
-            inval            = bool(body.get("inval", False)),
-            sent             = bool(body.get("sent", False)),
-            tp1_alert        = bool(body.get("tp1_alert", False)),
-            tp2_alert        = bool(body.get("tp2_alert", False)),
-            weekend          = bool(body.get("weekend", False)),
+            order_type       = order_request.direction,
+            volume           = order_request.volume,
+            price            = order_request.price,
+            sl               = order_request.sl,
+            tp               = order_request.tp,
+            tp2              = order_request.tp2,
+            tp3              = order_request.tp3,
+            timeframe        = order_request.timeframe,
+            entry_confluence = order_request.entry_confluence,
+            entry_atr        = order_request.entry_atr,
+            trailing         = order_request.trailing,
+            be               = order_request.be,
+            macro            = order_request.macro,
+            inval            = order_request.inval,
+            sent             = order_request.sent,
+            tp1_alert        = order_request.tp1_alert,
+            tp2_alert        = order_request.tp2_alert,
+            weekend          = order_request.weekend,
             status           = "pending",
-            comment          = f"DotVerse {ticker} {direction}",
+            comment          = f"DotVerse {order_request.ticker} {order_request.direction}",
         )
         db.add(order)
         db.commit()
@@ -8533,36 +8523,31 @@ def orders_submit():
     """Submit an order via the DotVerse execution pipeline."""
     if not _DBSession:
         return jsonify({"error": "Database not available"}), 503
-    body          = request.json or {}
     user_id       = str(session.get("user_id"))
-    symbol        = (body.get("symbol") or "").upper().strip()
-    side          = (body.get("side") or "").upper()
-    quantity      = float(body.get("quantity", 0.01))
-    entry_price   = float(body.get("entry_price", 0))
-    stop_loss     = body.get("stop_loss")
-    take_profit   = body.get("take_profit")
-    timeframe     = body.get("timeframe") or ""
-    order_type    = body.get("order_type", "market")
-    signal_id     = body.get("signal_id") or ""
-    if not symbol or side not in ("BUY", "SELL"):
-        return jsonify({"error": "symbol and side (BUY/SELL) are required"}), 400
+    try:
+        order_request = normalize_broker_order(request.json)
+    except OrderValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     db = _DBSession()
     try:
         order = MT5Order(
             user_id    = user_id,
-            symbol     = symbol,
-            order_type = side,
-            volume     = quantity,
-            price      = entry_price,
-            sl         = float(stop_loss)   if stop_loss   else None,
-            tp         = float(take_profit)  if take_profit  else None,
-            timeframe  = timeframe or None,
+            symbol     = order_request.symbol,
+            order_type = order_request.side,
+            volume     = order_request.quantity,
+            price      = order_request.entry_price,
+            sl         = order_request.stop_loss,
+            tp         = order_request.take_profit,
+            timeframe  = order_request.timeframe,
             status     = "pending",
-            comment    = f"DotVerse {symbol} {side} | order_type={order_type} | signal_id={signal_id}",
+            comment    = (
+                f"DotVerse {order_request.symbol} {order_request.side} | "
+                f"order_type={order_request.order_type} | signal_id={order_request.signal_id}"
+            ),
         )
         db.add(order)
         db.commit()
-        return jsonify({"status": "pending", "order_id": order.id, "symbol": symbol})
+        return jsonify({"status": "pending", "order_id": order.id, "symbol": order_request.symbol})
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
@@ -8583,8 +8568,8 @@ def mt5_get_pending():
     ea_uid = request.args.get("user_id")   # None if not sent
     db = _DBSession()
     try:
-        if ea_uid and ea_uid != "default":
-            uid_filter = [ea_uid, "default"]
+        uid_filter = user_ids_for_pending_poll(ea_uid)
+        if uid_filter:
             orders = db.query(MT5Order).filter(
                 MT5Order.status  == "pending",
                 MT5Order.user_id.in_(uid_filter),
@@ -8593,31 +8578,8 @@ def mt5_get_pending():
             orders = db.query(MT5Order).filter_by(status="pending").all()
         result = []
         for o in orders:
-            result.append({
-                "id":           o.id,
-                "symbol":       o.symbol,
-                "order_type":   o.order_type,
-                "volume":       o.volume,
-                "price":        o.price,
-                "sl":           o.sl,
-                "tp":           o.tp,
-                "tp2":          o.tp2,
-                "tp3":          o.tp3,
-                "action":       o.action or "open",
-                "close_ticket": o.close_ticket,
-                "trailing":     bool(o.trailing),
-                "be":           bool(o.be),
-                "macro":        bool(o.macro),
-                "inval":        bool(o.inval),
-                "sent":         bool(o.sent),
-                "tp1_alert":    bool(o.tp1_alert),
-                "tp2_alert":    bool(o.tp2_alert),
-                "weekend":      bool(o.weekend),
-            })
-            if o.order_type == "TRAILING":
-                o.status = "filled"
-            else:
-                o.status = "executing"
+            result.append(project_pending_mt5_order(o))
+            o.status = status_after_pending_poll(o.order_type)
         db.commit()
         # Embed automation settings so the EA can apply trailing stop without an extra request
         cfg = _get_automation_settings("default")
@@ -9128,14 +9090,14 @@ def mt5_cancel_order(order_id):
     try:
         order = db.query(MT5Order).filter(
             MT5Order.id == order_id,
-            MT5Order.user_id.in_([user_id, "default"]),
+            MT5Order.user_id.in_(user_ids_for_mt5_cancel(user_id)),
             MT5Order.status.in_(["pending", "executing"])
         ).first()
         if not order:
             return jsonify({"error": "Order not found or already processing"}), 404
         order.status = "cancelled"
         db.commit()
-        return jsonify({"status": "cancelled"})
+        return jsonify(mt5_cancel_response())
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
@@ -10468,7 +10430,7 @@ def _recommend_automations_from_signal(data):
         tp1     = True         # Always alert at TP1 — you're past your safest exit, good to know
         tp2     = True         # This IS the target — always alert when TP2 is hit
         weekend = is_swing or is_position           # Swing/position TP2 rows cross weekends
-        if be:    reasons.append("Break Even: once price moves 1 ATR in your favour your stop moves to entry, making the trade risk-free FROM THAT POINT. Until then your original stop is your full risk.")
+        if be:    reasons.append("Break Even: once price moves 1 ATR in your favour your stop moves to entry, reducing planned downside from that point. Until then your original stop is your full planned risk, and gaps or slippage can still fill worse.")
         reasons.append("No Trailing Stop — this row exits at the fixed TP2 price.")
         if macro: reasons.append("Macro Guard: this row stays open long enough to cross news events.")
         if inval: reasons.append("Technical Invalidation: watches for EMA/Supertrend reversal on closed candles.")
@@ -10571,38 +10533,7 @@ def _user_settings_to_dict(s):
     """Serialise a UserSettings row to JSON for the frontend.
     Encrypted credentials are NEVER returned in plaintext — only a flag
     indicating whether they are configured, plus the non-secret fields."""
-    if not s:
-        return {}
-    try:    assets = json.loads(s.assets_enabled) if s.assets_enabled else []
-    except: assets = []
-    try:    alloc  = json.loads(s.portfolio_alloc) if s.portfolio_alloc else {}
-    except: alloc  = {}
-    return {
-        "assets_enabled":      assets,
-        "risk_tolerance":      s.risk_tolerance,
-        "chart_theme":         s.chart_theme or "",
-        "chart_type":          s.chart_type or "candle",
-        "grid_style":          s.grid_style or "",
-        "indicator_scheme":    s.indicator_scheme or "",
-        "timezone":            s.timezone or "UTC",
-        "alert_confidence":    s.alert_confidence,
-        "alert_price_pct":     s.alert_price_pct,
-        "alert_drawdown_pct":  s.alert_drawdown_pct,
-        "alert_loss_pct":      s.alert_loss_pct,
-        "perf_target_winrate": s.perf_target_winrate,
-        "perf_target_rr":      s.perf_target_rr,
-        "perf_target_trades":  s.perf_target_trades,
-        "perf_target_annual":  s.perf_target_annual,
-        "portfolio_alloc":     alloc,
-        "portfolio_preset":    s.portfolio_preset,
-        "portfolio_rebalance": s.portfolio_rebalance,
-        "portfolio_benchmark": s.portfolio_benchmark,
-        "mt5_configured":      bool(s.mt5_api_key_enc),
-        "mt5_account":         s.mt5_account or "",
-        "mt5_broker_server":   s.mt5_broker_server or "",
-        "telegram_configured": bool(s.telegram_bot_token_enc),
-        "telegram_chat_id":    s.telegram_chat_id or "",
-    }
+    return serialize_user_settings(s)
 
 @app.route("/api/settings", methods=["GET"])
 @login_required
@@ -10635,6 +10566,7 @@ def settings_save():
         return jsonify({"error": "db unavailable"}), 503
     user_id = str(session.get("user_id"))
     body    = request.json or {}
+    settings_update = normalize_user_settings_update_payload(body)
     db      = _DBSession()
     try:
         s = db.query(UserSettings).filter_by(user_id=user_id).first()
@@ -10642,48 +10574,14 @@ def settings_save():
             s = UserSettings(user_id=user_id)
             db.add(s)
 
-        if "assets_enabled" in body:
-            try:    s.assets_enabled = json.dumps(list(body["assets_enabled"]))
-            except: pass
-        if "risk_tolerance" in body and body["risk_tolerance"] in ("conservative","moderate","aggressive"):
-            s.risk_tolerance = body["risk_tolerance"]
-
-        if "chart_theme"      in body: s.chart_theme      = str(body["chart_theme"])[:32]
-        if "chart_type"       in body and body["chart_type"] in ("candle","bar","line","area","hollow"):
-            s.chart_type = body["chart_type"]
-        if "grid_style"       in body: s.grid_style       = str(body["grid_style"])[:16]
-        if "indicator_scheme" in body: s.indicator_scheme = str(body["indicator_scheme"])[:16]
-
-        if "timezone" in body: s.timezone = str(body["timezone"])[:64]
-
-        if "alert_confidence" in body:
-            try:    s.alert_confidence = max(0, min(100, int(body["alert_confidence"])))
-            except: pass
-        for k in ("alert_price_pct","alert_drawdown_pct","alert_loss_pct",
-                  "perf_target_rr","perf_target_annual"):
-            if k in body:
-                try:    setattr(s, k, float(body[k]))
-                except: pass
-        for k in ("perf_target_winrate","perf_target_trades"):
-            if k in body:
-                try:    setattr(s, k, int(body[k]))
-                except: pass
-
-        if "portfolio_alloc" in body:
-            try:    s.portfolio_alloc = json.dumps(dict(body["portfolio_alloc"]))
-            except: pass
-        if "portfolio_preset" in body and body["portfolio_preset"] in ("conservative","balanced","aggressive"):
-            s.portfolio_preset = body["portfolio_preset"]
-        if "portfolio_rebalance" in body and body["portfolio_rebalance"] in ("monthly","quarterly","yearly"):
-            s.portfolio_rebalance = body["portfolio_rebalance"]
-        if "portfolio_benchmark" in body: s.portfolio_benchmark = str(body["portfolio_benchmark"])[:16]
+        for field_name, value in settings_update.updates.items():
+            setattr(s, field_name, value)
 
         # Connections — encrypt before storing, never log. Empty string = unchanged.
-        if body.get("mt5_api_key"):        s.mt5_api_key_enc        = _enc(str(body["mt5_api_key"]))
-        if "mt5_account"        in body:   s.mt5_account            = str(body["mt5_account"])[:64]
-        if "mt5_broker_server"  in body:   s.mt5_broker_server      = str(body["mt5_broker_server"])[:128]
-        if body.get("telegram_bot_token"): s.telegram_bot_token_enc = _enc(str(body["telegram_bot_token"]))
-        if "telegram_chat_id"   in body:   s.telegram_chat_id       = str(body["telegram_chat_id"])[:64]
+        if "mt5_api_key" in settings_update.credentials:
+            s.mt5_api_key_enc = _enc(settings_update.credentials["mt5_api_key"])
+        if "telegram_bot_token" in settings_update.credentials:
+            s.telegram_bot_token_enc = _enc(settings_update.credentials["telegram_bot_token"])
 
         s.updated_at = datetime.utcnow()
         db.commit()
@@ -10707,18 +10605,9 @@ def get_notifications():
         rows = db.query(Notification)\
                  .filter(Notification.user_id.in_([user_id, "default"]))\
                  .order_by(Notification.created_at.desc()).limit(50).all()
-        result = [{
-            "id":         n.id,
-            "type":       n.ntype,
-            "title":      n.title,
-            "body":       n.body,
-            "data":       json.loads(n.data) if n.data else None,
-            "read":       n.read,
-            "created_at": n.created_at.strftime("%Y-%m-%d %H:%M UTC"),
-        } for n in rows]
+        result = serialize_notifications_response(rows)
         db.close()
-        return jsonify({"notifications": result,
-                        "unread": sum(1 for r in result if not r["read"])})
+        return jsonify(result)
     except Exception as e:
         return jsonify({"notifications": [], "unread": 0})
 
@@ -10729,12 +10618,15 @@ def mark_notifications_read():
         return jsonify({"status": "ok"})
     user_id = str(session.get("user_id"))
     body    = request.json or {}
-    nid     = body.get("id")   # if None → mark all read
+    try:
+        nid = normalize_mark_notifications_read_payload(body)  # if None -> mark all read
+    except NotificationValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     try:
         db = _DBSession()
         q  = db.query(Notification).filter(Notification.user_id.in_([user_id, "default"]))
         if nid:
-            q = q.filter(Notification.id == int(nid))
+            q = q.filter(Notification.id == nid)
         q.update({"read": True}, synchronize_session=False)
         db.commit(); db.close()
         return jsonify({"status": "ok"})
@@ -10746,41 +10638,7 @@ def mark_notifications_read():
 def _account_to_dict(a):
     """Serialize a TradingAccount row for API responses. NEVER expose ea_secret."""
     state = mt5_state.get(str(a.user_id), {})
-    acct_info = state.get("account", {})
-    last_seen_str = None
-    connected = False
-    if state.get("last_seen"):
-        try:
-            ls = datetime.fromisoformat(state["last_seen"])
-            secs_ago = (datetime.utcnow() - ls).total_seconds()
-            connected = secs_ago < 45
-            last_seen_str = ls.strftime("%Y-%m-%d %H:%M UTC")
-        except Exception:
-            pass
-    return {
-        "id":              a.id,
-        "name":            a.name,
-        "broker":          a.broker or "",
-        "server":          a.server or "",
-        "account_number":  a.account_number or "",
-        "account_type":    a.account_type,
-        "currency":        a.currency,
-        "platform":        a.platform,
-        "status":          a.status,
-        "connected":       connected,
-        "last_seen":       last_seen_str,
-        "error_message":   a.error_message,
-        "color":           a.color,
-        "sort_order":      a.sort_order,
-        "is_active":       a.is_active,
-        "balance":         acct_info.get("balance"),
-        "equity":          acct_info.get("equity"),
-        "margin":          acct_info.get("margin"),
-        "margin_free":     acct_info.get("margin_free"),
-        "margin_level":    acct_info.get("margin_level"),
-        "created_at":      a.created_at.strftime("%Y-%m-%d %H:%M UTC") if a.created_at else None,
-        "updated_at":      a.updated_at.strftime("%Y-%m-%d %H:%M UTC") if a.updated_at else None,
-    }
+    return serialize_trading_account(a, state)
 
 @app.route("/api/accounts", methods=["GET"])
 @login_required
@@ -10809,47 +10667,38 @@ def accounts_create():
         return jsonify({"error": "db unavailable"}), 503
     user_id = str(session.get("user_id"))
     body    = request.json or {}
-    name        = (body.get("name") or "").strip()
-    broker      = (body.get("broker") or "").strip()
-    server      = (body.get("server") or "").strip()
-    account_num = (body.get("account_number") or "").strip()
-    acct_type   = (body.get("account_type") or "DEMO").upper()
-    currency    = (body.get("currency") or "USD").upper()
-    if not name:
-        return jsonify({"error": "name is required"}), 400
-    if acct_type not in ("LIVE", "DEMO"):
-        return jsonify({"error": "account_type must be LIVE or DEMO"}), 400
+    try:
+        account_request = normalize_account_create_payload(body)
+    except AccountValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     ea_secret = uuid.uuid4().hex
     db = _DBSession()
     try:
         # Check for duplicate account name
         existing = db.query(TradingAccount).filter(
             TradingAccount.user_id == user_id,
-            TradingAccount.name == name,
+            TradingAccount.name == account_request.name,
             TradingAccount.is_active == True,
         ).first()
         if existing:
             return jsonify({"error": "An account with this name already exists."}), 409
         a = TradingAccount(
             user_id=user_id,
-            name=name,
-            broker=broker,
-            server=server,
-            account_number=account_num,
-            account_type=acct_type,
-            currency=currency,
+            name=account_request.name,
+            broker=account_request.broker,
+            server=account_request.server,
+            account_number=account_request.account_number,
+            account_type=account_request.account_type,
+            currency=account_request.currency,
             platform="MT5",
             ea_secret_enc=_enc(ea_secret),
-            color=body.get("color"),
-            sort_order=body.get("sort_order", 0),
+            color=account_request.color,
+            sort_order=account_request.sort_order,
         )
         db.add(a)
         db.commit()
         db.refresh(a)
-        result = _account_to_dict(a)
-        # Include the EA secret once on creation so the user can copy it
-        result["ea_secret"] = ea_secret
-        return jsonify(result), 201
+        return jsonify(build_account_create_response(a, ea_secret)), 201
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
@@ -10864,6 +10713,10 @@ def accounts_update(account_id):
         return jsonify({"error": "db unavailable"}), 503
     user_id = str(session.get("user_id"))
     body    = request.json or {}
+    try:
+        account_update = normalize_account_update_payload(body)
+    except AccountValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     db = _DBSession()
     try:
         a = db.query(TradingAccount).filter(
@@ -10873,32 +10726,16 @@ def accounts_update(account_id):
         ).first()
         if not a:
             return jsonify({"error": "Account not found"}), 404
-        if "name" in body and body["name"]:
-            a.name = str(body["name"]).strip()
-        if "broker" in body:
-            a.broker = str(body["broker"]).strip()
-        if "server" in body:
-            a.server = str(body["server"]).strip()
-        if "account_number" in body:
-            a.account_number = str(body["account_number"]).strip()
-        if "account_type" in body:
-            t = body["account_type"].upper()
-            if t in ("LIVE", "DEMO"):
-                a.account_type = t
-        if "currency" in body:
-            a.currency = str(body["currency"]).upper()[:8]
-        if "color" in body:
-            a.color = str(body["color"])[:16] if body["color"] else None
-        if "sort_order" in body:
-            a.sort_order = int(body["sort_order"])
+        for field_name, value in account_update.updates.items():
+            setattr(a, field_name, value)
         # Regenerate EA secret if requested
-        if body.get("regenerate_secret"):
+        if account_update.regenerate_secret:
             a.ea_secret_enc = _enc(uuid.uuid4().hex)
         a.updated_at = datetime.utcnow()
         db.commit()
         result = _account_to_dict(a)
         # Include new EA secret if regenerated
-        if body.get("regenerate_secret") and a.ea_secret_enc:
+        if account_update.regenerate_secret and a.ea_secret_enc:
             result["ea_secret"] = _dec(a.ea_secret_enc)
         return jsonify(result)
     except Exception as e:
@@ -11253,22 +11090,26 @@ def push_subscribe():
     if not _DBSession:
         return jsonify({"status": "error", "message": "Database not available"}), 503
     body = request.json or {}
-    endpoint = body.get("endpoint", "").strip()
-    p256dh   = body.get("keys", {}).get("p256dh", "").strip()
-    auth     = body.get("keys", {}).get("auth", "").strip()
+    try:
+        push_request = normalize_push_subscribe_payload(body)
+    except PushSubscriptionValidationError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     user_id  = str(session.get("user_id", "default"))
-    if not endpoint or not p256dh or not auth:
-        return jsonify({"status": "error", "message": "endpoint, keys.p256dh, and keys.auth required"}), 400
     try:
         db = _DBSession()
         # Check for duplicate
-        existing = db.query(PushSubscription).filter_by(endpoint=endpoint).first()
+        existing = db.query(PushSubscription).filter_by(endpoint=push_request.endpoint).first()
         if existing:
-            existing.p256dh = p256dh
-            existing.auth   = auth
+            existing.p256dh = push_request.p256dh
+            existing.auth   = push_request.auth
             existing.user_id = user_id
         else:
-            sub = PushSubscription(user_id=user_id, endpoint=endpoint, p256dh=p256dh, auth=auth)
+            sub = PushSubscription(
+                user_id=user_id,
+                endpoint=push_request.endpoint,
+                p256dh=push_request.p256dh,
+                auth=push_request.auth,
+            )
             db.add(sub)
         db.commit()
         db.close()
@@ -11282,9 +11123,10 @@ def push_unsubscribe():
     if not _DBSession:
         return jsonify({"status": "ok"})
     body = request.json or {}
-    endpoint = body.get("endpoint", "").strip()
-    if not endpoint:
-        return jsonify({"status": "error", "message": "endpoint required"}), 400
+    try:
+        endpoint = normalize_push_unsubscribe_payload(body)
+    except PushSubscriptionValidationError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     try:
         db = _DBSession()
         db.query(PushSubscription).filter_by(endpoint=endpoint).delete()
@@ -11345,23 +11187,20 @@ def update_profile():
     user = _get_current_user()
     if not user:
         return jsonify({"status": "error", "message": "User not found"}), 404
-    body     = request.json or {}
-    new_name = body.get("name", "").strip()
-    old_pw   = body.get("old_password", "").strip()
-    new_pw   = body.get("new_password", "").strip()
+    profile_request = normalize_profile_update_payload(request.json)
     db = _DBSession()
     try:
         u = db.query(User).filter_by(id=user.id).first()
-        if new_name:
-            u.name = new_name
-        if new_pw:
-            if not old_pw:
+        if profile_request.name:
+            u.name = profile_request.name
+        if profile_request.new_password:
+            if not profile_request.old_password:
                 return jsonify({"status": "error", "message": "Current password required to set a new one"}), 400
-            if not check_password_hash(u.password_hash or "", old_pw):
+            if not check_password_hash(u.password_hash or "", profile_request.old_password):
                 return jsonify({"status": "error", "message": "Current password is incorrect"}), 400
-            if len(new_pw) < 6:
+            if len(profile_request.new_password) < 6:
                 return jsonify({"status": "error", "message": "New password must be at least 6 characters"}), 400
-            u.password_hash = generate_password_hash(new_pw)
+            u.password_hash = generate_password_hash(profile_request.new_password)
         db.commit()
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -11384,20 +11223,7 @@ def keys_list():
     db = _DBSession()
     try:
         rows = db.query(ExchangeKey).filter_by(user_id=user.id).order_by(ExchangeKey.created_at.desc()).all()
-        result = []
-        for r in rows:
-            try:
-                raw_key = _dec(r.api_key_enc)
-                masked  = raw_key[:4] + "••••••••" + raw_key[-4:] if len(raw_key) > 8 else "••••••••"
-            except Exception:
-                masked = "••••••••"
-            result.append({
-                "id":         r.id,
-                "exchange":   r.exchange,
-                "label":      r.label or "",
-                "key_masked": masked,
-                "created_at": r.created_at.strftime("%Y-%m-%d") if r.created_at else "",
-            })
+        result = [serialize_exchange_key(row, _dec) for row in rows]
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -11413,23 +11239,19 @@ def keys_add():
     user = _get_current_user()
     if not user:
         return jsonify({"status": "error", "message": "User not found"}), 404
-    body       = request.json or {}
-    exchange   = body.get("exchange", "").strip().lower()
-    label      = body.get("label", "").strip()
-    api_key    = body.get("api_key", "").strip()
-    api_secret = body.get("api_secret", "").strip()
-    api_passphrase = body.get("api_passphrase", "").strip()  # Coinbase-specific
-    if not exchange or not api_key or not api_secret:
-        return jsonify({"status": "error", "message": "Exchange, API key, and secret are required"}), 400
+    try:
+        key_request = normalize_exchange_key_create_payload(request.json)
+    except ExchangeKeyValidationError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     db = _DBSession()
     try:
         row = ExchangeKey(
             user_id            = user.id,
-            exchange           = exchange,
-            label              = label or exchange.capitalize(),
-            api_key_enc        = _enc(api_key),
-            api_secret_enc     = _enc(api_secret),
-            api_passphrase_enc = _enc(api_passphrase) if api_passphrase else None,
+            exchange           = key_request.exchange,
+            label              = key_request.label or key_request.exchange.capitalize(),
+            api_key_enc        = _enc(key_request.api_key),
+            api_secret_enc     = _enc(key_request.api_secret),
+            api_passphrase_enc = _enc(key_request.api_passphrase) if key_request.api_passphrase else None,
         )
         db.add(row)
         db.commit()
@@ -11540,7 +11362,7 @@ def telegram_webhook():
                         db.add(order)
                         db.commit()
                         db.refresh(order)
-                        order.comment = f"DotVerse #{order.id}"
+                        order.comment = dotverse_order_comment(order.id)
                         db.commit()
                         queued = True
                         answer_text = (f"✅ {rec.signal} {rec.lot_size:.2f} lots {symbol} queued — "
@@ -11838,11 +11660,14 @@ def keys_delete(key_id):
 def live_price():
     """Return latest price for a ticker. Used as REST fallback for non-crypto assets
     on the live size tab (crypto uses direct Binance WebSocket from the browser)."""
-    ticker     = request.args.get("ticker", "").strip().upper()
-    asset_type = request.args.get("asset_type", "stock").strip().lower()
-    if not ticker:
-        return jsonify({"error": "ticker required"}), 400
-    ticker = normalise_ticker(ticker, asset_type)
+    try:
+        live_price_request = normalize_live_price_query(
+            request.args,
+            normalise_ticker=normalise_ticker,
+        )
+    except MarketRequestValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+    ticker = live_price_request.ticker
     try:
         import yfinance as yf
         hist = yf.Ticker(ticker).history(period="1d", interval="1m")
@@ -11857,21 +11682,18 @@ def live_price():
 @login_required
 def analyze():
     try:
-        body       = request.json or {}
-        ticker     = body.get("ticker", "").upper().strip()
-        asset_type = body.get("asset_type", "stock")
-        timeframe  = body.get("timeframe", "1d").lower()
-
-        if not ticker:
+        try:
+            analyze_request = normalize_analyze_payload(
+                request.json,
+                valid_timeframes=TIMEFRAME_CONFIG.keys(),
+                is_forex_pair=is_forex_pair,
+                normalise_ticker=normalise_ticker,
+            )
+        except MarketRequestValidationError:
             return jsonify({"error": "Ticker symbol is required"}), 400
-        if timeframe not in TIMEFRAME_CONFIG:
-            timeframe = "1d"
-
-        # normalise_ticker may upgrade asset_type (e.g. GBPUSD typed as crypto → forex)
-        if is_forex_pair(ticker.replace("/","").replace("-","").replace("=X","")) and asset_type != "forex":
-            asset_type = "forex"
-
-        ticker = normalise_ticker(ticker, asset_type)
+        ticker = analyze_request.ticker
+        asset_type = analyze_request.asset_type
+        timeframe = analyze_request.timeframe
         cfg    = TIMEFRAME_CONFIG[timeframe]
         _t0    = time.time()
 
@@ -12694,17 +12516,17 @@ def diag_scan():
 def screen():
     """Lightweight pre-screen — no Claude API call. Used by browser alert mode."""
     try:
-        body       = request.json or {}
-        ticker     = body.get("ticker", "").upper().strip()
-        asset_type = body.get("asset_type", "stock")
-        timeframe  = body.get("timeframe", "1d").lower()
-
-        if not ticker:
-            return jsonify({"error": "Ticker required"}), 400
-        if timeframe not in TIMEFRAME_CONFIG:
-            timeframe = "1d"
-
-        ticker = normalise_ticker(ticker, asset_type)
+        try:
+            screen_request = normalize_screen_payload(
+                request.json,
+                valid_timeframes=TIMEFRAME_CONFIG.keys(),
+                normalise_ticker=normalise_ticker,
+            )
+        except MarketRequestValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        ticker = screen_request.ticker
+        asset_type = screen_request.asset_type
+        timeframe = screen_request.timeframe
         cfg    = TIMEFRAME_CONFIG[timeframe]
 
         df = safe_download(ticker, period=cfg["period"], interval=cfg["interval"],
@@ -12735,8 +12557,6 @@ def screen():
 def add_watch():
     """Register a ticker for 24/7 server-side watching with multi-channel alerts."""
     try:
-        body          = request.json or {}
-
         # K7.2: Free-tier active watches cap — 2 max
         _w_uid = str(session.get('user_id', 'anon'))
         _w_tier = session.get('user_tier', 'free')
@@ -12745,40 +12565,35 @@ def add_watch():
             if not _w_ok:
                 return _w_err
 
-        ticker        = body.get("ticker", "").upper().strip()
-        asset_type    = body.get("asset_type", "stock")
-        timeframe     = body.get("timeframe", "1d").lower()
-        # alert_channels: list of "sms" | "whatsapp" | "telegram"
-        alert_channels = body.get("alert_channels", ["sms"])
-        if not isinstance(alert_channels, list) or not alert_channels:
-            alert_channels = ["sms"]
-
-        if not ticker:
-            return jsonify({"error": "Ticker required"}), 400
-        if timeframe not in TIMEFRAME_CONFIG:
-            timeframe = "1d"
-
-        ticker         = normalise_ticker(ticker, asset_type)
+        try:
+            watch_request = normalize_add_watch_payload(
+                request.json,
+                valid_timeframes=TIMEFRAME_CONFIG.keys(),
+                normalise_ticker=normalise_ticker,
+            )
+        except MarketRequestValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        ticker         = watch_request.ticker
+        asset_type     = watch_request.asset_type
+        timeframe      = watch_request.timeframe
+        alert_channels = watch_request.alert_channels
         user_id        = str(session.get('user_id', 'anon'))
         key            = f"{user_id}_{ticker}_{timeframe}"
-        current_signal = body.get("current_signal", "HOLD") or "HOLD"
+        current_signal = watch_request.current_signal
 
         # Per-trade automation flags — sent from frontend _szLadderAuto[rowIdx] after Optimise runs.
         # All default False — backend compute (Optimise) must explicitly enable each one.
-        auto_flags = body.get("automations") or {}
-        be_on      = bool(auto_flags.get("be",      False))
-        trail_on   = bool(auto_flags.get("trail",   False))
-        macro_on   = bool(auto_flags.get("macro",   False))
-        inval_on   = bool(auto_flags.get("inval",   False))
-        sent_on    = bool(auto_flags.get("sent",    False))
-        tp1_on     = bool(auto_flags.get("tp1",     False))
-        tp2_on     = bool(auto_flags.get("tp2",     False))
-        weekend_on = bool(auto_flags.get("weekend", False))
+        be_on      = watch_request.automations.be_on
+        trail_on   = watch_request.automations.trail_on
+        macro_on   = watch_request.automations.macro_on
+        inval_on   = watch_request.automations.inval_on
+        sent_on    = watch_request.automations.sent_on
+        tp1_on     = watch_request.automations.tp1_on
+        tp2_on     = watch_request.automations.tp2_on
+        weekend_on = watch_request.automations.weekend_on
         # Signal levels at time of watch — used by BE and TRAIL compute in run_watch_job
-        try: entry_price = float(body.get("entry_price")) if body.get("entry_price") is not None else None
-        except (TypeError, ValueError): entry_price = None
-        try: entry_atr   = float(body.get("entry_atr"))   if body.get("entry_atr")   is not None else None
-        except (TypeError, ValueError): entry_atr = None
+        entry_price = watch_request.entry_price
+        entry_atr   = watch_request.entry_atr
 
         ch_labels = {"sms": "SMS", "whatsapp": "WhatsApp", "telegram": "Telegram"}
         ch_str    = " + ".join(ch_labels.get(c, c) for c in alert_channels)
@@ -12838,12 +12653,15 @@ def add_watch():
 def remove_watch():
     """Unregister a ticker from server-side watching."""
     try:
-        body      = request.json or {}
-        ticker    = body.get("ticker", "").upper().strip()
-        timeframe = body.get("timeframe", "1d").lower()
-        if not ticker:
-            return jsonify({"error": "ticker required"}), 400
-        ticker  = normalise_ticker(ticker, body.get("asset_type", "stock"))
+        try:
+            remove_request = normalize_remove_watch_payload(
+                request.json,
+                normalise_ticker=normalise_ticker,
+            )
+        except MarketRequestValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        ticker = remove_request.ticker
+        timeframe = remove_request.timeframe
         user_id = str(session.get('user_id', 'anon'))
         key     = f"{user_id}_{ticker}_{timeframe}"
 
@@ -12919,19 +12737,19 @@ def list_watches():
 def simulate():
     """Feature B — Simulation Mode. Returns 3 price path scenarios using template logic — no API calls."""
     try:
-        body = request.json or {}
+        simulate_request = normalize_simulate_payload(request.json)
         # Accept pre-computed analysis data from frontend to avoid re-fetching
-        ticker     = body.get("ticker", "").upper().strip()
-        asset_type = body.get("asset_type", "stock")
-        signal     = body.get("signal", "HOLD")
-        price      = body.get("price", 0) or 0
-        entry      = body.get("entry")
-        stop_loss  = body.get("stop_loss")
-        tp1        = body.get("tp1")
-        tp2        = body.get("tp2")
-        tp3        = body.get("tp3")
-        narrative  = body.get("narrative", "")
-        timeframe  = body.get("timeframe", "1d")
+        ticker     = simulate_request.ticker
+        asset_type = simulate_request.asset_type
+        signal     = simulate_request.signal
+        price      = simulate_request.price
+        entry      = simulate_request.entry
+        stop_loss  = simulate_request.stop_loss
+        tp1        = simulate_request.tp1
+        tp2        = simulate_request.tp2
+        tp3        = simulate_request.tp3
+        narrative  = simulate_request.narrative
+        timeframe  = simulate_request.timeframe
 
         # Generate probability based on signal
         if signal == "BUY":
@@ -13028,10 +12846,11 @@ def markov_analysis():
     transition matrix, most likely regime).
     """
     try:
-        ticker     = request.args.get("ticker", "SPY").upper().strip()
-        asset_type = request.args.get("asset_type", "stock").strip().lower()
-        days       = int(request.args.get("days", "365"))
-        lookback   = int(request.args.get("lookback", "20"))
+        markov_request = normalize_markov_query(request.args)
+        ticker     = markov_request.ticker
+        asset_type = markov_request.asset_type
+        days       = markov_request.days
+        lookback   = markov_request.lookback
 
         engine = MarkovEngine(lookback=lookback)
         result = engine.run(ticker, asset_type=asset_type, days=days, hmm_iterations=50)
@@ -13050,8 +12869,8 @@ def markov_analysis():
 def alert_test():
     """Send a test message to verify WhatsApp / Telegram / SMS configuration."""
     try:
-        body     = request.json or {}
-        channels = body.get("channels", ["sms"])
+        alert_request = normalize_alert_test_payload(request.json)
+        channels = alert_request.channels
         ts       = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
         msg = (
             f"✅ dot-verse Alert Test\n"
@@ -13105,12 +12924,13 @@ def scan_list():
     """Pre-screen multiple tickers quickly using TradingView scanner (primary)
     with yfinance fallback. No AI API call."""
     try:
-        data      = request.json or {}
-        tickers   = [t.strip().upper() for t in data.get("tickers", [])[:15]]
-        asset_type = data.get("asset_type", "crypto")
-        timeframe  = data.get("timeframe", "1h")
-        if timeframe not in TIMEFRAME_CONFIG:
-            timeframe = "1h"
+        scan_request = normalize_scan_list_payload(
+            request.json,
+            valid_timeframes=TIMEFRAME_CONFIG.keys(),
+        )
+        tickers = scan_request.tickers
+        asset_type = scan_request.asset_type
+        timeframe = scan_request.timeframe
         cfg     = TIMEFRAME_CONFIG[timeframe]
         results = []
         import threading as _threading
@@ -13230,8 +13050,8 @@ def scan_list():
 def get_prices():
     """Lightweight bulk price fetch for ticker tape — batch download for speed."""
     try:
-        data    = request.json or {}
-        tickers = [t.strip() for t in data.get("tickers", [])[:40]]
+        prices_request = normalize_prices_payload(request.json)
+        tickers = prices_request.tickers
         if not tickers:
             return jsonify({})
 
@@ -16053,91 +15873,11 @@ def calibration_isotonic():
                     .filter(CalibrationLabel.user_id == uid)
                     .all())
 
-        sample_size = len(labels)
-        if sample_size < GATE:
-            return jsonify({
-                "ready":       False,
-                "sample_size": sample_size,
-                "message":     f"Need {GATE - sample_size} more labeled trades for calibration. "
-                               f"Click 'Sync Labels' to populate from your trade history.",
-                "curve":       [],
-                "ece":         None,
-            })
-
-        # Build (X=confidence_raw, y=is_win) arrays
-        X_raw = np.array([l.confidence_raw for l in labels], dtype=float)
-        y     = np.array([1.0 if l.outcome == "WIN" else 0.0 for l in labels], dtype=float)
-
-        # Fit isotonic regression
-        import sklearn.isotonic as _iso
-        ir = _iso.IsotonicRegression(out_of_bounds="clip", increasing="auto")
-        y_pred = ir.fit_transform(X_raw, y)
-
-        # Build calibration curve: 10 equally-spaced confidence bins
-        n_bins = 10
-        bins = np.linspace(X_raw.min(), X_raw.max(), n_bins + 1)
-        curve = []
-        bin_empirical = []
-        bin_predicted = []
-        bin_counts = []
-        for i in range(n_bins):
-            lo, hi = bins[i], bins[i + 1]
-            if i == n_bins - 1:
-                mask = (X_raw >= lo) & (X_raw <= hi)
-            else:
-                mask = (X_raw >= lo) & (X_raw < hi)
-            count = int(mask.sum())
-            if count > 0:
-                emp_wr = float(y[mask].mean() * 100)
-                pred_wr = float(y_pred[mask].mean() * 100)
-            else:
-                emp_wr = 0
-                pred_wr = 0
-            curve.append({
-                "bin_low":   round(float(lo), 1),
-                "bin_high":  round(float(hi), 1),
-                "empirical": round(emp_wr, 1),
-                "calibrated": round(pred_wr, 1),
-                "count":     count,
-            })
-            if count > 0:
-                bin_empirical.append(emp_wr / 100)
-                bin_predicted.append(pred_wr / 100)
-                bin_counts.append(count)
-
-        # Expected Calibration Error (ECE) — weighted by bin count
-        total = sum(bin_counts)
-        ece = sum((abs(e - p) * c) for e, p, c in
-                  zip(bin_empirical, bin_predicted, bin_counts)) / total if total > 0 else 0
-
-        # Overall stats
-        overall_wr = round(float(y.mean() * 100), 1)
-
-        return jsonify({
-            "ready":        True,
-            "sample_size":  sample_size,
-            "message":      None,
-            "curve":        curve,
-            "ece":          round(ece, 4),
-            "overall_wr":   overall_wr,
-            "wins":         int(y.sum()),
-            "losses":       sample_size - int(y.sum()),
-            "calibrated_fn": _build_calibrated_lookup(ir, X_raw.min(), X_raw.max()),
-        })
+        return jsonify(fit_isotonic_calibration(labels, gate=GATE))
     except Exception as e:
         return jsonify({"error": str(e), "ready": False, "sample_size": 0}), 500
     finally:
         db.close()
-
-
-def _build_calibrated_lookup(ir, x_min, x_max):
-    """Build a lookup table: raw confidence → calibrated win prob.
-    Returns list of {raw: int, calibrated: float} for every 5% step."""
-    lookup = []
-    for raw in range(5, 101, 5):
-        predicted = float(ir.transform([float(raw)])[0])
-        lookup.append({"raw": raw, "calibrated": round(predicted * 100, 1)})
-    return lookup
 
 
 def _guess_regime(ticker, timeframe):
@@ -16162,16 +15902,15 @@ def _guess_regime(ticker, timeframe):
         return None
 
 
-# ─── P2.3: Qwen Signal Quality Review ─────────────────────────
+# ─── P2.3: LLM Signal Quality Review ──────────────────────────
 
 @app.route("/api/calibration/review", methods=["POST"])
 @login_required
 def calibration_review():
-    """P2.3 — Qwen 3.5 Plus reviews a signal for quality.
+    """P2.3 — OpenAI reviews a signal for quality.
     Body: { signal_id: int } or { ticker, signal, confidence, timeframe, trade_type }
     Returns structured review: quality_score (1-10), flags, explanation.
 
-    Uses Qwen 3.5 Plus via custom:qwen provider (OpenAI-compatible API).
     Result is cached for 1 hour per (user_id, signal_id) in app memory.
     """
     body   = request.get_json(force=True) or {}
@@ -16218,37 +15957,17 @@ def calibration_review():
         return jsonify({"error": "Could not resolve signal data"}), 404
 
     # ── Check cache ──
-    cache_key = f"qwen_review_{uid}_{sig_id or signal_ctx['ticker']}_{signal_ctx.get('timeframe','')}"
+    cache_key = f"openai_review_{uid}_{sig_id or signal_ctx['ticker']}_{signal_ctx.get('timeframe','')}"
     cached = cache_get(cache_key)
     if cached:
         return jsonify(cached)
 
-    # ── Build prompt ──
-    prompt = f"""You are a trading signal quality auditor. Review this signal and rate its quality.
+    prompt = build_signal_quality_review_prompt(signal_ctx)
 
-SIGNAL:
-- Ticker: {signal_ctx.get('ticker')}
-- Direction: {signal_ctx.get('signal')}
-- DotVerse Confidence: {signal_ctx.get('confidence', '?')}%
-- Timeframe: {signal_ctx.get('timeframe', '?')}
-- Trade Type: {signal_ctx.get('trade_type', '?')}
-- Entry: {signal_ctx.get('entry', '?')}
-- Stop Loss: {signal_ctx.get('stop_loss', '?')}
-- Take Profit 1: {signal_ctx.get('tp1', '?')}
-
-Evaluate:
-1. Is the R:R ratio reasonable (>1:1)?
-2. Does the trade type match the timeframe?
-3. Is the confidence score plausible for this setup?
-4. Any red flags (e.g., wide spread, news event, overnight gap risk)?
-
-RETURN ONLY this JSON (no markdown):
-{{"quality_score": 1-10, "summary": "1 sentence verdict", "strengths": ["bullet1","bullet2"], "weaknesses": ["bullet1","bullet2"], "flags": [], "recommendation": "take"/"review"/"skip"}}"""
-
-    # ── Call Qwen via custom:qwen provider ──
-    api_key = os.environ.get("QWEN_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+    # ── Call OpenAI ──
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        return jsonify({"quality_score": None, "summary": "Qwen not configured",
+        return jsonify({"quality_score": None, "summary": "OpenAI not configured",
                         "strengths": [], "weaknesses": [], "flags": [],
                         "recommendation": "review", "error": "API key missing"}), 200
 
@@ -16260,7 +15979,7 @@ RETURN ONLY this JSON (no markdown):
                 "Content-Type":  "application/json",
             },
             json={
-                "model":       "qwen-plus",
+                "model":       "gpt-4o-mini",
                 "messages":    [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
                 "max_tokens":  400,
@@ -16269,7 +15988,7 @@ RETURN ONLY this JSON (no markdown):
         )
 
         if response.status_code != 200:
-            return jsonify({"error": f"Qwen API error {response.status_code}",
+            return jsonify({"error": f"OpenAI API error {response.status_code}",
                             "quality_score": None, "summary": "API unavailable",
                             "strengths": [], "weaknesses": [], "flags": [],
                             "recommendation": "review"}), 200
@@ -16277,34 +15996,11 @@ RETURN ONLY this JSON (no markdown):
         data = response.json()
         raw_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
-        # Parse JSON from response
-        try:
-            result = json.loads(raw_content)
-        except json.JSONDecodeError:
-            # Try to extract JSON from markdown code blocks
-            import re
-            match = re.search(r'\{[^}]+\}', raw_content, re.DOTALL)
-            if match:
-                try:
-                    result = json.loads(match.group(0))
-                except Exception:
-                    result = {"quality_score": 5, "summary": raw_content[:200],
-                              "strengths": [], "weaknesses": [], "flags": [],
-                              "recommendation": "review"}
-            else:
-                result = {"quality_score": 5, "summary": raw_content[:200],
-                          "strengths": [], "weaknesses": [], "flags": [],
-                          "recommendation": "review"}
-
-        # Normalize fields
-        result.setdefault("quality_score", 5)
-        result.setdefault("summary", "")
-        result.setdefault("strengths", [])
-        result.setdefault("weaknesses", [])
-        result.setdefault("flags", [])
-        result.setdefault("recommendation", "review")
-        result["signal_id"] = sig_id
-        result["calibrated_review"] = True
+        result = parse_json_object(
+            raw_content,
+            fallback=fallback_quality_review(raw_content),
+        )
+        result = normalize_quality_review(result, signal_id=sig_id)
 
         cache_set(cache_key, result)
         return jsonify(result)
@@ -17323,7 +17019,7 @@ def optimise_result():
                     "message": "No result yet. Enqueue a job first via POST /api/optimise"})
 
 # ══════════════════════════════════════════════════════════════
-# VERDICT — Multi-Agent AI Analysis (TradingAgents via OpenRouter)
+# VERDICT — Multi-Agent AI Analysis (TradingAgents via DeepSeek)
 # ══════════════════════════════════════════════════════════════
 
 import hashlib as _hl
@@ -17560,6 +17256,9 @@ def verdict_status():
     workers_alive = 0
     queue_depth   = None
     queue_failed  = None
+    jobs_started  = None
+    jobs_finished = None
+    last_result   = None
     if _rq_queue:
         try:
             from rq import Worker as _RQWorker
@@ -17570,7 +17269,6 @@ def verdict_status():
             jobs_started   = _SJR(_rq_queue.name, connection=_rq_conn).count
             jobs_finished  = _FNJR(_rq_queue.name, connection=_rq_conn).count
             # Last finished job result for quick diagnosis
-            last_result = None
             finished_ids = _FNJR(_rq_queue.name, connection=_rq_conn).get_job_ids()
             if finished_ids:
                 from rq.job import Job as _RQJob
@@ -17636,56 +17334,6 @@ def verdict_queue_clear():
     })
 
 
-def _build_fallback_structured(state, decision):
-    """
-    Build structured verdict data directly from TradingAgents state reports
-    when _extract_verdict_structure fails or DEEPSEEK_API_KEY is missing.
-    Guaranteed to return a non-None dict with agents[] always populated.
-    """
-    def _snip(text, n=600):
-        t = str(text or "").strip()
-        if not t or t.lower() in ("none", ""):
-            return "Report not available for this analysis run."
-        return t[:n] + "…" if len(t) > n else t
-
-    st = state or {}
-    debate = st.get("investment_debate_state", {}) if isinstance(st, dict) else {}
-
-    # Derive action from decision text keyword frequency
-    d_low = str(decision or "").lower()
-    bull_words = sum(1 for w in ["buy","bullish","long","upside","positive","strong"] if w in d_low)
-    bear_words = sum(1 for w in ["sell","bearish","short","downside","negative","weak"] if w in d_low)
-    if bull_words > bear_words:
-        action = "BUY"
-    elif bear_words > bull_words:
-        action = "SELL"
-    else:
-        action = "HOLD"
-
-    agents = [
-        {"name": "Market Analyst",         "vote": action, "argument": _snip(st.get("market_report",""))},
-        {"name": "Sentiment Analyst",       "vote": action, "argument": _snip(st.get("sentiment_report",""))},
-        {"name": "News Researcher",         "vote": "HOLD", "argument": _snip(st.get("news_report",""))},
-        {"name": "Fundamentals Researcher", "vote": action, "argument": _snip(st.get("fundamentals_report",""))},
-        {"name": "Bull Researcher",         "vote": "BUY",  "argument": _snip(debate.get("bull_history",""))},
-        {"name": "Bear Researcher",         "vote": "SELL", "argument": _snip(debate.get("bear_history",""))},
-        {"name": "Research Manager",        "vote": action, "argument": _snip(st.get("investment_plan",""))},
-        {"name": "Risk Team",               "vote": action, "argument": _snip(st.get("final_trade_decision",""))},
-    ]
-
-    return {
-        "action": action,
-        "confidence": "MEDIUM",
-        "summary": _snip(str(decision or ""), 500),
-        "risk_team_notes": _snip(st.get("final_trade_decision",""), 300),
-        "positions": 3,
-        "risk_ladder": [0.5, 1.0, 1.5],
-        "tp_r_multiples": [1.5, 2.5, 3.5],
-        "trailing": ["0.5x ATR after +1.5R", "0.5x ATR after +1.5R", "0.75x ATR after +2R"],
-        "agents": agents,
-    }
-
-
 def _extract_verdict_structure(verdict_text, state, ticker, signal_ctx=None):
     """
     Post-processes the raw TradingAgents verdict into structured trade plan fields
@@ -17700,90 +17348,14 @@ def _extract_verdict_structure(verdict_text, state, ticker, signal_ctx=None):
     try:
         import openai as _oai
         client = _oai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-        raw = str(verdict_text)[:3000]
-
-        # Build per-agent context from LangGraph state (truncated to keep prompt tight)
-        def _snip(text, n=300):
-            t = str(text or "").strip()
-            return t[:n] + "…" if len(t) > n else t
-
-        debate = state.get("investment_debate_state", {}) if state else {}
-        agent_ctx = (
-            f"[Market Analyst] {_snip(state.get('market_report','') if state else '')}\n"
-            f"[Sentiment Analyst] {_snip(state.get('sentiment_report','') if state else '')}\n"
-            f"[News Researcher] {_snip(state.get('news_report','') if state else '')}\n"
-            f"[Fundamentals Researcher] {_snip(state.get('fundamentals_report','') if state else '')}\n"
-            f"[Bull Researcher] {_snip(debate.get('bull_history',''))}\n"
-            f"[Bear Researcher] {_snip(debate.get('bear_history',''))}\n"
-            f"[Research Manager] {_snip(state.get('investment_plan','') if state else '')}\n"
-            f"[Risk Team] {_snip(state.get('final_trade_decision','') if state else '')}\n"
-        )
-
-        # Build DotVerse signal context block if provided
-        signal_block = ""
-        if signal_ctx and isinstance(signal_ctx, dict):
-            sig_dir   = signal_ctx.get("sig", signal_ctx.get("signal", ""))
-            sig_entry = signal_ctx.get("entry", "")
-            sig_sl    = signal_ctx.get("sl", "")
-            sig_tp1   = signal_ctx.get("tp", signal_ctx.get("tp1", ""))
-            sig_tp2   = signal_ctx.get("tp2", "")
-            sig_tp3   = signal_ctx.get("tp3", "")
-            sig_rr    = signal_ctx.get("rr", "")
-            sig_conf  = signal_ctx.get("conf", signal_ctx.get("confLbl", ""))
-            sig_tf    = signal_ctx.get("tf", "")
-            parts = [f"Direction: {sig_dir}", f"Timeframe: {sig_tf}"]
-            if sig_entry:  parts.append(f"Entry: {sig_entry}")
-            if sig_sl:     parts.append(f"Stop loss: {sig_sl}")
-            if sig_tp1:    parts.append(f"TP1: {sig_tp1}")
-            if sig_tp2:    parts.append(f"TP2: {sig_tp2}")
-            if sig_tp3:    parts.append(f"TP3: {sig_tp3}")
-            if sig_rr:     parts.append(f"R:R 1:{sig_rr}")
-            if sig_conf:   parts.append(f"DotVerse confidence: {sig_conf}")
-            signal_block = "\n\nDOTVERSE SIGNAL (the app's own technical analysis — treat as separate context):\n" + " | ".join(parts)
-
         resp = client.chat.completions.create(
             model="deepseek-chat",
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Extract a structured trade plan from this analysis of {ticker}. "
-                    "Return ONLY valid JSON with these exact keys:\n"
-                    '{"action":"BUY|SELL|HOLD",'
-                    '"confidence":"HIGH|MEDIUM|LOW",'
-                    '"summary":"2-3 sentences plain English for a beginner",'
-                    '"risk_team_notes":"1-2 sentences about stop loss management and risk controls",'
-                    '"dotverse_signal_review":"2-3 sentences: evaluate the DotVerse technical signal separately — does the entry/SL/TP look reasonable given your analysis? Is R:R acceptable? Any concerns? Write N/A if no signal provided.",'
-                    '"positions":3,'
-                    '"risk_ladder":[0.5,1.0,1.5],'
-                    '"tp_r_multiples":[1.5,2.5,3.5],'
-                    '"trailing":["0.5x ATR after +1.5R","0.5x ATR after +1.5R","0.75x ATR after +2R"],'
-                    '"agents":['
-                    '{"name":"Market Analyst","vote":"BUY","argument":"4-6 sentences with their specific findings, data points, and reasoning"},'
-                    '{"name":"Sentiment Analyst","vote":"BUY","argument":"..."},'
-                    '{"name":"News Researcher","vote":"HOLD","argument":"..."},'
-                    '{"name":"Fundamentals Researcher","vote":"BUY","argument":"..."},'
-                    '{"name":"Bull Researcher","vote":"BUY","argument":"..."},'
-                    '{"name":"Bear Researcher","vote":"SELL","argument":"..."},'
-                    '{"name":"Research Manager","vote":"BUY","argument":"..."},'
-                    '{"name":"Risk Team","vote":"BUY","argument":"..."}'
-                    ']}\n\n'
-                    "Rules: positions=3-5 (HIGH=5,MEDIUM=4,LOW=3). "
-                    "risk_ladder must sum ≤8%. Start small (0.5-1%), scale up. "
-                    "tp_r_multiples: TP as multiples of initial R (distance from entry to SL = 1R). TP1 min 1.5R. "
-                    "If DotVerse signal is provided, calibrate tp_r_multiples against actual SL distance. "
-                    "HOLD: positions=1, risk_ladder=[0.5], trailing=['manual'], tp_r_multiples=[1.5].\n"
-                    "For agents: vote must match each agent's actual stance from their report. "
-                    "argument must be 4-6 sentences of detailed analysis from their specific report — include the key data points, reasoning, and specific concerns or supporting evidence they raised. Do not summarise. Quote specific findings.\n\n"
-                    f"FINAL VERDICT:\n{raw}\n\n"
-                    f"AGENT REPORTS:\n{agent_ctx}"
-                    f"{signal_block}"
-                )
-            }],
+            messages=build_verdict_structure_messages(ticker, verdict_text, state, signal_ctx),
             response_format={"type": "json_object"},
             max_tokens=2000,
             temperature=0.1,
         )
-        return json.loads(resp.choices[0].message.content)
+        return parse_json_object(resp.choices[0].message.content)
     except Exception as e:
         print(f"[verdict] structure extraction failed: {e}")
         return None
@@ -17802,23 +17374,9 @@ def _run_verdict_job(ticker, trade_date_str, signal_ctx=None):
     # If you're seeing this error, the most likely cause is that the Railway
     # service running this worker (which may be a separate service from the web
     # process) does not have the key in its environment variables.
-    _key_map = {
-        "deepseek":   "DEEPSEEK_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",
-        "openai":     "OPENAI_API_KEY",
-        "xai":        "XAI_API_KEY",
-    }
     provider = VERDICT_CONFIG.get("llm_provider", "")
-    required_env = _key_map.get(provider)
-    if required_env and not os.environ.get(required_env, "").strip():
-        return {
-            "error": (
-                f"{required_env} is not set in this worker's environment. "
-                f"Open Railway → your worker service → Variables and add {required_env}. "
-                f"The web service has the key but the worker process running this job does not."
-            ),
-            "status": "failed",
-        }
+    if not is_provider_configured(provider, os.environ):
+        return missing_provider_error(provider, process_name="worker")
     try:
         config = VERDICT_CONFIG.copy()
         ta = SharedContextTradingGraph(debug=False, config=config)
@@ -17828,7 +17386,7 @@ def _run_verdict_job(ticker, trade_date_str, signal_ctx=None):
         # (missing key, JSON parse error, network issue) fall back to building
         # agent cards directly from the TradingAgents state reports.
         if not structured:
-            structured = _build_fallback_structured(state, decision)
+            structured = build_fallback_structured(state, decision)
         return {"ticker": ticker, "verdict": decision, "structured": structured, "status": "complete"}
     except Exception as e:
         return {"error": str(e), "status": "failed"}
@@ -18386,42 +17944,7 @@ def api_docs_swagger():
 
 # ─── Serialisation helper ────────────────────────────────────
 def _agent_trade_to_dict(t):
-    return {
-        "id":            t.id,
-        "uuid":          t.uuid,
-        "account_id":    t.account_id,
-        "signal_id":     t.signal_id,
-        "symbol":        t.symbol,
-        "side":          t.side,
-        "quantity":      t.quantity,
-        "entry_price":   t.entry_price,
-        "exit_price":    t.exit_price,
-        "stop_loss":     t.stop_loss,
-        "take_profit":   t.take_profit,
-        "entry_time":    t.entry_time.isoformat() if t.entry_time else None,
-        "exit_time":     t.exit_time.isoformat() if t.exit_time else None,
-        "realized_pnl":  t.realized_pnl,
-        "unrealized_pnl": t.unrealized_pnl,
-        "rr_ratio":      t.rr_ratio,
-        "status":        t.status,
-        "outcome":       t.outcome,
-        "notes":         t.notes,
-        "created_at":    t.created_at.isoformat() if t.created_at else None,
-    }
-
-
-def _format_duration(start, end):
-    if not start or not end:
-        return ""
-    delta = end - start
-    days = delta.days
-    hours = delta.seconds // 3600
-    minutes = (delta.seconds % 3600) // 60
-    if days > 0:
-        return f"{days}d {hours}h"
-    if hours > 0:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
+    return serialize_agent_trade(t)
 
 
 # ─── 1. GET /api/trading-agent/dashboard ──────────────────────
@@ -18441,15 +17964,13 @@ def agent_dashboard():
         ).all()
         account_ids = [a.id for a in accounts]
         total_accounts = len(accounts)
-        online = sum(1 for a in accounts if a.status in ("connected", "online"))
+        online = 0
 
         # Aggregates from trades
         open_trades = db.query(AgentTrade).filter(
             AgentTrade.account_id.in_(account_ids),
             AgentTrade.status == "OPEN",
         ).all() if account_ids else []
-        total_open_positions = len(open_trades)
-        unrealized_pnl = sum((t.unrealized_pnl or 0.0) for t in open_trades)
 
         # Recent closed trades for win rate (last 90 days)
         cutoff = datetime.utcnow() - timedelta(days=90)
@@ -18458,31 +17979,15 @@ def agent_dashboard():
             AgentTrade.status == "CLOSED",
             AgentTrade.exit_time >= cutoff,
         ).all() if account_ids else []
-        total_closed = len(closed_trades)
-        wins = sum(1 for t in closed_trades if t.outcome == "WIN")
-        win_rate = round(wins / total_closed * 100, 1) if total_closed > 0 else 0.0
+        trade_summary = summarize_agent_dashboard_trades(open_trades, closed_trades)
 
         # Accounts needing attention
-        attention = []
-        healthy = []
-        total_balance = 0.0
-        total_equity = 0.0
+        projected_accounts = []
+        with mt5_state_lock:
+            live_states = live_states_for_query_ids(mt5_state, query_ids)
         for a in accounts:
-            balance = getattr(a, 'balance', 0) or 0.0
-            equity = getattr(a, 'equity', 0) or 0.0
-            drawdown = getattr(a, 'drawdown', 0) or 0.0
-            leverage = getattr(a, 'leverage', None) or "1:100"
             login = getattr(a, 'account_number', None) or ""
-            # Compute problem description
-            problem = None
-            if a.status == "warning":
-                problem = "Margin warning"
-            elif drawdown > 20:
-                problem = "Drawdown threshold exceeded"
-            elif a.status == "error":
-                problem = a.error_message or "Account error"
-            elif a.status == "disconnected":
-                problem = "Account disconnected"
+            live_state = find_live_state_for_account(login, live_states, len(accounts))
             # Compute today_pnl from real sources, never random
             today_pnl = None
 
@@ -18503,7 +18008,7 @@ def agent_dashboard():
                         if candidate and isinstance(candidate.get("account"), dict):
                             state = candidate
                             break
-                    acct_data = state.get("account", {})
+                    acct_data = (live_state or state).get("account", {})
                 if acct_data and daily_row and daily_row.starting_balance is not None:
                     mt5_login = str(acct_data.get("login", "") or "")
                     # Only apply delta if the EA's account login matches this account
@@ -18528,31 +18033,12 @@ def agent_dashboard():
                         _func.date(AgentTrade.exit_time) == datetime.utcnow().date(),
                     ).scalar()
                     today_pnl = round(float(today_sum or 0), 2)
-            total_balance += balance
-            total_equity += equity
-            entry = {
-                "id": a.id,
-                "name": a.name,
-                "initials": "".join([w[0] for w in a.name.split()]).upper()[:2],
-                "balance": balance,
-                "equity": equity,
-                "drawdown": drawdown,
-                "leverage": leverage,
-                "login": login,
-                "broker": a.broker,
-                "server": a.server,
-                "account_number": a.account_number,
-                "account_type": a.account_type,
-                "currency": a.currency,
-                "status": a.status,
-                "problem": problem,
-                "today_pnl": today_pnl,
-                "last_seen": a.last_seen.isoformat() if a.last_seen else None,
-            }
-            if a.status in ("warning", "error", "disconnected"):
-                attention.append(entry)
-            else:
-                healthy.append(entry)
+            entry = project_agent_account(a, live_states, len(accounts), today_pnl=today_pnl)
+            projected_accounts.append(entry)
+        account_summary = summarize_agent_dashboard_accounts(projected_accounts)
+        online = account_summary["online_accounts"]
+        attention = account_summary["attention"]
+        healthy = account_summary["healthy"]
 
         # ── Synthetic account: EA pushing data but no TradingAccount row ──
         if not accounts:
@@ -18564,44 +18050,21 @@ def agent_dashboard():
                         ea_state = candidate
                         break
             if ea_state and isinstance(ea_state.get("account"), dict):
-                acct_data = ea_state["account"]
-                ea_positions = ea_state.get("positions", [])
-                balance = float(acct_data.get("balance") or 0)
-                equity = float(acct_data.get("equity") or balance)
-                last_seen = ea_state.get("last_seen")
-                synthetic = {
-                    "id": "__pending__",
-                    "name": "MT5 (Pending Setup)",
-                    "initials": "MT",
-                    "needs_onboarding": True,
-                    "balance": balance,
-                    "equity": equity,
-                    "drawdown": None,
-                    "leverage": None,
-                    "login": str(acct_data.get("login", "") or ""),
-                    "broker": "MetaTrader 5",
-                    "server": str(acct_data.get("server", "") or ""),
-                    "account_number": str(acct_data.get("login", "") or ""),
-                    "account_type": "live",
-                    "currency": str(acct_data.get("currency", "USD") or "USD"),
-                    "status": "pending",
-                    "problem": None,
-                    "today_pnl": None,
-                    "last_seen": last_seen.isoformat() if last_seen else None,
-                    "open_positions": len(ea_positions),
-                }
+                synthetic = project_pending_mt5_account(ea_state)
                 healthy.append(synthetic)
                 total_accounts = 1
+                if synthetic.get("status") in ("connected", "online"):
+                    online = 1
 
         return jsonify({
             "total_accounts": total_accounts,
             "online_accounts": online,
-            "total_open_positions": total_open_positions,
-            "unrealized_pnl": round(unrealized_pnl, 2),
-            "total_closed_trades_90d": total_closed,
-            "win_rate_90d": win_rate,
-            "total_balance": round(total_balance, 2),
-            "total_equity": round(total_equity, 2),
+            "total_open_positions": trade_summary["total_open_positions"],
+            "unrealized_pnl": trade_summary["unrealized_pnl"],
+            "total_closed_trades_90d": trade_summary["total_closed_trades_90d"],
+            "win_rate_90d": trade_summary["win_rate_90d"],
+            "total_balance": account_summary["total_balance"],
+            "total_equity": account_summary["total_equity"],
             "today_pnl": round(sum(e.get("today_pnl", 0) or 0 for e in attention + healthy), 2),
             "attention": attention,
             "healthy": healthy,
@@ -18621,7 +18084,10 @@ def agent_positions():
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
     session_uid, query_ids = _agent_user_ids()
-    account_id = request.args.get("account_id")
+    try:
+        filters = normalize_agent_position_query_params(request.args)
+    except AgentTradeValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     db = _DBSession()
     try:
         query = db.query(AgentTrade).join(TradingAccount).filter(
@@ -18629,8 +18095,8 @@ def agent_positions():
             TradingAccount.is_active == True,
             AgentTrade.status == "OPEN",
         )
-        if account_id:
-            query = query.filter(AgentTrade.account_id == int(account_id))
+        if filters.account_id:
+            query = query.filter(AgentTrade.account_id == filters.account_id)
         trades = query.order_by(AgentTrade.entry_time.desc()).all()
 
         acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
@@ -18638,17 +18104,10 @@ def agent_positions():
         ).all()}
 
         results = []
+        now = datetime.utcnow()
         for t in trades:
-            d = _agent_trade_to_dict(t)
             account_name = acct_map.get(t.account_id, "Unknown")
-            d["account_name"] = account_name
-            d["client_name"] = account_name
-            d["client_initials"] = "".join([w[0] for w in account_name.split()]).upper()[:2]
-            d["entry"] = t.entry_price
-            d["current"] = t.current_price if hasattr(t, 'current_price') and t.current_price else t.entry_price
-            d["pnl"] = t.realized_pnl or t.unrealized_pnl or 0
-            d["duration"] = _format_duration(t.entry_time, datetime.utcnow() if t.status == "OPEN" else t.exit_time)
-            results.append(d)
+            results.append(project_agent_position(t, account_name, now=now))
         return jsonify({"positions": results, "count": len(results)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -18665,15 +18124,10 @@ def agent_trades():
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
     session_uid, query_ids = _agent_user_ids()
-    account_id = request.args.get("account_id")
-    symbol     = request.args.get("symbol")
-    outcome    = request.args.get("outcome")
-    search     = request.args.get("search")
-    status     = request.args.get("status", "CLOSED")
-    date_from  = request.args.get("date_from")
-    date_to    = request.args.get("date_to")
-    limit      = int(request.args.get("limit", 200))
-    offset     = int(request.args.get("offset", 0))
+    try:
+        filters = normalize_agent_trade_query_params(request.args)
+    except AgentTradeValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     db = _DBSession()
     try:
@@ -18681,40 +18135,34 @@ def agent_trades():
             TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         )
-        if account_id:
-            query = query.filter(AgentTrade.account_id == int(account_id))
-        if status:
-            query = query.filter(AgentTrade.status == status.upper())
-        if symbol:
-            query = query.filter(AgentTrade.symbol.ilike(f"%{symbol}%"))
-        if outcome:
-            query = query.filter(AgentTrade.outcome == outcome.upper())
-        if search:
-            query = query.filter(AgentTrade.symbol.ilike(f"%{search}%"))
-        if date_from:
-            query = query.filter(AgentTrade.exit_time >= datetime.fromisoformat(date_from))
-        if date_to:
-            query = query.filter(AgentTrade.exit_time <= datetime.fromisoformat(date_to))
+        if filters.account_id:
+            query = query.filter(AgentTrade.account_id == filters.account_id)
+        if filters.status:
+            query = query.filter(AgentTrade.status == filters.status)
+        if filters.symbol:
+            query = query.filter(AgentTrade.symbol.ilike(f"%{filters.symbol}%"))
+        if filters.outcome:
+            query = query.filter(AgentTrade.outcome == filters.outcome)
+        if filters.search:
+            query = query.filter(AgentTrade.symbol.ilike(f"%{filters.search}%"))
+        if filters.date_from:
+            query = query.filter(AgentTrade.exit_time >= filters.date_from)
+        if filters.date_to:
+            query = query.filter(AgentTrade.exit_time <= filters.date_to)
 
         total = query.count()
-        trades = query.order_by(AgentTrade.exit_time.desc().nullslast(), AgentTrade.entry_time.desc()).offset(offset).limit(limit).all()
+        trades = query.order_by(AgentTrade.exit_time.desc().nullslast(), AgentTrade.entry_time.desc()).offset(filters.offset).limit(filters.limit).all()
 
         acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
             TradingAccount.user_id.in_(query_ids)
         ).all()}
 
-        results = []
-        for t in trades:
-            d = _agent_trade_to_dict(t)
-            account_name = acct_map.get(t.account_id, "Unknown")
-            d["account_name"] = account_name
-            d["client_name"] = account_name
-            # Format date from exit_time or entry_time
-            date_src = t.exit_time or t.entry_time
-            d["date"] = date_src.strftime("%Y-%m-%d %H:%M") if date_src else None
-            results.append(d)
+        results = [
+            project_agent_trade_history_item(t, acct_map.get(t.account_id, "Unknown"))
+            for t in trades
+        ]
 
-        return jsonify({"trades": results, "total": total, "limit": limit, "offset": offset})
+        return jsonify({"trades": results, "total": total, "limit": filters.limit, "offset": filters.offset})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -18731,38 +18179,40 @@ def agent_create_trade():
         return jsonify({"error": "db unavailable"}), 503
     session_uid, query_ids = _agent_user_ids()
     body = request.json or {}
-    account_id = body.get("account_id")
-    if not account_id:
-        return jsonify({"error": "account_id is required"}), 400
+    try:
+        trade_request = normalize_agent_trade_create_payload(body)
+    except AgentTradeValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     db = _DBSession()
     try:
         acct = db.query(TradingAccount).filter(
-            TradingAccount.id == account_id,
+            TradingAccount.id == trade_request.account_id,
             TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         ).first()
         if not acct:
             return jsonify({"error": "Account not found or not owned"}), 404
-        if acct.user_id == "default" and session_uid != "default":
-            return jsonify({"error": "Cannot modify shared EA account"}), 403
+        mutation_error = agent_account_mutation_error(acct, session_uid)
+        if mutation_error:
+            return jsonify({"error": mutation_error}), 403
 
         trade = AgentTrade(
             uuid=str(uuid.uuid4()),
-            account_id=account_id,
-            signal_id=body.get("signal_id"),
-            symbol=(body.get("symbol") or "").upper(),
-            side=(body.get("side") or "BUY").upper(),
-            quantity=body.get("quantity", 0.0),
-            entry_price=body.get("entry_price", 0.0),
-            stop_loss=body.get("stop_loss"),
-            take_profit=body.get("take_profit"),
-            entry_time=datetime.fromisoformat(body["entry_time"]) if body.get("entry_time") else datetime.utcnow(),
+            account_id=trade_request.account_id,
+            signal_id=trade_request.signal_id,
+            symbol=trade_request.symbol,
+            side=trade_request.side,
+            quantity=trade_request.quantity,
+            entry_price=trade_request.entry_price,
+            stop_loss=trade_request.stop_loss,
+            take_profit=trade_request.take_profit,
+            entry_time=trade_request.entry_time,
             status="OPEN",
-            notes=body.get("notes"),
+            notes=trade_request.notes,
         )
         db.add(trade)
         db.add(AgentAuditLog(
-            account_id=account_id,
+            account_id=trade_request.account_id,
             event_type="trade_created",
             description=f"Trade {trade.uuid} created: {trade.side} {trade.symbol} @ {trade.entry_price}"
         ))
@@ -18785,46 +18235,29 @@ def agent_trades_export():
     if not _DBSession:
         return jsonify({"error": "db unavailable"}), 503
     session_uid, query_ids = _agent_user_ids()
-    account_id = request.args.get("account_id")
-    date_from  = request.args.get("date_from")
-    date_to    = request.args.get("date_to")
+    try:
+        filters = normalize_agent_trade_query_params(request.args, default_status=None)
+    except AgentTradeValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     db = _DBSession()
     try:
         query = db.query(AgentTrade).join(TradingAccount).filter(
             TradingAccount.user_id.in_(query_ids),
             TradingAccount.is_active == True,
         )
-        if account_id:
-            query = query.filter(AgentTrade.account_id == int(account_id))
-        if date_from:
-            query = query.filter(AgentTrade.exit_time >= datetime.fromisoformat(date_from))
-        if date_to:
-            query = query.filter(AgentTrade.exit_time <= datetime.fromisoformat(date_to))
+        if filters.account_id:
+            query = query.filter(AgentTrade.account_id == filters.account_id)
+        if filters.date_from:
+            query = query.filter(AgentTrade.exit_time >= filters.date_from)
+        if filters.date_to:
+            query = query.filter(AgentTrade.exit_time <= filters.date_to)
         trades = query.order_by(AgentTrade.exit_time.desc().nullslast()).all()
 
         acct_map = {a.id: a.name for a in db.query(TradingAccount).filter(
             TradingAccount.user_id.in_(query_ids)
         ).all()}
 
-        import csv, io
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["Date", "Account", "Symbol", "Side", "Entry", "Exit", "P&L", "R:R", "Outcome", "Status"])
-        for t in trades:
-            writer.writerow([
-                (t.exit_time or t.entry_time).strftime("%Y-%m-%d %H:%M") if (t.exit_time or t.entry_time) else "",
-                acct_map.get(t.account_id, ""),
-                t.symbol,
-                t.side,
-                t.entry_price,
-                t.exit_price or "",
-                round(t.realized_pnl or 0, 2),
-                round(t.rr_ratio, 2) if t.rr_ratio else "",
-                t.outcome or "",
-                t.status,
-            ])
-        csv_data = output.getvalue()
-        output.close()
+        csv_data = build_agent_trade_export_csv(trades, acct_map)
         return Response(
             csv_data,
             mimetype="text/csv",
@@ -18854,9 +18287,7 @@ def agent_trade_detail(trade_id):
         if not trade:
             return jsonify({"error": "Trade not found"}), 404
         acct = db.query(TradingAccount).filter(TradingAccount.id == trade.account_id).first()
-        result = _agent_trade_to_dict(trade)
-        result["account_name"] = acct.name if acct else "Unknown"
-        return jsonify(result)
+        return jsonify(project_agent_trade_detail(trade, acct.name if acct else "Unknown"))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -18873,6 +18304,10 @@ def agent_update_trade(trade_id):
         return jsonify({"error": "db unavailable"}), 503
     session_uid, query_ids = _agent_user_ids()
     body = request.json or {}
+    try:
+        trade_update = normalize_agent_trade_update_payload(body)
+    except AgentTradeValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     db = _DBSession()
     try:
         trade = db.query(AgentTrade).join(TradingAccount).filter(
@@ -18883,26 +18318,22 @@ def agent_update_trade(trade_id):
             return jsonify({"error": "Trade not found"}), 404
         # Secondary ownership check for shared EA accounts
         acct = db.query(TradingAccount).filter(TradingAccount.id == trade.account_id).first()
-        if acct and acct.user_id == "default" and session_uid != "default":
-            return jsonify({"error": "Cannot modify shared EA account"}), 403
+        mutation_error = agent_account_mutation_error(acct, session_uid)
+        if mutation_error:
+            return jsonify({"error": mutation_error}), 403
 
-        if "exit_price" in body:
-            trade.exit_price = body["exit_price"]
-        if "status" in body:
-            trade.status = body["status"].upper()
-            if trade.status == "CLOSED":
-                trade.exit_time = trade.exit_time or datetime.utcnow()
-                if trade.exit_price and trade.entry_price:
-                    multiplier = 1 if trade.side == "BUY" else -1
-                    trade.realized_pnl = (trade.exit_price - trade.entry_price) * multiplier * trade.quantity
-        if "outcome" in body:
-            trade.outcome = body["outcome"].upper()
-        if "notes" in body:
-            trade.notes = body["notes"]
-        if "stop_loss" in body:
-            trade.stop_loss = body["stop_loss"]
-        if "take_profit" in body:
-            trade.take_profit = body["take_profit"]
+        for field_name, value in trade_update.updates.items():
+            setattr(trade, field_name, value)
+        if trade_update.updates.get("status") == "CLOSED":
+            trade.exit_time = trade.exit_time or datetime.utcnow()
+            realized_pnl = calculate_realized_pnl(
+                side=trade.side,
+                entry_price=trade.entry_price,
+                exit_price=trade.exit_price,
+                quantity=trade.quantity,
+            )
+            if realized_pnl is not None:
+                trade.realized_pnl = realized_pnl
 
         event = "trade_updated" if trade.status == "OPEN" else "trade_closed"
         db.add(AgentAuditLog(
@@ -18945,11 +18376,7 @@ def agent_analytics():
             cutoff = datetime.utcnow() - timedelta(days=days_map[period])
 
         if not acct_ids:
-            return jsonify({
-                "total_trades": 0, "wins": 0, "losses": 0, "be": 0,
-                "win_rate": 0, "profit_factor": 0, "total_pnl": 0,
-                "avg_rr": 0, "sharpe_ratio": 0, "equity_curve": []
-            })
+            return jsonify(empty_agent_analytics())
 
         q = db.query(AgentTrade).filter(
             AgentTrade.account_id.in_(acct_ids),
@@ -18959,60 +18386,11 @@ def agent_analytics():
             q = q.filter(AgentTrade.exit_time >= cutoff)
         trades = q.all()
 
-        total = len(trades)
-        wins = sum(1 for t in trades if t.outcome == "WIN")
-        losses = sum(1 for t in trades if t.outcome == "LOSS")
-        be = sum(1 for t in trades if t.outcome == "BE")
-        win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
-
-        gross_profit = sum((t.realized_pnl or 0) for t in trades if (t.realized_pnl or 0) > 0)
-        gross_loss   = abs(sum((t.realized_pnl or 0) for t in trades if (t.realized_pnl or 0) < 0))
-        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0.0
-
-        total_pnl = round(sum(t.realized_pnl or 0 for t in trades), 2)
-        valid_rr = [t.rr_ratio for t in trades if t.rr_ratio and t.rr_ratio > 0]
-        avg_rr = round(sum(valid_rr) / len(valid_rr), 2) if valid_rr else 0.0
-
-        sharpe = 0.0
         daily_metrics = db.query(AgentDailyMetrics).filter(
             AgentDailyMetrics.account_id.in_(acct_ids)
         ).all() if acct_ids else []
-        if daily_metrics:
-            daily_pnl = [m.pnl or 0 for m in daily_metrics]
-            mean_pnl = sum(daily_pnl) / len(daily_pnl) if daily_pnl else 0
-            variance = sum((v - mean_pnl) ** 2 for v in daily_pnl) / len(daily_pnl) if daily_pnl else 1
-            std = variance ** 0.5
-            sharpe = round(mean_pnl / std, 2) if std > 0 else 0.0
 
-        equity_curve = []
-        running = 100.0
-        sorted_metrics = sorted(daily_metrics, key=lambda m: m.date)
-        for m in sorted_metrics:
-            equity_curve.append({
-                "date": m.date.isoformat(),
-                "value": round(running, 2),
-                "pnl": round(m.pnl or 0, 2),
-            })
-            if m.starting_balance and m.starting_balance > 0:
-                running *= (1 + (m.pnl or 0) / m.starting_balance)
-
-        return jsonify({
-            "total_trades": total,
-            "trade_count": total,
-            "wins": wins,
-            "losses": losses,
-            "be": be,
-            "win_rate": win_rate,
-            "profit_factor": profit_factor,
-            "total_pnl": total_pnl,
-            "avg_rr": avg_rr,
-            "sharpe_ratio": sharpe,
-            "opening_balance": round(sorted_metrics[0].starting_balance, 2) if sorted_metrics and sorted_metrics[0].starting_balance else 0,
-            "closing_balance": round(sorted_metrics[-1].ending_balance, 2) if sorted_metrics and sorted_metrics[-1].ending_balance else 0,
-            "total_return": round(total_pnl, 2),
-            "total_return_pct": round(total_pnl / sorted_metrics[0].starting_balance * 100, 2) if sorted_metrics and sorted_metrics[0].starting_balance and sorted_metrics[0].starting_balance > 0 else 0,
-            "equity_curve": equity_curve,
-        })
+        return jsonify(summarize_agent_analytics(trades, daily_metrics))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -19041,29 +18419,7 @@ def agent_portfolio():
             AgentTrade.status == "OPEN",
         ).all() if acct_ids else []
 
-        total_unrealized = sum(t.unrealized_pnl or 0 for t in open_trades)
-        total_open = len(open_trades)
-        symbols = list(set(t.symbol for t in open_trades))
-
-        accounts = []
-        for a in accts:
-            acct_open = [t for t in open_trades if t.account_id == a.id]
-            accounts.append({
-                "id": a.id,
-                "name": a.name,
-                "initials": "".join([w[0] for w in a.name.split()]).upper()[:2],
-                "status": a.status,
-                "open_positions": len(acct_open),
-                "unrealized_pnl": round(sum(t.unrealized_pnl or 0 for t in acct_open), 2),
-            })
-
-        return jsonify({
-            "total_accounts": len(accounts),
-            "total_open_positions": total_open,
-            "total_unrealized_pnl": round(total_unrealized, 2),
-            "unique_symbols": symbols,
-            "accounts": accounts,
-        })
+        return jsonify(project_agent_portfolio(accts, open_trades))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -19087,16 +18443,17 @@ def agent_archive_account(account_id):
         ).first()
         if not acct:
             return jsonify({"error": "Account not found"}), 404
-        if acct.user_id == "default" and session_uid != "default":
-            return jsonify({"error": "Cannot modify shared EA account"}), 403
+        mutation_error = agent_account_mutation_error(acct, session_uid)
+        if mutation_error:
+            return jsonify({"error": mutation_error}), 403
         acct.is_active = False
         db.add(AgentAuditLog(
             account_id=account_id,
             event_type="account_archived",
-            description=f"Account '{acct.name}' archived by user"
+            description=account_archived_audit_description(acct.name)
         ))
         db.commit()
-        return jsonify({"success": True, "message": f"Account '{acct.name}' archived"})
+        return jsonify(account_archived_response(acct.name))
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
@@ -19122,19 +18479,17 @@ def agent_sync_account(account_id):
         ).first()
         if not acct:
             return jsonify({"error": "Account not found"}), 404
-        if acct.user_id == "default" and session_uid != "default":
-            return jsonify({"error": "Cannot modify shared EA account"}), 403
+        mutation_error = agent_account_mutation_error(acct, session_uid)
+        if mutation_error:
+            return jsonify({"error": mutation_error}), 403
         acct.updated_at = datetime.utcnow()
         db.add(AgentAuditLog(
             account_id=account_id,
             event_type="sync_triggered",
-            description=f"Manual sync triggered for account '{acct.name}'"
+            description=account_sync_audit_description(acct.name)
         ))
         db.commit()
-        return jsonify({
-            "success": True,
-            "message": f"Sync triggered for '{acct.name}'. Data will refresh shortly."
-        })
+        return jsonify(account_sync_response(acct.name))
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
@@ -19159,30 +18514,15 @@ def agent_daily_metrics(account_id):
         ).first()
         if not acct:
             return jsonify({"error": "Account not found"}), 404
-        if acct.user_id == "default" and session_uid != "default":
-            return jsonify({"error": "Cannot modify shared EA account"}), 403
+        mutation_error = agent_account_mutation_error(acct, session_uid)
+        if mutation_error:
+            return jsonify({"error": mutation_error}), 403
 
         metrics = db.query(AgentDailyMetrics).filter(
             AgentDailyMetrics.account_id == account_id,
         ).order_by(AgentDailyMetrics.date.desc()).limit(365).all()
 
-        results = [{
-            "id": m.id,
-            "date": m.date.isoformat(),
-            "starting_balance": m.starting_balance,
-            "ending_balance": m.ending_balance,
-            "pnl": m.pnl,
-            "trades_count": m.trades_count,
-            "wins_count": m.wins_count,
-            "losses_count": m.losses_count,
-            "max_drawdown": m.max_drawdown,
-        } for m in metrics]
-
-        return jsonify({
-            "account_id": account_id,
-            "account_name": acct.name,
-            "metrics": results,
-        })
+        return jsonify(build_daily_metrics_response(account_id, acct.name, metrics))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -19206,45 +18546,59 @@ def agent_recompute_daily(account_id):
         ).first()
         if not acct:
             return jsonify({"error": "Account not found"}), 404
-        if acct.user_id == "default" and session_uid != "default":
-            return jsonify({"error": "Cannot modify shared EA account"}), 403
+        mutation_error = agent_account_mutation_error(acct, session_uid)
+        if mutation_error:
+            return jsonify({"error": mutation_error}), 403
 
         trades = db.query(AgentTrade).filter(
             AgentTrade.account_id == account_id,
             AgentTrade.status == "CLOSED",
         ).all()
 
-        from collections import defaultdict
-        daily = defaultdict(lambda: {"trades": 0, "wins": 0, "losses": 0, "pnl": 0.0})
-        for t in trades:
-            date_key = (t.exit_time or t.entry_time).date()
-            daily[date_key]["trades"] += 1
-            daily[date_key]["pnl"] += (t.realized_pnl or 0)
-            if t.outcome == "WIN":
-                daily[date_key]["wins"] += 1
-            elif t.outcome == "LOSS":
-                daily[date_key]["losses"] += 1
+        daily_rows = build_recomputed_daily_metric_rows(trades)
 
         db.query(AgentDailyMetrics).filter(AgentDailyMetrics.account_id == account_id).delete()
-        for date_key, d in sorted(daily.items()):
+        for row in daily_rows:
             db.add(AgentDailyMetrics(
                 account_id=account_id,
-                date=date_key,
-                pnl=round(d["pnl"], 2),
-                trades_count=d["trades"],
-                wins_count=d["wins"],
-                losses_count=d["losses"],
+                date=row["date"],
+                pnl=row["pnl"],
+                trades_count=row["trades_count"],
+                wins_count=row["wins_count"],
+                losses_count=row["losses_count"],
             ))
 
         db.add(AgentAuditLog(
             account_id=account_id,
             event_type="daily_recomputed",
-            description=f"Daily metrics recomputed for '{acct.name}': {len(daily)} days, {len(trades)} trades"
+            description=f"Daily metrics recomputed for '{acct.name}': {len(daily_rows)} days, {len(trades)} trades"
         ))
         db.commit()
-        return jsonify({"success": True, "days_computed": len(daily)})
+        return jsonify({"success": True, "days_computed": len(daily_rows)})
     except Exception as e:
         db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─── 13. GET /api/trading-agent/accounts ─────────────────────
+@app.route("/api/trading-agent/accounts", methods=["GET"])
+@login_required
+@_agent_rate_limit(60)
+def agent_accounts_list():
+    """Return the Agent tab's active MT5 accounts."""
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    session_uid, query_ids = _agent_user_ids()
+    db = _DBSession()
+    try:
+        accounts = db.query(TradingAccount).filter(
+            TradingAccount.user_id.in_(query_ids),
+            TradingAccount.is_active == True,
+        ).order_by(TradingAccount.sort_order, TradingAccount.name).all()
+        return jsonify({"accounts": [_account_to_dict(a) for a in accounts]})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
         db.close()
@@ -19261,19 +18615,27 @@ def agent_add_account():
         return jsonify({"error": "db unavailable"}), 503
     user_id = str(session.get("user_id"))
     body = request.json or {}
-    name = (body.get("name") or "").strip()
-    if not name:
-        return jsonify({"error": "name is required"}), 400
+    try:
+        account_request = normalize_account_create_payload(body, allow_login_alias=True)
+    except AccountValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     db = _DBSession()
     try:
+        existing = db.query(TradingAccount).filter(
+            TradingAccount.user_id == user_id,
+            TradingAccount.name == account_request.name,
+            TradingAccount.is_active == True,
+        ).first()
+        if existing:
+            return jsonify({"error": "An account with this name already exists."}), 409
         a = TradingAccount(
             user_id=user_id,
-            name=name,
-            broker=(body.get("broker") or "").strip(),
-            server=(body.get("server") or "").strip(),
-            account_number=(body.get("account_number") or "").strip(),
-            account_type=(body.get("account_type") or "DEMO").upper(),
-            currency=(body.get("currency") or "USD").upper(),
+            name=account_request.name,
+            broker=account_request.broker,
+            server=account_request.server,
+            account_number=account_request.account_number,
+            account_type=account_request.account_type,
+            currency=account_request.currency,
             platform="MT5",
         )
         # Generate EA secret if _enc is available
@@ -19286,16 +18648,15 @@ def agent_add_account():
         db.add(AgentAuditLog(
             account_id=a.id,
             event_type="account_added",
-            description=f"New account '{name}' added via Agent tab"
+            description=account_added_audit_description(account_request.name)
         ))
         db.commit()
         db.refresh(a)
-        result = _account_to_dict(a)
         try:
-            result["ea_secret"] = _dec(a.ea_secret_enc) if a.ea_secret_enc and _fernet else None
+            ea_secret = _dec(a.ea_secret_enc) if a.ea_secret_enc and _fernet else None
         except Exception:
-            result["ea_secret"] = None
-        return jsonify(result), 201
+            ea_secret = None
+        return jsonify(build_agent_account_create_response(a, ea_secret)), 201
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500

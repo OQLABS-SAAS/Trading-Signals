@@ -7656,6 +7656,59 @@ function _agentSvgDot(status){
 function _agentPnlStr(val){if(val>0) return _agentSvgGreenUp()+' +$'+val.toFixed(2);if(val<0) return _agentSvgRedDown()+' -$'+Math.abs(val).toFixed(2);return '$0.00';}
 function _agentPnlColor(val){if(val>0) return 'var(--grn)';if(val<0) return 'var(--red)';return 'var(--t3)';}
 function _agentOutcomeSvg(o){if(o==='win') return _agentSvgWin();if(o==='loss') return _agentSvgLoss();return _agentSvgBE();}
+function _agentEsc(v){return (typeof _escHtml==='function')?_escHtml(v==null?'':String(v)):String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function _agentNormalizeStatus(a){
+  var s=String((a&&a.status)||'').toLowerCase();
+  if((a&&(a.connected===true||a.online===true))||s==='connected'||s==='online') return 'online';
+  if(s==='disconnected'||s==='offline') return 'offline';
+  if(s==='warning'||s==='error'||s==='pending') return s;
+  return s||'pending';
+}
+function _agentNormalizeAccount(raw){
+  raw=raw||{};
+  var name=raw.name||raw.account_name||'MT5 Account';
+  var login=raw.login||raw.account_number||'';
+  var status=_agentNormalizeStatus(raw);
+  return Object.assign({},raw,{
+    id: raw.id!=null?raw.id:(login||name),
+    name: name,
+    initials: raw.initials||String(name).split(/\s+/).filter(Boolean).map(function(w){return w[0];}).join('').toUpperCase().slice(0,2)||'MT',
+    login: login,
+    account_number: raw.account_number||login,
+    account_type: (raw.account_type||'DEMO').toUpperCase(),
+    broker: raw.broker||'MetaTrader 5',
+    server: raw.server||'',
+    status: status,
+    connected: raw.connected===true||status==='online',
+    online: raw.online===true||status==='online',
+    leverage: raw.leverage!=null?raw.leverage:(raw.margin_leverage!=null?raw.margin_leverage:null)
+  });
+}
+function _agentRememberAccounts(accounts){
+  var normalized=(accounts||[]).map(_agentNormalizeAccount).filter(function(a){return a&&a.id!=null;});
+  normalized.forEach(function(a){_agentClientData[a.id]=a;});
+  _agentAccounts=normalized;
+  _agentOpenCount=Object.keys(_agentClientData).length;
+  return normalized;
+}
+function _agentAccountsFromDashboard(data){
+  return data?(data.attention||[]).concat(data.healthy||[],data.accounts||[]):null;
+}
+async function _agentLoadAccounts(){
+  var dashboard=await dvFetch('/api/trading-agent/dashboard');
+  var sawResponse=!!dashboard;
+  var accounts=_agentAccountsFromDashboard(dashboard);
+  if(accounts&&accounts.length) return {source:'dashboard',dashboard:dashboard,accounts:_agentRememberAccounts(accounts)};
+  var agentAccounts=await dvFetch('/api/trading-agent/accounts');
+  if(agentAccounts&&Array.isArray(agentAccounts.accounts)) sawResponse=true;
+  accounts=agentAccounts&&Array.isArray(agentAccounts.accounts)?agentAccounts.accounts:null;
+  if(accounts&&accounts.length) return {source:'agent_accounts',dashboard:dashboard,accounts:_agentRememberAccounts(accounts)};
+  var settingsAccounts=await dvFetch('/api/accounts');
+  if(settingsAccounts&&Array.isArray(settingsAccounts.accounts)) sawResponse=true;
+  accounts=settingsAccounts&&Array.isArray(settingsAccounts.accounts)?settingsAccounts.accounts:null;
+  if(accounts&&accounts.length) return {source:'settings_accounts',dashboard:dashboard,accounts:_agentRememberAccounts(accounts)};
+  return {source:sawResponse?'empty':'none',dashboard:dashboard,accounts:[]};
+}
 
 function _agentSwitchSubtab(name){
   // Abort any in-flight render for the previous sub-tab
@@ -7672,17 +7725,25 @@ function _agentSwitchSubtab(name){
 async function _agentRenderPanel(name, panel){
   if(!panel) return;
   var clients = Object.values(_agentClientData);
-  var attention = clients.filter(function(c){return c.status === 'warning' || c.status === 'offline' || c.status === 'error';});
+  var attention = clients.filter(function(c){return c.status === 'warning' || c.status === 'offline' || c.status === 'error' || c.status === 'disconnected';});
   var healthy = clients.filter(function(c){return c.status === 'online' || c.status === 'connected' || c.status === 'pending';});
 
   if(name === 'overview' || name === 'dashboard'){
     panel.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Loading accounts...</div></div>';
-    var d = Object.keys(_agentClientData).length ? null : await dvFetch('/api/trading-agent/dashboard');
+    var d = null;
+    if(!Object.keys(_agentClientData).length){
+      var loaded = await _agentLoadAccounts();
+      d = loaded.dashboard;
+      clients = Object.values(_agentClientData);
+      attention = clients.filter(function(c){return c.status==='warning'||c.status==='offline'||c.status==='error'||c.status==='disconnected';});
+      healthy = clients.filter(function(c){return c.status==='online'||c.status==='connected'||c.status==='pending';});
+    }
     if(window._agentAbort && window._agentAbort.signal.aborted) return;
     if(d){
-      (d.attention||[]).concat(d.healthy||[]).forEach(function(a){_agentClientData[a.id]=a;});
+      var dashboardAccounts = _agentAccountsFromDashboard(d)||[];
+      if(dashboardAccounts.length) _agentRememberAccounts(dashboardAccounts);
       clients = Object.values(_agentClientData);
-      attention = clients.filter(function(c){return c.status==='warning'||c.status==='offline'||c.status==='error';});
+      attention = clients.filter(function(c){return c.status==='warning'||c.status==='offline'||c.status==='error'||c.status==='disconnected';});
       healthy = clients.filter(function(c){return c.status==='online'||c.status==='connected'||c.status==='pending';});
     }
     // If API call failed (d is null) and no cached data, handle error cases
@@ -7715,8 +7776,8 @@ async function _agentRenderPanel(name, panel){
       + (attention.length ? '<div class="agent-section-head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8706e" stroke-width="2"><path d="M12 2L2 22h20L12 2z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="19" r="1" fill="#e8706e"/></svg><span class="agent-section-label agent-red">Needs Attention</span></div>'
         + '<div class="agent-problem-cards">'
         + attention.map(function(a){
-          return '<div class="agent-card agent-problem" data-tip="'+(a.name||'Unnamed')+': '+(a.problem||'Requires attention')+'" onclick="_agentSelectClient(\''+a.id+'\')">'
-            + '<div class="agent-card-header"><div class="agent-card-av">'+(a.initials||'??')+'</div><div class="agent-card-name">'+(a.name||'Unnamed')+'</div>'+_agentSvgDot(a.status)+'</div>'
+          return '<div class="agent-card agent-problem" data-tip="'+_agentEsc((a.name||'Unnamed')+': '+(a.problem||'Requires attention'))+'" onclick="_agentSelectClient(\''+_agentEsc(a.id)+'\')">'
+            + '<div class="agent-card-header"><div class="agent-card-av">'+_agentEsc(a.initials||'??')+'</div><div class="agent-card-name">'+_agentEsc(a.name||'Unnamed')+'</div>'+_agentSvgDot(a.status)+'</div>'
             + '<div class="agent-card-metrics"><div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+(a.balance != null ? a.balance : 'N/A')+'</div></div>'
             + (a.drawdown != null ? '<div><div class="agent-metric-label">Drawdown</div><div class="agent-metric-sub">'+a.drawdown+'</div></div>' : '')+'</div>'
             + (a.problem ? '<div class="agent-card-explain">'+a.problem+'</div>' : '')
@@ -7748,8 +7809,8 @@ async function _agentRenderPanel(name, panel){
         var pnlColor = pnlVal != null ? (pnlVal >= 0 ? 'var(--grn)' : 'var(--red)') : 'var(--t3)';
         var pnlDisplay = pnlVal != null ? (pnlSign + '$' + Math.abs(pnlVal).toFixed(2)) : '--';
         var pnlStatus = pnlVal != null ? 'Today: ' + pnlDisplay : 'Today: --';
-        return '<div class="agent-card" data-tip="'+(a.name||'Unnamed')+': Balance '+(a.balance != null ? a.balance : 'N/A')+' | Drawdown '+(a.drawdown != null ? a.drawdown : 'N/A')+' | Status: Online" onclick="_agentSelectClient(\''+a.id+'\')">'
-          + '<div class="agent-card-header"><div class="agent-card-av-sm">'+(a.initials||'??')+'</div><div class="agent-card-name">'+(a.name||'Unnamed')+'</div>'+_agentSvgDot('online')+'</div>'
+        return '<div class="agent-card" data-tip="'+_agentEsc((a.name||'Unnamed')+': Balance '+(a.balance != null ? a.balance : 'N/A')+' | Drawdown '+(a.drawdown != null ? a.drawdown : 'N/A')+' | Status: '+(a.status||'online'))+'" onclick="_agentSelectClient(\''+_agentEsc(a.id)+'\')">'
+          + '<div class="agent-card-header"><div class="agent-card-av-sm">'+_agentEsc(a.initials||'??')+'</div><div class="agent-card-name">'+_agentEsc(a.name||'Unnamed')+'</div>'+_agentSvgDot(a.status||'online')+'</div>'
           + '<div class="agent-card-metrics"><div><div class="agent-metric-label">Balance</div><div class="agent-metric-value">'+(a.balance != null ? a.balance : 'N/A')+'</div></div></div>'
           + '<div style="font-family:var(--mono);font-size:12px;color:'+pnlColor+';">'+pnlStatus+'</div>'
           + '<div class="agent-card-status">All systems normal</div></div>';
@@ -7878,47 +7939,43 @@ async function _agentRenderPanel(name, panel){
 
   else if(name === 'accounts'){
     panel.innerHTML = '<div class="agent-loading"><div class="agent-spinner"></div><div class="agent-loading-text">Loading accounts...</div></div>';
-    var data = await dvFetch('/api/trading-agent/dashboard');
+    var loadedAccounts = await _agentLoadAccounts();
     if(window._agentAbort && window._agentAbort.signal.aborted) return;
-    if(!data){
+    if(!loadedAccounts || loadedAccounts.source==='none'){
       panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">Could not load accounts</div><div class="agent-empty-desc">Check your connection and try again.</div><button class="agent-connect-btn agent-retry-btn" onclick="_agentSwitchSubtab(\'accounts\')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Retry</button></div>';
       return;
     }
-    var accounts = (data.attention || []).concat(data.healthy || []);
-    if(accounts.length > 0){
-      accounts.forEach(function(a){
-        _agentClientData[a.id] = a;
-      });
-    }
+    var accounts = loadedAccounts.accounts || [];
     var connectFormHtml = '<div class="agent-connect-form" id="agentConnectForm"><h3>Connect New Account</h3><div class="agent-form-grid">'
       + '<div data-tip="Give this account a recognizable name, like &apos;Johnson — IC Markets&apos;"><label>Client Name</label><input type="text" id="agentNewName" placeholder="e.g. Orion Capital"></div>'
       + '<div data-tip="Your broker name, e.g. IC Markets, Pepperstone, FXCM"><label>Broker</label><select id="agentNewBroker"><option>MetaTrader 5</option><option>cTrader</option></select></div>'
       + '<div data-tip="Your broker&apos;s MT5 server name. Usually found in your MT5 terminal."><label>Server</label><input type="text" id="agentNewServer" placeholder="e.g. ICMarkets-Live"></div>'
-      + '<div data-tip="Your MT5 account login ID, typically a number."><label>Login</label><input type="text" id="agentNewLogin" placeholder="Account number"></div>'
-      + '<div data-tip="Your MT5 account password. Stored encrypted."><label>Password</label><input type="password" id="agentNewPass" placeholder="Password"></div>'
+      + '<div data-tip="Your MT5 account login ID, typically a number."><label>Account Number</label><input type="text" id="agentNewLogin" placeholder="Account number"></div>'
+      + '<div data-tip="LIVE accounts can place real trades through the EA; DEMO accounts are for practice or testing."><label>Account Type</label><select id="agentNewType"><option value="DEMO">Demo</option><option value="LIVE">Live</option></select></div>'
       + '</div><span id="connectError" style="color:var(--red);font-size:11px;display:block;margin-top:6px;"></span><div class="agent-form-actions"><button class="agent-acct-btn agent-edit" onclick="_agentCancelConnect()">Cancel</button><button class="agent-generate-btn" onclick="_agentAddAccount()">Connect</button></div></div>';
     if(accounts.length === 0){
       panel.innerHTML = '<div class="agent-empty"><div class="agent-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="agent-empty-title">No accounts connected</div><div class="agent-empty-desc">Connect your first MT5 account to start managing positions, tracking trades, and generating reports.</div><button class="agent-connect-btn" data-tip="Add a new MT5 account" onclick="_agentShowConnect()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Connect New Account</button></div>' + connectFormHtml;
       return;
     }
     var accts = accounts.map(function(a){
-      return '<div class="agent-acct-card" data-id="'+a.id+'" data-tip="'+a.name+' \u2014 Balance: '+(a.balance != null ? a.balance : 'N/A')+' | Status: '+((a.status||'online').charAt(0).toUpperCase()+(a.status||'online').slice(1))+' | Broker: '+(a.broker||'N/A')+'" onclick="_agentSelectClient(\''+a.id+'\')">'
-        + '<div class="agent-acct-header"><div class="agent-acct-av">'+(a.initials||'??')+'</div><div class="agent-acct-name">'+a.name+'</div>'+(a.status==='online'?'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#c9a84c"/></svg>':a.status==='offline'?'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#e8706e"/></svg>':'<svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="#d4a843"/></svg>')+'</div>'
+      var login = a.login || a.account_number || '';
+      return '<div class="agent-acct-card" data-id="'+_agentEsc(a.id)+'" data-tip="'+_agentEsc(a.name+' \u2014 Balance: '+(a.balance != null ? a.balance : 'N/A')+' | Status: '+((a.status||'online').charAt(0).toUpperCase()+(a.status||'online').slice(1))+' | Broker: '+(a.broker||'N/A'))+'" onclick="_agentSelectClient(\''+_agentEsc(a.id)+'\')">'
+        + '<div class="agent-acct-header"><div class="agent-acct-av">'+_agentEsc(a.initials||'??')+'</div><div class="agent-acct-name">'+_agentEsc(a.name)+'</div>'+_agentSvgDot(a.status)+'</div>'
         + '<div class="agent-acct-details">'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Broker</span><span class="agent-acct-value">'+(a.broker||'N/A')+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Server</span><span class="agent-acct-value">'+(a.server||'N/A')+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Login</span><span class="agent-acct-value agent-mono">'+(a.login != null ? a.login : 'N/A')+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Balance</span><span class="agent-acct-value agent-mono">'+(a.balance != null ? (typeof a.balance === 'number' ? '$' + a.balance.toFixed(2) : a.balance) : 'N/A')+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Equity</span><span class="agent-acct-value agent-mono">'+(a.equity != null ? (typeof a.equity === 'number' ? '$' + a.equity.toFixed(2) : a.equity) : (a.balance != null ? (typeof a.balance === 'number' ? '$' + a.balance.toFixed(2) : a.balance) : 'N/A'))+'</span></div>'
-        + '<div class="agent-acct-row"><span class="agent-acct-label">Leverage</span><span class="agent-acct-value">'+(a.leverage != null ? a.leverage : 'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Broker</span><span class="agent-acct-value">'+_agentEsc(a.broker||'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Server</span><span class="agent-acct-value">'+_agentEsc(a.server||'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Login</span><span class="agent-acct-value agent-mono">'+_agentEsc(login||'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Balance</span><span class="agent-acct-value agent-mono">'+_agentEsc(a.balance != null ? (typeof a.balance === 'number' ? '$' + a.balance.toFixed(2) : a.balance) : 'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Equity</span><span class="agent-acct-value agent-mono">'+_agentEsc(a.equity != null ? (typeof a.equity === 'number' ? '$' + a.equity.toFixed(2) : a.equity) : (a.balance != null ? (typeof a.balance === 'number' ? '$' + a.balance.toFixed(2) : a.balance) : 'N/A'))+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Leverage</span><span class="agent-acct-value">'+_agentEsc(a.leverage != null ? a.leverage : 'N/A')+'</span></div>'
         + '</div>'
         + '<div class="agent-acct-actions">'
-        + '<button class="agent-acct-btn agent-edit" data-tip="Edit account details" onclick="_agentToggleEdit(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit</button>'
-        + '<button class="agent-acct-btn agent-sync" data-tip="Refresh account data from broker" onclick="_agentSyncAcct(\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Sync</button>'
-        + '<button class="agent-acct-btn agent-disconnect" data-tip="Disconnect this account" onclick="_agentConfirmDisc(this,\''+a.id+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.68 13.31a6 6 0 003.41-2.25M14 6.33A7.98 7.98 0 002 12a7.98 7.98 0 004.07 7.1"/><path d="M16 17.67A7.98 7.98 0 0022 12a7.98 7.98 0 00-4-6.91"/><line x1="2" y1="2" x2="22" y2="22"/></svg> Disconnect</button>'
+        + '<button class="agent-acct-btn agent-edit" data-tip="Edit account details" onclick="_agentToggleEdit(this,\''+_agentEsc(a.id)+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit</button>'
+        + '<button class="agent-acct-btn agent-sync" data-tip="Refresh account data from broker" onclick="_agentSyncAcct(\''+_agentEsc(a.id)+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Sync</button>'
+        + '<button class="agent-acct-btn agent-disconnect" data-tip="Disconnect this account" onclick="_agentConfirmDisc(this,\''+_agentEsc(a.id)+'\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.68 13.31a6 6 0 003.41-2.25M14 6.33A7.98 7.98 0 002 12a7.98 7.98 0 004.07 7.1"/><path d="M16 17.67A7.98 7.98 0 0022 12a7.98 7.98 0 00-4-6.91"/><line x1="2" y1="2" x2="22" y2="22"/></svg> Disconnect</button>'
         + '</div>'
-        + '<div class="agent-inline-edit"><label>Client Name</label><input type="text" value="'+a.name+'"><label>Login</label><input type="text" value="'+(a.login||'')+'"><label>Server</label><input type="text" value="'+(a.server||'')+'"><div class="agent-inline-row"><button class="agent-acct-btn agent-sync" onclick="_agentSaveEdit(this,\''+a.id+'\')">Save</button><button class="agent-acct-btn agent-edit" onclick="_agentCancelEdit(this)">Cancel</button></div></div>'
-        + '<div class="agent-confirm-disc">Disconnect this account?<div class="agent-confirm-row"><button class="agent-confirm-btn agent-confirm" onclick="_agentDoDisc(\''+a.id+'\')">Confirm</button><button class="agent-confirm-btn agent-cancel" onclick="_agentCancelDisc(this)">Cancel</button></div></div>'
+        + '<div class="agent-inline-edit"><label>Client Name</label><input type="text" value="'+_agentEsc(a.name)+'"><label>Login</label><input type="text" value="'+_agentEsc(login)+'"><label>Server</label><input type="text" value="'+_agentEsc(a.server||'')+'"><div class="agent-inline-row"><button class="agent-acct-btn agent-sync" onclick="_agentSaveEdit(this,\''+_agentEsc(a.id)+'\')">Save</button><button class="agent-acct-btn agent-edit" onclick="_agentCancelEdit(this)">Cancel</button></div></div>'
+        + '<div class="agent-confirm-disc">Disconnect this account?<div class="agent-confirm-row"><button class="agent-confirm-btn agent-confirm" onclick="_agentDoDisc(\''+_agentEsc(a.id)+'\')">Confirm</button><button class="agent-confirm-btn agent-cancel" onclick="_agentCancelDisc(this)">Cancel</button></div></div>'
         + '</div>';
     }).join('');
     panel.innerHTML = '<div class="agent-account-grid">'+accts+'</div>'
@@ -7929,14 +7986,18 @@ async function _agentRenderPanel(name, panel){
 
 // Agent client selection
 function _agentSelectClient(clientId){
+  if(clientId==null || clientId==='') return;
   var c = _agentClientData[clientId];
   if(!c) return;
   _agentActiveClient = clientId;
-  document.getElementById('agentClientAv').textContent = c.initials;
-  document.getElementById('agentClientName').textContent = c.name;
+  var av = document.getElementById('agentClientAv');
+  var nm = document.getElementById('agentClientName');
+  if(av) av.textContent = c.initials || 'MT';
+  if(nm) nm.textContent = c.name || 'MT5 Account';
   var dd = document.getElementById('agentClientDropdown');
   if(dd){dd.classList.remove('agent-show');}
-  document.getElementById('agentClientSelector').classList.remove('agent-open');
+  var selector = document.getElementById('agentClientSelector');
+  if(selector) selector.classList.remove('agent-open');
   // Refresh current panel if on a filterable tab
   if(_agentSubtab === 'positions' || _agentSubtab === 'history'){
     _agentRenderPanel(_agentSubtab, document.getElementById('agentPanel'));
@@ -7949,14 +8010,7 @@ async function _agentBuildDropdown(){
   if(!dd) return;
   // Fetch from API if _agentClientData hasn't been populated yet
   if(Object.keys(_agentClientData).length === 0){
-    var data = await dvFetch('/api/trading-agent/dashboard');
-    if(data){
-      var accounts = (data.attention || []).concat(data.healthy || []);
-      accounts.forEach(function(a){
-        if(a.id == null) return; // Skip synthetic accounts without DB rows
-        _agentClientData[a.id] = a;
-      });
-    }
+    await _agentLoadAccounts();
   }
   dd.innerHTML = '';
   Object.values(_agentClientData).forEach(function(c){
@@ -7964,9 +8018,9 @@ async function _agentBuildDropdown(){
     var row = document.createElement('div');
     row.className = 'agent-dd-row' + (_agentActiveClient === c.id ? ' agent-active' : '');
     row.onclick = function(e){e.stopPropagation();_agentSelectClient(c.id);};
-    row.innerHTML = '<div class="agent-dd-av">'+c.initials+'</div>'
-      + '<div class="agent-dd-info"><div class="agent-dd-name">'+c.name+'</div><div class="agent-dd-bal">'+c.balance+'</div></div>'
-      + '<div class="agent-dd-dot '+c.status+'"></div>';
+    row.innerHTML = '<div class="agent-dd-av">'+_agentEsc(c.initials||'MT')+'</div>'
+      + '<div class="agent-dd-info"><div class="agent-dd-name">'+_agentEsc(c.name||'MT5 Account')+'</div><div class="agent-dd-bal">'+_agentEsc(c.balance!=null?c.balance:'N/A')+'</div></div>'
+      + '<div class="agent-dd-dot '+_agentEsc(c.status||'pending')+'"></div>';
     dd.appendChild(row);
   });
 }
@@ -8242,14 +8296,20 @@ async function _agentAddAccount(){
     name: name,
     broker: (document.getElementById('agentNewBroker')||{}).value||'MetaTrader 5',
     server: (document.getElementById('agentNewServer')||{}).value||'Live',
-    login: (document.getElementById('agentNewLogin')||{}).value||'',
-    password: (document.getElementById('agentNewPass')||{}).value||''
+    account_number: (document.getElementById('agentNewLogin')||{}).value||'',
+    account_type: (document.getElementById('agentNewType')||{}).value||'DEMO'
   };
-  var result = await dvFetch('/api/trading-agent/accounts', {method:'POST',body:JSON.stringify(payload)});
-  if(result && result.success){
+  var result = await dvFetch('/api/trading-agent/accounts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(result && (result.success || result.id != null || result.account_number != null || result.login != null)){
+    var normalized = _agentNormalizeAccount(result);
+    _agentClientData[normalized.id] = normalized;
+    _agentAccounts = Object.values(_agentClientData);
     _dvToast('Account connected successfully');
     _agentOpenCount++;
     _agentCancelConnect();
+    if(result.ea_secret && typeof _showEaSecretModal === 'function'){
+      _showEaSecretModal(result.name || name, result.ea_secret);
+    }
     await _agentRenderPanel('accounts', document.getElementById('agentPanel'));
     _agentBuildDropdown();
     setTimeout(function(){ _agentSwitchSubtab('overview'); }, 100);
@@ -9176,6 +9236,32 @@ const BASE_URL='';
 async function dvFetch(path,opts={}){
   try{const r=await fetch(BASE_URL+path,{credentials:'include',...opts});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json();}
   catch(e){console.warn('[dvFetch]',path,e.message);return null;}
+}
+async function dvOrderFetch(path,opts={}){
+  try{
+    const r=await fetch(BASE_URL+path,{credentials:'include',...opts});
+    let data={};
+    try{ data=await r.json(); }catch(e){ data={}; }
+    if(data==null || typeof data!=='object') data={value:data};
+    data._ok=!!r.ok;
+    data._httpStatus=r.status;
+    return data;
+  }catch(e){
+    console.warn('[dvOrderFetch]',path,e.message);
+    return {_ok:false,_httpStatus:0,error:'Network error',message:e.message};
+  }
+}
+function _mt5OrderErrorText(res){
+  if(!res) return 'Order failed — check MT5 connection';
+  if(res.required_tier) return 'Upgrade required: MT5 live execution requires '+String(res.required_tier).toUpperCase()+' tier.';
+  if(res.login_required || res._httpStatus===401) return 'Sign in again before placing live trades.';
+  if(res.error) return String(res.error);
+  if(res.message) return String(res.message);
+  return 'Order failed — check MT5 connection';
+}
+function _mt5OrderErrorHtml(res){
+  var txt=_mt5OrderErrorText(res);
+  return (typeof _escHtml==='function') ? _escHtml(txt) : String(txt).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});
 }
 // Race a promise against a ms timeout — resolves null on timeout (handles hanging cross-origin fetches)
 function withTimeout(p,ms){return Promise.race([p,new Promise(res=>setTimeout(()=>res(null),ms))]);}
@@ -10584,7 +10670,7 @@ function _szSetBrokerLeverage(val){
   window._szBrokerLeverageReal = true;
   window._szBrokerLeverageSource = 'user';
   var note = document.getElementById('szBrokerLevNote');
-  if(note) note.textContent = 'Manual broker leverage · affects margin only, not max loss';
+  if(note) note.textContent = 'Manual broker leverage · affects margin only, not planned stop risk';
   if(typeof szCalc === 'function') szCalc();
 }
 function _szRefreshBrokerLeverage(lv, source){
@@ -10596,7 +10682,7 @@ function _szRefreshBrokerLeverage(lv, source){
   var sel = document.getElementById('szBrokerLev');
   if(sel){ sel.innerHTML = _dvBrokerLeverageOptions(n); sel.value = String(n); }
   var note = document.getElementById('szBrokerLevNote');
-  if(note) note.textContent = (source === 'broker' ? 'From connected MT5 account' : 'Manual broker leverage') + ' · affects margin only, not max loss';
+  if(note) note.textContent = (source === 'broker' ? 'From connected MT5 account' : 'Manual broker leverage') + ' · affects margin only, not planned stop risk';
 }
 function _szMarginDivisor(assetType, instrumentLev){
   var broker = _szBrokerLeverageValue();
@@ -10606,6 +10692,35 @@ function _szMarginDivisor(assetType, instrumentLev){
     return Math.max(1, Math.min(inst, broker));
   }
   return Math.max(1, broker);
+}
+function _szUsdPerPriceUnit(assetType, sym){
+  if(assetType !== 'forex') return 1;
+  var s = String(sym || '').toUpperCase().replace(/[\/\-]/g,'');
+  var quote = s.length >= 6 ? s.slice(3,6) : 'USD';
+  return (typeof _forexUsdRate === 'function') ? _forexUsdRate(quote) : 1;
+}
+function _szUsdPositionValue(assetType, sym, units, price){
+  return (parseFloat(units)||0) * (parseFloat(price)||0) * _szUsdPerPriceUnit(assetType, sym);
+}
+function _szExecQtyDisplay(lots, assetType){
+  var n = parseFloat(lots);
+  if(!(n > 0)) return '';
+  assetType = ({equity:'stock', auto:'stock'})[assetType] || assetType || '';
+  var trim = function(v){ return String(v).replace(/(\.\d*?[1-9])0+$/,'$1').replace(/\.0+$/,''); };
+  if(assetType === 'stock') return String(Math.max(1, Math.round(n)));
+  if(assetType === 'crypto') return trim(n.toFixed(6));
+  if(assetType === 'forex') return trim(n.toFixed(4));
+  return trim(n.toFixed(4));
+}
+function _szCalcQuantityRaw(calc){
+  calc = calc || window._szLastCalc || {};
+  var lots = parseFloat(calc.lots);
+  if(lots > 0) return lots;
+  var posSize = parseFloat(calc.posSize);
+  return posSize > 0 ? posSize : 0;
+}
+function _szHasCalculatedQuantity(calc){
+  return _szCalcQuantityRaw(calc) > 0;
 }
 
 function _todayToggleClass(id, btn){
@@ -10714,9 +10829,10 @@ function _todaySizeTrade(o, acct, riskPct){
   else if(o.asset==='index'){ unitLabel=lots.toFixed(2)+' contracts'; }
   else if(o.asset==='commodity'){ unitLabel=lots.toFixed(2)+' lots'; }
   else { var sh=Math.round(units); unitLabel=sh.toLocaleString()+(sh===1?' share':' shares'); }
-  // Cash actually committed: spot (crypto/stock) = full notional; leveraged (forex/
-  // index/commodity) = notional / leverage. Broker doesn't report leverage, so 1:100 est.
-  var leveraged = !(o.asset==='crypto'||o.asset==='stock');
+  // Cash actually committed: stocks are unlevered; MT5-style crypto/forex/index/
+  // commodity products use the selected broker leverage for margin. Max loss is
+  // still controlled only by the stop and position size, not by leverage.
+  var leveraged = o.asset!=='stock';
   var lev = leveraged ? (window._todayLeverage||100) : 1;
   var marginReq = notional/lev;
   return { units:units, lots:lots, contractSize:LOT.cs, notional:notional, tradeable:tradeable, minLot:LOT.minUnits, riskPctReq:(riskPct||1),
@@ -10840,7 +10956,7 @@ function showToday(){
 	      + '<div class="td-grid td-four">'
 	        + '<div class="td-field"><label>Account size</label><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)"></div>'
 	        + '<div class="td-field"><label>Weekly profit target</label><input id="todayProfitGoal" type="number" step="10" min="0" value="'+(c.profitGoal||500)+'" oninput="_todaySetProfitGoal(this.value)"></div>'
-	        + '<div class="td-field"><label>Risk per trade</label><input id="todayRisk" type="number" step="0.25" min="0.1" value="'+(c.riskPct||p.riskPct)+'" oninput="_todaySetGlobalRisk(this.value)"></div>'
+	        + '<div class="td-field"><label>Risk per trade</label><input id="todayRisk" type="number" step="0.05" min="0.05" max="'+_TODAY_PER_CAP+'" value="'+(c.riskPct||p.riskPct)+'" oninput="_todaySetGlobalRisk(this.value)"></div>'
 	        + '<div class="td-field"><label>Markets</label><select onchange="_todaySetMarketPreset(this.value)"><option value="all">Forex, gold, crypto, indices</option><option value="forex">Forex only</option><option value="crypto">Crypto only</option></select></div>'
 	        + '<div class="td-field"><label>Broker leverage</label><select id="todayLev" onchange="_todaySetLeverage(this.value)">'+_dvBrokerLeverageOptions(window._todayLeverage||100)+'</select></div>'
 	      + '</div>'
@@ -11150,7 +11266,7 @@ function _todayLadderHtml(o, idx, pxFmt, money2, esc){
       + '<span>risk <strong style="color:#e8706e;">'+money2(-totals.risk)+'</strong></span>'
       + '<span>profit plan <strong style="color:#5de8a0;">+'+money2(totals.profit)+'</strong></span>'
     + '</div>'
-    + (legs[0]&&legs[0].tooSmallSplit?'<div style="margin-top:6px;font-family:var(--mono);font-size:8px;color:rgba(201,168,76,.75);">Broker minimum lot is too large for a split, so this trade will submit as one safe order.</div>':'')
+    + (legs[0]&&legs[0].tooSmallSplit?'<div style="margin-top:6px;font-family:var(--mono);font-size:8px;color:rgba(201,168,76,.75);">Broker minimum lot is too large for a split, so this trade will submit as one planned order within the selected risk model.</div>':'')
   + '</div>';
 }
 function _todayRenderPlan(){
@@ -11165,22 +11281,22 @@ function _todayRenderPlan(){
   var lab=function(text,tip){ return '<div title="'+esc(tip)+'" style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.4);text-transform:uppercase;margin-bottom:2px;border-bottom:1px dotted rgba(237,232,216,.28);display:inline-block;cursor:help;">'+text+' <span style="opacity:.6;">ⓘ</span></div>'; };
   var sub=function(text,tip){ return '<span title="'+esc(tip)+'" style="border-bottom:1px dotted rgba(237,232,216,.18);cursor:help;">'+text+'</span>'; };
   var TT={
-    maxloss:'The most you can lose if price hits your stop loss — already after spread, fees and slippage. DotVerse auto-closes at the stop, so you cannot lose more than this.',
-    riskpct:'That max loss as a percentage of your account balance.',
+    maxloss:'The planned loss if price fills at your stop loss — already after spread, fees and slippage estimates. Your broker stop is the protection point; fast gaps or severe slippage can still exceed the estimate.',
+    riskpct:'That planned stop risk as a percentage of your account balance.',
     profit:'Your profit if price reaches the first take-profit (TP1), after all trading costs.',
     reward:'Reward-to-risk ratio — dollars you make for every $1 you risk. 1:2 means risk $10 to make $20.',
-    cashin:'Margin — the cash your broker locks up to hold this trade. With leverage it is a fraction of the position value. Your real risk is still only the Max loss.',
-    tradesize:'How big this trade is — shown as lot/unit size AND its dollar position value. Type a number to set the trade yourself; margin, profit, risk % and max loss all update. (You can also set risk % in the header — last edit wins.)',
+    cashin:'Margin — the cash your broker locks up to hold this trade. With leverage it is a fraction of the position value. Your planned stop risk is still controlled by the stop distance and selected risk %.',
+    tradesize:'How big this trade is — shown as lot/unit size AND its dollar position value. Type a number to set the trade yourself; margin, profit, risk % and planned stop risk all update. (You can also set risk % in the header — last edit wins.)',
     tradeamt:'The cash you put in to open this position (spot — no leverage).',
     margin:'The cash actually tied up to open this trade. With leverage you control a larger position than the cash you put up.',
     controls:'The full position value you control. You only put up the margin shown; the broker provides the rest via this leverage.',
-    controlsEst:'Leverage is ESTIMATED at 1:100 because your broker isn’t reporting it yet. Set your real leverage in Plan settings (or update & re-attach the DotVerse EA) for exact margin. Your max loss is unaffected — it never depends on leverage.',
+    controlsEst:'Leverage is ESTIMATED at 1:100 because your broker isn’t reporting it yet. Set your real leverage in Plan settings (or update & re-attach the DotVerse EA) for exact margin. Planned stop risk is separate from leverage, but gaps/slippage can exceed the estimate.',
     cost:'Total cost to trade: spread + commission + estimated slippage. Already subtracted from your profit and added to your loss.',
     live:'Live price vs your planned entry. Green = good to enter now; amber = price drifting; red = the setup has moved, skip it.',
-    riskinput:'The % of your account you risk on this trade. Change it and the size, max loss and profit re-calculate instantly.',
+    riskinput:'The % of your account you risk on this trade. Change it and the size, planned stop risk, and profit re-calculate instantly.',
     edge:'Reward-to-risk for this setup — how many dollars of reward per dollar of risk.'
   };
-  var autoTip={ be:'Break-even: after TP1 hits, your stop moves to entry so the trade can no longer turn into a loss.', trail:'Trailing stop: the stop follows price as it runs, locking in more profit.', macro:'News watch: flags high-impact economic news that could move this trade.', inval:'Invalidation: auto-exits if the original signal conditions break down.', sent:'Sentiment: monitors crowd positioning and sentiment shifts.', tp1:'TP1 alert: notifies you when price reaches the first take-profit.', tp2:'TP2 alert: notifies you when price reaches the second take-profit.', weekend:'Weekend guard: manages risk before the weekend market gap.' };
+  var autoTip={ be:'Break-even: after TP1 hits, your stop moves to entry so planned downside is reduced. Gaps and slippage can still fill worse.', trail:'Trailing stop: the stop follows price as it runs, locking in more profit.', macro:'News watch: flags high-impact economic news that could move this trade.', inval:'Invalidation: auto-exits if the original signal conditions break down.', sent:'Sentiment: monitors crowd positioning and sentiment shifts.', tp1:'TP1 alert: notifies you when price reaches the first take-profit.', tp2:'TP2 alert: notifies you when price reaches the second take-profit.', weekend:'Weekend guard: manages risk before the weekend market gap.' };
   var totExp=0, totCashIn=0, totRisk=0, totGross=0, totProfit=0, longs=0, shorts=0, clsSet={}, nTradeable=0, nTooSmall=0, nMoved=0;
 	  plan.forEach(function(o){ var s=o._size; if(o._live&&o._live.invalid){ nMoved++; return; } if(!s.tradeable){ nTooSmall++; return; } var lt=_todayLadderTotals(o); totExp+=lt.notional||s.notional; totCashIn+=lt.margin||s.marginReq; totRisk+=lt.risk||s.netLoss; totGross+=s.grossRisk; totProfit+=lt.profit||s.netTP1; if(o.sig==='BUY')longs++; else shorts++; clsSet[o.asset]=1; nTradeable++; });
   var autoLbl={be:'Break-even',trail:'Trailing',macro:'News',inval:'Invalidation',sent:'Sentiment',tp1:'TP1 alert',tp2:'TP2 alert',weekend:'Weekend'};
@@ -11237,13 +11353,13 @@ function _todayRenderPlan(){
         + '<div id="today-lp-'+idx+'" title="'+esc(TT.live)+'" style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.4);margin-bottom:7px;min-height:13px;cursor:help;"><span style="width:6px;height:6px;border-radius:50%;background:rgba(237,232,216,.25);flex-shrink:0;"></span>checking live price…</div>'
         + '<div style="display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.62);margin-bottom:5px;">'
           + '<span title="'+esc('The price DotVerse plans to enter at.')+'" style="cursor:help;">Entry <strong style="color:rgba(237,232,216,.92);">'+pxFmt(o.entry)+'</strong></span>'
-          + '<span title="'+esc('Auto-closes here at your max loss — '+_slPctAway.toFixed(1)+'% from entry.')+'" style="cursor:help;">Stop <strong style="color:#e8706e;">'+pxFmt(o.sl)+'</strong> <span style="color:rgba(237,232,216,.4);">('+_slPctAway.toFixed(1)+'% away)</span></span>'
+          + '<span title="'+esc('Planned stop level — '+_slPctAway.toFixed(1)+'% from entry. Fast markets, gaps, or slippage can fill worse than this estimate.')+'" style="cursor:help;">Stop <strong style="color:#e8706e;">'+pxFmt(o.sl)+'</strong> <span style="color:rgba(237,232,216,.4);">('+_slPctAway.toFixed(1)+'% away)</span></span>'
           + '<span title="'+esc(TT.reward)+'" style="cursor:help;">R:R <strong style="color:rgba(237,232,216,.92);">1 : '+(s.rr||0).toFixed(1)+'</strong></span>'
         + '</div>'
         + '<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.55);">Targets&nbsp; '+_tps.map(function(t,i){return 'TP'+(i+1)+' <span style="color:#5de8a0;">'+pxFmt(t)+'</span>';}).join(' · ')+'</div>'
       + '</div>'
       + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:5px;">'
-        + '<div><div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.45);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;">Risk per trade</div><div style="display:flex;align-items:center;gap:3px;"><input type="number" step="0.05" min="0.05" value="'+(+(o._risk||1).toFixed(2))+'" onchange="_todaySetTradeRisk('+idx+',this.value)" title="'+esc('Your risk % for this trade — size, money in, profit and max loss update.')+'" style="width:58px;padding:4px 6px;font-family:var(--mono);font-size:12px;font-weight:700;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.2);border-radius:4px;color:rgba(237,232,216,.92);outline:none;"><span style="font-size:11px;color:rgba(237,232,216,.5);">%</span></div></div>'
+        + '<div><div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.45);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;">Risk per trade</div><div style="display:flex;align-items:center;gap:3px;"><input type="number" step="0.05" min="0.05" value="'+(+(o._risk||1).toFixed(2))+'" onchange="_todaySetTradeRisk('+idx+',this.value)" title="'+esc('Your risk % for this trade — size, money in, profit and planned stop risk update.')+'" style="width:58px;padding:4px 6px;font-family:var(--mono);font-size:12px;font-weight:700;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.2);border-radius:4px;color:rgba(237,232,216,.92);outline:none;"><span style="font-size:11px;color:rgba(237,232,216,.5);">%</span></div></div>'
         + '<div><div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.45);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;">Trade size</div><div style="display:flex;align-items:center;gap:3px;"><input type="number" step="'+_szStep+'" min="0" value="'+(+_natVal.toFixed(_szDec))+'" onchange="_todaySetTradeSize('+idx+',this.value)" title="'+esc('Your trade size in '+_natUnit+' — risk %, money in and profit update.')+'" style="width:66px;padding:4px 6px;font-family:var(--mono);font-size:12px;font-weight:700;background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.2);border-radius:4px;color:rgba(237,232,216,.92);outline:none;"><span style="font-size:11px;color:rgba(237,232,216,.5);">'+_natUnit+'</span></div></div>'
       + '</div>'
       + '<div style="font-family:var(--mono);font-size:8.5px;color:rgba(237,232,216,.4);margin-bottom:10px;">✦ DotVerse suggests <span style="color:rgba(93,232,160,.8);font-weight:700;">'+_recR+'%</span> · set risk or size — the other follows</div>'
@@ -11290,7 +11406,7 @@ function _todayRenderPlan(){
     + '<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);line-height:1.5;margin-bottom:8px;">Same scanner as <span onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();" style="color:rgba(93,232,160,.8);border-bottom:1px dotted rgba(93,232,160,.4);cursor:pointer;">Signals ›</span> — Today shows your best <strong>'+nTradeable+'</strong> placeable, diversified pick'+(nTradeable===1?'':'s')+' out of <strong>'+(window._todayScanCount||nTradeable)+'</strong> live setups found. Signals lists every one; Today sizes them to your account.</div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.7);margin-bottom:8px;">'
       + '<span>Total position value: <strong>'+money(totExp)+'</strong></span>'
-      + '<span>Total max loss: <strong style="color:'+riskCol+';">'+money2(-totRisk)+' ('+riskPct.toFixed(2)+'% combined · '+perRisk+'% each)</strong></span>'
+      + '<span>Total planned stop risk: <strong style="color:'+riskCol+';">'+money2(-totRisk)+' ('+riskPct.toFixed(2)+'% combined · '+perRisk+'% each)</strong></span>'
       + '<span>Total profit if all hit TP1: <strong style="color:#5de8a0;">+'+money2(totProfit)+'</strong></span>'
       + '<span>'+nCls+' class'+(nCls===1?'':'es')+' · '+longs+' long / '+shorts+' short</span>'
     + '</div>'
@@ -11307,7 +11423,7 @@ function _todayRenderPlan(){
 	    + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(201,168,76,.85);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Plan totals · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
       + '<div style="flex:1;min-width:104px;">'+lab('Total margin','Combined margin across all trades — what you actually put up. Equals the sum of every card’s Cash in. For leveraged trades the full position value is bigger.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(201,168,76,.95);">'+money2(totCashIn)+'</div></div>'
-      + '<div style="flex:1;min-width:104px;">'+lab('Total position value','The total size you control across all trades. With leverage this can exceed your cash — your risk is still only the max loss.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(237,232,216,.75);">'+money2(totExp)+'</div></div>'
+      + '<div style="flex:1;min-width:104px;">'+lab('Total position value','The total size you control across all trades. With leverage this can exceed your cash. Planned stop risk is shown separately and can still slip in fast markets.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:rgba(237,232,216,.75);">'+money2(totExp)+'</div></div>'
       + '<div style="flex:1;min-width:104px;">'+lab('Total profit if all win','Combined profit if every trade reaches TP1, after costs. Not a promise — some trades will lose; this is the best case.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:#5de8a0;">+'+money2(totProfit)+'</div></div>'
 	      + '<div style="flex:1;min-width:104px;">'+lab('Total risk · all trades','Your TOTAL portfolio risk if every trade hits its stop — the sum of every selected trade.')+'<div style="font-family:var(--mono);font-size:15px;font-weight:700;color:'+riskCol+';">'+money2(-totRisk)+' <span style="font-size:11px;font-weight:600;">('+riskPct.toFixed(2)+'% combined · '+perRisk+'% each)</span></div></div>'
 	    + '</div></div>' : '';
@@ -11383,7 +11499,7 @@ function _todayRenderPlan(){
 	    return '<div class="td-sig-card'+short+'"><div class="td-stack" style="justify-content:space-between"><div><div class="sig-symbol">'+o.sym+'</div><div class="sig-meta">'+o.asset+' · '+o.tf+' · '+o.sig+'</div></div>'+_todayPill(o.sig,dir)+'</div>'
 	      + '<div class="sig-live"><span>Live entry monitor</span><b>'+((o._live&&o._live.price)?pxFmt(o._live.price):pxFmt(o.entry))+'</b><span class="'+dir+'">'+(o._live&&o._live.status?o._live.status:'entry active')+'</span></div>'
 	      + '<div class="sig-levels"><button class="sig-level"><span>Entry</span><b>'+pxFmt(o.entry)+'</b></button><button class="sig-level"><span>SL</span><b class="red">'+pxFmt(o.sl)+'</b></button><button class="sig-level"><span>TP1</span><b class="green">'+pxFmt(o.tp)+'</b></button><button class="sig-level"><span>TP2 / TP3</span><b class="green">'+(tps[1]?pxFmt(tps[1]):'—')+' / '+(tps[2]?pxFmt(tps[2]):'—')+'</b></button></div>'
-	      + '<div class="sig-detail-grid"><button class="sig-mini"><span>R:R</span><b>1:'+(s.rr||0).toFixed(1)+'</b></button><button class="sig-mini"><span>Lot size</span><b>'+_lots(o)+'</b></button><button class="sig-mini"><span>Dollar size</span><b>'+money(s.notional)+'</b></button><button class="sig-mini"><span>Max loss</span><b class="red">'+money2(-s.netLoss)+'</b><span class="td-sub">'+(s.riskPctOfAcct||0).toFixed(2)+'% risk</span></button></div>'
+	      + '<div class="sig-detail-grid"><button class="sig-mini"><span>R:R</span><b>1:'+(s.rr||0).toFixed(1)+'</b></button><button class="sig-mini"><span>Lot size</span><b>'+_lots(o)+'</b></button><button class="sig-mini"><span>Dollar size</span><b>'+money(s.notional)+'</b></button><button class="sig-mini"><span>Planned risk</span><b class="red">'+money2(-s.netLoss)+'</b><span class="td-sub">'+(s.riskPctOfAcct||0).toFixed(2)+'% risk</span></button></div>'
 	      + '<p class="td-sub">'+(o.reason||'DotVerse selected this setup because quality, risk, and timeframe fit the current basket goal.')+'</p>'
 	      + _autoControls(item)
 	      + '<button id="today-cta-'+idx+'" class="td-btn primary" style="margin-top:10px;width:100%" onclick="_todayPlaceTrade('+idx+')">Place this trade</button><div id="today-livebox-'+idx+'" style="margin-top:8px"></div></div>';
@@ -11396,7 +11512,7 @@ function _todayRenderPlan(){
 	  var basket = '<div class="basket-total">'
 	    + _todayMetric('Combined profit','+'+money2(totProfit),'Sum of all planned TP1 targets','green')
 	    + _todayMetric('Profit %','+'+_pct(totProfit),'Profit against the account','green')
-	    + _todayMetric('Combined loss',money2(-totRisk),'Worst case if all stops hit','red')
+	    + _todayMetric('Planned stop risk',money2(-totRisk),'If all planned stops fill before slippage','red')
 	    + _todayMetric('Risk %',riskPct.toFixed(2)+'%','Risk against the account','red')
 	    + _todayMetric('Total trade size',money(totExp),'All trade sizes added together','gold')
 	    + _todayMetric('Margin needed',money2(totCashIn),'Cash tied up by leverage','blue')
@@ -11476,7 +11592,8 @@ function _todaySetLeverage(val){
   var n=parseInt(val); if(!(n>0)) return;
   window._todayLeverage=n; window._todayLeverageReal=true; window._todayLeverageSource='user';
   var c=window._todayCfg, plan=window._todayPlan||[];
-  plan.forEach(function(o){ o._size=_todaySizeTrade(o, c.acct, o._risk||c.riskPct); });
+  var acct=_todaySyncAccountFromDom();
+  plan.forEach(function(o){ o._size=_todaySizeTrade(o, acct||c.acct, o._risk||c.riskPct); });
   window._todaySorted=true; if(plan.length) _todayRenderPlan();
 }
 // Top control = risk per selected trade.
@@ -11506,6 +11623,11 @@ function _todaySetGlobalLadder(mode){
 }
 function _todaySetGlobalRisk(val){
   var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
+  if(r > _TODAY_PER_CAP){
+    r = _TODAY_PER_CAP;
+    var inp=document.getElementById('todayRisk'); if(inp) inp.value=r;
+    if(typeof _dvToast==='function') _dvToast('Capped at '+_TODAY_PER_CAP+'% per trade — Today will not build unsafe oversized trades','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+  }
   c.riskPct=r;
   var acct=_todaySyncAccountFromDom();
   if(!(acct>0)){
@@ -11544,7 +11666,7 @@ function _todaySetTradeSize(idx, val){
   var plan=window._todayPlan||[]; var o=plan[idx]; if(!o) return;
   var nv=parseFloat(val); if(!(nv>0)) return;
   var entry=parseFloat(o.entry)||0, sl=parseFloat(o.sl)||0; var slDist=Math.abs(entry-sl);
-  var acct=(window._todayCfg&&window._todayCfg.acct)||0;
+  var acct=_todaySyncAccountFromDom();
   if(!(slDist>0)||!(acct>0)) return;
   var units=_todayNativeToUnits(o, nv);
   var rm=_todayRiskModel(o);
@@ -11622,13 +11744,13 @@ function _todayLiveBox(o, live){
   var dotCol=_todayLiveStatus(o, live).dot;
   // Re-price "if you enter now": clone the trade at the live entry, keep stop/target, same risk %.
   var clone={sym:o.sym, asset:o.asset, entry:live, sl:o.sl, tp:o.tp, sig:o.sig, spreadCost:o.spreadCost, atr:o.atr};
-  var ns=_todaySizeTrade(clone,(window._todayCfg&&window._todayCfg.acct)||0,(o._risk||1));
+  var ns=_todaySizeTrade(clone,_todaySyncAccountFromDom()||((window._todayCfg&&window._todayCfg.acct)||0),(o._risk||1));
   var esc=function(t){ return String(t).replace(/"/g,'&quot;'); };
   var enterNow;
   if(stopBreached || targetHit){
     enterNow = '<span style="color:#e8706e;">Setup has moved past your '+(stopBreached?'stop':'target')+' — entering now is not the planned trade (your stop would be on the wrong side). Skip, or wait for a fresh signal.</span>';
   } else if(ns.tradeable){
-    enterNow = '<span style="color:rgba(201,168,76,.85);">If you enter now @ '+pxFmt(live)+':</span> max loss <b style="color:#e8706e;">'+money2(-ns.netLoss)+'</b> · profit <b style="color:#5de8a0;">'+money2(ns.netTP1)+'</b> · R:R <b>1:'+(ns.rr>0?ns.rr.toFixed(1):'—')+'</b> · margin <b style="color:rgba(201,168,76,.9);">'+money2(ns.marginReq)+'</b>';
+    enterNow = '<span style="color:rgba(201,168,76,.85);">If you enter now @ '+pxFmt(live)+':</span> planned risk <b style="color:#e8706e;">'+money2(-ns.netLoss)+'</b> · profit <b style="color:#5de8a0;">'+money2(ns.netTP1)+'</b> · R:R <b>1:'+(ns.rr>0?ns.rr.toFixed(1):'—')+'</b> · margin <b style="color:rgba(201,168,76,.9);">'+money2(ns.marginReq)+'</b>';
   } else {
     enterNow = '<span style="color:rgba(201,168,76,.85);">If you enter now @ '+pxFmt(live)+':</span> position would be below your broker minimum at this price — too small to place.';
   }
@@ -11734,7 +11856,7 @@ function _todayStartLivePrices(){
 // ── Review & place — single card or the whole basket, one confirmed batch ──
 function _todayPlaceTrade(idx){
   var o=(window._todayPlan||[])[idx];
-  if(!o||!o._size.tradeable) return;
+  if(!o||!o._size||!o._size.tradeable) return;
   if(o._live&&o._live.invalid){
     if(typeof _dvToast==='function') _dvToast('This setup moved past its valid entry — skip it or rebuild Today','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
     return;
@@ -11742,14 +11864,20 @@ function _todayPlaceTrade(idx){
   _todayConfirmAndPlace([o]);
 }
 function _todayPlaceAll(){
+  var acct=_todaySyncAccountFromDom(), cfg=window._todayCfg||{};
+  if(acct>0){ (window._todayPlan||[]).forEach(function(o){ if(o&&o._size) o._size=_todaySizeTrade(o, acct, o._risk||cfg.riskPct||1); }); }
   // Only place trades that are tradeable AND whose live entry is still valid.
-  var plan=(window._todayPlan||[]).filter(function(o){ return o._size.tradeable && !(o._live&&o._live.invalid); });
+  var plan=(window._todayPlan||[]).filter(function(o){ return o&&o._size&&o._size.tradeable && !(o._live&&o._live.invalid); });
   if(!plan.length){ if(typeof _dvToast==='function') _dvToast('No trades are currently valid to place — entries have moved','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
   _todayConfirmAndPlace(plan);
 }
 function _todayConfirmAndPlace(trades){
   if(!trades||!trades.length) return;
-  var c=window._todayCfg, acct=c.acct||0;
+  var c=window._todayCfg||{}, acct=c.acct||0;
+  acct=_todaySyncAccountFromDom()||acct;
+  trades.forEach(function(o){ if(o&&o._size) o._size=_todaySizeTrade(o, acct, o._risk||c.riskPct||1); });
+  trades=trades.filter(function(o){ return o&&o._size&&o._size.tradeable&&!(o._live&&o._live.invalid); });
+  if(!trades.length){ if(typeof _dvToast==='function') _dvToast('No valid trade remains after recalculating account and risk','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
   var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
   var totLoss=0, totCap=0, totMargin=0, totProfit=0, totOrders=0;
   trades.forEach(function(o){ var lt=_todayLadderTotals(o); totLoss+=lt.risk||o._size.netLoss; totCap+=lt.notional||o._size.notional; totMargin+=lt.margin||o._size.marginReq; totProfit+=lt.profit||o._size.netTP1; totOrders+=lt.orders||1; });
@@ -11791,7 +11919,7 @@ function _todayConfirmAndPlace(trades){
     close();
     if(typeof _dvToast==='function'){
       if(r.ok>0) _dvToast(r.ok+' order'+(r.ok>1?'s':'')+' queued for MT5 — opening Act tab','rgba(93,232,160,.15)','rgba(93,232,160,.4)');
-      else _dvToast('Order'+(trades.length>1?'s':'')+' failed — check MT5 connection','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+      else _dvToast(r.lastError||('Order'+(trades.length>1?'s':'')+' failed — check MT5 connection'),'rgba(232,112,110,.15)','rgba(232,112,110,.4)');
     }
     if(r.ok>0){ setTimeout(function(){ if(typeof setNav==='function')setNav('act'); if(typeof showAct==='function')showAct(); if(typeof mt5Poll==='function'){ setTimeout(mt5Poll,600); setTimeout(mt5Poll,2500); } },700); }
   };
@@ -11811,7 +11939,7 @@ function _todayMt5Lots(o){
   return u/cs;
 }
 async function _todaySendOrders(trades, onProgress){
-	var ok=0, fail=0;
+	var ok=0, fail=0, lastError='';
 	var queue=[];
 	(trades||[]).forEach(function(o){
 	  _todayLadderLegs(o).forEach(function(l){ queue.push({trade:o, leg:l}); });
@@ -11819,7 +11947,7 @@ async function _todaySendOrders(trades, onProgress){
 	for(var i=0;i<queue.length;i++){
 	  var o=queue[i].trade, leg=queue[i].leg; var tv=(o.bullCount||0)+(o.bearCount||0);
 	  try{
-	    var res=await dvFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+	    var res=await dvOrderFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
 	      ticker:o.sym, asset_type:o.asset, order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
 	      entry:o.entry, sl:o.sl, tp1:leg.tp||o.tp, tp2:null, tp3:null, timeframe:o.tf||'',
 	      trailing:!!(leg.trailing||(o._autos&&o._autos.trail)),
@@ -11830,11 +11958,11 @@ async function _todaySendOrders(trades, onProgress){
 	      comment:'DotVerse Today L#'+leg.idx+' '+(leg.target||'tp1').toUpperCase()+' '+(o.sig||'')+' '+o.sym,
 	      entry_confluence: tv>0?((o.bullCount||0)/tv):null, entry_atr:o.atr||null
 	    })});
-	    if(res&&res.order_id) ok++; else fail++;
-	  }catch(e){ fail++; }
+	    if(res&&res.order_id) ok++; else { fail++; lastError=_mt5OrderErrorText(res); }
+	  }catch(e){ fail++; lastError=e&&e.message?e.message:'Order failed — check MT5 connection'; }
 	  if(onProgress) onProgress(ok+fail, queue.length);
 	}
-	return {ok:ok, fail:fail};
+	return {ok:ok, fail:fail, lastError:lastError};
 }
 function _todaySetAutoPlace(on){ window._todayCfg.autoPlace=!!on; var l=document.getElementById('todayAutoPlace'); if(l&&l.parentNode){ var box=l.parentNode; box.style.borderColor=on?'rgba(232,112,110,.4)':'rgba(237,232,216,.14)'; box.style.background=on?'rgba(232,112,110,.07)':'rgba(237,232,216,.02)'; } }
 // Auto-place: fire every valid trade automatically after a short, cancelable countdown.
@@ -11855,7 +11983,7 @@ function _todayAutoPlace(){
     _todaySendOrders(plan, function(done,total){ var s=document.getElementById('todayAutoStatus'); if(s) s.textContent=' '+done+'/'+total; }).then(function(r){
       if(typeof _dvToast==='function'){
         if(r.ok>0) _dvToast(r.ok+' order'+(r.ok>1?'s':'')+' auto-placed — opening Act tab','rgba(93,232,160,.15)','rgba(93,232,160,.4)');
-        else _dvToast('Auto-place failed — check MT5 connection','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+        else _dvToast(r.lastError||'Auto-place failed — check MT5 connection','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
       }
       remove();
       if(r.ok>0){ setTimeout(function(){ if(typeof setNav==='function')setNav('act'); if(typeof showAct==='function')showAct(); if(typeof mt5Poll==='function'){ setTimeout(mt5Poll,600); setTimeout(mt5Poll,2500); } },700); }
@@ -15911,6 +16039,7 @@ async function showPerformance(){
   const _wrCol = _wr!=null ? (_wr>=50?'#5de8a0':_wr>=35?'#c9a84c':'#e05555') : 'rgba(237,232,216,.3)';
   const _pfCol = _pf!=null ? (_pf>=1.5?'#5de8a0':_pf>=1?'#c9a84c':'#e05555') : 'rgba(237,232,216,.3)';
   const _expCol = _pexp!=null ? (_pexp>=0?'#5de8a0':'#e05555') : 'rgba(237,232,216,.3)';
+  const _dd = perfDrawdown || {};
   // Max DD from portfolio/drawdown endpoint (already computed)
   const _ddMax2 = _dd.max_drawdown_pct!=null ? _dd.max_drawdown_pct : null;
   const _ddCol2 = _ddMax2!=null ? (_ddMax2>20?'#e05555':_ddMax2>10?'#c9a84c':'#5de8a0') : 'rgba(237,232,216,.3)';
@@ -15990,7 +16119,6 @@ async function showPerformance(){
 </div>`;
 
   // ── Pre-compute Drawdown Card ──
-  const _dd = perfDrawdown || {};
   const _ddCur = _dd.current_drawdown_pct!=null ? _dd.current_drawdown_pct : 0;
   const _ddMax = _dd.max_drawdown_pct!=null ? _dd.max_drawdown_pct : 0;
   const _ddPeak = _dd.peak_equity!=null ? _dd.peak_equity : 100;
@@ -17290,13 +17418,15 @@ function showUnderstand(){
   }).join('')}</div>`;
 
   // ── Markov Matrix data fetch ────────────────────────────────────────────────
-  if (sig.sym && sig.tf) {
+  if (sig.sym && sig.tf && !sig.markov && !sig._markovLoading) {
     // Fetch Markov matrix data from backend
-    dvFetchT('/api/analysis/markov', {method:'POST', headers:{'Content-Type':'application/json'}, 
-      body: JSON.stringify({ticker: sig.sym, timeframe: sig.tf})
-    }, 15000).then(function(r) {
-      if (r && r.success && r.data) {
-        sig.markov = r.data;
+    sig._markovLoading = true;
+    var _mkAsset = ({equity:'stock', auto:'stock'})[sig.asset || sig.asset_type] || sig.asset || sig.asset_type || 'stock';
+    var _mkUrl = '/api/analysis/markov?ticker=' + encodeURIComponent(sig.sym) + '&asset_type=' + encodeURIComponent(_mkAsset);
+    dvFetchT(_mkUrl, {}, 15000).then(function(r) {
+      sig._markovLoading = false;
+      if (r && !r.error) {
+        sig.markov = r;
         // Re-render the Understand tab to show Markov Matrix
         setTimeout(() => {
           const el = document.getElementById('dashContent');
@@ -17311,6 +17441,7 @@ function showUnderstand(){
         }, 100);
       }
     }).catch(function(err) {
+      sig._markovLoading = false;
       console.warn('Markov data fetch failed:', err);
     });
   }
@@ -20202,7 +20333,7 @@ function showSize(){
         <div class="sz-field">
           <label class="sz-lbl">Stop Loss <span class="sz-req red">*</span></label>
           <input class="sz-inp" id="szSL" type="text" inputmode="decimal" placeholder="e.g. 65800" value="${String(pf.sl||sig.sl||'').replace(/,/g,'')}" oninput="window._szLadderUserSized=false;szCalc()">
-          ${(sig.sl||pf.sl)?`<div class="sz-hint" style="color:rgba(232,112,110,.5);">← From signal · auto-exit if price hits this</div>`:`<div class="sz-hint">Auto-exit price · your maximum loss point</div>`}
+          ${(sig.sl||pf.sl)?`<div class="sz-hint" style="color:rgba(232,112,110,.5);">← From signal · planned stop level</div>`:`<div class="sz-hint">Planned stop level · gaps/slippage can fill worse</div>`}
         </div>
         <!-- Current Price -->
         <div class="sz-field">
@@ -20242,7 +20373,7 @@ function showSize(){
           <select class="sz-inp" id="szBrokerLev" onchange="_szSetBrokerLeverage(this.value)">
             ${_dvBrokerLeverageOptions(window._szBrokerLeverage||100)}
           </select>
-          <div class="sz-hint" id="szBrokerLevNote">From MT5 if connected · affects margin only, not max loss</div>
+          <div class="sz-hint" id="szBrokerLevNote">From MT5 if connected · affects margin only, not planned stop risk</div>
         </div>
         <!-- Risk % — beginner-first preset selector with plain-English teaching -->
         <div class="sz-field" data-guide="calc-risk-pct">
@@ -20351,7 +20482,7 @@ function showSize(){
         <div style="padding:6px 12px;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mut);font-weight:700;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.06);">Your Risk vs Your Reward — tap any box</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;">
           <div id="szRRBoxSL" class="sz-rr-box sl" data-guide="rr-worst-case" onclick="szRRToggle('SL')">
-            <div class="sz-rr-box-lbl">Worst Case</div>
+            <div class="sz-rr-box-lbl">Planned SL</div>
             <div class="sz-rr-box-val red" id="szRRRisk">—</div>
             <div class="sz-rr-box-sub" id="szRRRiskLbl">if SL hit</div>
             <div class="sz-rr-box-hint">▼ details</div>
@@ -20925,6 +21056,8 @@ function _szAutoAllocate() {
   const slDist = Math.abs(entry - sl);
   if (!entry || !slDist) return null;
   const assetType = document.getElementById('szType')?.value || 'crypto';
+  const ticker = (window._activeSignal && window._activeSignal.sym) || '';
+  const quoteUsd = _szUsdPerPriceUnit(assetType, ticker);
   const levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
   const marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
   // Single mode = one trade gets the whole amount; multi = split across all legs.
@@ -20943,8 +21076,8 @@ function _szAutoAllocate() {
   const notional = [];
   for (let i = 0; i < N; i++) {
     const noti  = T * w[i] / wsum;
-    const units = noti / entry;
-    const riskPct = units * slDist / acct * 100;
+    const units = noti / (entry * (quoteUsd || 1));
+    const riskPct = units * slDist * (quoteUsd || 1) / acct * 100;
     notional.push(noti);
     // Set the leg in place (don't discard the rest of the array). 4-dp precision
     // so the risk %, the $ slice, and the profits all agree.
@@ -21040,14 +21173,16 @@ function szLadderRender() {
   if (!wrap) return;
   // Read account size, entry, SL, TP1/2/3 from the szCalc inputs.
   const acct  = parseFloat(document.getElementById('szAcct')?.value) || 10000;
-  const entry = parseFloat((document.getElementById('szEntry')?.value||'').replace(/,/g,'')) || 0;
-  const sl    = parseFloat((document.getElementById('szSL')?.value||'').replace(/,/g,''))    || 0;
-  const tp1   = parseFloat((document.getElementById('szTP1')?.value||'').replace(/,/g,''))   || 0;
-  const tp2   = parseFloat((document.getElementById('szTP2')?.value||'').replace(/,/g,''))   || 0;
-	  const tp3   = parseFloat((document.getElementById('szTP3')?.value||'').replace(/,/g,''))   || 0;
-	  const slDist = Math.abs(entry - sl) || 1;
-	  const assetType = document.getElementById('szType')?.value || 'crypto';
-	  const levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
+	  const entry = parseFloat((document.getElementById('szEntry')?.value||'').replace(/,/g,'')) || 0;
+	  const sl    = parseFloat((document.getElementById('szSL')?.value||'').replace(/,/g,''))    || 0;
+	  const tp1   = parseFloat((document.getElementById('szTP1')?.value||'').replace(/,/g,''))   || 0;
+	  const tp2   = parseFloat((document.getElementById('szTP2')?.value||'').replace(/,/g,''))   || 0;
+		  const tp3   = parseFloat((document.getElementById('szTP3')?.value||'').replace(/,/g,''))   || 0;
+		  const slDist = Math.abs(entry - sl) || 1;
+		  const assetType = document.getElementById('szType')?.value || 'crypto';
+		  const ticker = (window._activeSignal && window._activeSignal.sym) || '';
+		  const quoteUsd = _szUsdPerPriceUnit(assetType, ticker);
+		  const levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
 	  const contractSize = assetType === 'forex' ? levOrContr : 1;
 	  const marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
 	  function _fmtSize(units){
@@ -21116,16 +21251,16 @@ function szLadderRender() {
   const _ladderBtnsBar = document.getElementById('szLadderBtnsBar');
   if (_ladderBtnsBar) _ladderBtnsBar.style.display = _isSingle ? 'none' : 'flex';
 
-  wrap.innerHTML = _recBanner + _autoRecSection + _rowsToRender.map((risk, i) => {
-	    const moneyAtRisk = acct * (risk/100);
-	    const units       = moneyAtRisk / slDist;
-	    const tradeAmount = entry ? units * entry : 0;
-	    const rowMargin   = tradeAmount / marginDivisor;
+	  wrap.innerHTML = _recBanner + _autoRecSection + _rowsToRender.map((risk, i) => {
+		    const moneyAtRisk = acct * (risk/100);
+		    const units       = moneyAtRisk / (slDist * (quoteUsd || 1));
+		    const tradeAmount = entry ? _szUsdPositionValue(assetType, ticker, units, entry) : 0;
+		    const rowMargin   = tradeAmount / marginDivisor;
 	    const sizeStr     = _fmtSize(units);
 	    const lotsStr     = units.toFixed(4);
-    const p1 = tp1Dist ? units * tp1Dist : 0;
-    const p2 = tp2Dist ? units * tp2Dist : 0;
-    const p3 = tp3Dist ? units * tp3Dist : 0;
+	    const p1 = tp1Dist ? units * tp1Dist * (quoteUsd || 1) : 0;
+	    const p2 = tp2Dist ? units * tp2Dist * (quoteUsd || 1) : 0;
+	    const p3 = tp3Dist ? units * tp3Dist * (quoteUsd || 1) : 0;
 	    totalRisk += moneyAtRisk;
 	    totalTradeAmount += tradeAmount;
 	    totalUnits += units;
@@ -21297,12 +21432,12 @@ function szLadderRender() {
     // Per-row scale-out profit then summed
     let combinedScaleOut = 0;
     let bestCaseAllTp3   = 0;
-    _rowsToRender.forEach((risk) => {
-      const moneyAtRisk = acct * (risk/100);
-      const units       = moneyAtRisk / slDist;
-      combinedScaleOut += units * (0.5 * useTp1 + 0.3 * useTp2 + 0.2 * useTp3);
-      bestCaseAllTp3   += units * (tp3Dist || tp2Dist || tp1Dist);
-    });
+	    _rowsToRender.forEach((risk) => {
+	      const moneyAtRisk = acct * (risk/100);
+	      const units       = moneyAtRisk / (slDist * (quoteUsd || 1));
+	      combinedScaleOut += units * (0.5 * useTp1 + 0.3 * useTp2 + 0.2 * useTp3) * (quoteUsd || 1);
+	      bestCaseAllTp3   += units * (tp3Dist || tp2Dist || tp1Dist) * (quoteUsd || 1);
+	    });
     const netRR = totalRisk > 0 ? (combinedScaleOut / totalRisk) : 0;
     return `<div data-guide="size-trade-scenario" style="margin-top:8px;padding:11px 14px;background:linear-gradient(90deg, rgba(93,232,160,.08), rgba(201,168,76,.05));border:1px solid rgba(93,232,160,.28);border-radius:7px;">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;">
@@ -21316,7 +21451,7 @@ function szLadderRender() {
         </div>
       </div>
       <div style="margin-top:9px;padding-top:9px;border-top:1px solid rgba(237,232,216,.1);display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.6);">
-        <span>Worst case (all SL): <strong style="color:rgba(232,112,110,.9);">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:0})}</strong></span>
+        <span>Planned SL risk (all SL): <strong style="color:rgba(232,112,110,.9);">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:0})}</strong></span>
         <span>Best case (all TP3): <strong style="color:rgba(93,232,160,.9);">+$${bestCaseAllTp3.toLocaleString(undefined,{maximumFractionDigits:0})}</strong></span>
       </div>
     </div>`;
@@ -21341,8 +21476,9 @@ function szLadderRender() {
 	    setText('szSonarSize', totalUnits ? _fmtSize(totalUnits) : '—');
 	    setText('szSonarMargin', totalMargin ? '~$'+Math.round(totalMargin).toLocaleString() : '—');
 	    const stopLine=document.getElementById('szStopLine');
-	    if(stopLine) stopLine.textContent='Ladder total: '+_rowsToRender.length+' trade(s) · cash in $'+Math.round(totalMargin).toLocaleString()+' · position value $'+Math.round(totalTradeAmount).toLocaleString()+' · max loss $'+totalRisk.toFixed(2)+' ('+totalRiskPct.toFixed(totalRiskPct<1?2:1)+'% of account)';
+	    if(stopLine) stopLine.textContent='Ladder total: '+_rowsToRender.length+' trade(s) · cash in $'+Math.round(totalMargin).toLocaleString()+' · position value $'+Math.round(totalTradeAmount).toLocaleString()+' · planned stop risk $'+totalRisk.toFixed(2)+' ('+totalRiskPct.toFixed(totalRiskPct<1?2:1)+'% of account)';
 	    window._szLastCalc = {
+	      account: acct,
 	      posSize: totalUnits,
 	      lots: _nativeLots(totalUnits),
 	      lotsDisplay: _fmtSize(totalUnits),
@@ -21524,14 +21660,17 @@ function _szTradeVerdict(){
 }
 function _szBuildExecutionLegs(){
   var sig = window._activeSignal || {};
-  var acct = parseFloat(document.getElementById('szAcct')?.value) || 10000;
-  var entry = parseFloat((document.getElementById('szEntry')?.value || sig.entry || '').replace(/,/g,'')) || parseFloat(sig.entry) || 0;
-  var sl = parseFloat((document.getElementById('szSL')?.value || sig.sl || '').replace(/,/g,'')) || parseFloat(sig.sl) || 0;
-  var tp1 = parseFloat((document.getElementById('szTP1')?.value || sig.tp || sig.tp1 || '').replace(/,/g,'')) || parseFloat(sig.tp || sig.tp1) || 0;
-  var tp2 = parseFloat((document.getElementById('szTP2')?.value || sig.tp2 || '').replace(/,/g,'')) || parseFloat(sig.tp2) || null;
-  var tp3 = parseFloat((document.getElementById('szTP3')?.value || sig.tp3 || '').replace(/,/g,'')) || parseFloat(sig.tp3) || null;
+  var calc = window._szLastCalc || {};
+  var acct = parseFloat(document.getElementById('szAcct')?.value) || parseFloat(calc.account) || 10000;
+  var num = function(v){ return parseFloat(String(v == null ? '' : v).replace(/,/g,'')); };
+  var entry = num(document.getElementById('szEntry')?.value || sig.entry) || num(sig.entry) || 0;
+  var sl = num(document.getElementById('szSL')?.value || sig.sl) || num(sig.sl) || 0;
+  var tp1 = num(document.getElementById('szTP1')?.value || sig.tp || sig.tp1) || num(sig.tp || sig.tp1) || 0;
+  var tp2 = num(document.getElementById('szTP2')?.value || sig.tp2) || num(sig.tp2) || null;
+  var tp3 = num(document.getElementById('szTP3')?.value || sig.tp3) || num(sig.tp3) || null;
   var rawAsset = document.getElementById('szType')?.value || sig.asset || 'crypto';
   var assetType = ({equity:'stock', auto:'stock'})[rawAsset] || rawAsset;
+  var quoteUsd = _szUsdPerPriceUnit(assetType, sig.sym || '');
   var levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
   var contractSize = assetType === 'forex' ? (levOrContr || 100000) : 1;
   var marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
@@ -21539,7 +21678,6 @@ function _szBuildExecutionLegs(){
   if(!(entry > 0) || !(slDist > 0)) return [];
   var tpPriceMap = { tp1: tp1, tp2: tp2, tp3: tp3 };
   var isSingle = (window._szMode || 'single') === 'single';
-  var calc = window._szLastCalc || {};
   var targets = window._szLadderTargets || [];
   var out = [];
   if(isSingle && calc && parseFloat(calc.posSize) > 0){
@@ -21553,13 +21691,13 @@ function _szBuildExecutionLegs(){
       moneyAtRisk: parseFloat(calc.moneyAtRisk) || 0,
       units: units0,
       lots: parseFloat(calc.lots) || (assetType === 'forex' ? units0 / contractSize : units0),
-      notional: parseFloat(calc.tradeAmount) || units0 * entry,
+      notional: parseFloat(calc.tradeAmount) || _szUsdPositionValue(assetType, sig.sym || '', units0, entry),
       margin: parseFloat(calc.cashIn || calc.margin) || 0,
       assetType: assetType,
       target: target0,
       assignedTp: assigned0,
       trailing: target0 === 'trail',
-      profit: dist0 * units0
+      profit: dist0 * units0 * (quoteUsd || 1)
     });
     return out;
   }
@@ -21569,12 +21707,12 @@ function _szBuildExecutionLegs(){
     var r = parseFloat(risk) || 0;
     if(!(r > 0)) return;
     var dollars = acct * (r / 100);
-    var units = dollars / slDist;
+    var units = dollars / (slDist * (quoteUsd || 1));
     var lots = assetType === 'forex' ? units / contractSize : units;
     var target = (targets && targets[i]) || (i === 0 ? 'tp1' : i === 1 ? 'tp2' : 'tp3');
     var assigned = target === 'trail' ? null : (tpPriceMap[target] || tp1 || sig.tp);
     var dist = assigned ? Math.abs(parseFloat(assigned) - entry) : Math.abs(parseFloat(tp3 || tp2 || tp1 || entry) - entry);
-    var notional = units * entry;
+    var notional = _szUsdPositionValue(assetType, sig.sym || '', units, entry);
     out.push({
       idx: i + 1,
       riskPct: r,
@@ -21587,7 +21725,7 @@ function _szBuildExecutionLegs(){
       target: target,
       assignedTp: assigned,
       trailing: target === 'trail',
-      profit: dist * units
+      profit: dist * units * (quoteUsd || 1)
     });
   });
   return out;
@@ -21596,7 +21734,7 @@ function _szBuildExecutionLegs(){
 function _szConfirmTrade(onConfirm){
   var sig = window._activeSignal||{};
   if(!sig.sym){ if(typeof _dvToast==='function') _dvToast('Load a signal first','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
-  var acct=parseFloat(document.getElementById('szAcct')?.value)||10000;
+  var acct=parseFloat(document.getElementById('szAcct')?.value)||parseFloat((window._szLastCalc||{}).account)||10000;
   var legs=_szBuildExecutionLegs();
   if(!legs.length){ if(typeof _dvToast==='function') _dvToast('Enter entry and stop loss before placing','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
   var totRisk=0, totNotional=0, totMargin=0, totScale=0;
@@ -21610,7 +21748,7 @@ function _szConfirmTrade(onConfirm){
   ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(4,5,8,.78);display:flex;align-items:center;justify-content:center;padding:18px;';
   ov.innerHTML='<div style="max-width:440px;width:100%;background:#0a0e16;border:1px solid '+verdict.col+';border-radius:14px;padding:20px 22px;max-height:92vh;overflow:auto;">'
     +'<div style="font-family:var(--syne,sans-serif);font-size:17px;font-weight:600;margin-bottom:3px;color:#ede8d8;">Confirm your trade</div>'
-    +'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);margin-bottom:14px;line-height:1.5;">This places a <strong style="color:rgba(237,232,216,.82)">real order</strong> with your broker (MT5). You can close it anytime from the ACT tab — you are never stuck.</div>'
+    +'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);margin-bottom:14px;line-height:1.5;">This places a <strong style="color:rgba(237,232,216,.82)">real order</strong> with your broker (MT5). You can request a close from the ACT tab, subject to broker fills, liquidity, and connection state.</div>'
     +'<div style="background:'+vbg+';border:1px solid '+verdict.col+';border-radius:9px;padding:11px 13px;margin-bottom:13px;">'
       +'<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:'+verdict.col+';letter-spacing:.03em;margin-bottom:6px;">DotVerse says: '+verdict.label+'</div>'
       +'<ul style="margin:0;padding-left:16px;font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);line-height:1.6;">'+verdict.reasons.map(function(r){return '<li>'+r+'</li>';}).join('')+'</ul>'
@@ -21622,9 +21760,9 @@ function _szConfirmTrade(onConfirm){
       +(totScale>0?'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">If it works (typical exit)</span><span style="color:#5de8a0;">+'+money(totScale)+'</span></div>':'')
     +'</div>'
     +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin-bottom:16px;">'
-      +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">The most you can lose</div>'
+      +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">Planned stop risk</div>'
       +'<div style="font-family:var(--mono);font-size:24px;font-weight:700;color:#e8706e;line-height:1;">'+money(-totRisk)+'</div>'
-      +'<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.6);margin-top:6px;line-height:1.5;">That is '+(acct>0?(totRisk/acct*100).toFixed(2):'0')+'% of your account. DotVerse auto-closes at your stop loss — <strong style="color:rgba(237,232,216,.85)">you cannot lose more than this.</strong></div>'
+      +'<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.6);margin-top:6px;line-height:1.5;">That is '+(acct>0?(totRisk/acct*100).toFixed(2):'0')+'% of your account under the planned stop. Your broker stop is the protection point; fast gaps, rejected fills, or severe slippage can make the final loss differ.</div>'
     +'</div>'
     +'<div style="display:flex;gap:10px;">'
       +'<button id="szConfirmCancel" style="flex:1;padding:12px;border-radius:8px;border:1px solid rgba(237,232,216,.2);background:transparent;color:rgba(237,232,216,.7);font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">Cancel</button>'
@@ -21646,6 +21784,20 @@ function szLadderSubmitAll(){
 function actExecute(){
   var sig=window._activeSignal||{};
   if(!sig.sym){ var st=document.getElementById('mt5ExecStatus'); if(st) st.innerHTML='<span style="color:rgba(224,85,85,.9);">No signal loaded</span>'; return; }
+  var status=document.getElementById('mt5ExecStatus');
+  var platform=document.getElementById('actPlatform')?.value||'';
+  if(platform.includes('MT5')){
+    if((window._actOrderType||'market') !== 'market'){
+      if(status) status.innerHTML='<span style="color:rgba(201,168,76,.9);">MT5 pending order cards are guidance-only right now. Use Market Execution or place the pending order manually in MT5.</span>';
+      if(typeof _dvToast==='function') _dvToast('Pending MT5 order types are not wired to the EA yet — DotVerse will not send a different live order than you selected','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+      return;
+    }
+    if(!_szHasCalculatedQuantity(window._szLastCalc)){
+      if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">No calculated size — go to SIZE first so account, risk, and quantity are verified together.</span>';
+      if(typeof _dvToast==='function') _dvToast('Calculate Size first so DotVerse does not guess your order size','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+      return;
+    }
+  }
   _szConfirmTrade(_actExecuteGo);
 }
 async function _szLadderSubmitGo() {
@@ -21690,7 +21842,7 @@ async function _szLadderSubmitGo() {
     const isTrailing = !!leg.trailing;
     const auto = (window._szLadderAuto && window._szLadderAuto[i]) || _szDefaultAuto();
     try {
-      const res = await dvFetch('/api/mt5/order', {
+      const res = await dvOrderFetch('/api/mt5/order', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
@@ -21708,19 +21860,19 @@ async function _szLadderSubmitGo() {
           entry_atr:        _entryAtr
         })
       });
-      if (res && res.order_id) ok++; else fail++;
-    } catch(e) { fail++; }
+      if (res && res.order_id) ok++; else { fail++; window._szLastOrderError=_mt5OrderErrorText(res); }
+    } catch(e) { fail++; window._szLastOrderError=e&&e.message?e.message:'Order failed — check MT5 connection'; }
   }
   if (status) {
     const okCol  = ok > 0 ? 'rgba(93,232,160,.9)' : 'rgba(237,232,216,.5)';
     const failCol= fail > 0 ? 'rgba(232,112,110,.9)' : 'rgba(237,232,216,.5)';
     status.innerHTML = '<span style="color:' + okCol + ';">' + ok + ' submitted</span>'
-                     + (fail > 0 ? '  <span style="color:' + failCol + ';">' + fail + ' failed</span>' : '')
+                     + (fail > 0 ? '  <span style="color:' + failCol + ';">' + fail + ' failed' + (window._szLastOrderError?' · '+_escHtml(window._szLastOrderError):'') + '</span>' : '')
                      + '  · Tickets will appear in the ACT tab as the EA fills them.';
   }
   if (typeof _dvToast === 'function') {
     if (ok > 0) _dvToast('Ladder sent: ' + ok + ' orders queued for MT5 — opening Act tab to track', 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
-    else _dvToast('All ladder orders failed — check MT5 connection', 'rgba(232,112,110,.15)', 'rgba(232,112,110,.4)');
+    else _dvToast(window._szLastOrderError||'All ladder orders failed — check MT5 connection', 'rgba(232,112,110,.15)', 'rgba(232,112,110,.4)');
   }
   // After at least one successful submission, jump to ACT so user sees the
   // live trades populate as the EA fills them.
@@ -21737,12 +21889,6 @@ async function _szLadderSubmitGo() {
     }, 800);
   }
 }
-// Render ladder when Size tab template injects (after szCalc populates inputs)
-const _orig_szCalc = (typeof szCalc === 'function') ? szCalc : null;
-if (_orig_szCalc) {
-  szCalc = function() { _orig_szCalc(); try { szLadderRefresh(); } catch(e){} };
-}
-
 function szTypeChange(){
   const t=document.getElementById('szType')?.value||'crypto';
   const lf=document.getElementById('szLevField');
@@ -21850,6 +21996,8 @@ function szCalc(){
   const assetType  = document.getElementById('szType')?.value||'crypto';
   const tf         = window._activeSignal?.tf||'4H';
   const sig        = window._activeSignal;
+  const ticker     = (sig?.sym||'').toUpperCase();
+  const quoteUsd   = _szUsdPerPriceUnit(assetType, ticker);
 
   let tradeSize = parseFloat(document.getElementById('szTradeSize')?.value)||0;
   // When risk % is the driver (not a manually typed Trade Amount), auto-fill the
@@ -21874,7 +22022,7 @@ function szCalc(){
   // Risk hint
   const rh=document.getElementById('szRiskHint');
   if(rh && acct>0 && riskPct>0){
-    rh.textContent='= $'+moneyAtRisk.toFixed(2)+' max loss';
+    rh.textContent='= $'+moneyAtRisk.toFixed(2)+' planned stop risk';
     rh.style.color=riskPct>5?'var(--red)':'rgba(237,232,216,.55)';
   }
 
@@ -21909,7 +22057,6 @@ function szCalc(){
   }
 
   // Asset type + pip/point
-  const ticker=(sig?.sym||'').toUpperCase();
   const isJPY=ticker.includes('JPY');
   let pipSize=1, pipLabel='pts';
   if(assetType==='forex'){ pipSize=isJPY?0.01:0.0001; pipLabel='pips'; }
@@ -21941,10 +22088,10 @@ function szCalc(){
     } else {
       pipValPerLot=pipSize*contractSize;
     }
-    lots=moneyAtRisk/(slPips*pipValPerLot);
-    posSize=lots*contractSize;
-    posVal=posSize*(assetPrice||entry);
-    margin=posVal/(marginLev||1);
+	    lots=moneyAtRisk/(slPips*pipValPerLot);
+	    posSize=lots*contractSize;
+	    posVal=_szUsdPositionValue(assetType, ticker, posSize, assetPrice||entry);
+	    margin=posVal/(marginLev||1);
     lotsDisplay=lots<0.01?lots.toFixed(4)+' lots':lots.toFixed(2)+' lots';
   } else if(assetType==='crypto'){
     posSize=moneyAtRisk/(slDist||1);
@@ -21967,9 +22114,9 @@ function szCalc(){
   let _moneyAtRiskEff = moneyAtRisk;
   let _riskPctShown   = riskPct;
   if (window._szTradeSizeManual && tradeSize > 0 && entry > 0) {
-    posVal  = tradeSize * (marginLev || 1);
-    posSize = posVal / entry;
-    margin  = tradeSize;
+	    posVal  = tradeSize * (marginLev || 1);
+	    posSize = posVal / (entry * (quoteUsd || 1));
+	    margin  = tradeSize;
     if (assetType === 'forex') {
       lots = posSize / (contractSize || 1);
       lotsDisplay = lots < 0.01 ? lots.toFixed(4)+' lots' : lots.toFixed(2)+' lots';
@@ -21980,7 +22127,7 @@ function szCalc(){
       lots = null;
       lotsDisplay = posSize.toFixed(2) + (assetType==='index' ? ' contracts' : ' shares');
     }
-    _moneyAtRiskEff = posSize * slDist;
+	    _moneyAtRiskEff = posSize * slDist * (quoteUsd || 1);
     _riskPctShown   = acct > 0 ? (_moneyAtRiskEff / acct * 100) : 0;
     _s('szMoneyAtRisk', '$'+_moneyAtRiskEff.toFixed(2));
     _s('szRiskDisp', _riskPctShown.toFixed(1)+'%');
@@ -22005,13 +22152,13 @@ function szCalc(){
   if(tsRow)tsRow.style.display='none';
 
   // TP calculator
-  function calcTP(tp){
-    const dist=Math.abs(tp-entry);
-    const gross=dist*posSize;
-    // Spread dollar cost: spread_price_units × position_size (units held)
-    // The backend already deducted spread from the TP level, so we add it
-    // back to get the "raw" gross before spread was applied.
-    const spreadDollar=_spreadUnits*posSize;
+	  function calcTP(tp){
+	    const dist=Math.abs(tp-entry);
+	    const gross=dist*posSize*(quoteUsd || 1);
+	    // Spread dollar cost: spread_price_units × position_size (units held)
+	    // The backend already deducted spread from the TP level, so we add it
+	    // back to get the "raw" gross before spread was applied.
+	    const spreadDollar=_spreadUnits*posSize*(quoteUsd || 1);
     const rawGross=gross+spreadDollar;
     const fees=posVal*feeRate;
     const net=gross-fees;
@@ -22164,16 +22311,16 @@ function szCalc(){
     const isBuy=(sl<entry);
     const slFmt=(v)=>v>=100?'$'+v.toLocaleString(undefined,{maximumFractionDigits:2}):'$'+v.toFixed(5);
     rrBar._rrDetails={
-      SL:()=>`<div style="color:#e8706e;font-weight:700;font-size:13px;margin-bottom:8px;">Stop Loss Triggered — Worst Case</div>
+      SL:()=>`<div style="color:#e8706e;font-weight:700;font-size:13px;margin-bottom:8px;">Stop Loss Triggered — Planned Risk</div>
         <p style="color:rgba(255,255,255,.65);">${isBuy?'The market moved against your BUY trade — it fell instead of rising.':'The market moved against your SELL trade — it rose instead of falling.'} Your stop at <strong style="color:#e8706e;">${slFmt(sl)}</strong> auto-exits, limiting your loss to <strong style="color:#e8706e;">−$${slLoss.toFixed(0)}</strong>.</p>
-        <div style="border-left:2px solid #e8706e;padding-left:10px;margin:10px 0;color:rgba(255,255,255,.5);font-size:11px;"><strong style="color:rgba(255,255,255,.8);">What to do:</strong> Accept the loss. Do NOT move the stop further away — that turns a small controlled loss into a large one.</div>`,
+        <div style="border-left:2px solid #e8706e;padding-left:10px;margin:10px 0;color:rgba(255,255,255,.5);font-size:11px;"><strong style="color:rgba(255,255,255,.8);">What to do:</strong> Accept the planned stop. Do NOT move the stop further away — that can turn a manageable loss into a much larger one.</div>`,
       TP1:()=>{const t=calcTP(tp1);return!tp1?'<div style="color:var(--mut)">No TP1 set</div>':`<div style="color:#5de8a0;font-weight:700;font-size:13px;margin-bottom:8px;">TP1 — First Target Hit</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
           <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:5px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--mut);margin-bottom:3px;font-family:var(--mono);">TARGET</div><div style="font-family:var(--mono);font-weight:700;color:rgba(255,255,255,.9);">${t.priceStr}</div></div>
           <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:5px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--mut);margin-bottom:3px;font-family:var(--mono);">PROFIT</div><div style="font-family:var(--mono);font-weight:700;color:#5de8a0;">+$${t.net.toFixed(0)}</div></div>
           <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:5px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--mut);margin-bottom:3px;font-family:var(--mono);">R:R</div><div style="font-family:var(--mono);font-weight:700;color:#5de8a0;">1 : ${t.rr}</div></div>
         </div>
-        <div style="border-left:2px solid #5de8a0;padding-left:10px;color:rgba(255,255,255,.5);font-size:11px;"><strong style="color:rgba(255,255,255,.8);">What to do:</strong> Take 50% of your position here. Then move your stop loss to entry price — you can no longer lose on this trade.</div>`;},
+        <div style="border-left:2px solid #5de8a0;padding-left:10px;color:rgba(255,255,255,.5);font-size:11px;"><strong style="color:rgba(255,255,255,.8);">What to do:</strong> Take 50% of your position here. Then consider moving your stop loss to entry price so the remaining position has reduced planned downside, while remembering gaps and slippage can still fill worse.</div>`;},
       TP2:()=>{const t=calcTP(tp2);return!tp2?'<div style="color:var(--mut)">No TP2 set</div>':`<div style="color:#5de8a0;font-weight:700;font-size:13px;margin-bottom:8px;">TP2 — Extended Target Hit</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
           <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:5px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--mut);margin-bottom:3px;font-family:var(--mono);">TARGET</div><div style="font-family:var(--mono);font-weight:700;color:rgba(255,255,255,.9);">${t.priceStr}</div></div>
@@ -22203,8 +22350,14 @@ function szCalc(){
     const session=h>=9&&h<17?'New York':h>=2&&h<9?'London':h>=0&&h<2?'Tokyo':'After-hours';
     _s('szDurTime',dur); _s('szDurDate',dateStr); _s('szDurSession',session);
   }
-  // Store calculated size so updateFlowBadge can compute recommended lots
-  window._szLastCalc = { posSize, lots, lotsDisplay, assetType, moneyAtRisk: _moneyAtRiskEff, tradeAmount: posVal, cashIn: margin, margin: margin, riskPct: _riskPctShown, mode: 'single' };
+  // Store calculated size so updateFlowBadge can compute recommended lots.
+  // Then refresh the ladder from the same fresh inputs. A previous wrapper tried
+  // to do this before szCalc existed, so risk/account/amount edits left the
+  // ladder stale even while the summary changed.
+  window._szLastCalc = { account: acct, posSize, lots, lotsDisplay, assetType, moneyAtRisk: _moneyAtRiskEff, tradeAmount: posVal, cashIn: margin, margin: margin, riskPct: _riskPctShown, mode: 'single' };
+  if(typeof szLadderRender === 'function' && document.getElementById('szLadderRows')){
+    try{ szLadderRender(); }catch(e){}
+  }
   updateFlowBadge();
   if(typeof szRoRUpdate === 'function') szRoRUpdate();
 }
@@ -22330,6 +22483,11 @@ function showAct(){
   const sig = window._activeSignal || {};
   const isBuy = sig.sig==='BUY';
   const now = new Date();
+  const _actCalc = window._szLastCalc || {};
+  const _actAsset = _actCalc.assetType || sig.asset || sig.asset_type;
+  const _actLotsRaw = _szCalcQuantityRaw(_actCalc);
+  const _actQty = _szExecQtyDisplay(_actLotsRaw, _actAsset);
+  const _hasActCalc = _szHasCalculatedQuantity(_actCalc);
 
   // Real positions rendered by _mt5RenderPositions() after mt5LoadTab() fetches live state
 
@@ -22399,15 +22557,15 @@ function showAct(){
     <!-- How many units — simple label -->
     <div style="margin-bottom:16px;">
       <label style="font-family:var(--mono);font-size:10px;font-weight:700;color:rgba(237,232,216,.5);letter-spacing:.08em;display:block;margin-bottom:6px;">HOW MANY UNITS ARE YOU BUYING?</label>
-      <input class="sz-inp" id="actLots" type="text" placeholder="${(window._szLastCalc&&window._szLastCalc.lots>0)?window._szLastCalc.lots.toFixed(2):'0.10'}" value="${(window._szLastCalc&&window._szLastCalc.lots>0)?window._szLastCalc.lots.toFixed(2):''}"
+      <input class="sz-inp" id="actLots" type="text" placeholder="${_actQty||'0.10'}" value="${_actQty}"
         style="font-size:16px;font-weight:700;letter-spacing:.02em;padding:10px 14px;">
       <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.35);margin-top:5px;line-height:1.5;">
-        ${(window._szLastCalc&&window._szLastCalc.lots>0)?'Pre-filled from your SIZE calculation — change only if you want to trade a different amount.':'<span style="color:rgba(201,168,76,.7);">No SIZE calculation found — go to the SIZE tab first to calculate your position. Enter the number manually only if you know what you are doing.</span>'}
+        ${_hasActCalc?'Pre-filled from your SIZE calculation — change only if you want to trade a different amount.':'<span style="color:rgba(201,168,76,.7);">No SIZE calculation found — go to the SIZE tab first to calculate your position. Enter the number manually only if you know what you are doing.</span>'}
       </div>
     </div>
 
     <!-- UX-17: Stop loss dollar warning above Place button -->
-    ${(window._szLastCalc&&window._szLastCalc.moneyAtRisk>0)?`<div style="margin-bottom:10px;padding:9px 14px;background:rgba(232,112,110,.07);border:1px solid rgba(232,112,110,.2);border-radius:7px;font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.9);line-height:1.5;">If this trade hits your stop loss, you lose: <strong>$${parseFloat(window._szLastCalc.moneyAtRisk).toFixed(2)}</strong>. This is your maximum possible loss on this trade.</div>`:''}
+    ${(window._szLastCalc&&window._szLastCalc.moneyAtRisk>0)?`<div style="margin-bottom:10px;padding:9px 14px;background:rgba(232,112,110,.07);border:1px solid rgba(232,112,110,.2);border-radius:7px;font-family:var(--mono);font-size:11px;color:rgba(232,112,110,.9);line-height:1.5;">If this trade fills at your stop loss, planned loss is about: <strong>$${parseFloat(window._szLastCalc.moneyAtRisk).toFixed(2)}</strong>. Fast gaps, rejected fills, or slippage can make the final loss differ.</div>`:''}
 
     <!-- THE button — one single action -->
     <button id="mt5ExecBtn" onclick="actExecute()" data-guide="act-place-trade"
@@ -22619,7 +22777,7 @@ function showAct(){
       <label style="font-family:var(--mono);font-size:10px;font-weight:700;color:rgba(237,232,216,.5);letter-spacing:.08em;display:block;margin-bottom:6px;">QUANTITY</label>
       <input id="actExQty" type="number" step="any" placeholder="0.001"
         style="width:100%;padding:10px 12px;font-family:var(--mono);font-size:14px;font-weight:700;background:var(--s2);border:1px solid var(--bd);border-radius:6px;color:var(--t1);outline:none;"
-        value="${(window._szLastCalc&&window._szLastCalc.lots>0)?window._szLastCalc.lots.toFixed(4):''}">
+        value="${_szExecQtyDisplay(_szCalcQuantityRaw(window._szLastCalc), (window._szLastCalc&&window._szLastCalc.assetType)||sig.asset||sig.asset_type)}">
     </div>
 
     <!-- Price (limit only) -->
@@ -22990,11 +23148,11 @@ async function mt5Execute() {
   // ── AUTO-SIZE FROM CALCULATOR (commit 6 — 2026-04-29) ────────────────
   // Previously read a non-existent #mt5Lots input, falling back to 0.1
   // every time. Now reads window._szLastCalc populated by szCalc() with
-  // the user's account-+-risk-based position size. Safe fallback: 0.1.
+  // the user's account-+-risk-based position size. No silent default for live orders.
   const _szLast = window._szLastCalc || {};
   const _autoLots = (_szLast.lots && _szLast.lots > 0) ? _szLast.lots
                   : (_szLast.posSize && _szLast.posSize > 0) ? _szLast.posSize
-                  : 0.1;
+                  : 0;
   const lots = parseFloat(document.getElementById('mt5Lots')?.value) || _autoLots;
   const direction = window._mt5Dir;
   const signal = window._activeSignal || {};
@@ -23003,9 +23161,13 @@ async function mt5Execute() {
   const sl = signal.sl || 0;
   const tp1 = signal.tp || 0;
   if (!ticker) { if(status) status.innerHTML = '<span style="color:rgba(224,85,85,.9);">No signal loaded</span>'; return; }
+  if (!(lots > 0)) {
+    if(status) status.innerHTML = '<span style="color:rgba(224,85,85,.9);">No calculated size — go to SIZE first or enter a valid quantity.</span>';
+    return;
+  }
   if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
   if (status) status.innerHTML = '<span style="color:#d4b87a;">Sending...</span>';
-  const res = await dvFetch('/api/mt5/order', {
+  const res = await dvOrderFetch('/api/mt5/order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ticker, order_type: orderType, lots, direction, entry, sl, tp1 })
@@ -23041,7 +23203,7 @@ async function mt5Execute() {
     mt5Poll();
     setTimeout(mt5Poll, 3000);
   } else {
-    if(status) status.innerHTML = '<span style="color:rgba(224,85,85,.9);">Failed — EA offline or not connected</span>';
+    if(status) status.innerHTML = '<span style="color:rgba(224,85,85,.9);">' + _mt5OrderErrorHtml(res) + '</span>';
   }
   if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
 }
@@ -23056,9 +23218,24 @@ function _actExecuteGo(){
     if(!ticker){ if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">No signal loaded</span>'; return; }
     if(btn){ btn.disabled=true; btn.style.opacity='0.6'; }
     if(status) status.innerHTML='<span style="color:#d4b87a;">Sending...</span>';
-    const calcLeg=(_szBuildExecutionLegs && _szBuildExecutionLegs()[0]) || {};
-    const quantity=parseFloat(document.getElementById('actLots')?.value)||calcLeg.lots||0.1;
-    dvFetch('/api/mt5/order',{
+    const mt5OrderMode=window._actOrderType||'market';
+    if(mt5OrderMode !== 'market'){
+      if(status) status.innerHTML='<span style="color:rgba(201,168,76,.9);">MT5 pending order cards are guidance-only right now. Use Market Execution or place the pending order manually in MT5.</span>';
+      if(typeof _dvToast==='function') _dvToast('Pending MT5 order types are not wired to the EA yet — DotVerse will not send a different live order than you selected','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+      if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+      return;
+    }
+    const typedQty=parseFloat(document.getElementById('actLots')?.value);
+    const hasSizeCalc=_szHasCalculatedQuantity(window._szLastCalc);
+    const calcLeg=hasSizeCalc && typeof _szBuildExecutionLegs === 'function' ? (_szBuildExecutionLegs()[0] || {}) : {};
+    const quantity=(hasSizeCalc ? (typedQty>0 ? typedQty : (parseFloat(calcLeg.lots)>0 ? parseFloat(calcLeg.lots) : _szCalcQuantityRaw(window._szLastCalc))) : 0);
+    if(!(quantity>0)){
+      if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">No calculated size — go to SIZE first or enter a valid quantity.</span>';
+      if(typeof _dvToast==='function') _dvToast('No trade size found — calculate Size first so DotVerse does not guess your order size','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+      if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+      return;
+    }
+    dvOrderFetch('/api/mt5/order',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -23069,7 +23246,7 @@ function _actExecuteGo(){
         entry: parseFloat(sig.entry)||0,
         sl: parseFloat(sig.sl)||null,
         tp1: parseFloat(sig.tp)||null,
-        order_type: window._actExOrderType||'market',
+        order_type: mt5OrderMode,
         timeframe: sig.tf || '',
         signal_id: sig.id||(sig.sym+':'+sig.tf+':'+sig.sig+':'+Date.now())
       })
@@ -23080,8 +23257,9 @@ function _actExecuteGo(){
         actRefreshOrderFeed();
         mt5Poll();
       }else{
-        if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">Failed &mdash; order rejected</span>';
-        _dvToast('Order failed','rgba(224,85,85,.15)','rgba(224,85,85,.4)');
+        var err=_mt5OrderErrorText(res);
+        if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">'+_mt5OrderErrorHtml(res)+'</span>';
+        _dvToast(err,'rgba(224,85,85,.15)','rgba(224,85,85,.4)');
       }
       if(btn){ btn.disabled=false; btn.style.opacity='1'; }
     });
@@ -23097,7 +23275,7 @@ function _actExecuteGo(){
         +'<div style="padding:8px 10px;background:rgba(93,232,160,.06);border-radius:6px;"><div style="font-size:9px;color:var(--t3);font-family:var(--mono);letter-spacing:.05em;margin-bottom:3px;">TAKE PROFIT 1</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">'+(sig.tp||'—')+'</div></div>'
         +'<div style="padding:8px 10px;background:rgba(93,232,160,.04);border-radius:6px;"><div style="font-size:9px;color:var(--t3);font-family:var(--mono);letter-spacing:.05em;margin-bottom:3px;">TAKE PROFIT 2</div><div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#5de8a0;">'+(sig.tp2||'—')+'</div></div>'
         +'</div>'
-        +'<div style="margin-top:10px;font-size:10px;color:var(--t3);line-height:1.6;">Enter these exact levels in your broker platform. Set your stop loss first — it limits your maximum loss if the trade goes against you.</div>'
+        +'<div style="margin-top:10px;font-size:10px;color:var(--t3);line-height:1.6;">Enter these exact levels in your broker platform. Set your stop loss first — it defines the planned exit if the trade goes against you, but gaps or slippage can fill worse.</div>'
         +'</div>';
     }
   }
@@ -23115,7 +23293,11 @@ function actLogToPortfolio(){
     _dvToast(sig.sym+' has no active trade direction — run a full analysis first','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
     return;
   }
-  const lots = parseFloat(document.getElementById('actLots')?.value) || 1;
+  const lots = parseFloat(document.getElementById('actLots')?.value) || _szCalcQuantityRaw(window._szLastCalc);
+  if(!(lots>0)){
+    _dvToast('No calculated size — go to SIZE first or enter a valid quantity','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    return;
+  }
   const assetMap = { crypto:'crypto', equity:'stock', forex:'forex', commodity:'commodity', index:'index', auto:'stock' };
   const newPos = {
     ticker: sig.sym,
@@ -23140,7 +23322,11 @@ function actPaperTrade(){
     _dvToast('No signal loaded','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
     return;
   }
-  const lots = parseFloat(document.getElementById('actLots')?.value) || 1;
+  const lots = parseFloat(document.getElementById('actLots')?.value) || _szCalcQuantityRaw(window._szLastCalc);
+  if(!(lots>0)){
+    _dvToast('No calculated size — go to SIZE first or enter a valid quantity','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    return;
+  }
   dvFetch('/api/positions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     ticker: sig.sym+' [PAPER]', asset_type:'paper',
     signal: sig.sig==='SELL'?'SELL':'BUY',
@@ -23615,7 +23801,7 @@ function _mt5RenderPositions(positions) {
     // ── Risk strip ────────────────────────────────────────────
     var vol=parseFloat(p.volume)||0;
     var actualRisk=(vol>0&&sl>0&&openPrice>0)?Math.abs(openPrice-sl)*vol:0;
-    var riskLbl=actualRisk>0?'$'+actualRisk.toFixed(2)+' max loss':(window._mt5RiskAmt?'$'+window._mt5RiskAmt+' max loss':'Risk controlled');
+    var riskLbl=actualRisk>0?'$'+actualRisk.toFixed(2)+' planned risk':(window._mt5RiskAmt?'$'+window._mt5RiskAmt+' planned risk':'Risk planned');
     var riskHtml='<div style="display:flex;align-items:center;padding:8px 12px;border-radius:6px;margin-bottom:10px;background:var(--s2);border:1px solid var(--bd);">'
       +'<span style="font-family:var(--mono);font-size:11px;color:var(--t3);">Risk on this trade</span>'
       +'<span style="margin-left:auto;font-family:var(--mono);font-size:13px;font-weight:700;color:var(--amb);">'+riskLbl+'</span>'
@@ -23897,9 +24083,13 @@ function mt5LoadTab() {
     _mt5RenderPositions(d.positions || []);
     _actPopulateMt5Summary(d);
     if (d.account) {
-      // Update execution block lots from account balance
+      // Refresh the execution field only from a real Size calculation, never a guessed default.
       var lotsInp = document.getElementById('actLots');
-      if (lotsInp && !lotsInp.value) lotsInp.value = '0.10';
+      if (lotsInp && !lotsInp.value) {
+        var calc=window._szLastCalc||{};
+        var qty=_szExecQtyDisplay(_szCalcQuantityRaw(calc), calc.assetType || (window._activeSignal&&window._activeSignal.asset));
+        if(qty) lotsInp.value = qty;
+      }
     }
   }).catch(function(){ _mt5SetStatus(false, null); });
 
@@ -25314,8 +25504,8 @@ async function showAutomations() {
   // Keyed to _autoSettings key names. Auto-looked up inside row() — no call-site changes needed.
   var GUIDES = {
     breakeven: {
-      what: 'Once price reaches Target 1, your stop loss automatically moves to your entry price. You can no longer lose money on this trade.',
-      when_on: 'Turn ON for every trade. Once a trade reaches TP1 it makes that trade risk-free from then on. Important: it only helps AFTER the trade has moved in your favour — a trade that goes against you from the start is still stopped out for its full risk.',
+      what: 'Once price reaches Target 1, your stop loss automatically moves to your entry price. That reduces planned downside on the remaining position, though gaps and slippage can still fill worse.',
+      when_on: 'Turn ON for every trade. Once a trade reaches TP1 it reduces planned downside from then on. Important: it only helps AFTER the trade has moved in your favour — a trade that goes against you from the start is still stopped out for its full planned risk, with slippage still possible.',
       risk_if_off: 'Price can hit Target 1, reverse all the way back, and trigger your original stop loss — turning a winning trade into a full loss.',
       level: 'SAFE'
     },
@@ -25327,7 +25517,7 @@ async function showAutomations() {
     },
     autoTP1: {
       what: 'When price hits Target 1, DotVerse automatically closes 50% of your position and banks that profit.',
-      when_on: 'Turn ON if you want guaranteed partial profits locked in. Even if price reverses after TP1, you still win on half the trade.',
+      when_on: 'Turn ON if you want partial profits locked in after TP1. If price reverses after TP1, that realised portion remains closed while the rest still depends on fills.',
       risk_if_off: 'If price reaches TP1 and reverses before TP2, you close the full trade at a much smaller gain — or at breakeven if the stop moved.',
       level: 'SAFE'
     },
@@ -25933,12 +26123,12 @@ window._dvGuide = {
   },
   'stop-loss': {
     title: 'Stop Loss',
-    body: 'If price hits this level, your trade thesis is wrong and DotVerse automatically exits the position via your MT5 EA. This is your maximum possible loss on this trade. Never move your stop loss further away from entry — that is called "widening the stop" and it destroys your risk management.',
-    example: 'Entry $68,200 · Stop $65,800 → if BTC drops to $65,800, the trade closes. You lose a maximum of $2,400 on a $10,000 account with 1% risk.'
+    body: 'If price hits this level, your trade thesis is wrong and DotVerse automatically exits the position via your MT5 EA. This is your planned stop risk, not a guaranteed maximum — fast gaps, rejected fills, or slippage can fill worse. Never move your stop loss further away from entry; that is called "widening the stop" and it destroys your risk management.',
+    example: 'Entry $68,200 · Stop $65,800 → if BTC drops to $65,800, the trade closes near the planned stop. Final loss can differ if the market gaps or slips.'
   },
   'tp1': {
     title: 'TP1 — First Take Profit',
-    body: 'The highest-probability target. Price is most likely to reach this level before reversing. The professional approach: close 50% of your position here and move your stop loss to breakeven (entry price). This guarantees you cannot lose on the remaining position.',
+    body: 'The highest-probability target. Price is most likely to reach this level before reversing. The professional approach: close 50% of your position here and move your stop loss to breakeven (entry price). This reduces planned downside on the remaining position, but gaps and slippage can still fill worse.',
     example: 'Take 50% profit at TP1. Move stop to entry. Let the remaining 50% run to TP2.'
   },
   'tp2': {
@@ -26183,7 +26373,7 @@ window._dvGuide = {
   'calc-account': {
     title: 'Account Size ($)',
     body: 'Your total trading capital — the amount you have available to trade. DotVerse uses this to calculate how much you risk per trade as a fixed dollar amount. Enter your real account value. If you have $10,000 in your trading account, enter 10000.',
-    example: '$10,000 account at 1% risk = $100 maximum loss per trade. At 2% = $200 maximum loss.'
+    example: '$10,000 account at 1% risk = $100 planned stop risk per trade before slippage. At 2% = $200 planned stop risk.'
   },
   'calc-risk-pct': {
     title: 'Risk % Per Trade',
@@ -26239,12 +26429,12 @@ window._dvGuide = {
   },
   'calc-money-at-risk': {
     title: 'Money at Risk',
-    body: 'The exact dollar amount you will lose if price hits your stop loss. This is calculated as Account Size × Risk % and it is the most important number in trading. Every single trade, this number must be the same — it is your protection against a string of losses wiping you out.',
+    body: 'The planned dollar risk if price fills at your stop loss. This is calculated as Account Size × Risk % and it is one of the most important numbers in trading. Keep this number consistent so a string of losses stays survivable; fast markets can still fill worse.',
     example: '$10,000 account · 1% risk = $100 at risk. Lose 10 trades in a row → $1,000 lost → still have 90% of your account.'
   },
   'calc-margin': {
     title: 'Margin Required',
-    body: 'The capital your broker holds as security for your leveraged position. This money is temporarily frozen (not lost) while the trade is open. It is returned when you close the trade. Margin is NOT your maximum loss — your stop loss controls that.',
+    body: 'The capital your broker holds as security for your leveraged position. This money is temporarily frozen (not lost) while the trade is open. It is returned when you close the trade. Margin is not the planned risk — your stop level estimates that, while gaps and slippage can still fill worse.',
     example: '0.10 lot EURUSD at 100:1 leverage → margin required = $100 (the broker holds $100 but you control $10,000 of currency).'
   },
   'calc-effective-rr': {
@@ -26272,18 +26462,18 @@ window._dvGuide = {
 
   // ── RISK vs REWARD BAR (Size tab) ─────────────────────────────────────────
   'rr-worst-case': {
-    title: 'Worst Case — If Stop Loss Hit',
-    body: 'The exact dollar amount you lose if price hits your stop loss. This is a fixed number determined by your account size and risk % — not by the market. By controlling this number, you control your survival in trading. Click to see a plain-English explanation of what this means for this specific trade.',
-    example: '$100 worst case on a $10,000 account = 1% loss. You would need 100 consecutive losses to lose your entire account.'
+    title: 'Planned Risk — If Stop Loss Hit',
+    body: 'The planned dollar risk if price fills at your stop loss. It is estimated from your account size and risk %, then checked against the stop distance. Control this number first; gaps, rejected fills, and slippage can still change the final loss.',
+    example: '$100 planned risk on a $10,000 account = 1% risk before slippage. A long losing streak is survivable when each trade stays small.'
   },
   'rr-tp1': {
     title: 'TP1 — First Target Profit',
     body: 'The dollar gain if price reaches the first take profit level. Close 50% of your position here, move stop to breakeven, let the rest run. This is the highest-probability outcome — your trade has the best chance of reaching this level.',
-    example: 'Worst case −$100 · TP1 +$220 = 1:2.2 R:R. Even if you win only 40% of trades at this ratio, you are profitable.'
+    example: 'Planned SL risk −$100 · TP1 +$220 = 1:2.2 R:R before slippage. Even if you win only 40% of trades at this ratio, the setup can be profitable over many trades.'
   },
   'rr-tp2': {
     title: 'TP2 — Second Target Profit',
-    body: 'The dollar gain if price reaches the second take profit level. After taking 50% at TP1, hold the remaining 50% to TP2 with stop at breakeven. You cannot lose on this portion — the worst case is breakeven (stop at entry). Only realistic in trending market conditions.',
+    body: 'The dollar gain if price reaches the second take profit level. After taking 50% at TP1, hold the remaining 50% to TP2 with stop at breakeven. The remaining planned downside is reduced, but gap or slippage risk still exists. Only realistic in trending market conditions.',
     example: 'After TP1 exit (50%) → remaining position rides with zero risk to TP2 target.'
   },
   'rr-tp3': {
@@ -26302,7 +26492,7 @@ window._dvGuide = {
   // ── RISK OF RUIN (Size tab) ───────────────────────────────────────────────
   'risk-of-ruin': {
     title: 'Risk of Ruin',
-    body: 'The mathematical probability of losing your entire trading account at this risk % and win rate, over thousands of trades. At 1% risk with 50% win rate, risk of ruin is effectively zero. At 5% risk with 50% win rate, risk of ruin rises dramatically. This is why professional traders use small risk % — to make ruin mathematically impossible.',
+    body: 'The modelled probability of severe account loss at this risk % and win rate over many trades. At 1% risk with a stable 50% win rate, modelled risk of ruin is very low. At 5% risk it rises dramatically. This is why professional traders use small risk % — to make ruin far less likely.',
     example: '1% risk · 50% win rate → Risk of Ruin ~0%. 5% risk · 50% win rate → Risk of Ruin ~13%. 10% risk · 50% win rate → Risk of Ruin ~45%.'
   },
 
@@ -26326,25 +26516,25 @@ window._dvGuide = {
   },
   'ladder-preset-conservative': {
     title: 'Conservative Ladder (0.5% × 5)',
-    body: 'Five entries all at 0.5% risk. Total combined exposure: 2.5% of account. This is the safest way to scale into a trade — maximum 5 entries but each one is tiny. If the trade immediately goes against you, total loss is minimal.',
-    example: '$10,000 account · 5 × 0.5% = $50 each entry · total worst case = $250 loss if all 5 hit stop.'
+    body: 'Five entries all at 0.5% planned risk. Total combined planned exposure: 2.5% of account. This is the most conservative ladder preset because each entry is small. If the trade immediately goes against you, planned loss stays limited before slippage.',
+    example: '$10,000 account · 5 × 0.5% = $50 planned risk each entry · total planned stop risk = $250 if all 5 fill and hit stop.'
   },
   'ladder-preset-balanced': {
     title: 'Balanced Ladder (1/1.5/2/2.5/3%)',
     body: 'Five entries at increasing risk %. Entry 1 is cautious, Entry 5 is aggressive. You commit more capital as the trade confirms. If price hits stop on the first entry without confirming, you lose only 1%.',
-    example: '$10,000 account · Entries: $100 / $150 / $200 / $250 / $300 · Total worst case all stop: $1,000.'
+    example: '$10,000 account · Entries: $100 / $150 / $200 / $250 / $300 planned risk · Total planned stop risk if all stop: $1,000 before slippage.'
   },
   'ladder-preset-aggressive': {
     title: 'Aggressive Ladder (1/2/3/4/5%)',
-    body: 'Five entries at high and rapidly increasing risk. Total worst case exposure is 15% of account — only use this if you have a very strong signal (CONFIRMED, 85%+ confluence, all MTF aligned) and a proven track record. Not suitable for beginners.',
-    example: '$10,000 account · Entries: $100/$200/$300/$400/$500 · Total worst case: $1,500 (15% of account).'
+    body: 'Five entries at high and rapidly increasing planned risk. Total planned stop exposure is 15% of account before slippage — only use this if you have a very strong signal (CONFIRMED, 85%+ confluence, all MTF aligned) and a proven track record. Not suitable for beginners.',
+    example: '$10,000 account · Entries: $100/$200/$300/$400/$500 planned risk · Total planned stop risk: $1,500 (15% of account) before slippage.'
   },
 
   // ── AUTOMATION TOGGLES (Size tab + Automations tab) ───────────────────────
   'auto-be': {
     title: 'Break Even',
-    body: 'IF price first moves 1 ATR (one average candle-size) in your favour, DotVerse moves your stop loss from its original position to your exact entry. After that fires, the worst outcome on this trade is break-even. But until price moves that far in your favour, your original stop loss is live — if the trade goes against you from the start, you take the full planned loss. Break-even protects a winner; it does not stop a loser.',
-    example: 'Entry $68,200 · ATR $1,800 → IF price first reaches $70,000 (moved 1 ATR), stop auto-moves to $68,200 and you can no longer lose. If price drops to your stop BEFORE reaching $70,000, you take the full loss.'
+    body: 'IF price first moves 1 ATR (one average candle-size) in your favour, DotVerse moves your stop loss from its original position to your exact entry. After that fires, planned downside is reduced, but gaps and slippage can still fill worse. Until price moves that far in your favour, your original stop loss is live — if the trade goes against you from the start, you take the full planned loss before slippage. Break-even protects a winner; it does not stop a loser.',
+    example: 'Entry $68,200 · ATR $1,800 → IF price first reaches $70,000 (moved 1 ATR), stop auto-moves to $68,200 and planned downside is reduced. If price drops to your stop BEFORE reaching $70,000, you take the planned loss, with slippage risk still possible.'
   },
   'auto-trail': {
     title: 'Trailing Stop',
@@ -26530,13 +26720,13 @@ window._dvGuide = {
   },
   'size-direction-long': {
     title: 'LONG (Buy)',
-    body: 'You are buying, expecting the price to rise. You profit when price moves above your entry. Stop loss is below entry — if price falls to that level the trade closes with a controlled loss. Matches a BUY signal from the Signal tab.',
-    example: 'Long BTC at $68,200 · SL $65,800 · TP1 $72,000 → if price rises to $72,000 you gain $3,800. If price falls to $65,800 you lose $2,400 — your controlled maximum loss.'
+    body: 'You are buying, expecting the price to rise. You profit when price moves above your entry. Stop loss is below entry — if price fills there, the trade closes near your planned loss, though fast markets can slip. Matches a BUY signal from the Signal tab.',
+    example: 'Long BTC at $68,200 · SL $65,800 · TP1 $72,000 → if price rises to $72,000 you gain $3,800. If price falls to $65,800 you lose about $2,400 before fees/slippage.'
   },
   'size-direction-short': {
     title: 'SHORT (Sell)',
     body: 'You are selling, expecting the price to fall. You profit when price moves below your entry. Stop loss is above entry — if price rises to that level the trade closes. Matches a SELL signal. Shorting is more advanced — price can rise indefinitely but can only fall to zero.',
-    example: 'Short EURUSD at 1.0850 · SL 1.0920 · TP1 1.0720 → price falls to 1.0720 you gain 130 pips. Price rises to 1.0920 you lose 70 pips — controlled maximum loss.'
+    example: 'Short EURUSD at 1.0850 · SL 1.0920 · TP1 1.0720 → price falls to 1.0720 you gain 130 pips. Price rises to 1.0920 you lose about 70 pips before fees/slippage.'
   },
   'size-current-price': {
     title: 'Current Price',
@@ -26545,12 +26735,12 @@ window._dvGuide = {
   },
   'size-summary-box': {
     title: 'Trade Summary',
-    body: 'Your complete trade parameters in one place: account balance, risk percentage, exact dollar amount at risk, number of lots or units to trade, margin your broker will hold, and R:R at TP1. These are the numbers you enter into your MT5 platform to place the trade.',
+    body: 'Your complete trade parameters in one place: account balance, risk percentage, planned dollar risk, number of lots or units to trade, margin your broker will hold, and R:R at TP1. These are the numbers you enter into your MT5 platform to place the trade.',
     example: 'Balance $10,000 · Risk 1% · At Risk $100 · Lots 0.05 · Margin $320 · R:R 1:2.1 → enter these numbers into MT5 exactly as shown.'
   },
   'size-trade-scenario': {
     title: 'Trade Scenarios',
-    body: 'Four possible outcomes for this trade: (1) SL hit — your controlled loss. (2) TP1 hit — your gain at the first target. (3) TP2 hit — your gain if you hold longer. (4) TP3 hit — your maximum gain if the full trend plays out. Knowing all four outcomes before placing the trade is a professional discipline.',
+    body: 'Four possible outcomes for this trade: (1) SL hit — your planned stop loss before slippage. (2) TP1 hit — your gain at the first target. (3) TP2 hit — your gain if you hold longer. (4) TP3 hit — your largest planned target if the full trend plays out. Knowing all four outcomes before placing the trade is a professional discipline.',
     example: 'If SL: −$100 · If TP1: +$167 · If TP2: +$290 · If TP3: +$440 → you know your worst and best case before you commit a single dollar.'
   },
   'size-submit-mt5': {
@@ -26592,8 +26782,8 @@ window._dvGuide = {
   },
   'auto-tp1-scale': {
     title: 'Auto-Take 50% Profit at TP1',
-    body: 'When price reaches the first take profit target, DotVerse automatically closes 50% of your position via the MT5 EA. The remaining 50% continues to TP2 with the stop loss already moved to breakeven — so you cannot lose on the remainder.',
-    example: 'Position: 0.10 lots BUY · TP1 hit → EA automatically closes 0.05 lots and locks in that profit. The other 0.05 lots runs on to TP2 risk-free.'
+    body: 'When price reaches the first take profit target, DotVerse automatically closes 50% of your position via the MT5 EA. The remaining 50% continues to TP2 with the stop loss moved to breakeven, reducing planned downside on the remainder while gaps and slippage can still fill worse.',
+    example: 'Position: 0.10 lots BUY · TP1 hit → EA automatically closes 0.05 lots and locks in that profit. The other 0.05 lots runs on to TP2 with reduced planned downside.'
   },
   'auto-tp2-scale': {
     title: 'Auto-Take 30% Profit at TP2',
@@ -26687,7 +26877,7 @@ window._dvGuide = {
   },
   'portfolio-var': {
     title: 'Value at Risk (VaR)',
-    body: 'The maximum loss your portfolio is likely to experience on a normal trading day, expressed in dollars and as a percentage of your account. Calculated using 252 days of historical price volatility at 95% confidence — meaning 95 out of 100 days, your total loss across all positions will not exceed this number.',
+    body: 'The loss your portfolio is statistically expected to stay under on most normal trading days, expressed in dollars and as a percentage of your account. Calculated using 252 days of historical price volatility at 95% confidence — it is an estimate, not a guarantee.',
     example: 'VaR $340 (3.4% of $10,000) at 95% confidence → on a normal volatile day you are unlikely to lose more than $340 across all open positions. The other 5 days (extreme events) could exceed this.'
   },
   'portfolio-stress-test': {
