@@ -67,6 +67,7 @@ def test_today_v2_hydrates_account_context_from_live_sources():
     assert "Last MT5 balance (offline)" in source
     assert "d.connected===true" in source
     assert "Manual override" in source
+    assert "if(window._todayMt5Online===true&&window._todayLastMt5State&&window._todayLastMt5State.account) return 'Live MT5 equity'" in source
     assert "todayAcctSource" in source
     assert "window._todayMt5Online" in source
     assert "function _todayAccountIsConnected(a)" in source
