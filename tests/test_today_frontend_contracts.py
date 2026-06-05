@@ -71,7 +71,7 @@ def test_today_v2_hydrates_account_context_from_live_sources():
     assert "window._todayMt5Online" in source
     assert "function _todayAccountIsConnected(a)" in source
     assert "a.connected===true||a.is_connected===true||a.online===true||s==='connected'||s==='online'" in source
-    assert "window._todayMt5Online=list.some(_todayAccountIsConnected)" in source
+    assert "window._todayMt5Online=window._todayMt5Online===true || list.some(_todayAccountIsConnected)" in source
     assert "window._todayMt5Online=window._todayMt5Online===true || d.connected===true" in source
     assert "function _todayCanPlaceMt5()" in source
 
