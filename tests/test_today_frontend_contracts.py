@@ -74,6 +74,8 @@ def test_today_v2_hydrates_account_context_from_live_sources():
     assert "window._todayMt5Online=window._todayMt5Online===true || list.some(_todayAccountIsConnected)" in source
     assert "window._todayMt5Online=window._todayMt5Online===true || d.connected===true" in source
     assert "function _todayBridgeMt5StateToGlobalAccount(d)" in source
+    assert "if(window._todayLastMt5State) _todayBridgeMt5StateToGlobalAccount(window._todayLastMt5State)" in source
+    assert "if(d&&d.account) window._todayLastMt5State=d" in source
     assert "if(idx<0 && window._mt5Accounts.length===1) idx=0" in source
     assert "status: connected?'online':(prev.status||'disconnected')" in source
     assert "_todayBridgeMt5StateToGlobalAccount(d)" in source
