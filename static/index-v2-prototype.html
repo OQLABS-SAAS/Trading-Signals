@@ -12411,6 +12411,30 @@ function _todayApplyAccountContext(accounts, source){
   }
 }
 
+function _todayBridgeMt5StateToGlobalAccount(d){
+  if(!d||!d.account||!Array.isArray(window._mt5Accounts)||!window._mt5Accounts.length) return;
+  var acct=d.account||{}, login=String(acct.login||acct.account_number||'');
+  var idx=-1;
+  for(var i=0;i<window._mt5Accounts.length;i++){
+    var a=window._mt5Accounts[i]||{}, aLogin=String(a.login||a.account_number||'');
+    if(login&&aLogin&&login===aLogin){ idx=i; break; }
+  }
+  if(idx<0 && window._mt5Accounts.length===1) idx=0;
+  if(idx<0) return;
+  var prev=window._mt5Accounts[idx]||{}, connected=d.connected===true||prev.connected===true||prev.online===true;
+  var next=Object.assign({}, prev, {
+    connected: connected,
+    online: connected,
+    status: connected?'online':(prev.status||'disconnected'),
+    balance: acct.balance!=null?acct.balance:prev.balance,
+    equity: acct.equity!=null?acct.equity:prev.equity,
+    leverage: acct.leverage!=null?acct.leverage:prev.leverage,
+    last_seen: d.last_seen||prev.last_seen
+  });
+  window._mt5Accounts=window._mt5Accounts.map(function(a,i){return i===idx?next:a;});
+  if(typeof _updateGlobalConnIndicator==='function') _updateGlobalConnIndicator();
+}
+
 async function _todayLoadAccountContext(){
   try{
     if(typeof _agentLoadAccounts==='function'){
@@ -12465,6 +12489,7 @@ function showToday(){
       var b=parseFloat(d.account.balance)||0;
       if(b>0 && !window._todayAcctManual){
         window._todayMt5Online=window._todayMt5Online===true || d.connected===true;
+        _todayBridgeMt5StateToGlobalAccount(d);
         c.acct=b; window._todayAccountSource=window._todayMt5Online?'mt5_state':'mt5_state_stale';
         var a=document.getElementById('todayAcct'); if(a) a.value=Math.round(b);
         var src=document.getElementById('todayAcctSource'); if(src) src.textContent=_todayAccountSourceLabel();
