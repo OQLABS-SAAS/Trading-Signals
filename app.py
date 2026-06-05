@@ -10495,9 +10495,10 @@ def _recommend_automations_from_signal(data):
                 ("tp1", tp1), ("tp2", tp2), ("wknd", weekend)
             ] if v
         )
+        on_count = len([v for v in [be, trail, macro, inval, sent, tp1, tp2, weekend] if v])
         explanation = (
             f"This {trade_desc} ({conf_desc}). "
-            f"DotVerse activated {len(reasons)} automation{'s' if len(reasons) != 1 else ''} ({on_list}). "
+            f"DotVerse activated {on_count} automation{'s' if on_count != 1 else ''} ({on_list}). "
             + " ".join(reasons)
         )
 

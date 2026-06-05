@@ -37,3 +37,24 @@ def test_today_scout_alert_accepts_protect_mode(monkeypatch):
     assert "Today protect mode active" in sent["telegram"]
     assert sent["push"]["ntype"] == "today_scout"
     assert sent["push"]["data"]["kind"] == "protect"
+
+
+def test_today_automation_summary_counts_enabled_flags_not_reasons():
+    result = dvapp._recommend_automations_from_signal(
+        {
+            "trade_type": "swing",
+            "confidence": 82,
+            "confidence_label": "CONFIRMED",
+            "signal": "SELL",
+            "bull_count": 8,
+            "bear_count": 26,
+            "atr": 1,
+            "entry": 576,
+            "htf_bias": "BEARISH",
+            "rsi": 27,
+            "target": "tp3",
+        }
+    )
+
+    assert all(result[k] is True for k in ("be", "trail", "macro", "inval", "sent", "tp1", "tp2", "weekend"))
+    assert "DotVerse activated 8 automations" in result["explanation"]
