@@ -106,3 +106,36 @@ def test_today_v2_blocks_live_place_actions_when_mt5_is_offline():
     assert "MT5 is offline - no live order was sent" in source
     assert "var bottomOrderNote=protect?'new entries paused':(!mt5CanPlace?'MT5 offline'" in source
     assert ".today-v2-btn:disabled,.today-v2-review:disabled" in source
+
+
+def test_today_v2_allocates_basket_risk_only_to_executable_setups():
+    source = _source()
+
+    assert "var candidates=[]" in source
+    assert "if(o._minRiskPlace<=cap+1e-9)" in source
+    assert "var active=candidates.slice()" in source
+    assert "basket risk was reallocated to executable setups" in source
+    assert "cap*(weight/activeWeight)" in source
+    assert "return Math.max(0, used || 0)" in source
+    assert "return Math.max(0, used || 0.6)" not in source
+
+
+def test_today_v2_explains_requested_vs_actual_risk_after_lot_rounding():
+    source = _source()
+
+    assert "function _todayRiskFitNote(o, s)" in source
+    assert "Allocated '+target.toFixed(2)+'%; actual '+actual.toFixed(2)+'% after broker lot step/stop distance." in source
+    assert "var riskFitNote=_todayRiskFitNote(o,s)" in source
+    assert "riskFitNote||''" in source
+
+
+def test_today_v2_compresses_multiladder_instead_of_auto_single_when_possible():
+    source = _source()
+
+    assert "var execLadder=ladder.slice()" in source
+    assert "while(execLadder.length>1)" in source
+    assert "lots*((parseFloat(l.share)||0)/sumShares) >= minLot-1e-9" in source
+    assert "lots>=minLot*2-1e-9" in source
+    assert "compressedSplit:compressed" in source
+    assert "var compressedScale=actualScale&&legs.some" in source
+    assert "DotVerse compressed the preset into executable legs" in source
