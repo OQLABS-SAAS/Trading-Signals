@@ -61,6 +61,8 @@ def test_market_has_first_class_opportunity_desk_with_signal_badges():
     assert "Opportunity Map" in source
     assert "mkt-lane" in source
     assert "asset-class lanes" in source
+    assert "guided trade badges" in source
+    assert "review a badge in Signal before sizing" in source
     assert "mktOppDesk" in source
     assert "mktOppCount" in source
     assert "mktOppAvgConf" in source
@@ -103,7 +105,9 @@ def test_market_primary_cta_targets_rendered_lane_chips():
 
     assert "function _mktOpenTopSignal()" in source
     assert "document.querySelector('.mkt-lane-chip, .mkt-opp-card')" in source
-    assert 'onclick="_mktOpenTopSignal();">Open top signal' in source
+    assert 'onclick="_mktOpenTopSignal();">Review top Signal' in source
+    assert "Review top setup" in source
+    assert "Open strongest" not in source
     assert "document.querySelector('.mkt-opp-card'); if(c) _mktOpenSignalFromEl(c); else _mktRunOpportunityScan();" not in source
 
 
