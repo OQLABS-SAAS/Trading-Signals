@@ -12244,11 +12244,35 @@ function _todayConfirmAndPlace(trades){
 	    return '<div style="font-family:var(--mono);font-size:10.5px;padding:7px 0;border-bottom:1px solid rgba(237,232,216,.07);"><div style="display:flex;justify-content:space-between;gap:8px;"><span><strong>'+o.sym+'</strong> <span style="color:'+dc+';">'+dir+'</span> · '+legs.length+' ladder order'+(legs.length===1?'':'s')+' · '+active+' automation'+(active===1?'':'s')+'</span><span style="color:#e8706e;">'+money(-lt.risk)+'</span></div><div style="margin-top:3px;color:rgba(237,232,216,.45);">cash in '+money(lt.margin)+' · controls '+money(lt.notional)+' · profit plan <span style="color:#5de8a0;">+'+money(lt.profit)+'</span></div></div>';
 	  }).join('');
   var pct=acct>0?(totLoss/acct*100):0;
+  // ── Account mode banner — build before injecting HTML ──
+  // Source: window._todayLastMt5State is set ONLY by _todayBridgeMt5StateToGlobalAccount,
+  // which is called during showToday() and on every mt5Poll tick. If Today was never opened
+  // it remains undefined and the banner falls back safely to UNKNOWN (amber).
+  // _todayBuildPlan does NOT set this global; it only reads /api/mt5/state for sizing.
+  var _cfAcct=(window._todayLastMt5State&&window._todayLastMt5State.account)||{};
+  var _cfMode=_mt5AccountMode(_cfAcct)||'UNKNOWN';
+  var _cfLogin=String(_cfAcct.login||_cfAcct.account_number||'').trim();
+  var _cfServer=String(_cfAcct.server||'').trim();
+  var _cfIsLive=_cfMode==='LIVE';
+  var _cfIsDemo=_cfMode==='DEMO';
+  var _cfModeBg=_cfIsLive?'rgba(232,112,110,.10)':_cfIsDemo?'rgba(93,232,160,.07)':'rgba(201,168,76,.08)';
+  var _cfModeBorder=_cfIsLive?'rgba(232,112,110,.40)':_cfIsDemo?'rgba(93,232,160,.25)':'rgba(201,168,76,.35)';
+  var _cfModeColor=_cfIsLive?'#e8706e':_cfIsDemo?'#5de8a0':'#c9a84c';
+  var _cfModeLabel=_cfIsLive?'LIVE — real money will be used':_cfIsDemo?'DEMO — practice account, no real money':'MODE UNKNOWN — check MT5 connection';
+  var _cfAcctLine=(_cfLogin?'Account '+_cfLogin:'')+(_cfLogin&&_cfServer?' · ':'')+(_cfServer?_cfServer:'');
+  var _cfAccountBannerHtml='<div id="todayCfAcctBanner" style="background:'+_cfModeBg+';border:1px solid '+_cfModeBorder+';border-radius:9px;padding:10px 14px;margin-bottom:13px;">'
+    +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:3px;">'
+      +'<div style="width:8px;height:8px;border-radius:50%;background:'+_cfModeColor+';flex-shrink:0;"></div>'
+      +'<div style="font-family:var(--mono);font-size:11px;font-weight:700;color:'+_cfModeColor+';letter-spacing:.04em;">'+_cfModeLabel+'</div>'
+    +'</div>'
+    +(_cfAcctLine?'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.50);margin-left:15px;">'+_cfAcctLine+'</div>':'')
+  +'</div>';
   var ov=document.createElement('div'); ov.id='todayConfirmOverlay';
   ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(4,5,8,.78);display:flex;align-items:center;justify-content:center;padding:18px;';
   ov.innerHTML='<div style="max-width:440px;width:100%;background:#0a0e16;border:1px solid rgba(93,232,160,.4);border-radius:14px;padding:20px 22px;max-height:92vh;overflow:auto;">'
     +'<div style="font-family:var(--syne,sans-serif);font-size:17px;font-weight:600;margin-bottom:3px;color:#ede8d8;">Review &amp; place '+(trades.length>1?trades.length+' trades':'trade')+'</div>'
     +'<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);margin-bottom:13px;line-height:1.5;">This places <strong style="color:rgba(237,232,216,.82)">real order'+(trades.length>1?'s':'')+'</strong> with your broker (MT5). You can close '+(trades.length>1?'any of them':'it')+' anytime from the ACT tab.</div>'
+    +_cfAccountBannerHtml
     +'<div style="margin-bottom:12px;">'+rows+'</div>'
     +'<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);margin-bottom:4px;"><span>Cash in (margin)</span><span>'+money(totMargin)+(acct>0?' ('+(totMargin/acct*100).toFixed(0)+'% of account)':'')+'</span></div>'
     +(Math.round(totCap)!==Math.round(totMargin)?'<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.45);margin-bottom:4px;"><span>Position value, not cash</span><span>'+money(totCap)+'</span></div>':'')
@@ -12346,9 +12370,24 @@ function _todayAutoPlace(){
     });
   }
   function cancel(){ stop(); remove(); if(typeof _dvToast==='function') _dvToast('Auto-place cancelled — review and place manually','rgba(237,232,216,.12)','rgba(237,232,216,.3)'); }
+  // Compact account mode indicator — read from same source as _todayConfirmAndPlace.
+  // window._todayLastMt5State is set by _todayBridgeMt5StateToGlobalAccount (showToday /
+  // mt5Poll). Safe UNKNOWN fallback — never mislabels LIVE as DEMO.
+  var _apAcct=(window._todayLastMt5State&&window._todayLastMt5State.account)||{};
+  var _apMode=_mt5AccountMode(_apAcct)||'UNKNOWN';
+  var _apIsLive=_apMode==='LIVE', _apIsDemo=_apMode==='DEMO';
+  var _apModeColor=_apIsLive?'#e8706e':_apIsDemo?'#5de8a0':'#c9a84c';
+  var _apModeLabel=_apIsLive?'LIVE':'DEMO';
+  var _apLogin=String(_apAcct.login||_apAcct.account_number||'').trim();
+  var _apAcctChip='<span id="todayAutoModeChip" style="display:inline-flex;align-items:center;gap:5px;border:1px solid '+(_apIsLive?'rgba(232,112,110,.45)':_apIsDemo?'rgba(93,232,160,.3)':'rgba(201,168,76,.4)')+';background:'+(_apIsLive?'rgba(232,112,110,.10)':_apIsDemo?'rgba(93,232,160,.07)':'rgba(201,168,76,.08)')+';border-radius:5px;padding:3px 8px;font-family:var(--mono);font-size:10px;font-weight:700;color:'+_apModeColor+';white-space:nowrap;">'
+    +'<span style="width:6px;height:6px;border-radius:50%;background:'+_apModeColor+';flex-shrink:0;display:inline-block;"></span>'
+    +(_apIsLive||_apIsDemo?_apModeLabel:'MODE UNKNOWN')
+    +(_apLogin?' · '+_apLogin:'')
+  +'</span>';
   function paint(){
     bar.innerHTML='<span style="font-weight:700;color:#e8706e;">⚡ Auto-place ON</span>'
       +'<span>Placing '+plan.length+' valid trade'+(plan.length>1?'s':'')+' in '+secs+'s</span>'
+      +_apAcctChip
       +'<button id="todayAutoCancel" style="margin-left:auto;padding:5px 11px;border-radius:5px;border:1px solid rgba(237,232,216,.3);background:transparent;color:rgba(237,232,216,.85);font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;">Cancel</button>'
       +'<button id="todayAutoNow" style="padding:5px 11px;border-radius:5px;border:none;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;">Place now</button>';
     var cb=document.getElementById('todayAutoCancel'); if(cb) cb.onclick=cancel;
@@ -23489,6 +23528,33 @@ function _szConfirmTrade(onConfirm){
     +'</div>';
   }).join('');
   var vbg=go==='GO'?'rgba(93,232,160,.1)':go==='WAIT'?'rgba(201,168,76,.1)':'rgba(232,112,110,.1)';
+  // ── Account mode banner for SIZE/ACT confirm modal ──
+  // Source: window._todayLastMt5State.account — set ONLY by the EA-connected ground truth
+  // (_todayBridgeMt5StateToGlobalAccount / mt5Poll). Do NOT fall back to window._mt5Accounts
+  // — that list is not the EA-connected truth and can show a different account's mode than the
+  // order routes to (backend routes via _resolve_selected_mt5_account). Mode-only fallback
+  // window._mt5AccountType is EA-derived (set by _mt5SetStatus via mt5Poll) and acceptable
+  // for the mode string alone, but not for login/server. If EA truth is unavailable, show
+  // UNKNOWN (amber) — NEVER show a guessed specific account.
+  var _szCfAcct = (window._todayLastMt5State && window._todayLastMt5State.account) || null;
+  var _szCfMode = _mt5AccountMode(_szCfAcct) || window._mt5AccountType || '';
+  if (!_szCfMode) _szCfMode = 'UNKNOWN';
+  var _szCfLogin = String((_szCfAcct && (_szCfAcct.login || _szCfAcct.account_number)) || '').trim();
+  var _szCfServer = String((_szCfAcct && _szCfAcct.server) || '').trim();
+  var _szCfIsLive = _szCfMode === 'LIVE';
+  var _szCfIsDemo = _szCfMode === 'DEMO';
+  var _szCfModeBg = _szCfIsLive ? 'rgba(232,112,110,.10)' : _szCfIsDemo ? 'rgba(93,232,160,.07)' : 'rgba(201,168,76,.08)';
+  var _szCfModeBorder = _szCfIsLive ? 'rgba(232,112,110,.40)' : _szCfIsDemo ? 'rgba(93,232,160,.25)' : 'rgba(201,168,76,.35)';
+  var _szCfModeColor = _szCfIsLive ? '#e8706e' : _szCfIsDemo ? '#5de8a0' : '#c9a84c';
+  var _szCfModeLabel = _szCfIsLive ? 'LIVE — real money will be used' : _szCfIsDemo ? 'DEMO — practice account, no real money' : 'MODE UNKNOWN — check MT5 connection';
+  var _szCfAcctLine = (_szCfLogin ? 'Account ' + _szCfLogin : '') + (_szCfLogin && _szCfServer ? ' · ' : '') + (_szCfServer ? _szCfServer : '');
+  var _szCfAccountBannerHtml = '<div id="szCfAcctBanner" style="background:' + _szCfModeBg + ';border:1px solid ' + _szCfModeBorder + ';border-radius:9px;padding:10px 14px;margin-bottom:13px;">'
+    + '<div style="display:flex;align-items:center;gap:7px;margin-bottom:3px;">'
+      + '<div style="width:8px;height:8px;border-radius:50%;background:' + _szCfModeColor + ';flex-shrink:0;"></div>'
+      + '<div style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + _szCfModeColor + ';letter-spacing:.04em;">' + _szCfModeLabel + '</div>'
+    + '</div>'
+    + (_szCfAcctLine ? '<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.50);margin-left:15px;">' + _szCfAcctLine + '</div>' : '')
+  + '</div>';
   var ov=document.createElement('div'); ov.id='szConfirmOverlay';
   ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(4,5,8,.78);display:flex;align-items:center;justify-content:center;padding:18px;';
   ov.innerHTML='<div style="max-width:440px;width:100%;background:#0a0e16;border:1px solid '+verdict.col+';border-radius:14px;padding:20px 22px;max-height:92vh;overflow:auto;">'
@@ -23508,11 +23574,12 @@ function _szConfirmTrade(onConfirm){
       +'<div style="font-size:9px;color:rgba(237,232,216,.42);letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px;">Orders DotVerse will send to MT5</div>'
       +legRows
     +'</div>':'')
-    +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin-bottom:16px;">'
+    +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin-bottom:13px;">'
       +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">Planned stop risk</div>'
       +'<div style="font-family:var(--mono);font-size:24px;font-weight:700;color:#e8706e;line-height:1;">'+money(-totRisk)+'</div>'
       +'<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.6);margin-top:6px;line-height:1.5;">That is '+(acct>0?(totRisk/acct*100).toFixed(2):'0')+'% of your account under the planned stop. Your broker stop is the protection point; fast gaps, rejected fills, or severe slippage can make the final loss differ.</div>'
     +'</div>'
+    +_szCfAccountBannerHtml
     +'<div style="display:flex;gap:10px;">'
       +'<button id="szConfirmCancel" style="flex:1;padding:12px;border-radius:8px;border:1px solid rgba(237,232,216,.2);background:transparent;color:rgba(237,232,216,.7);font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">Cancel</button>'
       +'<button id="szConfirmGo" style="flex:1.4;padding:12px;border-radius:8px;border:none;background:'+(go==='SKIP'?'rgba(232,112,110,.85)':go==='WAIT'?'#c9a84c':'#5de8a0')+';color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em;">'+(go==='SKIP'?'Place anyway':'Place '+nT+' MT5 order'+(nT===1?'':'s')+' →')+'</button>'
@@ -24916,73 +24983,6 @@ function mt5SetDir(dir) {
   const sellBtn = document.getElementById('mt5DirSell');
   if(buyBtn){ buyBtn.style.background = dir === 'BUY' ? 'rgba(61,190,108,.25)' : 'rgba(61,190,108,.15)'; buyBtn.style.borderColor = dir === 'BUY' ? 'rgba(61,190,108,.9)' : 'rgba(61,190,108,.5)'; }
   if(sellBtn){ sellBtn.style.background = dir === 'SELL' ? 'rgba(224,85,85,.25)' : 'rgba(224,85,85,.15)'; sellBtn.style.borderColor = dir === 'SELL' ? 'rgba(224,85,85,.9)' : 'rgba(224,85,85,.5)'; }
-}
-
-async function mt5Execute() {
-  const btn = document.getElementById('mt5ExecBtn');
-  const status = document.getElementById('mt5ExecStatus');
-  const orderType = document.getElementById('mt5OrderType')?.value || 'Market';
-  // ── AUTO-SIZE FROM CALCULATOR (commit 6 — 2026-04-29) ────────────────
-  // Previously read a non-existent #mt5Lots input, falling back to 0.1
-  // every time. Now reads window._szLastCalc populated by szCalc() with
-  // the user's account-+-risk-based position size. No silent default for live orders.
-  const _szLast = window._szLastCalc || {};
-  const _autoLots = (_szLast.lots && _szLast.lots > 0) ? _szLast.lots
-                  : (_szLast.posSize && _szLast.posSize > 0) ? _szLast.posSize
-                  : 0;
-  const lots = parseFloat(document.getElementById('mt5Lots')?.value) || _autoLots;
-  const direction = window._mt5Dir;
-  const signal = window._activeSignal || {};
-  const ticker = signal.sym || '';
-  const entry = signal.entry || 0;
-  const sl = signal.sl || 0;
-  const tp1 = signal.tp || 0;
-  if (!ticker) { if(status) status.innerHTML = '<span style="color:rgba(224,85,85,.9);">No signal loaded</span>'; return; }
-  if (!(lots > 0)) {
-    if(status) status.innerHTML = '<span style="color:rgba(224,85,85,.9);">No calculated size — go to SIZE first or enter a valid quantity.</span>';
-    return;
-  }
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
-  if (status) status.innerHTML = '<span style="color:#d4b87a;">Sending...</span>';
-  const res = await dvOrderFetch('/api/mt5/order', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticker, order_type: orderType, lots, direction, entry, sl, tp1 })
-  });
-  if (res && res.order_id) {
-    if(status) status.innerHTML = '<span style="color:rgba(61,190,108,.9);">Order sent · #' + res.order_id + '</span>';
-    // Log trade immediately to actTradesList as pending
-    var list = document.getElementById('actTradesList');
-    if (list) {
-      var isBuy = (direction||'BUY').toUpperCase() === 'BUY';
-      var dirColor = isBuy ? 'rgba(93,232,160,.85)' : 'rgba(224,85,85,.85)';
-      var dirBg    = isBuy ? 'rgba(93,232,160,.1)'  : 'rgba(224,85,85,.1)';
-      var dirBd    = isBuy ? 'rgba(93,232,160,.25)' : 'rgba(224,85,85,.25)';
-      var pending = document.createElement('div');
-      pending.className = 'act-trade-card';
-      pending.id = 'pending-' + res.order_id;
-      pending.style.cssText = 'padding:14px 16px;opacity:.75;';
-      pending.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
-          '<div style="display:flex;align-items:center;gap:8px;">' +
-            '<span style="font-weight:700;font-size:13px;color:rgba(220,230,245,.9);">' + ticker + '</span>' +
-            '<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:' + dirBg + ';border:1px solid ' + dirBd + ';color:' + dirColor + ';">' + (direction||'BUY').toUpperCase() + '</span>' +
-            '<span style="font-size:10px;font-family:var(--mono);color:rgba(237,232,216,.5);">· Pending fill · #' + res.order_id + '</span>' +
-          '</div>' +
-          '<span style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Entry ' + entry + '</span>' +
-        '</div>' +
-        '<div style="font-size:10px;color:rgba(237,232,216,.4);font-family:var(--mono);">SL ' + sl + ' · TP ' + tp1 + ' · ' + lots + ' lots</div>';
-      // Remove empty state placeholder if present
-      if (list.querySelector('[style*="text-align:center"]')) list.innerHTML = '';
-      list.prepend(pending);
-    }
-    // Poll immediately then again after 3s to catch EA fill
-    mt5Poll();
-    setTimeout(mt5Poll, 3000);
-  } else {
-    if(status) status.innerHTML = '<span style="color:rgba(224,85,85,.9);">' + _mt5OrderErrorHtml(res) + '</span>';
-  }
-  if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
 }
 
 function _actExecuteGo(){
