@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Iterable
 
+from backend.app.accounts.account_contracts import annotate_mt5_account_mode
+
 
 MT5_ONLINE_TTL_SECONDS = 45
 
@@ -154,7 +156,9 @@ def project_agent_account(
 ) -> dict[str, Any]:
     login = _get(account, "account_number") or ""
     live_state = find_live_state_for_account(login, live_states, account_count, now=now)
-    live_account = live_state.get("account", {}) if live_state else {}
+    live_account_raw = live_state.get("account", {}) if live_state else {}
+    account_mode_fallback = None if live_account_raw else _get(account, "account_type")
+    live_account = annotate_mt5_account_mode(live_account_raw, fallback=account_mode_fallback)
     balance = _to_float(live_account.get("balance"), _to_float(_get(account, "balance"), 0.0))
     equity = _to_float(live_account.get("equity"), _to_float(_get(account, "equity"), balance))
     drawdown = _to_float(_get(account, "drawdown"), 0.0)
@@ -175,7 +179,10 @@ def project_agent_account(
         "broker": _get(account, "broker"),
         "server": _get(account, "server"),
         "account_number": _get(account, "account_number"),
-        "account_type": _get(account, "account_type"),
+        "account_type": live_account.get("account_type"),
+        "is_demo": live_account.get("is_demo"),
+        "is_live": live_account.get("is_live"),
+        "account_mode_source": live_account.get("account_mode_source"),
         "currency": _get(account, "currency"),
         "status": status,
         "problem": problem,
@@ -186,6 +193,7 @@ def project_agent_account(
 
 def project_pending_mt5_account(live_state: dict[str, Any]) -> dict[str, Any]:
     account = live_state.get("account", {}) if isinstance(live_state, dict) else {}
+    account = annotate_mt5_account_mode(account)
     positions = live_state.get("positions", []) if isinstance(live_state, dict) else []
     balance = _to_float(account.get("balance"), 0.0)
     equity = _to_float(account.get("equity"), balance)
@@ -204,7 +212,10 @@ def project_pending_mt5_account(live_state: dict[str, Any]) -> dict[str, Any]:
         "broker": "MetaTrader 5",
         "server": str(account.get("server", "") or ""),
         "account_number": login,
-        "account_type": str(account.get("account_type", "live") or "live"),
+        "account_type": account.get("account_type"),
+        "is_demo": account.get("is_demo"),
+        "is_live": account.get("is_live"),
+        "account_mode_source": account.get("account_mode_source"),
         "currency": str(account.get("currency", "USD") or "USD"),
         "status": "pending",
         "problem": None,

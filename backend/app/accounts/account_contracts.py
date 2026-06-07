@@ -41,6 +41,86 @@ def _format_datetime(value: Any) -> str | None:
     return None
 
 
+def _normalize_account_mode_text(value: Any) -> str | None:
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return None
+    if raw == "2":
+        return "LIVE"
+    if raw in {"0", "1"}:
+        return "DEMO"
+    if any(token in raw for token in ("REAL", "LIVE")):
+        return "LIVE"
+    if any(token in raw for token in ("DEMO", "PRACTICE", "PAPER", "CONTEST")):
+        return "DEMO"
+    return None
+
+
+def normalize_mt5_account_type(account_info: Any, fallback: Any = None) -> str:
+    """Derive DEMO/LIVE from the MT5 account payload, then fallback safely."""
+    info = account_info if isinstance(account_info, dict) else {}
+
+    for key, mode in (
+        ("is_live", "LIVE"),
+        ("live", "LIVE"),
+        ("real", "LIVE"),
+        ("is_real", "LIVE"),
+        ("is_demo", "DEMO"),
+        ("demo", "DEMO"),
+        ("paper", "DEMO"),
+    ):
+        if isinstance(info.get(key), bool) and info.get(key):
+            return mode
+
+    for key in (
+        "account_type",
+        "type",
+        "mode",
+        "trade_mode",
+        "trade_mode_label",
+        "trade_mode_name",
+        "account_trade_mode",
+    ):
+        mode = _normalize_account_mode_text(info.get(key))
+        if mode:
+            return mode
+
+    for key in ("trade_mode", "account_trade_mode", "trade_mode_value", "trade_mode_id"):
+        try:
+            value = int(info.get(key))
+        except (TypeError, ValueError):
+            continue
+        if value == 2:
+            return "LIVE"
+        if value in (0, 1):
+            return "DEMO"
+
+    server_text = " ".join(
+        str(info.get(key) or "") for key in ("server", "name", "company", "broker")
+    )
+    mode = _normalize_account_mode_text(server_text)
+    if mode:
+        return mode
+
+    return _normalize_account_mode_text(fallback) or "UNKNOWN"
+
+
+def annotate_mt5_account_mode(account_info: Any, fallback: Any = None) -> dict[str, Any]:
+    result = dict(account_info) if isinstance(account_info, dict) else {}
+    mt5_mode = normalize_mt5_account_type(result)
+    mode = normalize_mt5_account_type(result, fallback=fallback)
+    result["account_type"] = mode
+    result["is_demo"] = mode == "DEMO"
+    result["is_live"] = mode == "LIVE"
+    if mt5_mode in ("DEMO", "LIVE"):
+        result["account_mode_source"] = "mt5"
+    elif _normalize_account_mode_text(fallback):
+        result["account_mode_source"] = "fallback"
+    else:
+        result["account_mode_source"] = "unknown"
+    return result
+
+
 def normalize_account_create_payload(
     payload: dict[str, Any] | None,
     *,
@@ -112,6 +192,8 @@ def serialize_trading_account(
 ) -> dict[str, Any]:
     state = live_state if isinstance(live_state, dict) else {}
     acct_info = state.get("account", {}) if isinstance(state.get("account", {}), dict) else {}
+    acct_fallback = None if acct_info else _get(account, "account_type")
+    acct_info = annotate_mt5_account_mode(acct_info, fallback=acct_fallback)
     last_seen_str = None
     connected = False
     if state.get("last_seen"):
@@ -128,7 +210,10 @@ def serialize_trading_account(
         "broker": _get(account, "broker") or "",
         "server": _get(account, "server") or "",
         "account_number": _get(account, "account_number") or "",
-        "account_type": _get(account, "account_type"),
+        "account_type": acct_info.get("account_type"),
+        "is_demo": acct_info.get("is_demo"),
+        "is_live": acct_info.get("is_live"),
+        "account_mode_source": acct_info.get("account_mode_source"),
         "currency": _get(account, "currency"),
         "platform": _get(account, "platform"),
         "status": _get(account, "status"),

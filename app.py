@@ -59,9 +59,11 @@ from backend.app.accounts.account_contracts import (
     account_archived_response,
     account_sync_audit_description,
     account_sync_response,
+    annotate_mt5_account_mode,
     build_account_create_response,
     build_agent_account_create_response,
     normalize_account_create_payload,
+    normalize_mt5_account_type,
     normalize_account_update_payload,
     serialize_trading_account,
 )
@@ -1370,7 +1372,7 @@ def _fetch_coinmarketcap(ticker, timeframe="1d"):
 def _interval_to_timeframe(interval):
     """Map yfinance interval to fetch_chart_direct timeframe."""
     mapping = {
-        "1d": "1d", "1wk": "1w", "1mo": "1d",
+        "1d": "1d", "1wk": "1w", "1mo": "1mo",
         "1h": "1h", "60m": "1h",
         "4h": "4h", "30m": "30m", "15m": "15m", "5m": "5m", "1m": "1m",
     }
@@ -2692,6 +2694,40 @@ def fetch_chart_direct(ticker, asset_type, timeframe):
     print(f"[chart] ALL sources failed for {ticker} {timeframe}")
     return None
 
+
+def _infer_asset_type_for_provider(ticker, asset_type=None):
+    if asset_type:
+        return str(asset_type).lower()
+    upper = str(ticker or "").upper()
+    if upper.endswith(("USDT", "BUSD", "BTC", "ETH")) or "BINANCE" in upper:
+        return "crypto"
+    if upper.endswith("=X") or is_forex_pair(upper.replace("=X", "")):
+        return "forex"
+    if upper.startswith(("XAU", "XAG")) or upper in {"GOLD", "SILVER", "OIL", "WTI"}:
+        return "commodity"
+    if upper.startswith("^") or upper in {"SPX", "NDX", "US30", "DAX", "FTSE"}:
+        return "index"
+    return "stock"
+
+
+def provider_first_download(ticker, period="1y", interval="1d", asset_type=None, **kwargs):
+    """Use the EODHD-first chart router before Yahoo/yfinance fallback."""
+    at = _infer_asset_type_for_provider(ticker, asset_type)
+    timeframe = _interval_to_timeframe(interval)
+    cache_key = f"provider-first:{ticker}:{period}:{interval}:{at}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    chart_out = fetch_chart_direct(ticker, at, timeframe)
+    df = _chart_output_to_df(chart_out)
+    if not df.empty:
+        cache_set(cache_key, df)
+        return df
+
+    return safe_download(ticker, period=period, interval=interval, asset_type=at, **kwargs)
+
+
 # ─── MULTI-TIMEFRAME TREND ────────────────────────────────────
 def get_mtf_trend(ticker):
     result = {}
@@ -2705,7 +2741,7 @@ def get_mtf_trend(ticker):
     }
     for label, cfg in configs.items():
         try:
-            df_m = safe_download(ticker, period=cfg["period"],
+            df_m = provider_first_download(ticker, period=cfg["period"],
                                 interval=cfg["interval"], progress=False, auto_adjust=True)
             if "resample" in cfg:
                 df_m = df_m.resample(cfg["resample"]).agg(
@@ -5742,8 +5778,8 @@ def run_watch_job():
             timeframe  = w["timeframe"]
             cfg        = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
 
-            df = safe_download(ticker, period=cfg["period"], interval=cfg["interval"],
-                              progress=False, auto_adjust=True)
+            df = provider_first_download(ticker, period=cfg["period"], interval=cfg["interval"],
+                              asset_type=asset_type, progress=False, auto_adjust=True)
             if "resample" in cfg and not df.empty:
                 df = df.resample(cfg["resample"]).agg(
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
@@ -7522,8 +7558,8 @@ def _job_auto_scan():
         min_lot    = inst["min_lot"]
         try:
             cfg = TIMEFRAME_CONFIG.get(tf, TIMEFRAME_CONFIG["1d"])
-            df  = safe_download(ticker, period=cfg["period"], interval=cfg["interval"],
-                                progress=False, auto_adjust=True)
+            df  = provider_first_download(ticker, period=cfg["period"], interval=cfg["interval"],
+                                asset_type=asset_type, progress=False, auto_adjust=True)
             if "resample" in cfg:
                 df = df.resample(cfg["resample"]).agg(
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
@@ -8451,6 +8487,81 @@ def _lookup_user_by_mt5_secret(secret):
     finally:
         db.close()
 
+
+def _sync_mt5_account_mode_from_state(user_id, account_info):
+    """Persist the EA-reported demo/live mode on the matching saved account."""
+    if not _DBSession or not isinstance(account_info, dict):
+        return
+    login = str(account_info.get("login") or account_info.get("account_number") or "").strip()
+    if not login:
+        return
+    account_type = normalize_mt5_account_type(account_info)
+    if account_type not in {"DEMO", "LIVE"}:
+        return
+    db = _DBSession()
+    try:
+        query = db.query(TradingAccount).filter(
+            TradingAccount.is_active == True,
+            TradingAccount.account_number == login,
+        )
+        if user_id and str(user_id) != "default":
+            query = query.filter(TradingAccount.user_id == str(user_id))
+        rows = query.all()
+        changed = False
+        for row in rows:
+            if str(row.account_type or "").upper() != account_type:
+                row.account_type = account_type
+                row.updated_at = datetime.utcnow()
+                changed = True
+        if changed:
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _mt5_state_account_for_user(user_id):
+    with mt5_state_lock:
+        state = mt5_state.get(str(user_id)) or mt5_state.get("default")
+    if not isinstance(state, dict):
+        return {}
+    return annotate_mt5_account_mode(state.get("account", {}))
+
+
+def _resolve_selected_mt5_account(db, user_id, payload=None):
+    body = payload if isinstance(payload, dict) else {}
+    requested_id = body.get("account_id") or body.get("trading_account_id")
+    query = db.query(TradingAccount).filter(
+        TradingAccount.user_id == str(user_id),
+        TradingAccount.is_active == True,
+    )
+    if requested_id not in (None, ""):
+        try:
+            account = query.filter(TradingAccount.id == int(requested_id)).first()
+        except (TypeError, ValueError):
+            account = None
+        if not account:
+            raise OrderValidationError("selected MT5 account is not available")
+        return account
+
+    live_account = _mt5_state_account_for_user(user_id)
+    login = str(live_account.get("login") or live_account.get("account_number") or "").strip()
+    if login:
+        account = query.filter(TradingAccount.account_number == login).first()
+        if account:
+            live_account_type = live_account.get("account_type")
+            if live_account_type in {"DEMO", "LIVE"} and str(account.account_type or "").upper() != live_account_type:
+                account.account_type = live_account_type
+                account.updated_at = datetime.utcnow()
+            return account
+
+    accounts = query.all()
+    if len(accounts) == 1:
+        return accounts[0]
+    raise OrderValidationError("select a connected MT5 account before placing this trade")
+
+
 def _require_ea(f):
     """Decorator — validates X-EA-Secret header from the MT5 EA.
 
@@ -8474,9 +8585,15 @@ def _require_ea(f):
                 request.ea_user_id = user_id
                 return f(*args, **kwargs)
 
-        # Path 2 — legacy bypass list (single-user assumption: pick the first id)
+        # Path 2 — legacy bypass list. Safe only for a single legacy user; a
+        # multi-user bypass cannot identify which account the EA belongs to.
         if MT5_BYPASS_USER_IDS:
-            request.ea_user_id = next(iter(MT5_BYPASS_USER_IDS))
+            if len(MT5_BYPASS_USER_IDS) != 1:
+                return jsonify({
+                    "error": "Unauthorized",
+                    "message": "Ambiguous MT5 legacy bypass; configure per-account EA secret",
+                }), 401
+            request.ea_user_id = sorted(MT5_BYPASS_USER_IDS)[0]
             return f(*args, **kwargs)
 
         return jsonify({"error": "Unauthorized", "message": "Valid X-EA-Secret required"}), 401
@@ -8490,15 +8607,19 @@ def mt5_submit_order():
     if not _DBSession:
         return jsonify({"error": "Database not available"}), 503
     user_id    = str(session.get("user_id"))
+    body = request.json or {}
     try:
-        order_request = normalize_mt5_submit_order(request.json)
+        order_request = normalize_mt5_submit_order(body)
     except OrderValidationError as exc:
         return jsonify({"error": str(exc)}), 400
     symbol = _mt5_symbol(order_request.ticker, order_request.asset_type)
     db = _DBSession()
     try:
+        account = _resolve_selected_mt5_account(db, user_id, body)
+        account_type = normalize_mt5_account_type({}, fallback=account.account_type)
         order = MT5Order(
             user_id          = user_id,
+            account_id       = account.id,
             symbol           = symbol,
             order_type       = order_request.direction,
             volume           = order_request.volume,
@@ -8519,11 +8640,22 @@ def mt5_submit_order():
             tp2_alert        = order_request.tp2_alert,
             weekend          = order_request.weekend,
             status           = "pending",
-            comment          = f"DotVerse {order_request.ticker} {order_request.direction}",
+            comment          = f"DotVerse {order_request.ticker} {order_request.direction} | acct={account.id} {account_type}",
         )
         db.add(order)
         db.commit()
-        return jsonify({"status": "pending", "order_id": order.id, "symbol": symbol})
+        return jsonify({
+            "status": "pending",
+            "order_id": order.id,
+            "symbol": symbol,
+            "account_id": account.id,
+            "account_type": account_type,
+            "is_demo": account_type == "DEMO",
+            "is_live": account_type == "LIVE",
+        })
+    except OrderValidationError as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
@@ -8537,14 +8669,18 @@ def orders_submit():
     if not _DBSession:
         return jsonify({"error": "Database not available"}), 503
     user_id       = str(session.get("user_id"))
+    body = request.json or {}
     try:
-        order_request = normalize_broker_order(request.json)
+        order_request = normalize_broker_order(body)
     except OrderValidationError as exc:
         return jsonify({"error": str(exc)}), 400
     db = _DBSession()
     try:
+        account = _resolve_selected_mt5_account(db, user_id, body)
+        account_type = normalize_mt5_account_type({}, fallback=account.account_type)
         order = MT5Order(
             user_id    = user_id,
+            account_id = account.id,
             symbol     = order_request.symbol,
             order_type = order_request.side,
             volume     = order_request.quantity,
@@ -8554,13 +8690,24 @@ def orders_submit():
             timeframe  = order_request.timeframe,
             status     = "pending",
             comment    = (
-                f"DotVerse {order_request.symbol} {order_request.side} | "
+                f"DotVerse {order_request.symbol} {order_request.side} | acct={account.id} {account_type} | "
                 f"order_type={order_request.order_type} | signal_id={order_request.signal_id}"
             ),
         )
         db.add(order)
         db.commit()
-        return jsonify({"status": "pending", "order_id": order.id, "symbol": order_request.symbol})
+        return jsonify({
+            "status": "pending",
+            "order_id": order.id,
+            "symbol": order_request.symbol,
+            "account_id": account.id,
+            "account_type": account_type,
+            "is_demo": account_type == "DEMO",
+            "is_live": account_type == "LIVE",
+        })
+    except OrderValidationError as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         db.rollback()
         return jsonify({"error": str(e)}), 500
@@ -8573,12 +8720,7 @@ def mt5_get_pending():
     """EA polls this every 5s — returns pending orders and marks them as executing."""
     if not _DBSession:
         return jsonify({"orders": []})
-    # Bug V fix: identity contract — EA may identify itself via user_id query param.
-    # When EA sends user_id (e.g. "42"): scope to that user + "default" only.
-    # When EA omits user_id (all existing EAs): return ALL pending — backward compat.
-    # This preserves human-initiated trade execution for unidentified EAs while
-    # scoping correctly for multi-user deployments where EA sends its user_id.
-    ea_uid = request.args.get("user_id")   # None if not sent
+    ea_uid = getattr(request, 'ea_user_id', None)
     db = _DBSession()
     try:
         uid_filter = user_ids_for_pending_poll(ea_uid)
@@ -8590,12 +8732,37 @@ def mt5_get_pending():
         else:
             orders = db.query(MT5Order).filter_by(status="pending").all()
         result = []
+        account_ids = [o.account_id for o in orders if o.account_id]
+        account_map = {}
+        if account_ids:
+            account_map = {
+                a.id: a for a in db.query(TradingAccount).filter(TradingAccount.id.in_(account_ids)).all()
+            }
         for o in orders:
-            result.append(project_pending_mt5_order(o))
+            projected = project_pending_mt5_order(o)
+            account = account_map.get(o.account_id)
+            order_settings_user_id = str(o.user_id or ea_uid or "default")
+            cfg = _get_automation_settings(order_settings_user_id)
+            projected["settings"] = {
+                "trailing_on":       cfg.get("trailing_on", False),
+                "trailing_pips":     float(cfg.get("trailing_pips", 50.0)),
+                "trailing_atr_mult": float(cfg.get("trailing_atr_mult", 1.0)),
+            }
+            if account:
+                account_type = normalize_mt5_account_type({}, fallback=account.account_type)
+                projected.update({
+                    "account_number": account.account_number,
+                    "account_type": account_type,
+                    "is_demo": account_type == "DEMO",
+                    "is_live": account_type == "LIVE",
+                })
+            result.append(projected)
             o.status = status_after_pending_poll(o.order_type)
         db.commit()
-        # Embed automation settings so the EA can apply trailing stop without an extra request
-        cfg = _get_automation_settings("default")
+        # Backward-compatible default settings; each order also carries its
+        # own settings so mixed default/user queues remain unambiguous.
+        settings_user_id = getattr(request, 'ea_user_id', None) or "default"
+        cfg = _get_automation_settings(settings_user_id)
         settings = {
             "trailing_on":       cfg.get("trailing_on", False),
             "trailing_pips":     float(cfg.get("trailing_pips", 50.0)),
@@ -8616,19 +8783,28 @@ def mt5_confirm_order():
         return jsonify({"status": "ok"})
     body      = request.json or {}
     order_id  = body.get("order_id")
-    status    = body.get("status")   # filled | failed
+    status    = (body.get("status") or "").strip().lower()   # filled | failed
     ticket    = body.get("ticket")
     fill_price= body.get("fill_price")
     pnl       = body.get("pnl")      # realised P&L in account currency (for CLOSE orders)
-    comment   = body.get("comment", "")
+    comment   = (body.get("comment") or "").strip()
     db = _DBSession()
     try:
-        order = db.query(MT5Order).filter_by(id=order_id).first()
+        if status not in {"filled", "failed"}:
+            return jsonify({"error": "valid MT5 confirmation status required"}), 400
+        ea_uid = getattr(request, "ea_user_id", None)
+        order_query = db.query(MT5Order).filter_by(id=order_id)
+        if ea_uid and ea_uid != "default":
+            order_query = order_query.filter(MT5Order.user_id.in_([str(ea_uid), "default"]))
+        order = order_query.first()
+        if not order:
+            return jsonify({"error": "MT5 order not found"}), 404
         if order:
             order.status     = status
             order.mt5_ticket = ticket
             order.fill_price = fill_price
-            order.comment    = comment
+            if comment:
+                order.comment = comment
             if pnl is not None:
                 try:
                     order.pnl = float(pnl)
@@ -8647,7 +8823,8 @@ def mt5_confirm_order():
                 order.filled_at = datetime.utcnow()
                 # Send Telegram notification on fill — gated by market_alerts_on
                 try:
-                    _fill_cfg = _get_automation_settings("default")
+                    settings_user_id = getattr(request, 'ea_user_id', None) or order.user_id or "default"
+                    _fill_cfg = _get_automation_settings(settings_user_id)
                     if _fill_cfg.get("market_alerts_on", True):
                         emoji = "🟢" if order.order_type == "BUY" else "🔴"
                         tg_msg = (
@@ -8953,7 +9130,7 @@ def mt5_push_state():
     """EA pushes account info and open positions every 5s."""
     body      = request.json or {}
     user_id   = getattr(request, 'ea_user_id', None) or body.get("user_id", "default")
-    account   = body.get("account", {})
+    account   = annotate_mt5_account_mode(body.get("account", {}))
     positions = body.get("positions", [])
     spreads   = body.get("spreads", {})     # Phase 1.2: live spread map {symbol: spread_pts}
     # Bug S fix: spread guard — if EA reports current spread per position,
@@ -8987,6 +9164,7 @@ def mt5_push_state():
             db_s.close()
         except Exception:
             pass
+    _sync_mt5_account_mode_from_state(user_id, account)
     with mt5_state_lock:
         prev = mt5_state.get(user_id, {})
         mt5_state[user_id] = {
@@ -8997,7 +9175,12 @@ def mt5_push_state():
             "spread_warning": spread_warning,               # Bug S: high-spread guard flag
             "spread":         spreads,                       # Phase 1.2: live spread map
         }
-    return jsonify({"status": "ok"})
+    return jsonify({
+        "status": "ok",
+        "account_type": account.get("account_type"),
+        "is_demo": account.get("is_demo"),
+        "is_live": account.get("is_live"),
+    })
 
 @app.route("/api/mt5/state", methods=["GET"])
 @login_required
@@ -9007,11 +9190,19 @@ def mt5_get_state():
     with mt5_state_lock:
         state = mt5_state.get(user_id) or mt5_state.get("default")
     if not state:
-        return jsonify({"connected": False, "account": {}, "positions": []})
+        return jsonify({
+            "connected": False,
+            "account": {},
+            "positions": [],
+            "account_type": None,
+            "is_demo": False,
+            "is_live": False,
+        })
     last_seen = datetime.fromisoformat(state["last_seen"])
     secs_ago  = (datetime.utcnow() - last_seen).total_seconds()
     connected = secs_ago < 45
     positions = list(state["positions"])
+    account = annotate_mt5_account_mode(state.get("account", {}))
     # Enrich positions with tp2/tp3/timeframe from mt5_orders.
     # Primary match: comment field contains "DotVerse #<order_id>" — reliable because
     # res.deal (stored as mt5_ticket) != PositionGetTicket() in MT5.
@@ -9050,7 +9241,11 @@ def mt5_get_state():
     return jsonify({
         "connected":   connected,
         "secs_ago":    int(secs_ago),
-        "account":     state["account"],
+        "account":     account,
+        "account_type": account.get("account_type"),
+        "is_demo":     account.get("is_demo"),
+        "is_live":     account.get("is_live"),
+        "account_mode_source": account.get("account_mode_source"),
         "positions":   positions,
         "level_hits":  state.get("level_hits", {}),
     })
@@ -10879,8 +11074,9 @@ def accounts_summary(account_id):
         return jsonify({
             "balance": None, "equity": None, "margin": None,
             "margin_free": None, "margin_level": None, "connected": False,
+            "account_type": None, "is_demo": False, "is_live": False,
         })
-    acct_info = state.get("account", {})
+    acct_info = annotate_mt5_account_mode(state.get("account", {}))
     last_seen = datetime.fromisoformat(state["last_seen"])
     secs_ago  = (datetime.utcnow() - last_seen).total_seconds()
     connected = secs_ago < 45
@@ -10890,6 +11086,10 @@ def accounts_summary(account_id):
         "margin":       acct_info.get("margin"),
         "margin_free":  acct_info.get("margin_free"),
         "margin_level": acct_info.get("margin_level"),
+        "account_type": acct_info.get("account_type"),
+        "is_demo":      acct_info.get("is_demo"),
+        "is_live":      acct_info.get("is_live"),
+        "account_mode_source": acct_info.get("account_mode_source"),
         "connected":    connected,
         "secs_ago":     int(secs_ago),
     })
@@ -11760,12 +11960,18 @@ def live_price():
         return jsonify({"error": str(exc)}), 400
     ticker = live_price_request.ticker
     try:
-        import yfinance as yf
-        hist = yf.Ticker(ticker).history(period="1d", interval="1m")
+        hist = provider_first_download(
+            ticker,
+            period="5d",
+            interval="1m",
+            asset_type=live_price_request.asset_type,
+            progress=False,
+            auto_adjust=True,
+        )
         if hist.empty:
             return jsonify({"error": "no data"}), 404
         price = float(hist["Close"].iloc[-1])
-        return jsonify({"price": price, "delayed": True, "ticker": ticker})
+        return jsonify({"price": price, "delayed": True, "ticker": ticker, "provider_order": "eodhd-first"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -11773,9 +11979,10 @@ def live_price():
 @login_required
 def analyze():
     try:
+        body = request.get_json(silent=True) or {}
         try:
             analyze_request = normalize_analyze_payload(
-                request.json,
+                body,
                 valid_timeframes=TIMEFRAME_CONFIG.keys(),
                 is_forex_pair=is_forex_pair,
                 normalise_ticker=normalise_ticker,
@@ -11875,7 +12082,7 @@ def analyze():
         wr     = {"win_rate": None, "sample_size": 0}
         yf_ok  = False
         try:
-            df = safe_download(ticker, period=cfg["period"], interval=cfg["interval"])
+            df = provider_first_download(ticker, period=cfg["period"], interval=cfg["interval"], asset_type=asset_type)
 
             # ── Direct Binance fallback for crypto if safe_download returns empty ──
             # safe_download() should try Binance internally, but if it still fails
@@ -11920,10 +12127,10 @@ def analyze():
                         mtf["1D"] = {"trend": trend_d, "rsi": round(rsi_d, 1)}
                     except Exception:
                         pass
-                df_daily = safe_download(ticker, period="1y", interval="1d") if timeframe != "1d" else df
+                df_daily = provider_first_download(ticker, period="1y", interval="1d", asset_type=asset_type) if timeframe != "1d" else df
                 wr = calculate_win_rate(df_daily, "HOLD")
                 yf_ok = True
-                print(f"[analyze] yfinance OK — {len(df)} bars  (tv_ok={tv_ok})")
+                print(f"[analyze] provider-first OHLC OK — {len(df)} bars  (tv_ok={tv_ok})")
         except Exception as yf_err:
             print(f"[analyze] yfinance exception ({yf_err}) — trying direct chart fetch")
             # For crypto, prioritize Binance fallback since it's most reliable
@@ -13039,18 +13246,7 @@ def scan_list():
             raw = normalise_ticker(ticker, asset_type)
             row = None
             try:
-                df = safe_download(raw, period=cfg["period"], interval=cfg["interval"])
-                # Yahoo v8 rate-limits Railway IPs — yfinance package fallback (Bug Y fix).
-                if df.empty:
-                    try:
-                        df = yf.download(raw, period=cfg["period"], interval=cfg["interval"],
-                                         progress=False, auto_adjust=True)
-                        if isinstance(df.columns, pd.MultiIndex):
-                            df.columns = df.columns.get_level_values(0)
-                        print(f"[yfinance-fallback] {raw} {timeframe}: {len(df)} bars")
-                    except Exception as _yfe:
-                        print(f"[yfinance-fallback] {raw} error: {_yfe}")
-                        df = pd.DataFrame()
+                df = provider_first_download(raw, period=cfg["period"], interval=cfg["interval"], asset_type=asset_type)
                 if "resample" in cfg and not df.empty:
                     if not isinstance(df.index, pd.DatetimeIndex):
                         df.index = pd.to_datetime(df.index)
@@ -13148,59 +13344,30 @@ def get_prices():
 
         results = {}
 
-        # ── batch download all tickers in a single yfinance call ──────────
-        try:
-            batch_space = " ".join(tickers)
-            df_batch = yf.download(
-                batch_space,
-                period="5d", interval="1d",
-                progress=False, auto_adjust=True,
-                group_by="ticker",
-            )
-
-            for ticker in tickers:
-                try:
-                    # Multi-ticker download nests columns under the ticker symbol.
-                    # Single-ticker batch may still return MultiIndex — flatten it.
-                    if len(tickers) == 1:
-                        df_t = df_batch.copy()
-                        if isinstance(df_t.columns, pd.MultiIndex):
-                            df_t.columns = df_t.columns.get_level_values(0)
-                    else:
-                        df_t = df_batch[ticker] if ticker in df_batch.columns.get_level_values(0) else pd.DataFrame()
-
-                    df_t = df_t.dropna(subset=["Close"])
-                    if len(df_t) >= 2:
-                        p  = float(df_t["Close"].iloc[-1])
-                        p0 = float(df_t["Close"].iloc[-2])
-                        hi = float(df_t["High"].max()) if "High" in df_t.columns else p
-                        lo = float(df_t["Low"].min()) if "Low" in df_t.columns else p
-                        results[ticker] = {"price": round(p, 4), "chg": round((p / p0 - 1) * 100, 2), "high": round(hi, 4), "low": round(lo, 4)}
-                    elif len(df_t) == 1:
-                        results[ticker] = {"price": round(float(df_t["Close"].iloc[-1]), 4), "chg": 0.0, "high": round(float(df_t["Close"].iloc[-1]), 4), "low": round(float(df_t["Close"].iloc[-1]), 4)}
-                    else:
-                        results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
-                except Exception:
+        for ticker in tickers:
+            try:
+                asset_type = _infer_asset_type_for_provider(ticker)
+                df = provider_first_download(
+                    ticker,
+                    period="5d",
+                    interval="1d",
+                    asset_type=asset_type,
+                    progress=False,
+                    auto_adjust=True,
+                )
+                df = df.dropna(subset=["Close"])
+                if len(df) >= 2:
+                    p, p0 = float(df["Close"].iloc[-1]), float(df["Close"].iloc[-2])
+                    hi = float(df["High"].max()) if "High" in df.columns else p
+                    lo = float(df["Low"].min()) if "Low" in df.columns else p
+                    results[ticker] = {"price": round(p, 4), "chg": round((p / p0 - 1) * 100, 2), "high": round(hi, 4), "low": round(lo, 4), "provider_order": "eodhd-first"}
+                elif len(df) == 1:
+                    p = float(df["Close"].iloc[-1])
+                    results[ticker] = {"price": round(p, 4), "chg": 0.0, "high": round(p, 4), "low": round(p, 4), "provider_order": "eodhd-first"}
+                else:
                     results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
-
-        except Exception:
-            # Fallback: fetch individually if batch fails
-            for ticker in tickers:
-                try:
-                    df = safe_download(ticker, period="5d", interval="1d",
-                                      progress=False, auto_adjust=True)
-                    df = df.dropna(subset=["Close"])
-                    if len(df) >= 2:
-                        p, p0 = float(df["Close"].iloc[-1]), float(df["Close"].iloc[-2])
-                        hi = float(df["High"].max()) if "High" in df.columns else p
-                        lo = float(df["Low"].min()) if "Low" in df.columns else p
-                        results[ticker] = {"price": round(p, 4), "chg": round((p / p0 - 1) * 100, 2), "high": round(hi, 4), "low": round(lo, 4)}
-                    elif len(df) == 1:
-                        results[ticker] = {"price": round(float(df["Close"].iloc[-1]), 4), "chg": 0.0, "high": round(float(df["Close"].iloc[-1]), 4), "low": round(float(df["Close"].iloc[-1]), 4)}
-                    else:
-                        results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
-                except Exception:
-                    results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
+            except Exception:
+                results[ticker] = {"price": None, "chg": None, "high": None, "low": None}
 
         # ── TradingView fallback for any tickers still missing prices ──
         missing = [t for t in tickers if not results.get(t, {}).get("price")]
@@ -13396,9 +13563,7 @@ def sector_performance():
     sectors = []
     for name, etf in sector_etfs.items():
         try:
-            # Use yfinance for quick price fetch
-            ticker = yf.Ticker(etf)
-            hist = ticker.history(period="2d")
+            hist = provider_first_download(etf, period="5d", interval="1d", asset_type="stock")
             if len(hist) >= 2:
                 prev_close = float(hist["Close"].iloc[-2])
                 curr_price = float(hist["Close"].iloc[-1])
@@ -13543,9 +13708,7 @@ def new_listings():
         ticker = li["ticker"]
         atype = li["asset_type"]
         try:
-            df = safe_download(ticker, period="3mo", interval="1d")
-            if df.empty and atype == "crypto":
-                df = fetch_binance_ohlcv(ticker, interval="1d", period="3mo")
+            df = provider_first_download(ticker, period="3mo", interval="1d", asset_type=atype)
             if df.empty or len(df) < 51:
                 print(f"[new-listings] {ticker}: insufficient bars ({len(df)}) — skipping")
                 continue
@@ -13844,7 +14007,28 @@ def backtest_route():
         except Exception as e:
             print(f"[backtest] Binance OHLC error: {e}")
 
-    # ── Source 2: Stooq OHLC (stocks/indices/forex) ──
+    # ── Source 2: Provider-first OHLC (EODHD/Twelve/Stooq/FMP/Yahoo chain) ──
+    if not prices_hist:
+        try:
+            cfg = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
+            period_map = {"5m":"60d","15m":"60d","30m":"60d","1h":"180d","4h":"1y","1d":"1y","1w":"5y","1mo":"10y"}
+            df_bt = provider_first_download(ticker_n, period=period_map.get(timeframe,"1y"),
+                                  interval=cfg["interval"], asset_type=asset_type, progress=False, auto_adjust=True)
+            if "resample" in cfg and not df_bt.empty:
+                df_bt = df_bt.resample(cfg["resample"]).agg(
+                    {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
+                ).dropna()
+            if not df_bt.empty and len(df_bt) >= 15:
+                prices_hist  = [float(v) for v in df_bt["Close"].squeeze().dropna()]
+                highs_hist   = [float(v) for v in df_bt["High"].squeeze().dropna()]
+                lows_hist    = [float(v) for v in df_bt["Low"].squeeze().dropna()]
+                dates_hist   = [str(d.date()) for d in df_bt.index]
+                volumes_hist = [float(v) for v in df_bt["Volume"].squeeze().fillna(0)] if "Volume" in df_bt.columns else []
+                print(f"[backtest] provider-first OHLC: {len(prices_hist)} bars")
+        except Exception as e:
+            print(f"[backtest] provider-first OHLC error: {e}")
+
+    # ── Source 3: Stooq direct fallback (stocks/indices/forex) ──
     if asset_type in ("stock","index","forex","commodity") and not prices_hist:
         try:
             import csv, io as _io
@@ -13870,7 +14054,7 @@ def backtest_route():
         except Exception as e:
             print(f"[backtest] Stooq OHLC error: {e}")
 
-    # ── Source 2b: FMP OHLC (stocks/indices/forex — reliable on cloud servers) ──
+    # ── Source 3b: FMP direct fallback (stocks/indices/forex — reliable on cloud servers) ──
     if asset_type in ("stock","index","forex","commodity") and not prices_hist:
         fmp_key = os.environ.get("FMP_API_KEY", "").strip()
         if fmp_key:
@@ -13894,14 +14078,14 @@ def backtest_route():
             except Exception as e:
                 print(f"[backtest] FMP OHLC error: {e}")
 
-    # ── Source 3: yfinance OHLC ──
+    # ── Source 4: provider-first retry ──
     if not prices_hist:
         try:
             cfg = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
             # Reduced periods for Railway — 5y download + computation exceeds 30s timeout
             period_map = {"5m":"60d","15m":"60d","30m":"60d","1h":"180d","4h":"1y","1d":"1y","1w":"5y","1mo":"10y"}
-            df_bt = safe_download(ticker_n, period=period_map.get(timeframe,"1y"),
-                                  interval=cfg["interval"], progress=False, auto_adjust=True)
+            df_bt = provider_first_download(ticker_n, period=period_map.get(timeframe,"1y"),
+                                  interval=cfg["interval"], asset_type=asset_type, progress=False, auto_adjust=True)
             if "resample" in cfg and not df_bt.empty:
                 df_bt = df_bt.resample(cfg["resample"]).agg(
                     {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
@@ -16918,8 +17102,8 @@ def _run_backtest_job(ticker, asset_type, timeframe, signal, entry, stop_loss, t
             try:
                 cfg = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
                 period_map = {"5m":"60d","15m":"60d","30m":"60d","1h":"180d","4h":"1y","1d":"1y","1w":"5y","1mo":"10y"}
-                df_bt = safe_download(ticker_n, period=period_map.get(timeframe,"1y"),
-                                      interval=cfg["interval"], progress=False, auto_adjust=True)
+                df_bt = provider_first_download(ticker_n, period=period_map.get(timeframe,"1y"),
+                                      interval=cfg["interval"], asset_type=asset_type, progress=False, auto_adjust=True)
                 if "resample" in cfg and not df_bt.empty:
                     df_bt = df_bt.resample(cfg["resample"]).agg(
                         {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}
@@ -17478,7 +17662,8 @@ def _run_verdict_job(ticker, trade_date_str, signal_ctx=None):
         # agent cards directly from the TradingAgents state reports.
         if not structured:
             structured = build_fallback_structured(state, decision)
-        return {"ticker": ticker, "verdict": decision, "structured": structured, "status": "complete"}
+        tf_key = str((signal_ctx or {}).get("tf") or "4H").lower()
+        return {"ticker": ticker, "timeframe": tf_key, "verdict": decision, "structured": structured, "status": "complete"}
     except Exception as e:
         return {"error": str(e), "status": "failed"}
 
@@ -17558,7 +17743,7 @@ def verdict_result(job_id):
             result = job.result
             # Cache in Redis if successful
             if result and result.get("status") == "complete":
-                cache_key = "verdict:" + result.get("ticker","") + ":4h"
+                cache_key = "verdict:" + result.get("ticker","") + ":" + str(result.get("timeframe") or "4h").lower()
                 if _redis_client:
                     try:
                         _redis_client.setex(cache_key, 3600, json.dumps(result))
@@ -17588,6 +17773,7 @@ def verdict_chat():
     job_id   = body.get("job_id", "").strip()
     question = body.get("question", "").strip()
     ticker   = body.get("ticker", "").strip()
+    tf_key   = str(body.get("timeframe") or "4h").lower()
     if not question:
         return jsonify({"error": "question is required"}), 400
 
@@ -17613,7 +17799,9 @@ def verdict_chat():
 
     if not verdict_text and ticker and _redis_client:
         try:
-            cached = _redis_client.get(f"verdict:{ticker}:4h")
+            cached = _redis_client.get(f"verdict:{ticker}:{tf_key}")
+            if not cached and tf_key != "4h":
+                cached = _redis_client.get(f"verdict:{ticker}:4h")
             if cached:
                 r = json.loads(cached)
                 verdict_text = str(r.get("verdict", ""))[:3000]
@@ -17623,7 +17811,6 @@ def verdict_chat():
     # Retrieve DotVerse signal context stored at enqueue time
     if ticker and _redis_client:
         try:
-            tf_key = body.get("timeframe", "4h").lower()
             sig_raw = _redis_client.get(f"signal_ctx:{ticker}:{tf_key}")
             if not sig_raw:
                 # fallback: try common timeframes

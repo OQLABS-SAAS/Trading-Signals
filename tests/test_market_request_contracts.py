@@ -69,6 +69,29 @@ def test_normalize_analyze_payload_upgrades_forex_pair():
     assert req.timeframe == "1h"
 
 
+def test_market_request_contracts_canonicalize_asset_aliases():
+    live_req = normalize_live_price_query(
+        {"ticker": " eurusd ", "asset_type": " FX "},
+        normalise_ticker=_normalise_ticker,
+    )
+    analyze_req = normalize_analyze_payload(
+        {"ticker": "eurusd", "asset_type": "fx", "timeframe": "1h"},
+        valid_timeframes={"1d", "1h"},
+        is_forex_pair=lambda _ticker: False,
+        normalise_ticker=_normalise_ticker,
+    )
+    scan_req = normalize_scan_list_payload(
+        {"tickers": ["eurusd"], "asset_type": "fx", "timeframe": "1h"},
+        valid_timeframes={"1h"},
+    )
+
+    assert live_req.asset_type == "forex"
+    assert live_req.ticker == "forex:EURUSD"
+    assert analyze_req.asset_type == "forex"
+    assert analyze_req.ticker == "forex:EURUSD"
+    assert scan_req.asset_type == "forex"
+
+
 def test_normalize_analyze_payload_requires_ticker():
     try:
         normalize_analyze_payload(

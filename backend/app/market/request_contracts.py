@@ -114,6 +114,21 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
+def _normalize_asset_type(value: Any, fallback: str = "stock") -> str:
+    asset_type = str(value or fallback).strip().lower()
+    aliases = {
+        "equity": "stock",
+        "stocks": "stock",
+        "shares": "stock",
+        "fx": "forex",
+        "currency": "forex",
+        "currencies": "forex",
+        "indices": "index",
+        "macro": "commodity",
+    }
+    return aliases.get(asset_type, asset_type or fallback)
+
+
 def _alert_channels(value: Any) -> list[str]:
     if isinstance(value, list) and value:
         return value
@@ -140,7 +155,7 @@ def normalize_live_price_query(
     normalise_ticker: Callable[[str, str], str],
 ) -> LivePriceRequest:
     ticker = str(params.get("ticker", "") if params else "").strip().upper()
-    asset_type = str(params.get("asset_type", "stock") if params else "stock").strip().lower()
+    asset_type = _normalize_asset_type(params.get("asset_type", "stock") if params else "stock")
     if not ticker:
         raise MarketRequestValidationError("ticker required")
     return LivePriceRequest(ticker=normalise_ticker(ticker, asset_type), asset_type=asset_type)
@@ -155,7 +170,7 @@ def normalize_analyze_payload(
 ) -> AnalyzeRequest:
     body = payload if isinstance(payload, dict) else {}
     ticker = str(body.get("ticker") or "").upper().strip()
-    asset_type = body.get("asset_type", "stock")
+    asset_type = _normalize_asset_type(body.get("asset_type", "stock"))
     timeframe = str(body.get("timeframe", "1d")).lower()
 
     if not ticker:
@@ -182,7 +197,7 @@ def normalize_screen_payload(
 ) -> ScreenRequest:
     body = payload if isinstance(payload, dict) else {}
     ticker = str(body.get("ticker") or "").upper().strip()
-    asset_type = body.get("asset_type", "stock")
+    asset_type = _normalize_asset_type(body.get("asset_type", "stock"))
     timeframe = _valid_timeframe(str(body.get("timeframe", "1d")).lower(), valid_timeframes, "1d")
     if not ticker:
         raise MarketRequestValidationError("Ticker required")
@@ -201,7 +216,7 @@ def normalize_add_watch_payload(
 ) -> AddWatchRequest:
     body = payload if isinstance(payload, dict) else {}
     ticker = str(body.get("ticker") or "").upper().strip()
-    asset_type = body.get("asset_type", "stock")
+    asset_type = _normalize_asset_type(body.get("asset_type", "stock"))
     timeframe = _valid_timeframe(str(body.get("timeframe", "1d")).lower(), valid_timeframes, "1d")
     if not ticker:
         raise MarketRequestValidationError("Ticker required")
@@ -225,7 +240,7 @@ def normalize_remove_watch_payload(
     body = payload if isinstance(payload, dict) else {}
     ticker = str(body.get("ticker") or "").upper().strip()
     timeframe = str(body.get("timeframe", "1d")).lower()
-    asset_type = body.get("asset_type", "stock")
+    asset_type = _normalize_asset_type(body.get("asset_type", "stock"))
     if not ticker:
         raise MarketRequestValidationError("ticker required")
     return RemoveWatchRequest(
@@ -243,7 +258,7 @@ def normalize_scan_list_payload(
     body = payload if isinstance(payload, dict) else {}
     return ScanListRequest(
         tickers=[str(t).strip().upper() for t in body.get("tickers", [])[:15]],
-        asset_type=body.get("asset_type", "crypto"),
+        asset_type=_normalize_asset_type(body.get("asset_type", "crypto"), fallback="crypto"),
         timeframe=_valid_timeframe(str(body.get("timeframe", "1h")).lower(), valid_timeframes, "1h"),
     )
 
@@ -273,7 +288,7 @@ def normalize_prices_payload(payload: dict[str, Any] | None) -> PricesRequest:
 def normalize_markov_query(params: Any) -> MarkovRequest:
     return MarkovRequest(
         ticker=str(params.get("ticker", "SPY") if params else "SPY").upper().strip(),
-        asset_type=str(params.get("asset_type", "stock") if params else "stock").strip().lower(),
+        asset_type=_normalize_asset_type(params.get("asset_type", "stock") if params else "stock"),
         days=int(params.get("days", "365") if params else "365"),
         lookback=int(params.get("lookback", "20") if params else "20"),
     )

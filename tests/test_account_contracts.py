@@ -15,6 +15,7 @@ from backend.app.accounts.account_contracts import (  # noqa: E402
     build_account_create_response,
     build_agent_account_create_response,
     normalize_account_create_payload,
+    normalize_mt5_account_type,
     normalize_account_update_payload,
     serialize_trading_account,
 )
@@ -43,6 +44,18 @@ def test_normalize_account_create_payload_rejects_missing_name_and_bad_type():
             assert expected in str(exc)
         else:
             raise AssertionError("invalid account payload should fail")
+
+
+def test_normalize_mt5_account_type_reads_ea_mode_fields():
+    assert normalize_mt5_account_type({"account_type": "demo"}) == "DEMO"
+    assert normalize_mt5_account_type({"trade_mode": 0}) == "DEMO"
+    assert normalize_mt5_account_type({"trade_mode": 1}) == "DEMO"
+    assert normalize_mt5_account_type({"trade_mode": 2}) == "LIVE"
+    assert normalize_mt5_account_type({"server": "Broker-Demo"}) == "DEMO"
+    assert normalize_mt5_account_type({"server": "Broker-Real"}) == "LIVE"
+    assert normalize_mt5_account_type({}, fallback="LIVE") == "LIVE"
+    assert normalize_mt5_account_type({}) == "UNKNOWN"
+    assert normalize_mt5_account_type({"login": "123456", "balance": 1000}) == "UNKNOWN"
 
 
 def test_normalize_account_update_payload_extracts_editable_fields():
@@ -103,15 +116,62 @@ def test_serialize_trading_account_overlays_live_state():
     )
     live_state = {
         "last_seen": (now - timedelta(seconds=10)).isoformat(),
-        "account": {"balance": 1000, "equity": 1005, "margin": 20, "margin_free": 980, "margin_level": 500},
+        "account": {
+            "balance": 1000,
+            "equity": 1005,
+            "margin": 20,
+            "margin_free": 980,
+            "margin_level": 500,
+            "trade_mode": 0,
+        },
     }
 
     result = serialize_trading_account(account, live_state, now=now)
 
     assert result["connected"] is True
     assert result["broker"] == ""
+    assert result["account_type"] == "DEMO"
+    assert result["is_demo"] is True
+    assert result["is_live"] is False
+    assert result["account_mode_source"] == "mt5"
     assert result["balance"] == 1000
     assert result["created_at"] == "2026-06-05 12:00 UTC"
+
+
+def test_serialize_trading_account_does_not_invent_demo_mode_without_mt5_evidence():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    account = SimpleNamespace(
+        id=7,
+        name="Primary",
+        broker=None,
+        server="MetaQuotes",
+        account_number="12345",
+        account_type="LIVE",
+        currency="USD",
+        platform="MT5",
+        status="online",
+        error_message=None,
+        color="#fff",
+        sort_order=2,
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    live_state = {
+        "last_seen": (now - timedelta(seconds=10)).isoformat(),
+        "account": {
+            "login": "12345",
+            "balance": 1000,
+        },
+    }
+
+    result = serialize_trading_account(account, live_state, now=now)
+
+    assert result["connected"] is True
+    assert result["account_type"] == "UNKNOWN"
+    assert result["is_demo"] is False
+    assert result["is_live"] is False
+    assert result["account_mode_source"] == "unknown"
 
 
 def test_account_create_responses_include_secrets_only_when_requested():

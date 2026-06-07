@@ -42,6 +42,7 @@ def dotverse_order_comment(order_id: Any) -> str:
 def project_pending_mt5_order(order: Any) -> dict[str, Any]:
     return {
         "id": _get(order, "id"),
+        "account_id": _get(order, "account_id"),
         "symbol": _get(order, "symbol"),
         "order_type": _get(order, "order_type"),
         "volume": _get(order, "volume"),

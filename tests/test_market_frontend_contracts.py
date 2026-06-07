@@ -94,10 +94,12 @@ def test_market_trade_cards_route_into_signal_journey():
     assert "function _mktOpenSignalFromEl(el)" in source
     assert "setNav('signals')" in source
     assert "showSignalFeed()" in source
-    assert "window._sfResultCache={html:_mktSelectedSignalHtml(o),opps:[o],displayOpps:[o],ts:Date.now(),source:'market-selected'}" in source
+    assert "_rememberSignalHandoff(o,{handoffList:list,handoffSource:'market-scan'})" in open_body
+    assert "_mktSelectedSignalHtml(o)" not in open_body
+    assert "opps:[o]" not in open_body
     assert "loadSignalContext" not in open_body
     assert "function _mktAnalyseSignalFromEl(el)" in source
-    assert "loadSignalContext(o)" in source
+    assert "loadSignalContext(o,{handoffList:list,handoffSource:'market-scan'})" in source
 
 
 def test_market_primary_cta_targets_rendered_lane_chips():

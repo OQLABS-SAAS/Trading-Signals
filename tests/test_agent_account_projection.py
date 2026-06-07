@@ -46,7 +46,13 @@ def test_live_states_for_query_ids_keeps_only_states_with_account():
 def test_project_agent_account_overlays_live_mt5_state_by_account_number():
     now = datetime(2026, 6, 5, 12, 0, 0)
     live_state = {
-        "account": {"login": "123456", "balance": 10000.25, "equity": 10020.5, "leverage": 500},
+        "account": {
+            "login": "123456",
+            "balance": 10000.25,
+            "equity": 10020.5,
+            "leverage": 500,
+            "trade_mode": 0,
+        },
         "last_seen": (now - timedelta(seconds=10)).isoformat(),
     }
 
@@ -57,9 +63,33 @@ def test_project_agent_account_overlays_live_mt5_state_by_account_number():
     assert projected["balance"] == 10000.25
     assert projected["equity"] == 10020.5
     assert projected["leverage"] == "1:500"
+    assert projected["account_type"] == "DEMO"
+    assert projected["is_demo"] is True
+    assert projected["is_live"] is False
+    assert projected["account_mode_source"] == "mt5"
     assert projected["status"] == "online"
     assert projected["problem"] is None
     assert projected["today_pnl"] == 25.5
+
+
+def test_project_agent_account_keeps_unknown_mode_when_live_state_lacks_mt5_mode():
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    live_state = {
+        "account": {
+            "login": "123456",
+            "balance": 10000.25,
+            "equity": 10020.5,
+        },
+        "last_seen": (now - timedelta(seconds=10)).isoformat(),
+    }
+
+    projected = project_agent_account(_account(account_type="LIVE"), [live_state], 1, now=now)
+
+    assert projected["account_type"] == "UNKNOWN"
+    assert projected["is_demo"] is False
+    assert projected["is_live"] is False
+    assert projected["account_mode_source"] == "unknown"
+    assert projected["status"] == "online"
 
 
 def test_project_agent_account_uses_single_live_state_fallback_for_one_account():
@@ -123,6 +153,7 @@ def test_project_pending_mt5_account_keeps_live_login_and_metrics():
             "equity": "2510.75",
             "server": "Broker-Demo",
             "currency": "EUR",
+            "trade_mode": 0,
         },
         "positions": [{"ticket": 1}, {"ticket": 2}],
         "last_seen": datetime(2026, 6, 5, 12, 0, 0),
@@ -136,6 +167,9 @@ def test_project_pending_mt5_account_keeps_live_login_and_metrics():
     assert projected["balance"] == 2500.5
     assert projected["equity"] == 2510.75
     assert projected["server"] == "Broker-Demo"
+    assert projected["account_type"] == "DEMO"
+    assert projected["is_demo"] is True
+    assert projected["is_live"] is False
     assert projected["currency"] == "EUR"
     assert projected["open_positions"] == 2
 

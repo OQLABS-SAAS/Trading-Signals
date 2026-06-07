@@ -9907,7 +9907,7 @@ async function dvRunAnalyze(){
   if(btn){btn.disabled=false;btn.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Analyse';}
   if(_loadOverlay) _loadOverlay.style.display='none';
   if(data&&data.signal){
-    window._activeSignal={
+    window._activeSignal=_normalizeSignalContext({
       sym:data.ticker||sym, tf:(_dvTF||'4h').toUpperCase(), asset:_dvAsset||data.asset_type||'auto',
       sig:data.signal||'HOLD', entry:data.entry, sl:data.stop_loss,
       tp:data.tp1, tp2:data.tp2, tp3:data.tp3,
@@ -9978,7 +9978,7 @@ async function dvRunAnalyze(){
       smcStructures: data.smc_structures || null,
       // Phase 2.2: Signal Quality Score
       quality: data.quality || null,
-    };
+    });
     // Clear any stale verdict pre-warm from a previous signal
     window._verdictPrewarmJobId = null;
     window._verdictPrewarmResult = null;
@@ -10924,7 +10924,16 @@ function _szRefreshBrokerLeverage(lv, source){
   var note = document.getElementById('szBrokerLevNote');
   if(note) note.textContent = (source === 'broker' ? 'From connected MT5 account' : 'Manual broker leverage') + ' · affects margin only, not planned stop risk';
 }
+function _szNormalizeAssetType(assetType){
+  var a = String(assetType || '').toLowerCase();
+  if(a === 'equity' || a === 'stocks' || a === 'shares' || a === 'auto') return 'stock';
+  if(a === 'fx' || a === 'forex' || a === 'currency' || a === 'currencies') return 'forex';
+  if(a === 'indices') return 'index';
+  if(a === 'macro') return 'commodity';
+  return a || 'stock';
+}
 function _szMarginDivisor(assetType, instrumentLev){
+  assetType = _szNormalizeAssetType(assetType);
   var broker = _szBrokerLeverageValue();
   if(assetType === 'stock') return 1;
   if(assetType === 'crypto' || assetType === 'index'){
@@ -10934,6 +10943,7 @@ function _szMarginDivisor(assetType, instrumentLev){
   return Math.max(1, broker);
 }
 function _szUsdPerPriceUnit(assetType, sym){
+  assetType = _szNormalizeAssetType(assetType);
   if(assetType !== 'forex') return 1;
   var s = String(sym || '').toUpperCase().replace(/[\/\-]/g,'');
   var quote = s.length >= 6 ? s.slice(3,6) : 'USD';
@@ -10945,7 +10955,7 @@ function _szUsdPositionValue(assetType, sym, units, price){
 function _szExecQtyDisplay(lots, assetType){
   var n = parseFloat(lots);
   if(!(n > 0)) return '';
-  assetType = ({equity:'stock', auto:'stock'})[assetType] || assetType || '';
+  assetType = _szNormalizeAssetType(assetType);
   var trim = function(v){ return String(v).replace(/(\.\d*?[1-9])0+$/,'$1').replace(/\.0+$/,''); };
   if(assetType === 'stock') return String(Math.max(1, Math.round(n)));
   if(assetType === 'crypto') return trim(n.toFixed(6));
@@ -10958,6 +10968,44 @@ function _szCalcQuantityRaw(calc){
   if(lots > 0) return lots;
   var posSize = parseFloat(calc.posSize);
   return posSize > 0 ? posSize : 0;
+}
+function _szContractSize(assetType, sym, forexContractSize){
+  assetType = _szNormalizeAssetType(assetType);
+  if(assetType === 'forex') return parseFloat(forexContractSize) || 100000;
+  if(typeof _todayContractSize === 'function') return _todayContractSize({asset:assetType, sym:sym});
+  if(assetType === 'commodity'){
+    var s = String(sym || '').toUpperCase();
+    if(/XAG/.test(s)) return 5000;
+    if(/XAU/.test(s)) return 100;
+    if(/(WTI|USOIL|UKOIL|BRENT|CL)/.test(s)) return 1000;
+    if(/(NATGAS|NGAS)/.test(s) || /^NG/.test(s)) return 10000;
+    return 100;
+  }
+  return 1;
+}
+function _szBrokerLotUnits(assetType, sym){
+  assetType = _szNormalizeAssetType(assetType);
+  return assetType === 'forex' ? 100000 : _szContractSize(assetType, sym, 100000);
+}
+function _szNativeLotsFromUnits(units, assetType, sym){
+  units = parseFloat(units) || 0;
+  assetType = _szNormalizeAssetType(assetType);
+  if(assetType === 'stock' || assetType === 'crypto') return units;
+  return units / (_szBrokerLotUnits(assetType, sym) || 1);
+}
+function _szFormatNativeSize(units, assetType, sym){
+  units = parseFloat(units) || 0;
+  assetType = _szNormalizeAssetType(assetType);
+  var trim = function(v){ return String(v).replace(/(\.\d*?[1-9])0+$/,'$1').replace(/\.0+$/,''); };
+  if(assetType === 'forex'){
+    var fxLots = _szNativeLotsFromUnits(units, assetType, sym);
+    return trim(fxLots.toFixed(fxLots < 0.01 ? 4 : 2)) + ' lots';
+  }
+  if(assetType === 'crypto') return (units >= 1 ? trim(units.toFixed(4)) : trim(units.toFixed(6))) + ' units';
+  if(assetType === 'index') return trim(_szNativeLotsFromUnits(units, assetType, sym).toFixed(2)) + ' contracts';
+  if(assetType === 'commodity') return trim(_szNativeLotsFromUnits(units, assetType, sym).toFixed(4)) + ' lots';
+  var sh = Math.max(1, Math.round(units));
+  return sh.toLocaleString() + (sh === 1 ? ' share' : ' shares');
 }
 function _szHasCalculatedQuantity(calc){
   return _szCalcQuantityRaw(calc) > 0;
@@ -12949,11 +12997,14 @@ function _todayRenderPlan(){
 
 function showSignalFeed(){
   _sfStopLivePrices();   // clear any running price-refresh interval from previous view
-  // Reset trade type filter to 'all' every time Signals tab is opened
-  window._stratMode = 'all';
-  document.querySelectorAll('.strat-pill').forEach(p=>p.classList.toggle('active', p.id==='sm-all'));
+  // Reset trade type filter to 'all' unless Market deliberately routed a mode.
+  var _preserveMode = window._sfPreserveStratModeOnce === true;
+  window._sfPreserveStratModeOnce = false;
+  if(!_preserveMode) window._stratMode = 'all';
+  var _activeMode = window._stratMode || 'all';
+  document.querySelectorAll('.strat-pill').forEach(p=>p.classList.toggle('active', p.id==='sm-'+_activeMode));
   const _sh = document.getElementById('stratModeHint');
-  if(_sh) _sh.textContent = 'All timeframes · browse every opportunity';
+  if(_sh) _sh.textContent = _preserveMode ? ((window._stratMode||'all') + ' mode · routed from Market') : 'All timeframes · browse every opportunity';
   _sfSortOpen=false;
   const el=document.getElementById('dashContent');
   el.innerHTML=_sfRender();
@@ -14275,28 +14326,135 @@ function _scApplyFilters(){
 }
 
 
-function loadSignalContext(o){
-  window._activeSignal = o;
+function _dvNormalizeAssetType(asset){
+  var a = String(asset || '').toLowerCase();
+  if(a === 'equity' || a === 'stocks' || a === 'shares') return 'stock';
+  if(a === 'fx' || a === 'forex' || a === 'currency' || a === 'currencies') return 'forex';
+  if(a === 'indices') return 'index';
+  if(a === 'macro') return 'commodity';
+  return a || 'stock';
+}
+
+function _normalizeSignalContext(o, overrides){
+  var src = Object.assign({}, o || {}, overrides || {});
+  var sym = src.sym || src.ticker || src.symbol || '';
+  var sig = String(src.sig || src.signal || src.dir || src.direction || 'HOLD').toUpperCase();
+  var asset = _dvNormalizeAssetType(src.asset || src.asset_type || src.cls || src.className);
+  var tf = String(src.tf || src.timeframe || window._dvTF || '4H').toUpperCase();
+  var entry = src.entry != null ? src.entry : src.entry_price;
+  var sl = src.sl != null ? src.sl : (src.stop_loss != null ? src.stop_loss : src.stop);
+  var tp = src.tp != null ? src.tp : (src.tp1 != null ? src.tp1 : (src.target != null ? src.target : src.target_price));
+  return Object.assign({}, src, {
+    sym: sym,
+    ticker: src.ticker || sym,
+    symbol: src.symbol || sym,
+    sig: sig,
+    signal: src.signal || sig,
+    asset: asset,
+    asset_type: asset,
+    tf: tf,
+    timeframe: src.timeframe || tf,
+    entry: entry,
+    sl: sl,
+    stop_loss: src.stop_loss != null ? src.stop_loss : sl,
+    tp: tp,
+    tp1: src.tp1 != null ? src.tp1 : tp,
+    rr: src.rr || src.risk_reward || src.riskReward || '',
+    conf: src.conf != null ? src.conf : (src.confidence != null ? src.confidence : src.bull_score)
+  });
+}
+
+function _signalKey(o){
+  if(!o) return '';
+  var n = _normalizeSignalContext(o);
+  return [n.sym||'', n.tf||'', n.sig||''].join(':').toUpperCase();
+}
+
+function _signalHandoffListFor(o, opts){
+  opts = opts || {};
+  var list = opts.handoffList || opts.list || null;
+  if(!list && window._sfResultCache) list = window._sfResultCache.displayOpps || window._sfResultCache.opps;
+  if(!list && window._mktOpportunityCache) list = window._mktOpportunityCache.opps;
+  if(!Array.isArray(list) || !list.length) list = o ? [o] : [];
+  return list.filter(function(x){ return x && (x.sym || x.ticker || x.symbol); }).map(function(x){ return _normalizeSignalContext(x); });
+}
+
+function _rememberSignalHandoff(o, opts){
+  opts = opts || {};
+  var signal = _normalizeSignalContext(o);
+  var list = _signalHandoffListFor(signal, opts);
+  var key = _signalKey(signal);
+  var idx = typeof opts.handoffIndex === 'number' ? opts.handoffIndex : list.findIndex(function(x){ return _signalKey(x) === key; });
+  if(idx < 0) idx = 0;
+  window._signalHandoff = {
+    list: list,
+    index: idx,
+    source: opts.handoffSource || opts.source || (window._sfResultCache && window._sfResultCache.source) || 'signals',
+    ts: Date.now()
+  };
+}
+
+function _signalHandoffMove(delta){
+  var h = window._signalHandoff || {};
+  var list = Array.isArray(h.list) ? h.list : [];
+  if(list.length < 2) return;
+  var next = Math.max(0, Math.min(list.length - 1, (h.index || 0) + delta));
+  _rememberSignalHandoff(list[next], {handoffList:list, handoffIndex:next, handoffSource:h.source});
+  loadSignalContext(list[next], {handoffList:list, handoffIndex:next, handoffSource:h.source});
+}
+
+function _signalHandoffBackToSignals(){
+  if(window._sfResultCache && window._sfResultCache.source === 'market-scan'){
+    window._sfResultCache = null;
+    window._sfFullResultCache = null;
+  }
+  window._signalHandoff = null;
+  window._sfPreserveStratModeOnce = false;
+  setNav('signals');
+  showSignalFeed();
+}
+
+function _signalHandoffBarHtml(){
+  var h = window._signalHandoff || {};
+  var list = Array.isArray(h.list) ? h.list : [];
+  if(list.length < 2) return '';
+  var idx = Math.max(0, Math.min(list.length - 1, h.index || 0));
+  var prevDisabled = idx <= 0 ? 'disabled ' : '';
+  var nextDisabled = idx >= list.length - 1 ? 'disabled ' : '';
+  var src = h.source === 'market-selected' || h.source === 'market-scan' ? 'Market list' : 'Signals list';
+  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;padding:9px 12px;border-radius:8px;border:1px solid rgba(201,168,76,.22);background:rgba(201,168,76,.06);">'
+    + '<div style="min-width:0;"><div style="font-family:var(--mono);font-size:10px;color:rgba(201,168,76,.86);letter-spacing:.05em;">'+src+' · '+(idx+1)+' of '+list.length+'</div><div style="font-size:11px;color:rgba(237,232,216,.56);margin-top:2px;">Browse the same opportunity set without rescanning or losing your selected signal.</div></div>'
+    + '<div style="display:flex;gap:6px;flex-shrink:0;">'
+    + '<button '+prevDisabled+'onclick="_signalHandoffMove(-1)" title="Previous signal" style="width:32px;height:30px;border-radius:6px;border:1px solid rgba(237,232,216,.14);background:rgba(237,232,216,.06);color:rgba(237,232,216,.82);cursor:pointer;">‹</button>'
+    + '<button onclick="_signalHandoffBackToSignals()" title="Back to full Signals list" style="height:30px;padding:0 10px;border-radius:6px;border:1px solid rgba(201,168,76,.24);background:rgba(201,168,76,.1);color:#c9a84c;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;">All Signals</button>'
+    + '<button '+nextDisabled+'onclick="_signalHandoffMove(1)" title="Next signal" style="width:32px;height:30px;border-radius:6px;border:1px solid rgba(237,232,216,.14);background:rgba(237,232,216,.06);color:rgba(237,232,216,.82);cursor:pointer;">›</button>'
+    + '</div></div>';
+}
+
+function loadSignalContext(o, opts){
+  var signal = _normalizeSignalContext(o);
+  _rememberSignalHandoff(signal, opts || {});
+  window._activeSignal = Object.assign({}, signal);
   // Inject computed context fields missing from signal-feed payload.
   // Signal feed objects are pre-rendered and don't carry session/regime data.
   if (window._activeSignal.smcStructures === undefined) {
-    window._activeSignal.smcStructures = o.smc_structures || null;
+    window._activeSignal.smcStructures = signal.smc_structures || null;
   }
   var scKey = 'ses'+'sion_con'+'text';
   if (!window._activeSignal[scKey]) {
-    window._activeSignal[scKey] = _dvSessionContext(o.asset || 'other');
+    window._activeSignal[scKey] = _dvSessionContext(signal.asset || 'other');
   }
   if (!window._activeSignal.regime) {
     window._activeSignal.regime = 'NORMAL';
     window._activeSignal.regime_warning = '';
   }
   if (!window._activeSignal.trade_type) {
-    window._activeSignal.trade_type = _dvDeriveTradeType(o.tf || '1h');
+    window._activeSignal.trade_type = _dvDeriveTradeType(signal.tf || '1h');
   }
   if (!window._activeSignal.htf_bias) {
     window._activeSignal.htf_bias = 'NEUTRAL';
   }
-  window._calcPrefill = { entry: o.entry, sl: o.sl, tp: o.tp, tp2: o.tp2, tp3: o.tp3, sym: o.sym };
+  window._calcPrefill = { entry: signal.entry, sl: signal.sl, tp: signal.tp, tp2: signal.tp2, tp3: signal.tp3, sym: signal.sym };
   window._lastBt = null;   // reset stale backtest from previous signal
   window._szTargetsUserModified = false; // new signal — let DotVerse re-apply its recommendation
   setTimeout(function(){ undRunBacktest(true); }, 300);
@@ -14390,7 +14548,7 @@ function _dvDeriveTradeType(tf){
 }
 
 function loadScannerSignal(a){
-  window._activeSignal={
+  window._activeSignal=_normalizeSignalContext({
     sym:a.sym, tf:(_scTFFilter!=='all'?_scTFFilter.toUpperCase():'4H'),
     asset:a.cls||a.asset_type||'auto',
     sig:a.sig||a.s4h||'HOLD', entry:a.entry, sl:a.sl||a.stop_loss,
@@ -14413,8 +14571,8 @@ function loadScannerSignal(a){
     session_context: a.session_context || null,
     // SMC-FE: scanner path includes smc_structures from full get_analysis()
     smcStructures: a.smc_structures || null,
-  };
-  window._calcPrefill={entry:a.entry,sl:a.sl||a.stop_loss,tp:a.tp||a.tp1,tp2:a.tp2,tp3:a.tp3,sym:a.sym};
+  });
+  window._calcPrefill={entry:window._activeSignal.entry,sl:window._activeSignal.sl,tp:window._activeSignal.tp,tp2:window._activeSignal.tp2,tp3:window._activeSignal.tp3,sym:window._activeSignal.sym};
   window._lastBt = null;   // reset stale backtest from previous signal
   setTimeout(function(){ undRunBacktest(true); }, 300);
   setNav('understand');showUnderstand();
@@ -14516,21 +14674,23 @@ function sfToggleAnalysis(id,btn){
 
 // ── One-click signal-to-order ─────────────────────────────
 function tradeThisSignal(sym, dir, entry, stop, target, assetClass, rr, tf) {
-  // Build an activeSignal object for the ACT tab
-  window._activeSignal = {
+  // Build an activeSignal object and route through SIZE before execution.
+  var nextSignal = _normalizeSignalContext({
     sym: sym, sig: dir.toUpperCase(),
     entry: entry, sl: stop, tp: target,
     rr: rr, asset: assetClass, tf: tf,
     conf: 75, reason: 'Signal feed'
-  };
-  // Navigate to ACT tab
-  setNav('act');
-  showAct();
-  // After render, scroll to the exchange order section
+  });
+  _rememberSignalHandoff(nextSignal, {source:'trade-intent'});
+  window._activeSignal = nextSignal;
+  window._calcPrefill = { entry: nextSignal.entry, sl: nextSignal.sl, tp: nextSignal.tp, sym: nextSignal.sym };
+  window._szTargetsUserModified = false;
+  setNav('size');
+  showSize();
   setTimeout(function() {
-    var el = document.getElementById('actExchangeSection');
-    if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
-  }, 200);
+    var el = document.getElementById('szCalcCard') || document.getElementById('dashContent');
+    if (el && el.scrollIntoView) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+  }, 120);
 }
 function sfSetFilter(key,val){
   _sfFilter[key]=val;
@@ -14730,14 +14890,40 @@ function _mktSelectedSignalHtml(o){
     + '<div class="opp-card-footer"><button class="opp-analyze-btn" data-sig="'+payload+'" onclick="event.stopPropagation();_mktAnalyseSignalFromEl(this);">Analyse →</button><button onclick="event.stopPropagation();tradeThisSignal(&quot;'+_esc(o.sym||'')+'&quot;,&quot;'+_esc(sig.toLowerCase())+'&quot;,&quot;'+_esc(o.entry||'')+'&quot;,&quot;'+_esc(o.sl||'')+'&quot;,&quot;'+_esc(o.tp||o.tp1||'')+'&quot;,&quot;'+_esc(asset)+'&quot;,&quot;'+_esc(String(rr))+'&quot;,&quot;'+_esc(tf)+'&quot;)" style="padding:7px 12px;border-radius:5px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:#c9a84c;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;">Trade This Signal</button></div>'
     + '</div></div>';
 }
+
+function _mktPrimeSignalCacheFromList(selected, list){
+  var signals = _signalHandoffListFor(selected, {handoffList:list});
+  if(!signals.length) signals = selected ? [_normalizeSignalContext(selected)] : [];
+  _rememberSignalHandoff(selected, {handoffList:signals,handoffSource:'market-scan'});
+  var cards = signals.map(function(sig){
+    return _mktSelectedSignalHtml(sig);
+  }).join('');
+  if(window._sfResultCache && window._sfResultCache.source !== 'market-scan'){
+    window._sfFullResultCache = window._sfResultCache;
+  }
+  window._rmOpps = signals;
+  window._sfResultCache = {
+    html: _signalHandoffBarHtml() + '<div class="opp-list">' + cards + '</div>',
+    opps: signals,
+    displayOpps: signals,
+    selected: _signalKey(selected),
+    source: 'market-scan',
+    ts: Date.now()
+  };
+}
+
 function _mktOpenSignalFromEl(el){
   if(!el) return;
   var o=_mktSignalFromEl(el);
   if(!o) return;
-  window._activeSignal=o;
+  var list=(window._mktOpportunityCache&&window._mktOpportunityCache.opps) || (window._sfResultCache&&(window._sfResultCache.displayOpps||window._sfResultCache.opps)) || [o];
+  _rememberSignalHandoff(o,{handoffList:list,handoffSource:'market-scan'});
+  _mktPrimeSignalCacheFromList(o,list);
   window._calcPrefill={entry:o.entry,sl:o.sl,tp:o.tp,tp2:o.tp2,tp3:o.tp3,sym:o.sym};
   _mktSyncQuickAsset(o.sym,o.asset);
-  window._sfResultCache={html:_mktSelectedSignalHtml(o),opps:[o],displayOpps:[o],ts:Date.now(),source:'market-selected'};
+  if(window._sfResultCache && window._sfResultCache.source === 'market-scan'){
+    window._sfResultCache = Object.assign({}, window._sfResultCache, {selected:_signalKey(o), source:'market-scan'});
+  }
   setNav('signals');
   showSignalFeed();
 }
@@ -14745,8 +14931,9 @@ function _mktAnalyseSignalFromEl(el){
   if(!el) return;
   var o=_mktSignalFromEl(el);
   if(!o) return;
+  var list=(window._mktOpportunityCache&&window._mktOpportunityCache.opps) || (window._sfResultCache&&(window._sfResultCache.displayOpps||window._sfResultCache.opps)) || [o];
   _mktSyncQuickAsset(o.sym,o.asset);
-  loadSignalContext(o);
+  loadSignalContext(o,{handoffList:list,handoffSource:'market-scan'});
 }
 function _mktOpenTopSignal(){
   var c=document.querySelector('.mkt-lane-chip, .mkt-opp-card');
@@ -15295,7 +15482,7 @@ function _mktRenderCockpit(){
         <div style="font-size:10px;color:rgba(237,232,216,.4);margin-bottom:6px;">${m.desc}</div>
         <div style="font-size:10px;color:rgba(237,232,216,.6);line-height:1.4;">${m.why}</div>
         ${active?`<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(237,232,216,.06);font-family:var(--mono);font-size:8px;color:${vCol[v]};letter-spacing:.06em;">● ACTIVE</div>`:''}
-        <button onclick="event.stopPropagation();mktSetMode('${m.id}',this.closest('[onclick]'));setNav('signals');showSignalFeed();"
+        <button onclick="event.stopPropagation();mktSetMode('${m.id}',this.closest('[onclick]'));window._sfPreserveStratModeOnce=true;setNav('signals');showSignalFeed();"
           style="margin-top:8px;width:100%;padding:5px 0;border-radius:5px;
                  background:${active?vBd[v]:'rgba(237,232,216,.06)'};
                  border:1px solid ${active?vBd[v]:'rgba(237,232,216,.1)'};
@@ -15670,7 +15857,7 @@ function mktAnalyseSym(sym, assetType){
   var asset = assetType || assetMap[sym] || _mktAssetForSymbol(sym);
   if(asset==='equity') asset='stock';
   _mktSyncQuickAsset(sym, asset);
-  window._activeSignal = {
+  window._activeSignal = _normalizeSignalContext({
     sym: sym,
     asset: asset,
     sig: 'Analysing…',
@@ -15678,7 +15865,7 @@ function mktAnalyseSym(sym, assetType){
     conf: 0, confLbl: 'WAIT',
     reason: 'Running DotVerse analysis on ' + sym + '…',
     tf: '4H'
-  };
+  });
   window._calcPrefill = { sym: sym };
   // Route to SIGNAL so user can pick or confirm a signal for this asset
   setNav('signals');
@@ -18849,6 +19036,7 @@ function showUnderstand(){
     <div class="sf-page-title">Understand</div>
     <div class="sf-breadcrumb">MARKET › SIGNAL › <em>UNDERSTAND</em> › VERDICT › SIZE › ACT</div>
   </div>
+  ${_signalHandoffBarHtml()}
 
   <!-- Command bar -->
   <div class="dv-cmd-bar">
@@ -19398,7 +19586,7 @@ function showUnderstand(){
         </div>
         <div style="display:flex;gap:16px;margin-top:8px;justify-content:center;">
           <span style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" onclick="setNav('verdict');showVerdict()">Run AI Verdict first</span>
-          <span style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" onclick="setNav('act');showAct()">Skip to Act</span>
+          <span style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" onclick="setNav('signals');showSignalFeed()">Back to Signals list</span>
         </div>
         <div class="und-action-row" style="margin-top:8px;">
           <button class="btn-ghost btn-pipeline" style="font-size:11px;" onclick="undRunBacktest()">
@@ -22519,21 +22707,14 @@ function szLadderRender() {
 		  const ticker = (window._activeSignal && window._activeSignal.sym) || '';
 		  const quoteUsd = _szUsdPerPriceUnit(assetType, ticker);
 		  const levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
-	  const contractSize = assetType === 'forex' ? levOrContr : 1;
-	  const marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
-	  function _fmtSize(units){
-	    if(assetType === 'forex'){
-	      var lots = units / (contractSize || 1);
-	      return (lots < 0.01 ? lots.toFixed(4) : lots.toFixed(2)) + ' lots';
-	    }
-	    if(assetType === 'crypto') return (units >= 1 ? units.toFixed(4) : units.toFixed(6)) + ' units';
-	    if(assetType === 'index') return units.toFixed(2) + ' contracts';
-	    if(assetType === 'commodity') return units.toFixed(2) + ' lots';
-	    return Math.round(units).toLocaleString() + ' shares';
-	  }
-	  function _nativeLots(units){
-	    return assetType === 'forex' ? units / (contractSize || 1) : units;
-	  }
+		  const contractSize = _szBrokerLotUnits(assetType, ticker);
+		  const marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
+		  function _fmtSize(units){
+		    return _szFormatNativeSize(units, assetType, ticker);
+		  }
+		  function _nativeLots(units){
+		    return _szNativeLotsFromUnits(units, assetType, ticker);
+		  }
   // Per-unit gain at each TP level (price distance from entry to TP).
   // For SELL the SL is above entry and TPs below — Math.abs handles both.
   const tp1Dist = tp1 ? Math.abs(tp1 - entry) : 0;
@@ -23008,7 +23189,7 @@ function _szBuildExecutionLegs(){
   var assetType = ({equity:'stock', auto:'stock'})[rawAsset] || rawAsset;
   var quoteUsd = _szUsdPerPriceUnit(assetType, sig.sym || '');
   var levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
-  var contractSize = assetType === 'forex' ? (levOrContr || 100000) : 1;
+  var contractSize = _szBrokerLotUnits(assetType, sig.sym || '');
   var marginDivisor = (typeof _szMarginDivisor === 'function') ? _szMarginDivisor(assetType, levOrContr) : (assetType === 'stock' ? 1 : Math.max(1, levOrContr));
   var slDist = Math.abs(entry - sl);
   if(!(entry > 0) || !(slDist > 0)) return [];
@@ -23026,7 +23207,7 @@ function _szBuildExecutionLegs(){
       riskPct: parseFloat(calc.riskPct) || parseFloat(document.getElementById('szRisk')?.value) || 0,
       moneyAtRisk: parseFloat(calc.moneyAtRisk) || 0,
       units: units0,
-      lots: parseFloat(calc.lots) || (assetType === 'forex' ? units0 / contractSize : units0),
+      lots: parseFloat(calc.lots) || _szNativeLotsFromUnits(units0, assetType, sig.sym || ''),
       notional: parseFloat(calc.tradeAmount) || _szUsdPositionValue(assetType, sig.sym || '', units0, entry),
       margin: parseFloat(calc.cashIn || calc.margin) || 0,
       assetType: assetType,
@@ -23044,7 +23225,7 @@ function _szBuildExecutionLegs(){
     if(!(r > 0)) return;
     var dollars = acct * (r / 100);
     var units = dollars / (slDist * (quoteUsd || 1));
-    var lots = assetType === 'forex' ? units / contractSize : units;
+    var lots = _szNativeLotsFromUnits(units, assetType, sig.sym || '');
     var target = (targets && targets[i]) || (i === 0 ? 'tp1' : i === 1 ? 'tp2' : 'tp3');
     var assigned = target === 'trail' ? null : (tpPriceMap[target] || tp1 || sig.tp);
     var dist = assigned ? Math.abs(parseFloat(assigned) - entry) : Math.abs(parseFloat(tp3 || tp2 || tp1 || entry) - entry);
@@ -23079,6 +23260,16 @@ function _szConfirmTrade(onConfirm){
   var verdict=_szTradeVerdict(); var go=verdict.v;
   var nT=legs.length;
   var money=function(v){return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString();};
+  var legRows=legs.map(function(l){
+    var lot=parseFloat(l.lots)||0;
+    var risk=parseFloat(l.moneyAtRisk)||0;
+    var target=l.trailing?'trailing':(l.assignedTp!=null?String(l.assignedTp):'target');
+    return '<div style="display:grid;grid-template-columns:44px 1fr 1fr;gap:8px;align-items:center;padding:7px 0;border-top:1px solid rgba(237,232,216,.07);">'
+      +'<span style="color:rgba(237,232,216,.45)">#'+(l.idx||'')+'</span>'
+      +'<span style="color:rgba(237,232,216,.84)">'+lot.toFixed(lot>=1?2:4)+' lots</span>'
+      +'<span style="color:#5de8a0;text-align:right;">TP '+target+' · risk '+money(-risk)+'</span>'
+    +'</div>';
+  }).join('');
   var vbg=go==='GO'?'rgba(93,232,160,.1)':go==='WAIT'?'rgba(201,168,76,.1)':'rgba(232,112,110,.1)';
   var ov=document.createElement('div'); ov.id='szConfirmOverlay';
   ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(4,5,8,.78);display:flex;align-items:center;justify-content:center;padding:18px;';
@@ -23095,6 +23286,10 @@ function _szConfirmTrade(onConfirm){
       +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Position value</span><span>'+money(totNotional)+'</span></div>'
       +(totScale>0?'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">If it works (typical exit)</span><span style="color:#5de8a0;">+'+money(totScale)+'</span></div>':'')
     +'</div>'
+    +(nT>1?'<div style="background:rgba(237,232,216,.035);border:1px solid rgba(237,232,216,.1);border-radius:9px;padding:10px 12px;margin-bottom:13px;font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);">'
+      +'<div style="font-size:9px;color:rgba(237,232,216,.42);letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px;">Orders DotVerse will send to MT5</div>'
+      +legRows
+    +'</div>':'')
     +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin-bottom:16px;">'
       +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">Planned stop risk</div>'
       +'<div style="font-family:var(--mono);font-size:24px;font-weight:700;color:#e8706e;line-height:1;">'+money(-totRisk)+'</div>'
@@ -23102,7 +23297,7 @@ function _szConfirmTrade(onConfirm){
     +'</div>'
     +'<div style="display:flex;gap:10px;">'
       +'<button id="szConfirmCancel" style="flex:1;padding:12px;border-radius:8px;border:1px solid rgba(237,232,216,.2);background:transparent;color:rgba(237,232,216,.7);font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">Cancel</button>'
-      +'<button id="szConfirmGo" style="flex:1.4;padding:12px;border-radius:8px;border:none;background:'+(go==='SKIP'?'rgba(232,112,110,.85)':go==='WAIT'?'#c9a84c':'#5de8a0')+';color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em;">'+(go==='SKIP'?'Place it anyway':'Place this trade →')+'</button>'
+      +'<button id="szConfirmGo" style="flex:1.4;padding:12px;border-radius:8px;border:none;background:'+(go==='SKIP'?'rgba(232,112,110,.85)':go==='WAIT'?'#c9a84c':'#5de8a0')+';color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em;">'+(go==='SKIP'?'Place anyway':'Place '+nT+' MT5 order'+(nT===1?'':'s')+' →')+'</button>'
     +'</div>'
   +'</div>';
   document.body.appendChild(ov);
@@ -23404,7 +23599,7 @@ function szCalc(){
   const slPips=slDist/pipSize;
 
   // Position sizing
-  const contractSize=(assetType==='forex')?levOrContr:100000;
+  const contractSize=(assetType==='forex')?(levOrContr||100000):_szBrokerLotUnits(assetType, ticker);
   const lev=marginLev;
   let posSize, posVal, lots, lotsDisplay, margin;
 
@@ -23424,23 +23619,24 @@ function szCalc(){
     } else {
       pipValPerLot=pipSize*contractSize;
     }
-	    lots=moneyAtRisk/(slPips*pipValPerLot);
-	    posSize=lots*contractSize;
+	    const displayLots=moneyAtRisk/(slPips*pipValPerLot);
+	    posSize=displayLots*contractSize;
 	    posVal=_szUsdPositionValue(assetType, ticker, posSize, assetPrice||entry);
 	    margin=posVal/(marginLev||1);
-    lotsDisplay=lots<0.01?lots.toFixed(4)+' lots':lots.toFixed(2)+' lots';
+    lots=_szNativeLotsFromUnits(posSize, assetType, ticker);
+    lotsDisplay=_szFormatNativeSize(posSize, assetType, ticker);
   } else if(assetType==='crypto'){
     posSize=moneyAtRisk/(slDist||1);
     posVal=posSize*(assetPrice||entry);
     margin=posVal/(marginLev||1);
-    lotsDisplay=posSize>=1?posSize.toFixed(4)+' units':posSize.toFixed(6)+' units';
-    lots=posSize;
+    lots=_szNativeLotsFromUnits(posSize, assetType, ticker);
+    lotsDisplay=_szFormatNativeSize(posSize, assetType, ticker);
   } else {
     posSize=moneyAtRisk/(slDist||1);
     posVal=posSize*(assetPrice||entry);
     margin=posVal/(marginLev||1);
-    lotsDisplay=posSize.toFixed(2)+(assetType==='index'?' contracts':' shares');
-    lots=null;
+    lots=_szNativeLotsFromUnits(posSize, assetType, ticker);
+    lotsDisplay=_szFormatNativeSize(posSize, assetType, ticker);
   }
 
   // ── Unify the tab on the amount the trader entered ──
@@ -23454,14 +23650,14 @@ function szCalc(){
 	    posSize = posVal / (entry * (quoteUsd || 1));
 	    margin  = tradeSize;
     if (assetType === 'forex') {
-      lots = posSize / (contractSize || 1);
-      lotsDisplay = lots < 0.01 ? lots.toFixed(4)+' lots' : lots.toFixed(2)+' lots';
+      lots = _szNativeLotsFromUnits(posSize, assetType, ticker);
+      lotsDisplay = _szFormatNativeSize(posSize, assetType, ticker);
     } else if (assetType === 'crypto') {
-      lots = posSize;
-      lotsDisplay = posSize >= 1 ? posSize.toFixed(4)+' units' : posSize.toFixed(6)+' units';
+      lots = _szNativeLotsFromUnits(posSize, assetType, ticker);
+      lotsDisplay = _szFormatNativeSize(posSize, assetType, ticker);
     } else {
-      lots = null;
-      lotsDisplay = posSize.toFixed(2) + (assetType==='index' ? ' contracts' : ' shares');
+      lots = _szNativeLotsFromUnits(posSize, assetType, ticker);
+      lotsDisplay = _szFormatNativeSize(posSize, assetType, ticker);
     }
 	    _moneyAtRiskEff = posSize * slDist * (quoteUsd || 1);
     _riskPctShown   = acct > 0 ? (_moneyAtRiskEff / acct * 100) : 0;
@@ -23798,8 +23994,10 @@ function _actPopulateMt5Summary(data) {
   var profit     = parseFloat(a.profit) || 0;
   var profitSign = profit >= 0 ? '+' : '';
   var profitColor = profit >= 0 ? '#5de8a0' : '#e8706e';
+  var modeLabel = _mt5ModeLabel(data);
+  var modeColor = _mt5ModeColor(data);
   el.innerHTML =
-    '<span style="color:#5de8a0;">● Connected</span> &nbsp;·&nbsp; ' +
+    '<span style="color:'+modeColor+';">● '+modeLabel+' connected</span> &nbsp;·&nbsp; ' +
     '<span style="color:var(--t2);">Balance </span><span style="color:var(--t1);font-weight:600;">$' + bal.toFixed(2) + '</span>' +
     ' &nbsp;·&nbsp; ' +
     '<span style="color:var(--t2);">Equity </span><span style="color:var(--t1);font-weight:600;">$' + eq.toFixed(2) + '</span>' +
@@ -23824,6 +24022,18 @@ function showAct(){
   const _actLotsRaw = _szCalcQuantityRaw(_actCalc);
   const _actQty = _szExecQtyDisplay(_actLotsRaw, _actAsset);
   const _hasActCalc = _szHasCalculatedQuantity(_actCalc);
+  const _actExecutionLegs = (_hasActCalc && typeof _szBuildExecutionLegs === 'function') ? _szBuildExecutionLegs() : [];
+  const _actMultiLeg = _actExecutionLegs.length > 1;
+  const _actLegRows = _actExecutionLegs.map(function(l){
+    const lots = parseFloat(l.lots) || 0;
+    const target = l.trailing ? 'trailing' : (l.assignedTp != null ? l.assignedTp : 'target');
+    const risk = parseFloat(l.moneyAtRisk) || 0;
+    return `<div style="display:grid;grid-template-columns:42px 1fr 1fr;gap:8px;align-items:center;padding:7px 0;border-top:1px solid rgba(237,232,216,.07);">
+      <span style="color:rgba(237,232,216,.45)">#${l.idx||''}</span>
+      <span style="color:rgba(237,232,216,.84)">${lots.toFixed(lots>=1?2:4)} lots</span>
+      <span style="color:#5de8a0;text-align:right;">TP ${target} · risk $${risk.toFixed(2)}</span>
+    </div>`;
+  }).join('');
 
   // Real positions rendered by _mt5RenderPositions() after mt5LoadTab() fetches live state
 
@@ -23893,11 +24103,24 @@ function showAct(){
     <!-- How many units — simple label -->
     <div style="margin-bottom:16px;">
       <label style="font-family:var(--mono);font-size:10px;font-weight:700;color:rgba(237,232,216,.5);letter-spacing:.08em;display:block;margin-bottom:6px;">HOW MANY UNITS ARE YOU BUYING?</label>
+      ${_actMultiLeg ? `
+      <div id="actLots" data-multi-leg="true" style="font-size:14px;font-weight:700;letter-spacing:.02em;padding:10px 14px;border-radius:8px;border:1px solid rgba(201,168,76,.25);background:rgba(201,168,76,.06);color:var(--gold);font-family:var(--mono);">
+        ${_actExecutionLegs.length} ladder orders from SIZE
+      </div>
+      <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.45);margin-top:5px;line-height:1.5;">
+        Multi-ladder sizing is locked here so Act sends the exact SIZE plan. Change the ladder amounts in SIZE, then return to Act.
+      </div>
+      <div style="margin-top:9px;border:1px solid rgba(237,232,216,.1);border-radius:8px;background:rgba(237,232,216,.025);padding:8px 10px;font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);">
+        <div style="font-size:9px;color:rgba(237,232,216,.42);letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px;">Exact MT5 orders</div>
+        ${_actLegRows}
+      </div>
+      ` : `
       <input class="sz-inp" id="actLots" type="text" placeholder="${_actQty||'0.10'}" value="${_actQty}"
         style="font-size:16px;font-weight:700;letter-spacing:.02em;padding:10px 14px;">
       <div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.35);margin-top:5px;line-height:1.5;">
         ${_hasActCalc?'Pre-filled from your SIZE calculation — change only if you want to trade a different amount.':'<span style="color:rgba(201,168,76,.7);">No SIZE calculation found — go to the SIZE tab first to calculate your position. Enter the number manually only if you know what you are doing.</span>'}
       </div>
+      `}
     </div>
 
     <!-- UX-17: Stop loss dollar warning above Place button -->
@@ -23909,7 +24132,7 @@ function showAct(){
       onmouseover="this.style.background='${isBuy?'rgba(93,232,160,.25)':'rgba(232,112,110,.25)'}'"
       onmouseout="this.style.background='${isBuy?'rgba(93,232,160,.15)':'rgba(232,112,110,.15)'}'">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      Place this trade
+      Place MT5 order${_actMultiLeg?'s':''}
     </button>
 
     <!-- Practice option — secondary, quiet -->
@@ -24561,42 +24784,68 @@ function _actExecuteGo(){
       if(btn){ btn.disabled=false; btn.style.opacity='1'; }
       return;
     }
-    const typedQty=parseFloat(document.getElementById('actLots')?.value);
     const hasSizeCalc=_szHasCalculatedQuantity(window._szLastCalc);
-    const calcLeg=hasSizeCalc && typeof _szBuildExecutionLegs === 'function' ? (_szBuildExecutionLegs()[0] || {}) : {};
-    const quantity=(hasSizeCalc ? (typedQty>0 ? typedQty : (parseFloat(calcLeg.lots)>0 ? parseFloat(calcLeg.lots) : _szCalcQuantityRaw(window._szLastCalc))) : 0);
-    if(!(quantity>0)){
+    const typedQty=parseFloat(document.getElementById('actLots')?.value);
+    const executionLegs=hasSizeCalc && typeof _szBuildExecutionLegs === 'function' ? _szBuildExecutionLegs() : [];
+    const calcLeg=executionLegs[0] || {};
+    if(typedQty>0 && executionLegs.length === 1){
+      executionLegs.length = 1;
+      executionLegs[0] = Object.assign({}, calcLeg, {lots: typedQty});
+    }
+    const fallbackQty=hasSizeCalc ? (parseFloat(calcLeg.lots)>0 ? parseFloat(calcLeg.lots) : _szCalcQuantityRaw(window._szLastCalc)) : 0;
+    if(!executionLegs.length && fallbackQty>0){
+      executionLegs.push({
+        idx: 1,
+        lots: fallbackQty,
+        assetType: (window._szLastCalc&&window._szLastCalc.assetType) || ({equity:'stock', auto:'stock'})[sig.asset] || sig.asset || 'crypto',
+        assignedTp: parseFloat(sig.tp)||null
+      });
+    }
+    if(!executionLegs.length || !executionLegs.some(function(l){ return parseFloat(l.lots)>0; })){
       if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">No calculated size — go to SIZE first or enter a valid quantity.</span>';
       if(typeof _dvToast==='function') _dvToast('No trade size found — calculate Size first so DotVerse does not guess your order size','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
       if(btn){ btn.disabled=false; btn.style.opacity='1'; }
       return;
     }
-    dvOrderFetch('/api/mt5/order',{
+    status.innerHTML='<span style="color:#d4b87a;">Sending '+executionLegs.length+' MT5 order'+(executionLegs.length===1?'':'s')+'...</span>';
+    const orderRequests = executionLegs.map(function(leg){
+      return dvOrderFetch('/api/mt5/order',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         ticker: sig.sym,
-        asset_type: calcLeg.assetType || (window._szLastCalc&&window._szLastCalc.assetType) || ({equity:'stock', auto:'stock'})[sig.asset] || sig.asset || 'crypto',
+        asset_type: leg.assetType || (window._szLastCalc&&window._szLastCalc.assetType) || ({equity:'stock', auto:'stock'})[sig.asset] || sig.asset || 'crypto',
         direction: (sig.sig||'BUY').toUpperCase(),
-        lots: quantity,
+        lots: parseFloat(leg.lots)||0,
         entry: parseFloat(sig.entry)||0,
         sl: parseFloat(sig.sl)||null,
-        tp1: parseFloat(sig.tp)||null,
+        tp1: leg.assignedTp != null ? parseFloat(leg.assignedTp) : (parseFloat(sig.tp)||null),
         order_type: mt5OrderMode,
         timeframe: sig.tf || '',
-        signal_id: sig.id||(sig.sym+':'+sig.tf+':'+sig.sig+':'+Date.now())
+        signal_id: sig.id||(sig.sym+':'+sig.tf+':'+sig.sig+':leg'+(leg.idx||1)+':'+Date.now())
       })
-    }).then(function(res){
-      if(res&&res.order_id){
-        if(status) status.innerHTML='<span style="color:rgba(61,190,108,.9);">Order sent &middot; #'+res.order_id+'</span>';
-        _dvToast('Order submitted &mdash; #'+res.order_id,'rgba(61,190,108,.15)','rgba(61,190,108,.4)');
+      }).then(function(res){ return {leg:leg,res:res}; }).catch(function(err){
+        return {leg:leg,res:{error:'request_failed',message:(err&&err.message)||'MT5 order request failed'}};
+      });
+    });
+    Promise.all(orderRequests).then(function(results){
+      var ok = results.filter(function(r){ return r.res && r.res.order_id; });
+      var failed = results.filter(function(r){ return !(r.res && r.res.order_id); });
+      if(ok.length){
+        var ids = ok.map(function(r){ return '#'+r.res.order_id; }).join(', ');
+        if(status) status.innerHTML='<span style="color:rgba(61,190,108,.9);">'+ok.length+' MT5 order'+(ok.length===1?'':'s')+' sent &middot; '+ids+(failed.length?' · '+failed.length+' failed':'')+'</span>';
+        _dvToast(ok.length+' MT5 order'+(ok.length===1?'':'s')+' submitted','rgba(61,190,108,.15)','rgba(61,190,108,.4)');
         actRefreshOrderFeed();
         mt5Poll();
       }else{
-        var err=_mt5OrderErrorText(res);
-        if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">'+_mt5OrderErrorHtml(res)+'</span>';
+        var err=_mt5OrderErrorText((failed[0]||{}).res);
+        if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">'+_mt5OrderErrorHtml((failed[0]||{}).res)+'</span>';
         _dvToast(err,'rgba(224,85,85,.15)','rgba(224,85,85,.4)');
       }
+    }).catch(function(err){
+      if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">MT5 order request failed — '+_esc((err&&err.message)||'try again')+'</span>';
+      if(typeof _dvToast==='function') _dvToast('MT5 order request failed — try again','rgba(224,85,85,.15)','rgba(224,85,85,.4)');
+    }).finally(function(){
       if(btn){ btn.disabled=false; btn.style.opacity='1'; }
     });
   } else {
@@ -24986,26 +25235,54 @@ function _mt5GuessAssetType(sym) {
   return 'stock';
 }
 
-function _mt5SetStatus(connected, lastSeenStr) {
+function _mt5AccountMode(dataOrMode) {
+  var raw = '';
+  if (typeof dataOrMode === 'string') {
+    raw = dataOrMode;
+  } else if (dataOrMode) {
+    raw = dataOrMode.account_type || (dataOrMode.account && dataOrMode.account.account_type) || '';
+  }
+  raw = String(raw || '').toUpperCase();
+  if (raw === 'LIVE' || raw === 'REAL') return 'LIVE';
+  if (raw === 'DEMO' || raw === 'CONTEST' || raw === 'PRACTICE' || raw === 'PAPER') return 'DEMO';
+  return '';
+}
+
+function _mt5ModeLabel(dataOrMode) {
+  var mode = _mt5AccountMode(dataOrMode);
+  return mode ? 'MT5 ' + mode : 'MT5 UNKNOWN';
+}
+
+function _mt5ModeColor(dataOrMode) {
+  var mode = _mt5AccountMode(dataOrMode);
+  return mode === 'LIVE' ? '#e8706e' : mode === 'DEMO' ? '#5de8a0' : '#c9a84c';
+}
+
+function _mt5SetStatus(connected, lastSeenStr, accountType) {
   // Store globally so Settings → Connections tab can read live state
   window._mt5IsConnected = !!connected;
   window._mt5LastSeen    = lastSeenStr || null;
+  window._mt5AccountType  = _mt5AccountMode(accountType) || null;
   const lbl = document.getElementById('actMt5Lbl');
   if (lbl) {
+    var mode = _mt5AccountMode(accountType);
     lbl.textContent = connected
-      ? 'MT5 connected — ready to execute'
+      ? _mt5ModeLabel(accountType) + ' connected — ' + (mode === 'LIVE' ? 'live account detected' : mode === 'DEMO' ? 'demo account detected' : 'account mode unknown')
       : (lastSeenStr ? 'EA Offline — last seen ' + lastSeenStr : 'EA Offline — open MT5 and start EA');
-    lbl.style.color = connected ? '#5de8a0' : '#e05555';
+    lbl.style.color = connected ? _mt5ModeColor(accountType) : '#e05555';
   }
   // Update Settings badge if Connections tab is currently open
   var badge = document.getElementById('mt5ConnBadge');
-  if (badge) _mt5ApplyConnBadge(badge, connected, lastSeenStr);
+  if (badge) _mt5ApplyConnBadge(badge, connected, lastSeenStr, accountType);
 }
-function _mt5ApplyConnBadge(badge, connected, lastSeenStr) {
+function _mt5ApplyConnBadge(badge, connected, lastSeenStr, accountType) {
   if (connected) {
-    badge.textContent = 'CONNECTED';
-    badge.style.background = 'rgba(93,232,160,.12)';
-    badge.style.color = 'rgba(93,232,160,.9)';
+    var mode = _mt5AccountMode(accountType);
+    var isLive = mode === 'LIVE';
+    var isDemo = mode === 'DEMO';
+    badge.textContent = mode ? _mt5ModeLabel(accountType) + ' CONNECTED' : 'MT5 MODE UNKNOWN';
+    badge.style.background = isLive ? 'rgba(232,112,110,.12)' : isDemo ? 'rgba(93,232,160,.12)' : 'rgba(201,168,76,.12)';
+    badge.style.color = isLive ? 'rgba(232,112,110,.92)' : isDemo ? 'rgba(93,232,160,.9)' : 'rgba(201,168,76,.92)';
   } else {
     badge.textContent = lastSeenStr ? 'OFFLINE · ' + lastSeenStr : 'NOT CONNECTED';
     badge.style.background = 'rgba(224,85,85,.12)';
@@ -25393,7 +25670,8 @@ function mt5Poll() {
     var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
       ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago / 60) + 'm ago')
       : null;
-    _mt5SetStatus(d.connected, lastSeenStr);
+    var accountType = d.account_type || (d.account && d.account.account_type);
+    _mt5SetStatus(d.connected, lastSeenStr, accountType);
     _mt5LevelHits = d.level_hits || {};
     if (d.connected) {
       window._mt5AccountBalance = (d.account && d.account.balance) ? parseFloat(d.account.balance) : 0;
@@ -25413,7 +25691,8 @@ function mt5LoadTab() {
     var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
       ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago / 60) + 'm ago')
       : null;
-    _mt5SetStatus(d.connected, lastSeenStr);
+    var accountType = d.account_type || (d.account && d.account.account_type);
+    _mt5SetStatus(d.connected, lastSeenStr, accountType);
     _mt5LevelHits = d.level_hits || {};
     window._mt5AccountBalance = (d.account && d.account.balance) ? parseFloat(d.account.balance) : 0;
     _mt5RenderPositions(d.positions || []);
@@ -25815,7 +26094,7 @@ function btPickTicker(sym, assetCategory) {
     body: JSON.stringify({ ticker: sym, asset_type: asset, timeframe: _btTF })
   }).then(function(d) {
     if (!d) { if(loading) loading.style.display='none'; return; }
-    window._activeSignal = Object.assign({}, d, { sym: d.ticker || sym, asset: d.asset_type || asset, tf: _btTF });
+    window._activeSignal = _normalizeSignalContext(d, { sym: d.ticker || sym, asset: d.asset_type || asset, tf: _btTF });
     triggerBacktest();
   }).catch(function(e) {
     if (loading) loading.style.display = 'none';

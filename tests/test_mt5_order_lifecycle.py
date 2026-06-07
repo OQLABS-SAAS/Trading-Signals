@@ -34,6 +34,7 @@ def test_dotverse_order_comment_uses_mt5_order_id():
 def test_project_pending_mt5_order_preserves_ea_contract_fields():
     order = SimpleNamespace(
         id=7,
+        account_id=3,
         symbol="EURUSD",
         order_type="BUY",
         volume=0.01,
@@ -56,6 +57,7 @@ def test_project_pending_mt5_order_preserves_ea_contract_fields():
 
     assert project_pending_mt5_order(order) == {
         "id": 7,
+        "account_id": 3,
         "symbol": "EURUSD",
         "order_type": "BUY",
         "volume": 0.01,
