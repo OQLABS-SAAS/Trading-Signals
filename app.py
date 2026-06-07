@@ -1386,6 +1386,8 @@ def _chart_output_to_df(chart_output):
     """
     if chart_output is None:
         return pd.DataFrame()
+    if isinstance(chart_output, pd.DataFrame):
+        return chart_output.dropna(how="all")
     dates, prices, vols, ema20, ema50, opens, highs, lows = chart_output
     if not dates or not opens:
         return pd.DataFrame()
@@ -1394,6 +1396,18 @@ def _chart_output_to_df(chart_output):
         "Close": prices, "Volume": vols,
     }, index=pd.to_datetime(dates))
     return df.dropna(how="all")
+
+
+def _provider_trace(provider_used=None, attempted=None, fallback_used=False, last_error=None):
+    return {
+        "policy": "provider-first-v1",
+        "primary": "EODHD when configured",
+        "fallbacks": ["Twelve Data", "Stooq", "FMP", "Yahoo v8", "safe_download"],
+        "provider_used": provider_used,
+        "attempted": attempted or [],
+        "fallback_used": bool(fallback_used),
+        "last_error": last_error,
+    }
 
 
 def safe_download(ticker, period="1y", interval="1d", asset_type=None, **kwargs):
@@ -2639,60 +2653,75 @@ def _fetch_eodhd(ticker, asset_type, timeframe):
 def fetch_chart_direct(ticker, asset_type, timeframe):
     """Try multiple free data sources in priority order.
     Returns (dates, prices, vols, ema20, ema50) or None if all fail."""
+    result, _trace = fetch_chart_direct_with_trace(ticker, asset_type, timeframe)
+    return result
+
+
+def fetch_chart_direct_with_trace(ticker, asset_type, timeframe):
+    """Try data sources in priority order and return (chart_output, trace)."""
+    attempted = []
+
     # 1. Binance — best for crypto, no rate limits
     if asset_type == "crypto":
+        attempted.append("Binance")
         result = _fetch_binance(ticker, timeframe)
         if result:
-            return result
+            return result, _provider_trace("Binance", attempted, fallback_used=False)
 
     # 1b. CoinMarketCap — crypto fallback when Binance blocked on Railway
     if asset_type == "crypto":
+        attempted.append("CoinMarketCap")
         result = _fetch_coinmarketcap(ticker, timeframe)
         if result is not None and not result.empty:
             print(f"[cmc] SUCCESS — {len(result)} bars for {ticker}")
-            return result
+            return result, _provider_trace("CoinMarketCap", attempted, fallback_used=True)
         print(f"[cmc] FAILED for {ticker}")
 
     # 2. EODHD — primary for stocks/indices/forex/commodities, also crypto (#3)
     if asset_type in ("stock", "index", "forex", "commodity", "crypto"):
+        attempted.append("EODHD")
         print(f"[chart] trying EODHD for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_eodhd(ticker, asset_type, timeframe)
         if result:
-            return result
+            return result, _provider_trace("EODHD", attempted, fallback_used=asset_type == "crypto" and len(attempted) > 1)
         print(f"[chart] EODHD failed for {ticker}")
 
     # 3. Twelve Data — fallback for stocks/forex intraday on Railway
     if asset_type in ("stock", "index", "forex", "commodity"):
+        attempted.append("Twelve Data")
         print(f"[chart] trying Twelve Data for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_twelvedata(ticker, asset_type, timeframe)
         if result:
-            return result
+            return result, _provider_trace("Twelve Data", attempted, fallback_used=True)
         print(f"[chart] Twelve Data failed for {ticker}")
 
     # 3. Stooq — works for stocks, indices, some forex (daily only)
     if asset_type in ("stock", "index", "forex", "commodity"):
+        attempted.append("Stooq")
         print(f"[chart] trying Stooq for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_stooq(ticker, asset_type, timeframe)
         if result:
-            return result
+            return result, _provider_trace("Stooq", attempted, fallback_used=True)
         print(f"[chart] Stooq failed for {ticker}")
 
     # 4. FMP — alternative when TD key missing or quota hit
     if asset_type in ("stock", "index", "forex", "commodity"):
+        attempted.append("FMP")
         print(f"[chart] trying FMP for {ticker} ({asset_type}) {timeframe}")
         result = _fetch_fmp(ticker, asset_type, timeframe)
         if result:
-            return result
+            return result, _provider_trace("FMP", attempted, fallback_used=True)
         print(f"[chart] FMP failed for {ticker}")
 
     # 5. Yahoo Finance v8 — last resort (likely 429 on Railway)
+    attempted.append("Yahoo v8")
     print(f"[chart] trying Yahoo v8 for {ticker} ({asset_type}) {timeframe}")
     result = _fetch_yahoo_v8(ticker, asset_type, timeframe)
     if result:
-        return result
+        return result, _provider_trace("Yahoo v8", attempted, fallback_used=True)
 
     print(f"[chart] ALL sources failed for {ticker} {timeframe}")
-    return None
+    return None, _provider_trace(None, attempted, fallback_used=True, last_error="all providers failed")
 
 
 def _infer_asset_type_for_provider(ticker, asset_type=None):
@@ -2719,13 +2748,23 @@ def provider_first_download(ticker, period="1y", interval="1d", asset_type=None,
     if cached is not None:
         return cached
 
-    chart_out = fetch_chart_direct(ticker, at, timeframe)
+    chart_out, provider_trace = fetch_chart_direct_with_trace(ticker, at, timeframe)
     df = _chart_output_to_df(chart_out)
     if not df.empty:
+        df.attrs["dotverse_provider_trace"] = provider_trace
         cache_set(cache_key, df)
         return df
 
-    return safe_download(ticker, period=period, interval=interval, asset_type=at, **kwargs)
+    fallback_df = safe_download(ticker, period=period, interval=interval, asset_type=at, **kwargs)
+    if fallback_df is not None and not fallback_df.empty:
+        fallback_trace = _provider_trace(
+            "safe_download",
+            (provider_trace or {}).get("attempted", []) + ["safe_download"],
+            fallback_used=True,
+            last_error=(provider_trace or {}).get("last_error"),
+        )
+        fallback_df.attrs["dotverse_provider_trace"] = fallback_trace
+    return fallback_df
 
 
 # ─── MULTI-TIMEFRAME TREND ────────────────────────────────────
@@ -8455,8 +8494,30 @@ def admin_set_tier():
 
 # ─── MT5 INTEGRATION ─────────────────────────────────────────
 
+def _mt5_state_key_for_account(account_id):
+    return f"account:{account_id}" if account_id not in (None, "") else None
+
+
+def _mt5_auth_context(user_id, account=None, scope="user"):
+    ctx = {
+        "user_id": str(user_id),
+        "scope": scope,
+        "account_id": None,
+        "account_number": None,
+        "account_type": None,
+    }
+    if account is not None:
+        ctx.update({
+            "scope": "account",
+            "account_id": getattr(account, "id", None),
+            "account_number": str(getattr(account, "account_number", "") or "").strip() or None,
+            "account_type": normalize_mt5_account_type({}, fallback=getattr(account, "account_type", None)),
+        })
+    return ctx
+
+
 def _lookup_user_by_mt5_secret(secret):
-    """Find the user_id whose saved MT5/EA secret decrypts to the given secret.
+    """Find the user/account context whose saved MT5/EA secret matches.
 
     Accept both the older per-user UserSettings key and the newer per-account
     TradingAccount EA secret. O(N) over saved secrets is fine for current scale;
@@ -8470,7 +8531,7 @@ def _lookup_user_by_mt5_secret(secret):
         for row in rows:
             try:
                 if _dec(row.mt5_api_key_enc) == secret:
-                    return str(row.user_id)
+                    return _mt5_auth_context(row.user_id)
             except Exception:
                 continue
         accounts = db.query(TradingAccount).filter(
@@ -8480,7 +8541,7 @@ def _lookup_user_by_mt5_secret(secret):
         for account in accounts:
             try:
                 if _dec(account.ea_secret_enc) == secret:
-                    return str(account.user_id)
+                    return _mt5_auth_context(account.user_id, account=account)
             except Exception:
                 continue
         return None
@@ -8488,7 +8549,7 @@ def _lookup_user_by_mt5_secret(secret):
         db.close()
 
 
-def _sync_mt5_account_mode_from_state(user_id, account_info):
+def _sync_mt5_account_mode_from_state(user_id, account_info, account_id=None):
     """Persist the EA-reported demo/live mode on the matching saved account."""
     if not _DBSession or not isinstance(account_info, dict):
         return
@@ -8502,8 +8563,11 @@ def _sync_mt5_account_mode_from_state(user_id, account_info):
     try:
         query = db.query(TradingAccount).filter(
             TradingAccount.is_active == True,
-            TradingAccount.account_number == login,
         )
+        if account_id not in (None, ""):
+            query = query.filter(TradingAccount.id == int(account_id))
+        else:
+            query = query.filter(TradingAccount.account_number == login)
         if user_id and str(user_id) != "default":
             query = query.filter(TradingAccount.user_id == str(user_id))
         rows = query.all()
@@ -8527,6 +8591,194 @@ def _mt5_state_account_for_user(user_id):
     if not isinstance(state, dict):
         return {}
     return annotate_mt5_account_mode(state.get("account", {}))
+
+
+def _mt5_state_for_user(user_id):
+    with mt5_state_lock:
+        state = mt5_state.get(str(user_id)) or mt5_state.get("default")
+    return state if isinstance(state, dict) else {}
+
+
+def _mt5_state_for_account(user_id, account=None):
+    keys = []
+    account_key = _mt5_state_key_for_account(getattr(account, "id", None))
+    if account_key:
+        keys.append(account_key)
+    keys.extend([str(user_id), "default"])
+    with mt5_state_lock:
+        for key in keys:
+            state = mt5_state.get(key)
+            if isinstance(state, dict):
+                return state
+    return {}
+
+
+def _mt5_state_age_seconds(state):
+    try:
+        last_seen = state.get("last_seen")
+        if not last_seen:
+            return None
+        seen = datetime.fromisoformat(str(last_seen).replace("Z", ""))
+        return (datetime.utcnow() - seen).total_seconds()
+    except Exception:
+        return None
+
+
+def _assert_mt5_account_ready_for_order(user_id, account):
+    state = _mt5_state_for_account(user_id, account)
+    age = _mt5_state_age_seconds(state)
+    if age is None or age >= 45:
+        raise OrderValidationError("MT5 is offline or stale; reconnect the selected account before placing orders")
+    live_account = annotate_mt5_account_mode(state.get("account", {}))
+    live_login = str(live_account.get("login") or live_account.get("account_number") or "").strip()
+    saved_login = str(getattr(account, "account_number", "") or "").strip()
+    if saved_login and live_login and saved_login != live_login:
+        raise OrderValidationError("selected MT5 account does not match the connected broker account")
+    live_type = live_account.get("account_type")
+    saved_type = normalize_mt5_account_type({}, fallback=getattr(account, "account_type", None))
+    if live_type in {"DEMO", "LIVE"} and saved_type in {"DEMO", "LIVE"} and live_type != saved_type:
+        raise OrderValidationError(f"selected account is {saved_type}, but connected MT5 is {live_type}")
+    if live_type in {"DEMO", "LIVE"} and saved_type not in {"DEMO", "LIVE"}:
+        account.account_type = live_type
+        if hasattr(account, "updated_at"):
+            account.updated_at = datetime.utcnow()
+    return {
+        "connected_account_type": live_type or saved_type,
+        "mt5_last_seen_age": age,
+        "mt5_login": live_login,
+    }
+
+
+def _find_recent_duplicate_mt5_order(db, user_id, account_id, symbol, direction, volume, price, sl, tp, within_seconds=90, extras=None):
+    cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+    try:
+        rows = db.query(MT5Order).filter(
+            MT5Order.user_id == str(user_id),
+            MT5Order.account_id == account_id,
+            MT5Order.symbol == symbol,
+            MT5Order.order_type == direction,
+            MT5Order.status.in_(["pending", "executing"]),
+            MT5Order.created_at >= cutoff,
+        ).all()
+    except Exception:
+        return None
+    def same_num(a, b):
+        if a is None and b is None:
+            return True
+        try:
+            return abs(float(a or 0) - float(b or 0)) < 1e-9
+        except Exception:
+            return False
+    for row in rows:
+        if not (same_num(getattr(row, "volume", None), volume) and same_num(getattr(row, "price", None), price) and same_num(getattr(row, "sl", None), sl) and same_num(getattr(row, "tp", None), tp)):
+            continue
+        if extras:
+            mismatch = False
+            for key, expected in extras.items():
+                actual = getattr(row, key, None)
+                if isinstance(expected, bool):
+                    if bool(actual) != expected:
+                        mismatch = True
+                        break
+                elif isinstance(expected, (int, float)) or isinstance(actual, (int, float)):
+                    if not same_num(actual, expected):
+                        mismatch = True
+                        break
+                elif (actual or None) != (expected or None):
+                    mismatch = True
+                    break
+            if mismatch:
+                continue
+            return row
+    return None
+
+
+def _requeue_stale_executing_mt5_orders(db, ea_uid=None, ea_account_id=None, stale_seconds=180):
+    cutoff = datetime.utcnow() - timedelta(seconds=stale_seconds)
+    try:
+        query = db.query(MT5Order).filter(
+            MT5Order.status == "executing",
+            MT5Order.created_at <= cutoff,
+        )
+        if ea_account_id not in (None, ""):
+            query = query.filter(MT5Order.account_id == int(ea_account_id))
+        else:
+            uid_filter = user_ids_for_pending_poll(ea_uid)
+            if uid_filter:
+                query = query.filter(MT5Order.user_id.in_(uid_filter))
+        rows = query.all()
+    except Exception:
+        return 0
+    count = 0
+    for order in rows:
+        order.status = "pending"
+        count += 1
+    return count
+
+
+def _mt5_confirm_matches_terminal_order(order, status, ticket, fill_price, pnl, comment):
+    if str(getattr(order, "status", "") or "").lower() != status:
+        return False
+    if ticket not in (None, "") and str(getattr(order, "mt5_ticket", "") or "") != str(ticket):
+        return False
+    if fill_price not in (None, ""):
+        try:
+            if abs(float(getattr(order, "fill_price", 0) or 0) - float(fill_price)) > 1e-9:
+                return False
+        except Exception:
+            return False
+    if pnl not in (None, ""):
+        try:
+            if abs(float(getattr(order, "pnl", 0) or 0) - float(pnl)) > 1e-9:
+                return False
+        except Exception:
+            return False
+    if comment and getattr(order, "comment", None) and comment != getattr(order, "comment", None):
+        return False
+    return True
+
+
+def _reconcile_mt5_positions_from_push(db, user_id, account_id, positions):
+    if not positions:
+        return 0
+    import re as _re
+    reconciled = 0
+    for pos in positions:
+        comment = str(pos.get("comment") or "")
+        match = _re.search(r"DotVerse\s+#?(\d+)", comment)
+        if not match:
+            continue
+        try:
+            order_id = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        query = db.query(MT5Order).filter(MT5Order.id == order_id)
+        if user_id and user_id != "default":
+            query = query.filter(MT5Order.user_id.in_([str(user_id), "default"]))
+        if account_id not in (None, ""):
+            query = query.filter(MT5Order.account_id == int(account_id))
+        order = query.first()
+        if not order:
+            continue
+        if str(getattr(order, "status", "") or "").lower() not in {"pending", "executing"}:
+            continue
+        order.status = "filled"
+        ticket = pos.get("ticket") or pos.get("position_id")
+        if ticket not in (None, ""):
+            try:
+                order.mt5_ticket = int(ticket)
+            except (TypeError, ValueError):
+                order.mt5_ticket = ticket
+        fill_price = pos.get("price_open") or pos.get("open_price") or pos.get("price")
+        if fill_price not in (None, ""):
+            try:
+                order.fill_price = float(fill_price)
+            except (TypeError, ValueError):
+                pass
+        if not getattr(order, "filled_at", None):
+            order.filled_at = datetime.utcnow()
+        reconciled += 1
+    return reconciled
 
 
 def _resolve_selected_mt5_account(db, user_id, payload=None):
@@ -8580,9 +8832,13 @@ def _require_ea(f):
 
         # Path 1 — per-user lookup
         if secret:
-            user_id = _lookup_user_by_mt5_secret(secret)
-            if user_id:
-                request.ea_user_id = user_id
+            auth_ctx = _lookup_user_by_mt5_secret(secret)
+            if auth_ctx:
+                request.ea_user_id = auth_ctx.get("user_id")
+                request.ea_scope = auth_ctx.get("scope")
+                request.ea_account_id = auth_ctx.get("account_id")
+                request.ea_account_number = auth_ctx.get("account_number")
+                request.ea_account_type = auth_ctx.get("account_type")
                 return f(*args, **kwargs)
 
         # Path 2 — legacy bypass list. Safe only for a single legacy user; a
@@ -8594,6 +8850,10 @@ def _require_ea(f):
                     "message": "Ambiguous MT5 legacy bypass; configure per-account EA secret",
                 }), 401
             request.ea_user_id = sorted(MT5_BYPASS_USER_IDS)[0]
+            request.ea_scope = "legacy-user"
+            request.ea_account_id = None
+            request.ea_account_number = None
+            request.ea_account_type = None
             return f(*args, **kwargs)
 
         return jsonify({"error": "Unauthorized", "message": "Valid X-EA-Secret required"}), 401
@@ -8616,7 +8876,43 @@ def mt5_submit_order():
     db = _DBSession()
     try:
         account = _resolve_selected_mt5_account(db, user_id, body)
+        readiness = _assert_mt5_account_ready_for_order(user_id, account)
         account_type = normalize_mt5_account_type({}, fallback=account.account_type)
+        duplicate = _find_recent_duplicate_mt5_order(
+            db,
+            user_id,
+            account.id,
+            symbol,
+            order_request.direction,
+            order_request.volume,
+            order_request.price,
+            order_request.sl,
+            order_request.tp,
+            extras={
+                "tp2": order_request.tp2,
+                "tp3": order_request.tp3,
+                "timeframe": order_request.timeframe,
+                "trailing": order_request.trailing,
+                "be": order_request.be,
+                "macro": order_request.macro,
+                "inval": order_request.inval,
+                "sent": order_request.sent,
+                "tp1_alert": order_request.tp1_alert,
+                "tp2_alert": order_request.tp2_alert,
+                "weekend": order_request.weekend,
+            },
+        )
+        if duplicate:
+            return jsonify({
+                "status": "duplicate",
+                "order_id": duplicate.id,
+                "symbol": symbol,
+                "account_id": account.id,
+                "account_type": account_type,
+                "is_demo": account_type == "DEMO",
+                "is_live": account_type == "LIVE",
+                "message": "Duplicate order already queued or executing",
+            })
         order = MT5Order(
             user_id          = user_id,
             account_id       = account.id,
@@ -8652,6 +8948,8 @@ def mt5_submit_order():
             "account_type": account_type,
             "is_demo": account_type == "DEMO",
             "is_live": account_type == "LIVE",
+            "mt5_ready": True,
+            "mt5_last_seen_age": readiness.get("mt5_last_seen_age"),
         })
     except OrderValidationError as e:
         db.rollback()
@@ -8677,7 +8975,33 @@ def orders_submit():
     db = _DBSession()
     try:
         account = _resolve_selected_mt5_account(db, user_id, body)
+        readiness = _assert_mt5_account_ready_for_order(user_id, account)
         account_type = normalize_mt5_account_type({}, fallback=account.account_type)
+        duplicate = _find_recent_duplicate_mt5_order(
+            db,
+            user_id,
+            account.id,
+            order_request.symbol,
+            order_request.side,
+            order_request.quantity,
+            order_request.entry_price,
+            order_request.stop_loss,
+            order_request.take_profit,
+            extras={
+                "timeframe": order_request.timeframe,
+            },
+        )
+        if duplicate:
+            return jsonify({
+                "status": "duplicate",
+                "order_id": duplicate.id,
+                "symbol": order_request.symbol,
+                "account_id": account.id,
+                "account_type": account_type,
+                "is_demo": account_type == "DEMO",
+                "is_live": account_type == "LIVE",
+                "message": "Duplicate order already queued or executing",
+            })
         order = MT5Order(
             user_id    = user_id,
             account_id = account.id,
@@ -8704,6 +9028,8 @@ def orders_submit():
             "account_type": account_type,
             "is_demo": account_type == "DEMO",
             "is_live": account_type == "LIVE",
+            "mt5_ready": True,
+            "mt5_last_seen_age": readiness.get("mt5_last_seen_age"),
         })
     except OrderValidationError as e:
         db.rollback()
@@ -8721,16 +9047,21 @@ def mt5_get_pending():
     if not _DBSession:
         return jsonify({"orders": []})
     ea_uid = getattr(request, 'ea_user_id', None)
+    ea_account_id = getattr(request, "ea_account_id", None)
     db = _DBSession()
     try:
+        _requeue_stale_executing_mt5_orders(db, ea_uid=ea_uid, ea_account_id=ea_account_id)
         uid_filter = user_ids_for_pending_poll(ea_uid)
         if uid_filter:
             orders = db.query(MT5Order).filter(
                 MT5Order.status  == "pending",
                 MT5Order.user_id.in_(uid_filter),
-            ).all()
+            )
         else:
-            orders = db.query(MT5Order).filter_by(status="pending").all()
+            orders = db.query(MT5Order).filter_by(status="pending")
+        if ea_account_id not in (None, ""):
+            orders = orders.filter(MT5Order.account_id == int(ea_account_id))
+        orders = orders.all()
         result = []
         account_ids = [o.account_id for o in orders if o.account_id]
         account_map = {}
@@ -8796,9 +9127,25 @@ def mt5_confirm_order():
         order_query = db.query(MT5Order).filter_by(id=order_id)
         if ea_uid and ea_uid != "default":
             order_query = order_query.filter(MT5Order.user_id.in_([str(ea_uid), "default"]))
+        ea_account_id = getattr(request, "ea_account_id", None)
+        if ea_account_id not in (None, ""):
+            order_query = order_query.filter(MT5Order.account_id == int(ea_account_id))
         order = order_query.first()
         if not order:
             return jsonify({"error": "MT5 order not found"}), 404
+        current_status = str(getattr(order, "status", "") or "").lower()
+        terminal_statuses = {"filled", "failed", "cancelled"}
+        if current_status in terminal_statuses:
+            if _mt5_confirm_matches_terminal_order(order, status, ticket, fill_price, pnl, comment):
+                return jsonify({
+                    "status": "ok",
+                    "duplicate": True,
+                    "tp2": order.tp2 if order else None,
+                    "tp3": order.tp3 if order else None,
+                })
+            return jsonify({"error": "conflicting MT5 confirmation for terminal order"}), 409
+        if current_status not in {"pending", "executing"}:
+            return jsonify({"error": "MT5 order is not confirmable from its current state"}), 409
         if order:
             order.status     = status
             order.mt5_ticket = ticket
@@ -9130,9 +9477,16 @@ def mt5_push_state():
     """EA pushes account info and open positions every 5s."""
     body      = request.json or {}
     user_id   = getattr(request, 'ea_user_id', None) or body.get("user_id", "default")
+    ea_account_id = getattr(request, "ea_account_id", None)
     account   = annotate_mt5_account_mode(body.get("account", {}))
     positions = body.get("positions", [])
     spreads   = body.get("spreads", {})     # Phase 1.2: live spread map {symbol: spread_pts}
+    payload_seq = body.get("seq") or body.get("sequence")
+    payload_ts = body.get("timestamp") or body.get("event_time") or body.get("ea_time")
+    expected_login = str(getattr(request, "ea_account_number", "") or "").strip()
+    pushed_login = str(account.get("login") or account.get("account_number") or "").strip()
+    if expected_login and pushed_login and expected_login != pushed_login:
+        return jsonify({"error": "EA account secret does not match pushed broker login"}), 409
     # Bug S fix: spread guard — if EA reports current spread per position,
     # compare against stored entry_atr (5× ATR threshold).
     # Sets spread_warning flag in mt5_state so watch job can pause auto-trades.
@@ -9164,22 +9518,56 @@ def mt5_push_state():
             db_s.close()
         except Exception:
             pass
-    _sync_mt5_account_mode_from_state(user_id, account)
+    _sync_mt5_account_mode_from_state(user_id, account, account_id=ea_account_id)
+    state_key = _mt5_state_key_for_account(ea_account_id) or str(user_id)
     with mt5_state_lock:
-        prev = mt5_state.get(user_id, {})
-        mt5_state[user_id] = {
+        prev = mt5_state.get(state_key, {})
+        try:
+            prev_seq = prev.get("seq")
+            if payload_seq is not None and prev_seq is not None and int(payload_seq) <= int(prev_seq):
+                return jsonify({"status": "stale", "ignored": True}), 200
+        except Exception:
+            pass
+        if payload_ts:
+            prev_ts = prev.get("payload_ts")
+            try:
+                incoming = datetime.fromisoformat(str(payload_ts).replace("Z", ""))
+                previous = datetime.fromisoformat(str(prev_ts).replace("Z", "")) if prev_ts else None
+                if previous and incoming <= previous:
+                    return jsonify({"status": "stale", "ignored": True}), 200
+            except Exception:
+                pass
+        next_state = {
             "account":        account,
             "positions":      positions,
             "last_seen":      datetime.utcnow().isoformat(),
+            "payload_ts":      payload_ts,
+            "seq":             payload_seq,
+            "account_id":      ea_account_id,
             "level_hits":     prev.get("level_hits", {}),  # preserve — set by mt5_level_alert
             "spread_warning": spread_warning,               # Bug S: high-spread guard flag
             "spread":         spreads,                       # Phase 1.2: live spread map
         }
+        mt5_state[state_key] = next_state
+        if state_key != str(user_id):
+            mt5_state[str(user_id)] = next_state
+    reconciled = 0
+    if _DBSession and positions:
+        db_rec = _DBSession()
+        try:
+            reconciled = _reconcile_mt5_positions_from_push(db_rec, user_id, ea_account_id, positions)
+            if reconciled:
+                db_rec.commit()
+        except Exception:
+            db_rec.rollback()
+        finally:
+            db_rec.close()
     return jsonify({
         "status": "ok",
         "account_type": account.get("account_type"),
         "is_demo": account.get("is_demo"),
         "is_live": account.get("is_live"),
+        "reconciled": reconciled,
     })
 
 @app.route("/api/mt5/state", methods=["GET"])
@@ -12058,6 +12446,7 @@ def analyze():
         ind  = {}
         mtf  = {}
         _t1  = time.time()
+        analyze_provider_trace = _provider_trace("TradingView", ["TradingView"], fallback_used=False) if tv_ok else _provider_trace(None, ["TradingView"], fallback_used=True, last_error="TradingView unavailable")
         if tv_ok:
             ind = build_ind_from_tv(tv, ticker=ticker, timeframe=timeframe, asset_type=asset_type)  # SIG-7
             print(f"[analyze] TV OK — {ticker} {timeframe}: price={tv['tv_price']} RSI={tv.get('tv_rsi')} [{_t1-_t0:.1f}s]")
@@ -12083,6 +12472,8 @@ def analyze():
         yf_ok  = False
         try:
             df = provider_first_download(ticker, period=cfg["period"], interval=cfg["interval"], asset_type=asset_type)
+            if hasattr(df, "attrs") and df.attrs.get("dotverse_provider_trace"):
+                analyze_provider_trace = df.attrs.get("dotverse_provider_trace")
 
             # ── Direct Binance fallback for crypto if safe_download returns empty ──
             # safe_download() should try Binance internally, but if it still fails
@@ -12479,6 +12870,9 @@ def analyze():
             "mtf":         mtf,
             **counter,
             "tv": tv,
+            "provider_trace": analyze_provider_trace,
+            "provider_used": analyze_provider_trace.get("provider_used"),
+            "fallback_used": analyze_provider_trace.get("fallback_used"),
         })
         # ── Macro context — upcoming high-impact events (non-blocking, Redis-cached) ──
         try:
@@ -12733,10 +13127,12 @@ def diag():
 
 
 @app.route("/api/diag-eodhd", methods=["GET"])
+@login_required
+@require_admin
 def diag_eodhd():
-    """Quick EODHD-only diagnostic — no auth, returns fast."""
+    """Admin-only EODHD diagnostic."""
     eodhd_key = os.environ.get("EODHD_API_KEY", "").strip()
-    results = {"key_set": bool(eodhd_key), "key_prefix": eodhd_key[:6] + "..." if eodhd_key else ""}
+    results = {"key_set": bool(eodhd_key)}
     if not eodhd_key:
         return jsonify({"error": "EODHD_API_KEY not set", **results})
     for label, url_suffix in [
@@ -12765,8 +13161,10 @@ def diag_eodhd():
 
 
 @app.route("/api/diag-scan", methods=["GET"])
+@login_required
+@require_admin
 def diag_scan():
-    """Test the COMPLETE scan data path for one ticker."""
+    """Admin-only COMPLETE scan data path diagnostic for one ticker."""
     ticker = request.args.get("ticker", "AAPL").upper().strip()
     tf = request.args.get("timeframe", "1d")
     at = request.args.get("asset_type", "stock")
@@ -13156,6 +13554,37 @@ def markov_analysis():
         if "error" in result:
             return jsonify({"error": result["error"]}), 400
 
+        labels = result.get("state_labels") or ["Bull", "Bear", "Sideways"]
+        counts = result.get("state_counts") or {}
+        total_states = sum(int(v or 0) for v in counts.values()) or 1
+        bull_pct = float(counts.get("Bull", 0) or 0) / total_states
+        bear_pct = float(counts.get("Bear", 0) or 0) / total_states
+
+        current_state = (
+            (result.get("hmm_confirmation") or {}).get("most_likely_regime_label")
+            or max(counts, key=counts.get, default="Sideways")
+        )
+
+        def _bull_forecast(matrix):
+            try:
+                bull_idx = labels.index("Bull")
+                state_idx = labels.index(current_state) if current_state in labels else bull_idx
+                return float(matrix[state_idx][bull_idx])
+            except Exception:
+                return None
+
+        hmm_agreement = (result.get("hmm_confirmation") or {}).get("agreement_rate")
+        result.update({
+            "bull_pct": round(bull_pct, 4),
+            "bear_pct": round(bear_pct, 4),
+            "current_state": current_state,
+            "hmm_aligned": bool(hmm_agreement is not None and hmm_agreement >= 0.5),
+            "p1_bull_pct": _bull_forecast(result.get("transition_matrix") or []),
+            "p5_bull_pct": _bull_forecast(result.get("multi_day_forecast_5d") or []),
+            "p10_bull_pct": _bull_forecast(result.get("multi_day_forecast_10d") or []),
+            "p20_bull_pct": _bull_forecast(result.get("multi_day_forecast_20d") or []),
+        })
+
         return jsonify(result)
 
     except Exception as exc:
@@ -13216,116 +13645,244 @@ def alert_test():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def _scan_candidate_id(row):
+    raw = row.get("raw_ticker") or row.get("ticker") or row.get("symbol") or "UNKNOWN"
+    tf = row.get("timeframe") or "1h"
+    sig = row.get("signal") or "HOLD"
+    asset = row.get("asset_type") or "unknown"
+    return f"{asset}:{raw}:{tf}:{sig}".replace(" ", "").upper()
+
+
+def _df_last_timestamp_utc(df):
+    try:
+        if df is None or df.empty:
+            return None
+        idx = df.index[-1]
+        if hasattr(idx, "to_pydatetime"):
+            idx = idx.to_pydatetime()
+        if hasattr(idx, "isoformat"):
+            return idx.isoformat()
+    except Exception:
+        return None
+    return None
+
+
+def _scan_one_candidate(ticker, asset_type, timeframe, cfg):
+    # Bug N fix 2026-04-29: scan_list now uses the SAME data source as
+    # /api/analyze (provider_first_download + calculate_indicators). The shared
+    # signal-universe endpoint below reuses this exact function, so Signals,
+    # Market, and Today can start from one canonical candidate contract.
+    raw = normalise_ticker(ticker, asset_type)
+    try:
+        df = provider_first_download(raw, period=cfg["period"], interval=cfg["interval"], asset_type=asset_type)
+        if "resample" in cfg and not df.empty:
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index)
+            df = df.resample(cfg["resample"]).agg(
+                {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
+        if df.empty or len(df) < 20:
+            return {"ticker": ticker, "raw_ticker": raw, "asset_type": asset_type, "timeframe": timeframe, "error": "no data"}
+        provider_trace = df.attrs.get("dotverse_provider_trace") or _provider_trace("unknown", [], fallback_used=False)
+        ind = calculate_indicators(df, timeframe, asset_type)
+        # Markov regime engine feeds a weighted bull/bear vote into the confluence
+        # pool. Enable it for the scan ONLY when the EODHD data feed is configured.
+        _use_mkv = bool(os.environ.get("EODHD_API_KEY", "").strip())
+        analysis = get_analysis(ticker, asset_type, ind, timeframe, use_markov=_use_mkv)
+        ct = detect_counter_trade(ind) or {}
+        try:
+            _wr = calculate_win_rate(df, analysis.get("signal", "HOLD"))
+        except Exception:
+            _wr = {"win_rate": None, "sample_size": 0}
+        row = {
+            "ticker": ticker, "raw_ticker": raw, "asset_type": asset_type,
+            "price": ind["price"], "chg_1d": ind["chg_1d"], "rsi": ind["rsi"],
+            "vol_ratio": ind["vol_ratio"],
+            "volume": int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
+            "ema_trend": ind["ema_trend"], "supertrend": ind["supertrend"],
+            "signal": analysis["signal"], "entry": analysis.get("entry"),
+            "stop_loss": analysis.get("stop_loss"), "tp1": analysis.get("tp1"),
+            "tp2": analysis.get("tp2"), "tp3": analysis.get("tp3"),
+            "rr1": analysis.get("rr1"), "rr2": analysis.get("rr2"), "rr3": analysis.get("rr3"),
+            "reason": analysis.get("summary",""), "bull_score": analysis.get("bullish_count",0),
+            "bear_score": analysis.get("bearish_count",0), "counter_trade": ct.get("counter_trade", False),
+            "confidence": analysis.get("confidence","LOW"),
+            "confidence_pct": analysis.get("confidence_pct"),
+            "confidence_label": analysis.get("confidence_label","HYPOTHESIS"),
+            "spread_cost":    analysis.get("spread_cost"),
+            "spread_quality": analysis.get("spread_quality","fair"),
+            "spread_source":  analysis.get("spread_source"),
+            "spread_pips":    analysis.get("spread_pips"),
+            "rr1_raw":        analysis.get("rr1_raw"),
+            "trade_type":     analysis.get("trade_type","day"),
+            "htf_bias":       analysis.get("htf_bias","NEUTRAL"),
+            "timeframe":      timeframe,
+            "regime":         analysis.get("regime","NORMAL"),
+            "regime_warning": analysis.get("regime_warning",""),
+            "regime_context": analysis.get("regime_context",""),
+            "session_context": analysis.get("session_context",
+                {"session":"—","off_hours":False,"warning_level":None,"message":""}),
+            "smc_structures": analysis.get("smc_structures", {}),
+            "quality": analysis.get("quality"),
+            "win_rate":    _wr.get("win_rate"),
+            "win_rate_n":  _wr.get("sample_size"),
+            "data_timestamp_utc": _df_last_timestamp_utc(df),
+            "provider_trace": provider_trace,
+            "provider_used": provider_trace.get("provider_used"),
+            "fallback_used": provider_trace.get("fallback_used"),
+        }
+        row["candidate_id"] = _scan_candidate_id(row)
+        return row
+    except Exception as e:
+        print(f"[scan-list] Error for {ticker}: {e}")
+        return {"ticker": ticker, "raw_ticker": raw, "asset_type": asset_type, "timeframe": timeframe, "error": str(e)[:80]}
+
+
+def _sort_scan_candidates(results):
+    def sort_key(r):
+        if r.get("error"): return 99
+        sig = r.get("signal", "HOLD")
+        if sig in ("BUY", "SELL"): return 0
+        return 2
+    results.sort(key=sort_key)
+    return results
+
+
+def _run_scan_request(scan_request):
+    tickers = scan_request.tickers
+    asset_type = scan_request.asset_type
+    timeframe = scan_request.timeframe
+    cfg = TIMEFRAME_CONFIG[timeframe]
+    results = []
+    import threading as _threading
+    results_lock = _threading.Lock()
+
+    def _scan_one(ticker):
+        row = _scan_one_candidate(ticker, asset_type, timeframe, cfg)
+        if row:
+            with results_lock:
+                results.append(row)
+
+    threads = [_threading.Thread(target=_scan_one, args=(t,)) for t in tickers]
+    for th in threads: th.start()
+    for th in threads: th.join(timeout=60)
+    return _sort_scan_candidates(results)
+
+
+def _signal_universe_requests(body):
+    payload = body if isinstance(body, dict) else {}
+    groups = payload.get("groups")
+    if not isinstance(groups, list) or not groups:
+        groups = [payload]
+    requests_out = []
+    valid_timeframes = set(TIMEFRAME_CONFIG.keys())
+    for group in groups[:12]:
+        if not isinstance(group, dict):
+            continue
+        raw_tfs = group.get("tfs") or group.get("timeframes") or [group.get("timeframe", "1h")]
+        if not isinstance(raw_tfs, list):
+            raw_tfs = [raw_tfs]
+        for tf in raw_tfs[:7]:
+            tf = str(tf or "1h").lower()
+            if tf not in valid_timeframes:
+                tf = "1d"
+            scan_request = normalize_scan_list_payload(
+                dict(group, timeframe=tf),
+                valid_timeframes=TIMEFRAME_CONFIG.keys(),
+            )
+            if scan_request.tickers:
+                requests_out.append(scan_request)
+    return requests_out[:60]
+
+
+def _signal_universe_provider_health(candidates, errors):
+    failed = [c for c in candidates if c.get("error")]
+    ready = [c for c in candidates if not c.get("error")]
+    unique_errors = sorted({str(e)[:120] for e in errors if e})
+    provider_counts = {}
+    fallback_count = 0
+    latest_data_timestamp_utc = None
+    for candidate in ready:
+        provider = candidate.get("provider_used") or (candidate.get("provider_trace") or {}).get("provider_used") or "unknown"
+        provider_counts[provider] = provider_counts.get(provider, 0) + 1
+        if candidate.get("fallback_used") or (candidate.get("provider_trace") or {}).get("fallback_used"):
+            fallback_count += 1
+        ts = candidate.get("data_timestamp_utc")
+        if ts and (latest_data_timestamp_utc is None or str(ts) > str(latest_data_timestamp_utc)):
+            latest_data_timestamp_utc = ts
+    return {
+        "ready": bool(ready),
+        "candidate_count": len(candidates),
+        "ready_count": len(ready),
+        "failed_count": len(failed),
+        "provider_counts": provider_counts,
+        "fallback_count": fallback_count,
+        "latest_data_timestamp_utc": latest_data_timestamp_utc,
+        "unique_errors": unique_errors[:8],
+        "provider_policy_version": "provider-first-v1",
+    }
+
+
+@app.route("/api/signal-universe/run", methods=["POST"])
+@login_required
+def signal_universe_run():
+    """Canonical signal candidate scan shared by Signals, Market, and Today."""
+    try:
+        body = request.get_json(silent=True) or {}
+        run_id = "sigrun_" + uuid.uuid4().hex[:12]
+        scan_requests = _signal_universe_requests(body)
+        candidates = []
+        errors = []
+        scan_scope = []
+        for scan_request in scan_requests:
+            scan_scope.append({
+                "asset_type": scan_request.asset_type,
+                "timeframe": scan_request.timeframe,
+                "tickers": scan_request.tickers,
+            })
+        if scan_requests:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            max_workers = min(6, len(scan_requests))
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = [pool.submit(_run_scan_request, scan_request) for scan_request in scan_requests]
+                for future in as_completed(futures):
+                    rows = future.result()
+                    candidates.extend(rows)
+                    errors.extend([r.get("error") for r in rows if r.get("error")])
+        _sort_scan_candidates(candidates)
+        ready = any(not c.get("error") for c in candidates)
+        as_of_utc = datetime.utcnow().isoformat() + "Z"
+        provider_health = _signal_universe_provider_health(candidates, errors)
+        response = {
+            "ready": ready,
+            "run_id": run_id,
+            "as_of_utc": as_of_utc,
+            "provider_policy_version": "provider-first-v1",
+            "scan_scope": scan_scope,
+            "universe_filters": body.get("filters") if isinstance(body.get("filters"), dict) else {},
+            "market_regime": {"status": "computed_per_candidate"},
+            "candidates": candidates,
+            "results": candidates,
+            "count": len(candidates),
+            "errors": errors,
+            "provider_health": provider_health,
+            "request_count": len(scan_requests),
+        }
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"ready": False, "error": str(e)}), 500
+
+
 @app.route("/api/scan-list", methods=["POST"])
 @login_required
 def scan_list():
-    """Pre-screen multiple tickers quickly using TradingView scanner (primary)
-    with yfinance fallback. No AI API call."""
+    """Pre-screen multiple tickers using the shared provider-first signal engine."""
     try:
         scan_request = normalize_scan_list_payload(
             request.json,
             valid_timeframes=TIMEFRAME_CONFIG.keys(),
         )
-        tickers = scan_request.tickers
-        asset_type = scan_request.asset_type
-        timeframe = scan_request.timeframe
-        cfg     = TIMEFRAME_CONFIG[timeframe]
-        results = []
-        import threading as _threading
-        results_lock = _threading.Lock()
-
-        def _scan_one(ticker):
-            # Bug N fix 2026-04-29: scan_list now uses the SAME data source as
-            # /api/analyze (yfinance + calculate_indicators). Previously the TV
-            # fast-path used build_ind_from_tv() which hardcodes vol_ratio=1.0 and
-            # supertrend='NEUTRAL', producing different `ind` than calculate_indicators.
-            # Same ticker/TF could yield BUY in scan-list and SELL in analyze. The
-            # signal-coherence ethos requires one source of truth — scan-list and
-            # analyze must agree by construction. TV is still used elsewhere for chart
-            # rendering and MTF context; for SIGNAL VOTING, only yfinance.
-            raw = normalise_ticker(ticker, asset_type)
-            row = None
-            try:
-                df = provider_first_download(raw, period=cfg["period"], interval=cfg["interval"], asset_type=asset_type)
-                if "resample" in cfg and not df.empty:
-                    if not isinstance(df.index, pd.DatetimeIndex):
-                        df.index = pd.to_datetime(df.index)
-                    df = df.resample(cfg["resample"]).agg(
-                        {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
-                if df.empty or len(df) < 20:
-                    row = {"ticker": ticker, "error": "no data"}
-                else:
-                    ind      = calculate_indicators(df, timeframe, asset_type)
-                    # Markov regime engine feeds a weighted bull/bear vote into the
-                    # confluence pool. Enable it for the scan ONLY when the EODHD data
-                    # feed is configured — otherwise it's a no-op (returns neutral) and
-                    # we skip the overhead. Results are cached 1h per symbol.
-                    _use_mkv = bool(os.environ.get("EODHD_API_KEY", "").strip())
-                    analysis = get_analysis(ticker, asset_type, ind, timeframe, use_markov=_use_mkv)
-                    ct       = detect_counter_trade(ind)
-                    # Historical win rate for THIS signal, computed on the df we already have
-                    # (no extra fetch). Feeds the Today card's backtest panel + the edge gate.
-                    try:
-                        _wr = calculate_win_rate(df, analysis.get("signal", "HOLD"))
-                    except Exception:
-                        _wr = {"win_rate": None, "sample_size": 0}
-                    row = {
-                        "ticker": ticker, "raw_ticker": raw, "asset_type": asset_type,
-                        "price": ind["price"], "chg_1d": ind["chg_1d"], "rsi": ind["rsi"],
-                        "vol_ratio": ind["vol_ratio"],
-                        "volume": int(float(df["Volume"].iloc[-1])) if "Volume" in df else 0,
-                        "ema_trend": ind["ema_trend"], "supertrend": ind["supertrend"],
-                        "signal": analysis["signal"], "entry": analysis.get("entry"),
-                        "stop_loss": analysis.get("stop_loss"), "tp1": analysis.get("tp1"),
-                        "tp2": analysis.get("tp2"), "tp3": analysis.get("tp3"),
-                        "rr1": analysis.get("rr1"), "rr2": analysis.get("rr2"), "rr3": analysis.get("rr3"),
-                        "reason": analysis.get("summary",""), "bull_score": analysis.get("bullish_count",0),
-                        "bear_score": analysis.get("bearish_count",0), "counter_trade": ct["counter_trade"],
-                        "confidence": analysis.get("confidence","LOW"),
-                        "confidence_pct": analysis.get("confidence_pct"),
-                        "confidence_label": analysis.get("confidence_label","HYPOTHESIS"),
-                        "spread_cost":    analysis.get("spread_cost"),
-                        "spread_quality": analysis.get("spread_quality","fair"),
-                        "spread_source":  analysis.get("spread_source"),
-                        "spread_pips":    analysis.get("spread_pips"),
-                        "rr1_raw":        analysis.get("rr1_raw"),
-                        "trade_type":     analysis.get("trade_type","day"),
-                        "htf_bias":       analysis.get("htf_bias","NEUTRAL"),
-                        "timeframe":      timeframe,
-                        # G1: Market regime — so scanner-loaded signals show regime chip + warning
-                        "regime":         analysis.get("regime","NORMAL"),
-                        "regime_warning": analysis.get("regime_warning",""),
-                        "regime_context": analysis.get("regime_context",""),
-                        # G2: Session context — so scanner-loaded signals show off-hours warning
-                        "session_context": analysis.get("session_context",
-                            {"session":"—","off_hours":False,"warning_level":None,"message":""}),
-                        # SMC-FE: forward structures so scanner-loaded signals show real SMC data
-                        "smc_structures": analysis.get("smc_structures", {}),
-                        # Phase 2.2: Signal Quality Score
-                        "quality": analysis.get("quality"),
-                        # Backtest/historical edge for this setup (Today card + gate):
-                        "win_rate":    _wr.get("win_rate"),
-                        "win_rate_n":  _wr.get("sample_size"),
-                    }
-            except Exception as e:
-                print(f"[scan-list] Error for {ticker}: {e}")
-                row = {"ticker": ticker, "error": str(e)[:80]}
-            if row:
-                with results_lock:
-                    results.append(row)
-
-        # Run all tickers in parallel — 6 tickers in ~5s instead of ~30s
-        threads = [_threading.Thread(target=_scan_one, args=(t,)) for t in tickers]
-        for th in threads: th.start()
-        for th in threads: th.join(timeout=60)
-
-        def sort_key(r):
-            if r.get("error"): return 99
-            sig = r.get("signal", "HOLD")
-            if sig in ("BUY", "SELL"): return 0
-            return 2
-        results.sort(key=sort_key)
-        return jsonify({"results": results, "timeframe": timeframe, "count": len(results)})
+        results = _run_scan_request(scan_request)
+        return jsonify({"results": results, "timeframe": scan_request.timeframe, "count": len(results)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -17301,6 +17858,11 @@ import hashlib as _hl
 import math as _math
 import concurrent.futures
 
+VERDICT_RATE_LIMIT = 3
+VERDICT_RATE_WINDOW_SECONDS = 60
+_verdict_rate_store = {}
+_verdict_inflight_store = {}
+
 VERDICT_CONFIG = {
     "llm_provider": "deepseek",
     "deep_think_llm": "deepseek-chat",       # was deepseek-v4-pro — switched for speed (60-90s vs 5-10min)
@@ -17519,6 +18081,58 @@ except Exception as e:
     TA_ERROR = str(e)
     print(f"[verdict] TradingAgents not available: {e}")
 
+
+def _check_verdict_rate_limit(user_id):
+    now = time.time()
+    bucket = f"verdict_rl:{user_id}"
+    calls = [ts for ts in _verdict_rate_store.get(bucket, []) if now - ts < VERDICT_RATE_WINDOW_SECONDS]
+    if len(calls) >= VERDICT_RATE_LIMIT:
+        retry_after = max(1, int(VERDICT_RATE_WINDOW_SECONDS - (now - calls[0])))
+        return False, retry_after
+    calls.append(now)
+    _verdict_rate_store[bucket] = calls
+    return True, None
+
+
+def _get_existing_verdict_job(verdict_key):
+    now = time.time()
+    if _redis_client:
+        try:
+            job_id = _redis_client.get(verdict_key)
+            if isinstance(job_id, bytes):
+                job_id = job_id.decode("utf-8")
+            if job_id and _rq_queue:
+                job = _rq_queue.fetch_job(job_id)
+                if job and not job.is_finished and not job.is_failed:
+                    return str(job_id)
+        except Exception:
+            pass
+    entry = _verdict_inflight_store.get(verdict_key)
+    if not entry:
+        return None
+    if now - entry.get("created_at", 0) > 600:
+        _verdict_inflight_store.pop(verdict_key, None)
+        return None
+    job_id = entry.get("job_id")
+    try:
+        job = _rq_queue.fetch_job(job_id) if _rq_queue and job_id else None
+        if job and (job.is_finished or job.is_failed):
+            _verdict_inflight_store.pop(verdict_key, None)
+            return None
+    except Exception:
+        pass
+    return job_id
+
+
+def _remember_verdict_job(verdict_key, job_id):
+    _verdict_inflight_store[verdict_key] = {"job_id": job_id, "created_at": time.time()}
+    if _redis_client:
+        try:
+            _redis_client.setex(verdict_key, 600, job_id)
+        except Exception:
+            pass
+
+
 @app.route("/api/verdict/status", methods=["GET"])
 def verdict_status():
     """Public diagnostic — no auth required.
@@ -17674,7 +18288,7 @@ def verdict_enqueue():
     if not _rq_queue:
         return jsonify({"error": "Worker queue not available"}), 503
     body   = request.get_json(force=True) or {}
-    ticker = body.get("ticker", "").strip()
+    ticker = body.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
 
@@ -17705,13 +18319,35 @@ def verdict_enqueue():
     if not TA_AVAILABLE:
         return jsonify({"error": "TradingAgents not available on this server", "status": "unavailable"}), 503
 
+    user_id = str(session.get("user_id", "anonymous"))
+    allowed, retry_after = _check_verdict_rate_limit(user_id)
+    if not allowed:
+        return jsonify({
+            "error": "verdict_rate_limit",
+            "message": "Verdict analysis is expensive; wait before requesting another run.",
+            "limit": VERDICT_RATE_LIMIT,
+            "window_seconds": VERDICT_RATE_WINDOW_SECONDS,
+            "retry_after_seconds": retry_after,
+        }), 429
+
+    inflight_key = f"verdict_inflight:{ticker}:{tf_key}"
+    existing_job_id = _get_existing_verdict_job(inflight_key)
+    if existing_job_id:
+        return jsonify({
+            "job_id": existing_job_id,
+            "status": "enqueued",
+            "deduped": True,
+            "message": "Verdict already running for this ticker/timeframe",
+        })
+
     trade_date = body.get("date") or datetime.utcnow().strftime("%Y-%m-%d")
     try:
         job = _rq_queue.enqueue(
             _run_verdict_job, ticker, trade_date, signal_ctx,
             job_timeout=600, result_ttl=3600,
         )
-        return jsonify({"job_id": job.id, "status": "enqueued"})
+        _remember_verdict_job(inflight_key, job.id)
+        return jsonify({"job_id": job.id, "status": "enqueued", "deduped": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

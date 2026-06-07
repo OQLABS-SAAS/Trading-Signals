@@ -41,9 +41,12 @@ def test_today_v2_exposes_multiladder_presets_and_leg_money():
     assert "presetBtn('beginner','Beginner'" in source
     assert "presetBtn('aggressive','Aggressive'" in source
     assert "Preset controls are inactive" in source
-    assert "Every leg below has its own cash in, position value, lot size, target, risk, and profit." in source
+    assert "Each row below is one MT5 order." in source
+    assert "Cash in = margin you put up; controls = position value; lots = broker size units." in source
     assert "Every leg below has its own cash in, controlled value" not in source
-    assert "controls · '+((l.lots||0).toFixed(4))+' lots" in source
+    assert "Controls: position value. Size:" in source
+    assert "function legSizeText(l)" in source
+    assert "esc(legSizeText(l))" in source
 
 
 def test_today_v2_downgrades_target_not_covered_to_scout_first():
@@ -138,4 +141,4 @@ def test_today_v2_compresses_multiladder_instead_of_auto_single_when_possible():
     assert "lots>=minLot*2-1e-9" in source
     assert "compressedSplit:compressed" in source
     assert "var compressedScale=actualScale&&legs.some" in source
-    assert "DotVerse compressed the preset into executable legs" in source
+    assert "DotVerse compressed the preset so every order clears broker minimum lot size" in source

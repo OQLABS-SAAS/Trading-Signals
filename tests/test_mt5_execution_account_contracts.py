@@ -77,6 +77,17 @@ class _FakeDB:
         self.closed = True
 
 
+class _FakeOrderDB(_FakeDB):
+    def __init__(self, accounts, orders):
+        super().__init__(accounts)
+        self.orders = list(orders)
+
+    def query(self, model):
+        if model is dvapp.MT5Order:
+            return _FakeQuery(self.orders)
+        return _FakeQuery(self.accounts)
+
+
 class _FakePendingDB:
     def __init__(self, orders, accounts):
         self.orders = list(orders)
@@ -157,6 +168,43 @@ def _authed_pro_client():
     return client
 
 
+def _install_mt5_state(user_id="testuser", login="123456", trade_mode=2, seconds_old=0):
+    previous_state = dict(dvapp.mt5_state)
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state[user_id] = {
+            "account": {"login": login, "trade_mode": trade_mode, "server": "Broker-Demo" if trade_mode in (0, 1) else "Broker-Live"},
+            "positions": [],
+            "last_seen": (dvapp.datetime.utcnow() - dvapp.timedelta(seconds=seconds_old)).isoformat(),
+            "level_hits": {},
+        }
+    return previous_state
+
+
+def _restore_mt5_state(previous_state):
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state.update(previous_state)
+
+
+def _install_account_mt5_state(account_id=7, user_id="testuser", login="123456", trade_mode=2, seconds_old=0):
+    previous_state = dict(dvapp.mt5_state)
+    state = {
+        "account": {"login": login, "trade_mode": trade_mode, "server": "Broker-Demo" if trade_mode in (0, 1) else "Broker-Live"},
+        "positions": [],
+        "last_seen": (dvapp.datetime.utcnow() - dvapp.timedelta(seconds=seconds_old)).isoformat(),
+        "level_hits": {},
+    }
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state[f"account:{account_id}"] = state
+        dvapp.mt5_state[user_id] = {
+            **state,
+            "account": {"login": "999999", "trade_mode": trade_mode, "server": "Other"},
+        }
+    return previous_state
+
+
 def test_mt5_submit_order_functionally_stamps_selected_account(monkeypatch):
     account = SimpleNamespace(
         id=7,
@@ -169,21 +217,25 @@ def test_mt5_submit_order_functionally_stamps_selected_account(monkeypatch):
     fake_db = _FakeDB([account])
 
     monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=2)
 
-    resp = _authed_pro_client().post(
-        "/api/mt5/order",
-        json={
-            "account_id": 7,
-            "ticker": "EURUSD",
-            "asset_type": "forex",
-            "direction": "BUY",
-            "lots": 0.2,
-            "entry": 1.08,
-            "sl": 1.075,
-            "tp1": 1.09,
-            "timeframe": "1h",
-        },
-    )
+    try:
+        resp = _authed_pro_client().post(
+            "/api/mt5/order",
+            json={
+                "account_id": 7,
+                "ticker": "EURUSD",
+                "asset_type": "forex",
+                "direction": "BUY",
+                "lots": 0.2,
+                "entry": 1.08,
+                "sl": 1.075,
+                "tp1": 1.09,
+                "timeframe": "1h",
+            },
+        )
+    finally:
+        _restore_mt5_state(previous_state)
 
     assert resp.status_code == 200, resp.get_data(as_text=True)
     data = resp.get_json()
@@ -192,6 +244,7 @@ def test_mt5_submit_order_functionally_stamps_selected_account(monkeypatch):
     assert data["account_type"] == "LIVE"
     assert data["is_live"] is True
     assert data["is_demo"] is False
+    assert data["mt5_ready"] is True
     assert fake_db.committed is True
     assert fake_db.closed is True
     order = fake_db.added[0]
@@ -199,6 +252,240 @@ def test_mt5_submit_order_functionally_stamps_selected_account(monkeypatch):
     assert order.volume == 0.2
     assert order.symbol == "EURUSD"
     assert "acct=7 LIVE" in order.comment
+
+
+def test_mt5_submit_order_rejects_stale_or_offline_mt5_state(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="DEMO",
+        is_active=True,
+        updated_at=None,
+    )
+    fake_db = _FakeDB([account])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=0, seconds_old=90)
+
+    try:
+        resp = _authed_pro_client().post(
+            "/api/mt5/order",
+            json={"account_id": 7, "ticker": "EURUSD", "asset_type": "forex", "direction": "BUY", "lots": 0.2, "entry": 1.08},
+        )
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert "MT5 is offline or stale" in resp.get_json()["error"]
+    assert fake_db.added == []
+    assert fake_db.rolled_back is True
+
+
+def test_mt5_submit_order_rejects_selected_account_mismatch(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="DEMO",
+        is_active=True,
+        updated_at=None,
+    )
+    fake_db = _FakeDB([account])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="999999", trade_mode=0)
+
+    try:
+        resp = _authed_pro_client().post(
+            "/api/mt5/order",
+            json={"account_id": 7, "ticker": "EURUSD", "asset_type": "forex", "direction": "BUY", "lots": 0.2, "entry": 1.08},
+        )
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert "does not match the connected broker account" in resp.get_json()["error"]
+    assert fake_db.added == []
+
+
+def test_mt5_submit_order_prefers_account_scoped_live_state(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="LIVE",
+        is_active=True,
+        updated_at=None,
+    )
+    fake_db = _FakeDB([account])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_account_mt5_state(account_id=7, login="123456", trade_mode=2)
+
+    try:
+        resp = _authed_pro_client().post(
+            "/api/mt5/order",
+            json={
+                "account_id": 7,
+                "ticker": "EURUSD",
+                "asset_type": "forex",
+                "direction": "BUY",
+                "lots": 0.2,
+                "entry": 1.08,
+                "sl": 1.075,
+                "tp1": 1.09,
+            },
+        )
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["mt5_ready"] is True
+    assert fake_db.added[0].account_id == 7
+
+
+def test_mt5_submit_order_dedupes_recent_pending_duplicate(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="DEMO",
+        is_active=True,
+        updated_at=None,
+    )
+    existing_order = SimpleNamespace(
+        id=444,
+        user_id="testuser",
+        account_id=7,
+        symbol="EURUSD",
+        order_type="BUY",
+        volume=0.2,
+        price=1.08,
+        sl=1.075,
+        tp=1.09,
+        status="pending",
+        created_at=dvapp.datetime.utcnow(),
+    )
+    fake_db = _FakeOrderDB([account], [existing_order])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=0)
+
+    try:
+        resp = _authed_pro_client().post(
+            "/api/mt5/order",
+            json={
+                "account_id": 7,
+                "ticker": "EURUSD",
+                "asset_type": "forex",
+                "direction": "BUY",
+                "lots": 0.2,
+                "entry": 1.08,
+                "sl": 1.075,
+                "tp1": 1.09,
+            },
+        )
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["status"] == "duplicate"
+    assert data["order_id"] == 444
+    assert fake_db.added == []
+
+
+def test_mt5_submit_order_does_not_dedupe_distinct_ladder_targets(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="DEMO",
+        is_active=True,
+        updated_at=None,
+    )
+    existing_order = SimpleNamespace(
+        id=444,
+        user_id="testuser",
+        account_id=7,
+        symbol="EURUSD",
+        order_type="BUY",
+        volume=0.2,
+        price=1.08,
+        sl=1.075,
+        tp=1.09,
+        tp2=1.095,
+        tp3=1.1,
+        timeframe="1h",
+        trailing=False,
+        be=False,
+        macro=False,
+        inval=False,
+        sent=False,
+        tp1_alert=False,
+        tp2_alert=False,
+        weekend=False,
+        status="pending",
+        created_at=dvapp.datetime.utcnow(),
+    )
+    fake_db = _FakeOrderDB([account], [existing_order])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=0)
+
+    try:
+        resp = _authed_pro_client().post(
+            "/api/mt5/order",
+            json={
+                "account_id": 7,
+                "ticker": "EURUSD",
+                "asset_type": "forex",
+                "direction": "BUY",
+                "lots": 0.2,
+                "entry": 1.08,
+                "sl": 1.075,
+                "tp1": 1.09,
+                "tp2": 1.097,
+                "tp3": 1.105,
+            },
+        )
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["status"] == "pending"
+    assert len(fake_db.added) == 1
+    assert fake_db.added[0].tp2 == 1.097
+
+
+def test_execution_order_route_uses_same_mt5_readiness_guard(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="LIVE",
+        is_active=True,
+        updated_at=None,
+    )
+    fake_db = _FakeDB([account])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=2, seconds_old=90)
+
+    try:
+        resp = _authed_pro_client().post(
+            "/api/orders",
+            json={
+                "account_id": 7,
+                "symbol": "EURUSD",
+                "side": "BUY",
+                "quantity": 0.2,
+                "entry_price": 1.08,
+                "stop_loss": 1.075,
+                "take_profit": 1.09,
+            },
+        )
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert "MT5 is offline or stale" in resp.get_json()["error"]
+    assert fake_db.added == []
 
 
 def test_mt5_submit_order_requires_account_selection_when_ambiguous(monkeypatch):
@@ -239,10 +526,7 @@ def test_mt5_submit_order_does_not_downgrade_saved_mode_from_partial_mt5_state(m
     fake_db = _FakeDB([account])
 
     monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
-    with dvapp.mt5_state_lock:
-        previous_state = dict(dvapp.mt5_state)
-        dvapp.mt5_state.clear()
-        dvapp.mt5_state["testuser"] = {"account": {"login": "123456", "balance": 1000}}
+    previous_state = _install_mt5_state(login="123456", trade_mode=2)
     try:
         resp = _authed_pro_client().post(
             "/api/mt5/order",
@@ -255,9 +539,7 @@ def test_mt5_submit_order_does_not_downgrade_saved_mode_from_partial_mt5_state(m
             },
         )
     finally:
-        with dvapp.mt5_state_lock:
-            dvapp.mt5_state.clear()
-            dvapp.mt5_state.update(previous_state)
+        _restore_mt5_state(previous_state)
 
     assert resp.status_code == 200, resp.get_data(as_text=True)
     data = resp.get_json()
@@ -492,6 +774,64 @@ def test_mt5_confirm_rejects_unknown_or_invalid_results(monkeypatch):
     assert fake_db.closed is True
 
 
+def test_mt5_confirm_accepts_exact_terminal_replay_as_noop(monkeypatch):
+    filled_at = dvapp.datetime.utcnow()
+    order = _mt5_order(
+        status="filled",
+        mt5_ticket=555,
+        fill_price=1.081,
+        filled_at=filled_at,
+        comment="DotVerse #101 acct=7 LIVE",
+    )
+    fake_db = _FakeConfirmDB([order])
+    previous_bypass = dvapp.MT5_BYPASS_USER_IDS
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    dvapp.MT5_BYPASS_USER_IDS = {"testuser"}
+    try:
+        resp = dvapp.app.test_client().post(
+            "/api/mt5/confirm",
+            json={"order_id": 101, "status": "filled", "ticket": 555, "fill_price": 1.081},
+        )
+    finally:
+        dvapp.MT5_BYPASS_USER_IDS = previous_bypass
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["status"] == "ok"
+    assert data["duplicate"] is True
+    assert order.filled_at == filled_at
+    assert order.mt5_ticket == 555
+    assert fake_db.committed is False
+    assert fake_db.closed is True
+
+
+def test_mt5_confirm_rejects_conflicting_terminal_replay(monkeypatch):
+    order = _mt5_order(
+        status="filled",
+        mt5_ticket=555,
+        fill_price=1.081,
+        comment="DotVerse #101 acct=7 LIVE",
+    )
+    fake_db = _FakeConfirmDB([order])
+    previous_bypass = dvapp.MT5_BYPASS_USER_IDS
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    dvapp.MT5_BYPASS_USER_IDS = {"testuser"}
+    try:
+        resp = dvapp.app.test_client().post(
+            "/api/mt5/confirm",
+            json={"order_id": 101, "status": "filled", "ticket": 777, "fill_price": 1.081},
+        )
+    finally:
+        dvapp.MT5_BYPASS_USER_IDS = previous_bypass
+
+    assert resp.status_code == 409, resp.get_data(as_text=True)
+    assert "conflicting MT5 confirmation" in resp.get_json()["error"]
+    assert order.mt5_ticket == 555
+    assert fake_db.committed is False
+
+
 def test_mt5_push_sync_does_not_persist_unknown_mode_as_demo(monkeypatch):
     account = SimpleNamespace(
         id=7,
@@ -514,3 +854,133 @@ def test_mt5_push_sync_does_not_persist_unknown_mode_as_demo(monkeypatch):
     assert fake_db.committed is False
     assert fake_db.rolled_back is False
     assert fake_db.closed is False
+
+
+def test_mt5_push_uses_account_scoped_state_and_ignores_stale_sequence(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="LIVE",
+        is_active=True,
+        updated_at=None,
+    )
+    fake_db = _FakePendingDB([], [account])
+    previous_state = dict(dvapp.mt5_state)
+    previous_bypass = dvapp.MT5_BYPASS_USER_IDS
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    monkeypatch.setattr(
+        dvapp,
+        "_lookup_user_by_mt5_secret",
+        lambda secret: dvapp._mt5_auth_context("testuser", account=account) if secret == "acct-secret" else None,
+    )
+    dvapp.MT5_BYPASS_USER_IDS = set()
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state.clear()
+
+    try:
+        client = dvapp.app.test_client()
+        first = client.post(
+            "/api/mt5/push",
+            headers={"X-EA-Secret": "acct-secret"},
+            json={
+                "seq": 5,
+                "account": {"login": "123456", "trade_mode": 2},
+                "positions": [{"ticket": 9001, "symbol": "EURUSD"}],
+            },
+        )
+        second = client.post(
+            "/api/mt5/push",
+            headers={"X-EA-Secret": "acct-secret"},
+            json={
+                "seq": 4,
+                "account": {"login": "123456", "trade_mode": 2},
+                "positions": [{"ticket": 9002, "symbol": "XAUUSD"}],
+            },
+        )
+        with dvapp.mt5_state_lock:
+            account_state = dict(dvapp.mt5_state["account:7"])
+    finally:
+        dvapp.MT5_BYPASS_USER_IDS = previous_bypass
+        _restore_mt5_state(previous_state)
+
+    assert first.status_code == 200, first.get_data(as_text=True)
+    assert first.get_json()["status"] == "ok"
+    assert second.status_code == 200, second.get_data(as_text=True)
+    assert second.get_json()["status"] == "stale"
+    assert account_state["account_id"] == 7
+    assert account_state["positions"][0]["ticket"] == 9001
+
+
+def test_mt5_push_rejects_account_secret_login_mismatch(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="LIVE",
+        is_active=True,
+        updated_at=None,
+    )
+    fake_db = _FakePendingDB([], [account])
+    previous_bypass = dvapp.MT5_BYPASS_USER_IDS
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    monkeypatch.setattr(
+        dvapp,
+        "_lookup_user_by_mt5_secret",
+        lambda secret: dvapp._mt5_auth_context("testuser", account=account) if secret == "acct-secret" else None,
+    )
+    dvapp.MT5_BYPASS_USER_IDS = set()
+    try:
+        resp = dvapp.app.test_client().post(
+            "/api/mt5/push",
+            headers={"X-EA-Secret": "acct-secret"},
+            json={"account": {"login": "999999", "trade_mode": 2}, "positions": []},
+        )
+    finally:
+        dvapp.MT5_BYPASS_USER_IDS = previous_bypass
+
+    assert resp.status_code == 409, resp.get_data(as_text=True)
+    assert "does not match pushed broker login" in resp.get_json()["error"]
+
+
+def test_mt5_push_reconciles_position_comment_to_filled_order(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="LIVE",
+        is_active=True,
+        updated_at=None,
+    )
+    order = _mt5_order(status="executing", mt5_ticket=None, fill_price=None, filled_at=None)
+    fake_db = _FakePendingDB([order], [account])
+    previous_bypass = dvapp.MT5_BYPASS_USER_IDS
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    monkeypatch.setattr(
+        dvapp,
+        "_lookup_user_by_mt5_secret",
+        lambda secret: dvapp._mt5_auth_context("testuser", account=account) if secret == "acct-secret" else None,
+    )
+    dvapp.MT5_BYPASS_USER_IDS = set()
+    try:
+        resp = dvapp.app.test_client().post(
+            "/api/mt5/push",
+            headers={"X-EA-Secret": "acct-secret"},
+            json={
+                "seq": 6,
+                "account": {"login": "123456", "trade_mode": 2},
+                "positions": [{"ticket": 9001, "symbol": "EURUSD", "price_open": 1.081, "comment": "DotVerse #101 acct=7 LIVE"}],
+            },
+        )
+    finally:
+        dvapp.MT5_BYPASS_USER_IDS = previous_bypass
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["reconciled"] == 1
+    assert order.status == "filled"
+    assert order.mt5_ticket == 9001
+    assert order.fill_price == 1.081
+    assert order.filled_at is not None

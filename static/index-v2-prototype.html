@@ -5812,9 +5812,11 @@ button { font-weight: 400 !important; }
     <!-- Pipeline breadcrumb + dots — pinned, never scrolls -->
     <div class="dsb-pin">
       <div class="nav-pipeline">
+        <span class="npp" data-nav="today"       onclick="setNav('today');showToday();">TDY</span>
+        <span class="npp-arr">›</span>
         <span class="npp active" data-nav="market"      onclick="setNav('market');showMarket();">MKT</span>
         <span class="npp-arr">›</span>
-        <span class="npp" data-nav="signals"            onclick="setNav('signals');showSignalFeed();">SIG</span>
+        <span class="npp" data-nav="signals"            onclick="_sfOpenFullSignals();">SIG</span>
         <span class="npp-arr">›</span>
         <span class="npp" data-nav="understand"         onclick="setNav('understand');showUnderstand();">UND</span>
         <span class="npp-arr">›</span>
@@ -5826,6 +5828,7 @@ button { font-weight: 400 !important; }
       </div>
       <div class="flow-progress" style="margin:5px 0 0 2px;">
         <div class="flow-dot active"></div>
+        <div class="flow-dot"></div>
         <div class="flow-dot"></div>
         <div class="flow-dot"></div>
         <div class="flow-dot"></div>
@@ -5850,12 +5853,12 @@ button { font-weight: 400 !important; }
         <span class="nav-step-tag">01</span>
       </div>
 
-      <div class="nav-item" data-nav="signals" onclick="setNav('signals');showSignalFeed();">
+      <div class="nav-item" data-nav="signals" onclick="_sfOpenFullSignals();">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         <span><span>Signal</span><span class="nav-desc">Find your next trade</span></span>
         <span class="nav-badge" id="navSignalBadge">—</span>
       </div>
-      <div class="nav-item" data-nav="scanner" onclick="setNav('signals');showSignalFeed();setTimeout(()=>sfShowTab('scanner'),60);" style="padding-left:28px;">
+      <div class="nav-item" data-nav="scanner" onclick="_sfOpenFullSignals();setTimeout(()=>sfShowTab('scanner'),60);" style="padding-left:28px;">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <span style="font-size:11px;">Scanner</span>
       </div>
@@ -5972,7 +5975,7 @@ button { font-weight: 400 !important; }
           <button class="mode-toggle-btn" id="modeBtnBeg" onclick="switchMode('beginner')">BEGINNER</button>
           <button class="mode-toggle-btn" id="modeBtnAdv" onclick="switchMode('trader')">ADVANCED</button>
         </div>
-        <button class="btn-view-sig btn-pipeline" onclick="setNav('signals');showSignalFeed();">
+        <button class="btn-view-sig btn-pipeline" onclick="_sfOpenFullSignals();">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           View Signals
         </button>
@@ -6174,7 +6177,7 @@ function setNav(id){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.nav===id));
   document.querySelectorAll('.npp').forEach(n=>n.classList.toggle('active', n.dataset.nav===id));
   // Update progress dots
-  const steps=['market','signals','understand','size','act'];
+  const steps=['today','market','signals','understand','verdict','size','act'];
   const cur=steps.indexOf(id);
   document.querySelectorAll('.flow-dot').forEach((d,i)=>{
     d.classList.remove('active','done');
@@ -6712,7 +6715,7 @@ function _loadLandingStats(){
     if(src) src.textContent = 'on-chain';
   }); }catch(e){}
 }
-function showDashTab(t){ showView('vDash'); startDashClock(); if(t==='signals'){ setNav('signals'); showSignalFeed(); } }
+function showDashTab(t){ showView('vDash'); startDashClock(); if(t==='signals'){ _sfOpenFullSignals(); } }
 
 // ── AUTH PANELS ────────────────────────────────────────────────
 let authStep=1;
@@ -9452,8 +9455,7 @@ function sfShowTab(tab){
 }
 // scannerLoadSym — jump to scanner and highlight a symbol row
 function scannerLoadSym(sym){
-  setNav('signals');
-  showSignalFeed();
+  _sfOpenFullSignals();
   setTimeout(()=>{
     sfShowTab('scanner');
     setTimeout(()=>{
@@ -10786,13 +10788,27 @@ async function dvRefreshAlertBtn(){
     btn.style.borderColor='rgba(201,168,76,.55)';
     btn.style.color='rgba(201,168,76,.9)';
     btn.style.background='rgba(201,168,76,.08)';
-    btn.innerHTML='<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Alert Active &nbsp;·&nbsp; Cancel';
+    var activeTitle = btn.querySelector('.und-alert-title');
+    var activeSub = btn.querySelector('.und-alert-sub');
+    if(activeTitle && activeSub){
+      activeTitle.textContent = 'Alert active';
+      activeSub.textContent = 'Click to cancel this watch.';
+    } else {
+      btn.innerHTML='<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Alert Active &nbsp;·&nbsp; Cancel';
+    }
   } else {
     btn.setAttribute('onclick','dvSetWatch()');
     btn.style.borderColor='';
     btn.style.color='';
     btn.style.background='';
-    btn.innerHTML='<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> Set DotVerse Alert';
+    var idleTitle = btn.querySelector('.und-alert-title');
+    var idleSub = btn.querySelector('.und-alert-sub');
+    if(idleTitle && idleSub){
+      idleTitle.textContent = 'Alert';
+      idleSub.textContent = 'Watch this setup and notify on movement.';
+    } else {
+      btn.innerHTML='<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> Set DotVerse Alert';
+    }
   }
 }
 
@@ -11720,7 +11736,7 @@ function _todayRenderPlan(){
     : {t:'Mixed',c:'#c9a84c'})));
   var summary='<div style="border:1px solid rgba(93,232,160,.25);border-radius:9px;padding:13px 15px;margin-bottom:12px;background:linear-gradient(90deg,rgba(93,232,160,.06),rgba(201,168,76,.04));">'
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;"><span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(93,232,160,.75);font-weight:700;text-transform:uppercase;">Today\'s plan · '+nTradeable+' trade'+(nTradeable===1?'':'s')+'</span><span style="margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;color:'+health.c+';">'+health.t+'</span></div>'
-    + '<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);line-height:1.5;margin-bottom:8px;">Same scanner as <span onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();" style="color:rgba(93,232,160,.8);border-bottom:1px dotted rgba(93,232,160,.4);cursor:pointer;">Signals ›</span> — Today shows your best <strong>'+nTradeable+'</strong> placeable, diversified pick'+(nTradeable===1?'':'s')+' out of <strong>'+(window._todayScanCount||nTradeable)+'</strong> live setups found. Signals lists every one; Today sizes them to your account.</div>'
+    + '<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.5);line-height:1.5;margin-bottom:8px;">Same scanner as <span onclick="_sfOpenFullSignals();" style="color:rgba(93,232,160,.8);border-bottom:1px dotted rgba(93,232,160,.4);cursor:pointer;">Signals ›</span> — Today shows your best <strong>'+nTradeable+'</strong> placeable, diversified pick'+(nTradeable===1?'':'s')+' out of <strong>'+(window._todayScanCount||nTradeable)+'</strong> live setups found. Signals lists every one; Today sizes them to your account.</div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.7);margin-bottom:8px;">'
       + '<span>Total position value: <strong>'+money(totExp)+'</strong></span>'
       + '<span>Total planned stop risk: <strong style="color:'+riskCol+';">'+money2(-totRisk)+' ('+riskPct.toFixed(2)+'% combined · '+perRisk+'% each)</strong></span>'
@@ -11838,7 +11854,7 @@ function _todayRenderPlan(){
 	  + '<div class="fire-panel"><div><div class="td-mini">Basket command · '+pset.label+' preset</div><h2 style="font-family:var(--syne);font-size:18px;font-weight:500;margin-top:3px">Ready to fire all '+nTradeable+' selected trade'+(nTradeable===1?'':'s')+' together</h2><p class="td-sub">One action queues every selected trade, each with its own TP ladder, SL, lot size, and automation rules. Total size '+money(totExp)+', target +'+money2(totProfit)+', risk '+money2(-totRisk)+' / '+riskPct.toFixed(2)+'% combined.</p>'+goalBanner+riskBanner+'</div><div class="td-stack"><button class="td-btn gold" onclick="_todayPlaceAll()">Review all</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all</button></div></div>'
 	  + '<div class="td-grid td-two"><div class="td-card"><div class="td-card-head"><h2>Best setups basket</h2><div class="td-stack">'+_todayPill('Multi-TF','gold')+_todayPill('Multi-ladder kept','green')+_todayPill(pset.label+' risk','blue')+'</div></div><div class="td-pad td-table-wrap"><table class="td-table"><tr><th>Trade</th><th>TF</th><th>Live</th><th>Lots</th><th>Trade size</th><th>Loss / risk</th><th>Profit</th><th>Quality</th><th></th></tr>'+_tableRows()+'</table></div></div><div class="td-grid">'+_selectedSignalCard(selected)+_selectedLadderPanel(selected)+'</div></div>'
 	  + '<div class="td-card" style="margin-top:12px"><div class="td-card-head"><h2>Final basket totals</h2><div class="td-stack">'+_todayPill(pset.label+' preset','gold')+_todayPill('All '+nTradeable+' trades combined','green')+'</div></div><div class="td-pad"><div class="td-grid td-four">'+_todayMetric('All trade amounts',money(totExp),'Total position value across the basket','gold')+_todayMetric('Combined profit','+'+money2(totProfit)+' / +'+_pct(totProfit),'Total planned upside from every trade','green')+_todayMetric('Combined risk',money2(-totRisk)+' / '+riskPct.toFixed(2)+'%','Total loss if every stop is hit','red')+_todayMetric('Margin required',money2(totCashIn),'Cash needed at broker after leverage','blue')+'</div><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(237,232,216,.065);margin-top:10px"><span>Total basket command</span><b>'+money(totExp)+' trade size · +'+money2(totProfit)+' profit · '+money2(-totRisk)+' risk</b></div><div class="td-stack" style="margin-top:10px"><button class="td-btn gold" onclick="_todayPlaceAll()">Review totals</button><button class="td-btn primary" onclick="_todayPlaceAll()">Review &amp; fire all '+nTradeable+'</button></div></div></div>'
-	  + '<div class="flow-footer"><div><div class="flow-footer-step">Step 0 of 6 · TODAY</div><div class="flow-footer-msg">Goal basket is built. Next: check whether market conditions support the basket.</div></div><div class="td-stack"><button class="td-btn ghost" onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();">Signals feed</button><button class="td-btn primary" onclick="setNav(\'market\');showMarket&&showMarket();">Review Market →</button></div></div>';
+	  + '<div class="flow-footer"><div><div class="flow-footer-step">Step 1 of 7 · TODAY</div><div class="flow-footer-msg">Goal basket is built. Next: check whether market conditions support the basket.</div></div><div class="td-stack"><button class="td-btn ghost" onclick="_sfOpenFullSignals();">Signals feed</button><button class="td-btn primary" onclick="setNav(\'market\');showMarket&&showMarket();">Review Market →</button></div></div>';
 	  // HONEST EMPTY STATE: candidates exist but none fit the selected per-trade risk on this account.
   if(nTradeable===0 && plan.length>0){
     var _cheapest=Math.min.apply(null, plan.map(function(o){ return (o._minRiskPlace!=null&&isFinite(o._minRiskPlace))?o._minRiskPlace:999; }));
@@ -11848,7 +11864,7 @@ function _todayRenderPlan(){
       + '<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(201,168,76,.9);font-weight:700;text-transform:uppercase;margin-bottom:8px;">No trades fit your '+perRisk+'% per-trade risk today</div>'
       + '<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);line-height:1.6;">DotVerse found <strong>'+(window._todayScanCount||plan.length)+'</strong> live setups, but on your '+money(c.acct)+' account each needs at least <strong style="color:rgba(201,168,76,.95);">'+(+_cheapest.toFixed(2))+'%</strong> risk to place the smallest lot your broker allows — more than your '+perRisk+'% per-trade setting.</div>'
       + (_fits? '<button onclick="_todayRaiseBudget('+_sug+')" style="margin-top:12px;padding:9px 14px;border-radius:6px;border:1px solid rgba(201,168,76,.5);background:rgba(201,168,76,.14);color:rgba(201,168,76,.95);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Raise per-trade risk to '+_sug+'% to place the best trade →</button>' : '<div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);">These setups suit a larger account — add funds, or check back for cheaper setups.</div>')
-      + '<div style="margin-top:11px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);line-height:1.5;">Same scanner as <span onclick="setNav(\'signals\');showSignalFeed&&showSignalFeed();" style="color:rgba(93,232,160,.8);cursor:pointer;border-bottom:1px dotted rgba(93,232,160,.4);">Signals ›</span> — Signals lists every setup; Today only shows what fits your account.</div>'
+      + '<div style="margin-top:11px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);line-height:1.5;">Same scanner as <span onclick="_sfOpenFullSignals();" style="color:rgba(93,232,160,.8);cursor:pointer;border-bottom:1px dotted rgba(93,232,160,.4);">Signals ›</span> — Signals lists every setup; Today only shows what fits your account.</div>'
     + '</div>';
     _dvTapTipInit();
     return;
@@ -12360,9 +12376,9 @@ function _todayEnsureCommandStyles(){
   + '.today-v2-table th:nth-child(4),.today-v2-table td:nth-child(4){min-width:146px}.today-v2-table th:nth-child(5),.today-v2-table td:nth-child(5){min-width:118px}'
   + '.today-v2-detail{padding:16px}.today-v2-selectedTop{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:14px}.today-v2-bigSym{font-family:var(--syne);font-size:28px;font-weight:500;color:#ede8d8}.today-v2-meta{font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.34);margin-top:4px}.today-v2-liveBox{border:1px solid rgba(126,183,255,.22);background:rgba(126,183,255,.045);border-radius:8px;padding:12px;margin-bottom:12px}.today-v2-priceLine{height:9px;border-radius:999px;background:linear-gradient(90deg,#e8706e,rgba(237,232,216,.18) 42%,#5de8a0);position:relative;margin:13px 0 18px}.today-v2-tick{position:absolute;top:-5px;width:2px;height:19px;background:#ede8d8;left:42%;opacity:.75}.today-v2-marker{position:absolute;top:-5px;left:46%;width:19px;height:19px;border-radius:50%;background:#5de8a0;border:4px solid #091018;box-shadow:0 0 20px rgba(93,232,160,.35);animation:todayMarker 3.4s ease-in-out infinite}@keyframes todayMarker{0%,100%{left:44%}50%{left:51%}}'
   + '.today-v2-three{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}.today-v2-exec{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.today-v2-choice{position:relative;border:1px solid rgba(237,232,216,.105);background:rgba(237,232,216,.024);border-radius:8px;padding:11px;text-align:left;color:rgba(237,232,216,.58);cursor:pointer;transition:.16s ease}.today-v2-choice b{display:block;font-family:var(--mono);font-size:12px;color:#ede8d8;margin-bottom:4px}.today-v2-choice span{font-size:11px;line-height:1.35;color:rgba(237,232,216,.34)}.today-v2-choice.on{border-color:rgba(93,232,160,.36);background:rgba(93,232,160,.08);box-shadow:0 0 24px rgba(93,232,160,.08)}.today-v2-choice.on:after{content:"ON";position:absolute;right:10px;top:10px;font-family:var(--mono);font-size:9px;color:#5de8a0}.today-v2-choice:disabled,.today-v2-choice.disabled{opacity:.55;cursor:not-allowed;background:rgba(237,232,216,.012);box-shadow:none}.today-v2-choice:disabled:after,.today-v2-choice.disabled:after{content:"OFF";color:rgba(237,232,216,.32)}.today-v2-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(201,168,76,.22);background:rgba(201,168,76,.055);border-radius:8px;padding:10px 12px;margin:10px 0 12px}.today-v2-toggle{width:48px;height:26px;border-radius:999px;border:1px solid rgba(237,232,216,.18);background:rgba(237,232,216,.07);position:relative;cursor:pointer;flex:0 0 auto}.today-v2-toggle:disabled{opacity:.45;cursor:not-allowed}.today-v2-toggle:after{content:"";position:absolute;width:20px;height:20px;left:3px;top:2px;border-radius:50%;background:rgba(237,232,216,.34);transition:.18s ease}.today-v2-toggle.on{background:rgba(93,232,160,.18);border-color:rgba(93,232,160,.45)}.today-v2-toggle.on:after{transform:translateX(22px);background:#5de8a0;box-shadow:0 0 18px rgba(93,232,160,.35)}'
-  + '.today-v2-ladder{display:grid;gap:8px}.today-v2-leg{display:grid;grid-template-columns:78px minmax(86px,1fr) 92px 86px 86px 72px;gap:8px;align-items:center;border:1px solid rgba(237,232,216,.105);border-radius:7px;background:rgba(6,9,14,.38);padding:10px}.today-v2-legName{font-family:var(--mono);font-size:11px;color:#ede8d8}.today-v2-legSub{font-size:11px;color:rgba(237,232,216,.34);margin-top:2px}.today-v2-preset{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 12px}.today-v2-single,.today-v2-path,.today-v2-scout{border:1px solid rgba(126,183,255,.22);background:rgba(126,183,255,.045);border-radius:8px;padding:12px;margin-top:8px}.today-v2-single b,.today-v2-path b,.today-v2-scout b{font-family:var(--mono);font-size:15px;color:#ede8d8}.today-v2-scout{display:flex;align-items:center;justify-content:space-between;gap:12px;border-color:rgba(201,168,76,.28);background:linear-gradient(135deg,rgba(201,168,76,.08),rgba(93,232,160,.04))}.today-v2-scout.on{border-color:rgba(93,232,160,.35);background:linear-gradient(135deg,rgba(93,232,160,.10),rgba(126,183,255,.05))}.today-v2-scout button{border:1px solid rgba(93,232,160,.36);background:rgba(93,232,160,.12);color:#5de8a0;border-radius:7px;padding:9px 12px;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap}.today-v2-autos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.today-v2-auto{border:1px solid rgba(93,232,160,.24);background:rgba(93,232,160,.06);border-radius:7px;padding:9px;font-size:11px;color:rgba(237,232,216,.68);line-height:1.4;text-align:left;cursor:pointer;transition:.15s ease}.today-v2-auto:hover{transform:translateY(-1px);border-color:rgba(93,232,160,.42)}.today-v2-auto b{display:block;font-family:var(--mono);font-size:10px;margin-bottom:3px;color:#5de8a0}.today-v2-auto small{display:block;margin-top:5px;color:rgba(237,232,216,.42);font-size:10px;line-height:1.35}.today-v2-auto.optional{border-color:rgba(201,168,76,.24);background:rgba(201,168,76,.06)}.today-v2-auto.optional b{color:#c9a84c}.today-v2-auto.off{border-color:rgba(237,232,216,.105);background:rgba(237,232,216,.02);color:rgba(237,232,216,.38)}.today-v2-auto.off:hover{border-color:rgba(201,168,76,.28);background:rgba(201,168,76,.045)}.today-v2-auto.off b{color:rgba(237,232,216,.44)}'
-  + '.today-v2-targetBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.today-v2-smallBtn{border:1px solid rgba(237,232,216,.18);background:rgba(237,232,216,.035);color:rgba(237,232,216,.58);border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:10px;cursor:pointer}.today-v2-smallBtn.on{color:#5de8a0;border-color:rgba(93,232,160,.35);background:rgba(93,232,160,.10)}.today-v2-bottom{position:static;margin-top:14px;background:rgba(7,9,15,.92);backdrop-filter:blur(20px);border:1px solid rgba(237,232,216,.105);border-radius:9px;padding:11px 14px;display:grid;grid-template-columns:repeat(8,minmax(104px,1fr)) 178px;gap:10px;align-items:center;z-index:60;box-shadow:0 18px 60px rgba(0,0,0,.34)}.today-v2-bottom .bitem{border-right:1px solid rgba(237,232,216,.08);min-height:42px}.today-v2-bottom b{display:block;font-family:var(--mono);font-size:14px;margin-top:3px}.today-v2-review{height:42px;border:0;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-weight:700;cursor:pointer}'
-  + '@media(max-width:1500px){.today-v2-bottom{grid-template-columns:repeat(4,minmax(128px,1fr));}.today-v2-review{grid-column:span 4}}@media(max-width:1180px){.today-page.v2{padding-bottom:16px}.today-v2-top,.today-v2-setup,.today-v2-summary,.today-v2-main,.today-v2-bottom{grid-template-columns:1fr}.today-v2-riskTop,.today-v2-readiness,.today-v2-three,.today-v2-autos,.today-v2-preset{grid-template-columns:1fr}.today-v2-bottom{position:static;margin-top:14px}.today-v2-table{min-width:760px}.today-v2-tableWrap{overflow-x:auto}.today-v2-exec{grid-template-columns:1fr}.today-v2-ladder{overflow-x:auto}.today-v2-leg{min-width:650px}}';
+  + '.today-v2-ladder{display:grid;gap:10px;margin-top:8px}.today-v2-leg{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;border:1px solid rgba(237,232,216,.105);border-radius:8px;background:rgba(6,9,14,.38);padding:12px;min-width:0}.today-v2-legTop{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-width:0}.today-v2-legBadge{flex:0 0 auto;border:1px solid rgba(201,168,76,.24);background:rgba(201,168,76,.08);color:#c9a84c;border-radius:999px;padding:3px 8px;font-family:var(--mono);font-size:9px;font-weight:700}.today-v2-legGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.today-v2-legCell{border:1px solid rgba(237,232,216,.075);background:rgba(237,232,216,.025);border-radius:7px;padding:8px;min-width:0}.today-v2-legCell b{display:block;font-family:var(--mono);font-size:12px;color:#ede8d8;overflow-wrap:anywhere}.today-v2-legCell span{display:block;font-size:10px;color:rgba(237,232,216,.40);line-height:1.35;margin-top:3px}.today-v2-legName{font-family:var(--mono);font-size:12px;color:#ede8d8}.today-v2-legSub{font-size:11px;color:rgba(237,232,216,.42);margin-top:3px;line-height:1.35}.today-v2-preset{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 12px}.today-v2-single,.today-v2-path,.today-v2-scout{border:1px solid rgba(126,183,255,.22);background:rgba(126,183,255,.045);border-radius:8px;padding:12px;margin-top:8px}.today-v2-single b,.today-v2-path b,.today-v2-scout b{font-family:var(--mono);font-size:15px;color:#ede8d8}.today-v2-scout{display:flex;align-items:center;justify-content:space-between;gap:12px;border-color:rgba(201,168,76,.28);background:linear-gradient(135deg,rgba(201,168,76,.08),rgba(93,232,160,.04))}.today-v2-scout.on{border-color:rgba(93,232,160,.35);background:linear-gradient(135deg,rgba(93,232,160,.10),rgba(126,183,255,.05))}.today-v2-scout button{border:1px solid rgba(93,232,160,.36);background:rgba(93,232,160,.12);color:#5de8a0;border-radius:7px;padding:9px 12px;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap}.today-v2-autos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.today-v2-auto{border:1px solid rgba(93,232,160,.24);background:rgba(93,232,160,.06);border-radius:7px;padding:9px;font-size:11px;color:rgba(237,232,216,.68);line-height:1.4;text-align:left;cursor:pointer;transition:.15s ease}.today-v2-auto:hover{transform:translateY(-1px);border-color:rgba(93,232,160,.42)}.today-v2-auto b{display:block;font-family:var(--mono);font-size:10px;margin-bottom:3px;color:#5de8a0}.today-v2-auto small{display:block;margin-top:5px;color:rgba(237,232,216,.42);font-size:10px;line-height:1.35}.today-v2-auto.optional{border-color:rgba(201,168,76,.24);background:rgba(201,168,76,.06)}.today-v2-auto.optional b{color:#c9a84c}.today-v2-auto.off{border-color:rgba(237,232,216,.105);background:rgba(237,232,216,.02);color:rgba(237,232,216,.38)}.today-v2-auto.off:hover{border-color:rgba(201,168,76,.28);background:rgba(201,168,76,.045)}.today-v2-auto.off b{color:rgba(237,232,216,.44)}'
+  + '.today-v2-targetBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.today-v2-smallBtn{border:1px solid rgba(237,232,216,.18);background:rgba(237,232,216,.035);color:rgba(237,232,216,.58);border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:10px;cursor:pointer}.today-v2-smallBtn.on{color:#5de8a0;border-color:rgba(93,232,160,.35);background:rgba(93,232,160,.10)}.today-v2-bottom{position:static;margin-top:14px;background:rgba(7,9,15,.92);backdrop-filter:blur(20px);border:1px solid rgba(237,232,216,.105);border-radius:9px;padding:11px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px;align-items:stretch;z-index:60;box-shadow:0 18px 60px rgba(0,0,0,.34)}.today-v2-bottom .bitem{border-right:1px solid rgba(237,232,216,.08);min-height:42px}.today-v2-bottom b{display:block;font-family:var(--mono);font-size:14px;margin-top:3px}.today-v2-review{min-height:42px;border:0;border-radius:7px;background:#5de8a0;color:#06140c;font-family:var(--mono);font-weight:700;cursor:pointer;padding:0 14px}'
+  + '@media(max-width:1180px){.today-page.v2{padding-bottom:16px}.today-v2-top,.today-v2-setup,.today-v2-summary,.today-v2-main,.today-v2-bottom{grid-template-columns:1fr}.today-v2-riskTop,.today-v2-readiness,.today-v2-three,.today-v2-autos,.today-v2-preset,.today-v2-legGrid{grid-template-columns:1fr}.today-v2-bottom{position:static;margin-top:14px}.today-v2-table{min-width:760px}.today-v2-tableWrap{overflow-x:auto}.today-v2-exec{grid-template-columns:1fr}}';
   document.head.appendChild(st);
 }
 
@@ -12949,8 +12965,37 @@ function _todayRenderPlan(){
       : (exec.collapsed
         ? 'Scale-out is requested, but this trade size is too small to split safely. DotVerse will send 1 MT5 order unless you raise basket risk or account size.'
         : 'DotVerse will send '+exec.orders+' MT5 order'+(exec.orders===1?'':'s')+' for this setup.'+(compressedScale?' The ladder was compressed so every leg clears broker minimum lot size.':''));
+    function legLabel(l){
+      if(l.idx===1) return {name:'Anchor', sub:'First profit take. This is the main piece DotVerse exits early.'};
+      if(l.idx===2) return {name:'Partial', sub:'Second piece. It aims for a higher target after the first exit.'};
+      return {name:'Runner', sub:'Small final piece. It stays open only if the trade keeps working.'};
+    }
+    function legTarget(l){
+      if(l.trailing) return {name:'Trailing runner', sub:'No fixed final target. DotVerse trails the stop after profit.'};
+      return {name:((l.target||'tp1').toUpperCase()+' '+pxFmt(l.tp)), sub:'Target price for this order. Stop-loss stays shared.'};
+    }
+    function legSizeText(l){
+      var lots=parseFloat(l.lots)||0, units=parseFloat(l.units)||0, asset=(o.asset||'').toLowerCase();
+      if(asset==='stock') return Math.round(units).toLocaleString()+(Math.round(units)===1?' share':' shares');
+      if(asset==='crypto') return (units>=1?units.toFixed(4):units.toFixed(6))+' units';
+      if(asset==='index') return lots.toFixed(4)+' contracts';
+      return lots.toFixed(4)+' lots';
+    }
+    function legHtml(l){
+      var lbl=legLabel(l), tgt=legTarget(l);
+      return '<div class="today-v2-leg">'
+        + '<div class="today-v2-legTop"><div><div class="today-v2-legName">'+lbl.name+'</div><div class="today-v2-legSub">'+lbl.sub+'</div></div><span class="today-v2-legBadge">Order '+(l.idx||1)+'</span></div>'
+        + '<div class="today-v2-legGrid">'
+          + '<div class="today-v2-legCell"><b>'+tgt.name+'</b><span>'+tgt.sub+'</span></div>'
+          + '<div class="today-v2-legCell"><b class="gold">'+money2(l.margin||0)+'</b><span>Cash in: margin you put up for this MT5 order.</span></div>'
+          + '<div class="today-v2-legCell"><b>'+money(l.notional||0)+'</b><span>Controls: position value. Size: '+esc(legSizeText(l))+'.</span></div>'
+          + '<div class="today-v2-legCell"><b class="red">'+money2(-(l.risk||0))+'</b><span>Risk if stop-loss hits: '+_todayPctOfAcct(l.risk,acct).toFixed(2)+'% of account.</span></div>'
+          + '<div class="today-v2-legCell"><b class="green">+'+money2(l.profit||0)+'</b><span>Can make if this order reaches its target.</span></div>'
+          + '<div class="today-v2-legCell"><b>'+Math.round((l.share||0)*100)+'%</b><span>Share of this setup assigned to this order.</span></div>'
+        + '</div></div>';
+    }
     var ladder=actualScale
-      ? '<div class="panelTitle" style="margin:14px 0 8px">Scale-out plan</div><div class="today-v2-copy" style="margin-bottom:10px">Scale-out means smaller MT5 orders instead of one large order. Every leg below has its own cash in, position value, lot size, target, risk, and profit.'+(compressedScale?' DotVerse compressed the preset into executable legs because the original runner sizes were below broker minimum.':'')+'</div><div class="today-v2-ladder">'+legs.map(function(l){var target=l.trailing?'TRAIL':((l.target||'tp1').toUpperCase()+' '+pxFmt(l.tp)); return '<div class="today-v2-leg"><div><div class="today-v2-legName">'+(l.idx===1?'Anchor':l.idx===2?'Partial':'Runner')+'</div><div class="today-v2-legSub">'+Math.round((l.share||0)*100)+'% of setup</div></div><div><div class="today-v2-legName">'+target+'</div><div class="today-v2-legSub">own TP + shared SL</div></div><div><div class="today-v2-legName gold">'+money2(l.margin||0)+'</div><div class="today-v2-legSub">cash in</div></div><div><div class="today-v2-legName">'+money(l.notional||0)+'</div><div class="today-v2-legSub">controls · '+((l.lots||0).toFixed(4))+' lots</div></div><div><div class="today-v2-legName red">'+money2(-(l.risk||0))+'</div><div class="today-v2-legSub">'+_todayPctOfAcct(l.risk,acct).toFixed(2)+'% account</div></div><div><div class="today-v2-legName green">+'+money2(l.profit||0)+'</div><div class="today-v2-legSub">planned</div></div></div>';}).join('')+'</div>'
+      ? '<div class="panelTitle" style="margin:14px 0 8px">Scale-out plan</div><div class="today-v2-copy" style="margin-bottom:10px">Each row below is one MT5 order. Scale-out means DotVerse sends smaller orders instead of one large order. Cash in = margin you put up; controls = position value; lots = broker size units.'+(compressedScale?' DotVerse compressed the preset so every order clears broker minimum lot size.':'')+'</div><div class="today-v2-ladder">'+legs.map(legHtml).join('')+'</div>'
       : '<div class="today-v2-single"><div class="td-mini">'+(exec.collapsed?'Scale-out unavailable':'Single order preview')+'</div><b>'+o.sym+' '+o.sig+' · 1 MT5 order · '+money2(-s.netLoss)+' risk · +'+money2(s.netTP1)+' planned profit</b><div class="today-v2-copy" style="margin-top:7px">'+(exec.collapsed?'The selected risk creates parts below broker minimum lot size, so DotVerse keeps the trade as one order instead of pretending it can split it.':'Simple execution with live monitor, spread guard, news guard, and breakeven still available.')+'</div></div>';
     var preset=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
     var presetDisabled=!scale || exec.collapsed;
@@ -12995,10 +13040,69 @@ function _todayRenderPlan(){
   _dvTapTipInit();
 }
 
-function showSignalFeed(){
+function _sfCacheFresh(cache){
+  return !!(cache && cache.ts && (Date.now() - cache.ts < 5 * 60 * 1000));
+}
+
+function _sfFilterKey(){
+  return window._condFilter && window._condFilter.type ? window._condFilter.type : null;
+}
+
+function _sfCacheMatchesView(cache){
+  if(!_sfCacheFresh(cache) || !cache.html) return false;
+  return (cache.filterKey || null) === _sfFilterKey()
+    && !!cache.verifiedOnly === !!window._sfVerifiedOnly
+    && (cache.mode || 'all') === (window._stratMode || 'all');
+}
+
+function _sfClearMarketHandoffCache(){
+  if(window._sfResultCache && window._sfResultCache.source === 'market-scan'){
+    window._sfResultCache = _sfCacheFresh(window._sfFullResultCache) ? window._sfFullResultCache : null;
+  }
+  window._sfFullResultCache = null;
+  window._signalHandoff = null;
+  window._sfUseMarketHandoffOnce = false;
+  window._sfPreserveStratModeOnce = false;
+}
+
+function _sfOpenFullSignals(){
+  var fullCache = _sfCacheFresh(window._sfFullResultCache) ? window._sfFullResultCache : null;
+  window._condFilter = null;
+  _sfClearMarketHandoffCache();
+  window._sfResultCache = fullCache && _sfCacheMatchesView(fullCache) ? fullCache : null;
+  setNav('signals');
+  showSignalFeed({full:true});
+}
+
+function _sfOpenFilteredSignals(cls){
+  _sfClearMarketHandoffCache();
+  applyCondFilter(cls);
+  setNav('signals');
+  showSignalFeed({filtered:true});
+}
+
+function _sfOpenModeSignals(mode){
+  _sfClearMarketHandoffCache();
+  window._condFilter = null;
+  window._stratMode = mode || window._stratMode || 'all';
+  window._sfResultCache = null;
+  window._sfPreserveStratModeOnce = true;
+  setNav('signals');
+  showSignalFeed({mode:true});
+}
+
+function showSignalFeed(opts){
+  opts = opts || {};
   _sfStopLivePrices();   // clear any running price-refresh interval from previous view
+  var _marketHandoffEntry = window._sfUseMarketHandoffOnce === true || opts.marketHandoff === true;
+  window._sfUseMarketHandoffOnce = false;
+  if(!_marketHandoffEntry && window._sfResultCache && window._sfResultCache.source === 'market-scan'){
+    window._sfResultCache = _sfCacheFresh(window._sfFullResultCache) ? window._sfFullResultCache : null;
+    window._sfFullResultCache = null;
+    window._signalHandoff = null;
+  }
   // Reset trade type filter to 'all' unless Market deliberately routed a mode.
-  var _preserveMode = window._sfPreserveStratModeOnce === true;
+  var _preserveMode = opts.full ? false : window._sfPreserveStratModeOnce === true;
   window._sfPreserveStratModeOnce = false;
   if(!_preserveMode) window._stratMode = 'all';
   var _activeMode = window._stratMode || 'all';
@@ -13021,7 +13125,7 @@ function showSignalFeed(){
   // Restore cached results instantly if less than 5 minutes old — no re-scan needed
   var _cache = window._sfResultCache;
   var _CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-  if (_cache && _cache.html && _cache.ts && (Date.now() - _cache.ts < _CACHE_TTL)) {
+  if (_sfCacheMatchesView(_cache)) {
     var listEl = document.getElementById('sfOppsList');
     if (listEl) listEl.innerHTML = _cache.html;
     if (_cache.opps) {
@@ -13078,6 +13182,33 @@ const ALL_SCAN_TFS = ['15m','30m','1h','4h','1d','1w','1mo'];
 async function _runScanBase(groups, signal) {
   var _scanErrors = [];
   var _scanTotal = 0;
+  try {
+    const universe = await dvFetch('/api/signal-universe/run', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ groups: groups }),
+      signal: signal
+    });
+    if(universe && Array.isArray(universe.candidates || universe.results)){
+      var _universeResults = universe.candidates || universe.results || [];
+      if(universe.ready !== false && _universeResults.length > 0){
+        window._dvSignalUniverseRun = universe;
+        return {
+          results: _universeResults,
+          errors: universe.errors || [],
+          total: universe.request_count || groups.length || 0,
+          run: universe,
+          run_id: universe.run_id,
+          provider_health: universe.provider_health || null,
+          ready: true
+        };
+      }
+      (universe.errors || ['signal universe returned no ready candidates']).forEach(function(err){ _scanErrors.push(err); });
+    }
+  } catch(e) {
+    if (e?.name === 'AbortError') throw e;
+    _scanErrors.push(e?.message || 'signal universe fetch error');
+  }
   // Build the list of request descriptors (no longer wrap in individual Promises)
   const _requests = groups.flatMap(function(g){
     var tfs = g.tfs || (g.daily_only ? ['1d'] : ALL_SCAN_TFS);
@@ -13308,7 +13439,7 @@ async function _sfFetchSignals(){
   // 2. Profit factor ≥ 1.0    — gross wins exceed gross losses
   // 3. Min 30 trades          — 30+ is the statistical minimum (30-trade p-value ~0.18 for 55% WR)
   // 4. Expectancy > 0.1R      — rules out WR=50%+PF=1.0 strategies that are effectively break-even after fees
-  const BT_GATE = { win_rate: 50, profit_factor: 1.0, min_trades: 3, min_expectancy: 0.10 };
+  const BT_GATE = { win_rate: 50, profit_factor: 1.0, min_trades: 30, min_expectancy: 0.10 };
 
   /* Run all backtests in parallel — one per actionable signal */
   const btResults = await Promise.all(actionable.map(async function(o){
@@ -13585,7 +13716,7 @@ async function _sfFetchSignals(){
           : '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.7);background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.18);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HOLD — CONDITIONS NOT CLEAR ENOUGH</span></div>')
       + '<div class="opp-card-footer">'
       + '<button class="opp-analyze-btn" onclick="event.stopPropagation();loadSignalContext(' + oJson + ');">Analyse &#8594;</button>'
-      + '<button onclick="event.stopPropagation();tradeThisSignal(&quot;' + (o.sym||'') + '&quot;,&quot;' + (o.sig||'BUY').toLowerCase() + '&quot;,&quot;' + (o.entry||'') + '&quot;,&quot;' + (o.sl||'') + '&quot;,&quot;' + (o.tp||'') + '&quot;,&quot;' + (o.asset==='equity'?'stock':(o.asset||'stock')) + '&quot;,&quot;' + (o.rr||'2.5') + '&quot;,&quot;' + (o.tf||'1h') + '&quot;)" style="padding:7px 12px;border-radius:5px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:#c9a84c;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;" onmouseover="this.style.background=\'rgba(201,168,76,.18)\'" onmouseout="this.style.background=\'rgba(201,168,76,.1)\'">Trade This Signal</button>'
+      + '<button onclick="event.stopPropagation();tradeThisSignal(&quot;' + (o.sym||'') + '&quot;,&quot;' + (o.sig||'BUY').toLowerCase() + '&quot;,&quot;' + (o.entry||'') + '&quot;,&quot;' + (o.sl||'') + '&quot;,&quot;' + (o.tp||'') + '&quot;,&quot;' + (o.asset==='equity'?'stock':(o.asset||'stock')) + '&quot;,&quot;' + (o.rr||'2.5') + '&quot;,&quot;' + (o.tf||'1h') + '&quot;)" style="padding:7px 12px;border-radius:5px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:#c9a84c;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;" onmouseover="this.style.background=\'rgba(201,168,76,.18)\'" onmouseout="this.style.background=\'rgba(201,168,76,.1)\'">Review Setup</button>'
       + '</div></div>';
   }).join('');
 
@@ -13594,7 +13725,7 @@ async function _sfFetchSignals(){
   if(listNow) listNow.innerHTML = _finalHtml;
   // Cache results so navigating away and back restores instantly (5-min TTL)
   // displayOpps cached separately — _sfStartLivePrices needs it to match card IDs (index-based)
-  window._sfResultCache = { html: _finalHtml, opps: verifiedOpps, displayOpps: displayOpps, ts: Date.now() };
+  window._sfResultCache = { html: _finalHtml, opps: verifiedOpps, displayOpps: displayOpps, ts: Date.now(), source:'signals', filterKey:_sfFilterKey(), verifiedOnly:!!window._sfVerifiedOnly, mode:window._stratMode||'all' };
   // Update metric cards with real data
   _sfUpdateMetrics(verifiedOpps);
   // Start live price strips — show current price vs entry on every card
@@ -13891,7 +14022,7 @@ function _sfRender(){
       + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
       + '<div style="width:8px;height:8px;border-radius:50%;background:'+cf.dot+';box-shadow:0 0 10px '+cf.dot+';animation:pulse 1.5s infinite;flex-shrink:0;"></div>'
       + '<span style="font-size:12px;font-weight:700;letter-spacing:.08em;color:'+cf.color+';">'+cf.badge+' ACTIVE</span>'
-      + '<button onclick="window._condFilter=null;showSignalFeed();" style="margin-left:auto;background:transparent;border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.4);font-size:10px;font-weight:600;padding:3px 10px;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Clear filter</button>'
+      + '<button onclick="_sfOpenFullSignals();" style="margin-left:auto;background:transparent;border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.4);font-size:10px;font-weight:600;padding:3px 10px;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Clear filter</button>'
       + '</div>'
       + '<div style="font-size:11px;color:rgba(255,255,255,.45);line-height:1.5;">'+cf.hint+'</div>'
       + '</div>';
@@ -14029,11 +14160,11 @@ function _sfRender(){
     <!-- Flow footer after top 10 -->
     <div class="flow-footer" style="margin-top:24px;">
       <div class="flow-footer-left">
-        <div class="flow-footer-step">Step 2 of 6 &middot; SIGNAL</div>
+        <div class="flow-footer-step">Step 3 of 7 &middot; SIGNAL</div>
       </div>
       <div class="flow-footer-right">
         <button class="flow-btn-back btn-pipeline" aria-label="Go back" onclick="setNav('market');showMarket();">← Market</button>
-        <button class="flow-btn-next btn-pipeline" onclick="setNav('understand');showUnderstand();">View in Understand →</button>
+        <button class="flow-btn-next btn-pipeline" onclick="_sfViewInUnderstand();">View in Understand →</button>
       </div>
     </div>
 
@@ -14370,6 +14501,32 @@ function _signalKey(o){
   return [n.sym||'', n.tf||'', n.sig||''].join(':').toUpperCase();
 }
 
+function _resetVerdictStateForSignal(reason){
+  if (window._verdictPollInterval) {
+    clearInterval(window._verdictPollInterval);
+    window._verdictPollInterval = null;
+  }
+  window._verdictRunning = false;
+  window._verdictJobId = null;
+  window._verdictPrewarmJobId = null;
+  window._verdictPrewarmSignalKey = null;
+  window._verdictPrewarmResult = null;
+  window._verdictPrewarmStructured = null;
+  window._lastVerdict = null;
+  window._lastVerdictSignalKey = null;
+  window._structuredVerdict = null;
+  window._verdictPlan = null;
+  window._verdictChatJobId = null;
+  window._verdictChatHistory = [];
+  window._verdictAutoReviewCache = null;
+  window._verdictSignalAssessmentCache = null;
+}
+
+function _verdictOwnsSignal(sig, keyName){
+  var expected = _signalKey(sig || window._activeSignal || {});
+  return !!expected && window[keyName] === expected;
+}
+
 function _signalHandoffListFor(o, opts){
   opts = opts || {};
   var list = opts.handoffList || opts.list || null;
@@ -14404,14 +14561,28 @@ function _signalHandoffMove(delta){
 }
 
 function _signalHandoffBackToSignals(){
-  if(window._sfResultCache && window._sfResultCache.source === 'market-scan'){
-    window._sfResultCache = null;
-    window._sfFullResultCache = null;
+  _sfOpenFullSignals();
+}
+
+function _sfViewInUnderstand(){
+  if(window._activeSignal && (window._activeSignal.sym || window._activeSignal.ticker || window._activeSignal.symbol)){
+    setNav('understand');
+    showUnderstand();
+    return;
   }
-  window._signalHandoff = null;
-  window._sfPreserveStratModeOnce = false;
-  setNav('signals');
-  showSignalFeed();
+  var h = window._signalHandoff || {};
+  var handoffList = Array.isArray(h.list) ? h.list : [];
+  var list = handoffList;
+  if(!list.length && window._sfResultCache) list = window._sfResultCache.displayOpps || window._sfResultCache.opps || [];
+  if(!list.length && window._mktOpportunityCache) list = window._mktOpportunityCache.opps || [];
+  var idx = Math.max(0, Math.min(list.length - 1, h.index || 0));
+  var candidate = list[idx] || list[0];
+  if(candidate){
+    loadSignalContext(candidate, {handoffList:list, handoffIndex:idx, handoffSource:(h.source || 'signals')});
+    return;
+  }
+  setNav('understand');
+  showUnderstand();
 }
 
 function _signalHandoffBarHtml(){
@@ -14433,6 +14604,11 @@ function _signalHandoffBarHtml(){
 
 function loadSignalContext(o, opts){
   var signal = _normalizeSignalContext(o);
+  var prevSignalKey = _signalKey(window._activeSignal || {});
+  var nextSignalKey = _signalKey(signal);
+  if (prevSignalKey !== nextSignalKey || !_verdictOwnsSignal(signal, '_lastVerdictSignalKey')) {
+    _resetVerdictStateForSignal('signal-context-change');
+  }
   _rememberSignalHandoff(signal, opts || {});
   window._activeSignal = Object.assign({}, signal);
   // Inject computed context fields missing from signal-feed payload.
@@ -14661,7 +14837,7 @@ function _sfCard(s){
         onmouseover="this.style.background='${s.dir==='long'?'rgba(93,232,160,.2)':'rgba(232,112,110,.2)'}'"
         onmouseout="this.style.background='${s.dir==='long'?'rgba(93,232,160,.12)':'rgba(232,112,110,.12)'}'">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Trade This Signal
+        Review Setup
       </button>
     </div>
   </div>`;
@@ -14674,21 +14850,23 @@ function sfToggleAnalysis(id,btn){
 
 // ── One-click signal-to-order ─────────────────────────────
 function tradeThisSignal(sym, dir, entry, stop, target, assetClass, rr, tf) {
-  // Build an activeSignal object and route through SIZE before execution.
+  // Build an activeSignal object and route through the review gates before sizing.
   var nextSignal = _normalizeSignalContext({
     sym: sym, sig: dir.toUpperCase(),
     entry: entry, sl: stop, tp: target,
     rr: rr, asset: assetClass, tf: tf,
     conf: 75, reason: 'Signal feed'
   });
+  _resetVerdictStateForSignal('trade-intent-change');
   _rememberSignalHandoff(nextSignal, {source:'trade-intent'});
   window._activeSignal = nextSignal;
   window._calcPrefill = { entry: nextSignal.entry, sl: nextSignal.sl, tp: nextSignal.tp, sym: nextSignal.sym };
   window._szTargetsUserModified = false;
-  setNav('size');
-  showSize();
+  setNav('understand');
+  showUnderstand();
+  setTimeout(function(){ if (typeof _vPrewarm === 'function') _vPrewarm(); }, 600);
   setTimeout(function() {
-    var el = document.getElementById('szCalcCard') || document.getElementById('dashContent');
+    var el = document.getElementById('dashContent');
     if (el && el.scrollIntoView) el.scrollIntoView({behavior: 'smooth', block: 'start'});
   }, 120);
 }
@@ -14779,7 +14957,7 @@ function _mktUpdateConditionChip(state){
   if(filter) filter.textContent=state.filter;
   if(cta){
     cta.textContent=state.action+' ->';
-    cta.onclick=function(){ applyCondFilter(state.cls); setNav('signals'); showSignalFeed(); };
+    cta.onclick=function(){ _sfOpenFilteredSignals(state.cls); };
   }
   var head=document.getElementById('mktOppHeadline');
   var copy=document.getElementById('mktOppCopy');
@@ -14887,7 +15065,7 @@ function _mktSelectedSignalHtml(o){
     + '<div class="opp-card-mid"><div class="opp-conf-wrap" data-guide="confidence-ring"><svg width="52" height="52" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" fill="none" stroke="rgba(237,232,216,.07)" stroke-width="3"/><circle cx="26" cy="26" r="23" fill="none" stroke="'+cc+'" stroke-width="3" stroke-dasharray="'+Math.round(conf/100*144.5)+' 144.5" stroke-linecap="round" transform="rotate(-90 26 26)" style="filter:drop-shadow(0 0 5px '+cc+')"/></svg><div class="opp-conf-center"><span class="opp-conf-pct" style="color:'+cc+'">'+conf+'</span></div></div>'
     + '<div class="opp-card-right"><div class="opp-rr-big">1:'+_esc(rr)+'</div><div class="opp-conf-lbl" style="color:'+cc+'">'+_esc(o.confLbl||o.confidence_label||'MARKET')+'</div><div class="opp-levels"><div class="opp-level-item"><span class="opp-lbl">Entry</span><span class="opp-val">'+_esc(o.entry||'--')+'</span></div><div class="opp-level-item"><span class="opp-lbl">SL</span><span class="opp-val red">'+_esc(o.sl||'--')+'</span></div><div class="opp-level-item"><span class="opp-lbl">TP</span><span class="opp-val grn">'+_esc(o.tp||o.tp1||'--')+'</span></div></div></div></div>'
     + '<div class="opp-reason">'+_esc(o.reason||'DotVerse Market selected this setup for Signal review.')+'</div>'
-    + '<div class="opp-card-footer"><button class="opp-analyze-btn" data-sig="'+payload+'" onclick="event.stopPropagation();_mktAnalyseSignalFromEl(this);">Analyse →</button><button onclick="event.stopPropagation();tradeThisSignal(&quot;'+_esc(o.sym||'')+'&quot;,&quot;'+_esc(sig.toLowerCase())+'&quot;,&quot;'+_esc(o.entry||'')+'&quot;,&quot;'+_esc(o.sl||'')+'&quot;,&quot;'+_esc(o.tp||o.tp1||'')+'&quot;,&quot;'+_esc(asset)+'&quot;,&quot;'+_esc(String(rr))+'&quot;,&quot;'+_esc(tf)+'&quot;)" style="padding:7px 12px;border-radius:5px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:#c9a84c;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;">Trade This Signal</button></div>'
+    + '<div class="opp-card-footer"><button class="opp-analyze-btn" data-sig="'+payload+'" onclick="event.stopPropagation();_mktAnalyseSignalFromEl(this);">Analyse →</button><button onclick="event.stopPropagation();tradeThisSignal(&quot;'+_esc(o.sym||'')+'&quot;,&quot;'+_esc(sig.toLowerCase())+'&quot;,&quot;'+_esc(o.entry||'')+'&quot;,&quot;'+_esc(o.sl||'')+'&quot;,&quot;'+_esc(o.tp||o.tp1||'')+'&quot;,&quot;'+_esc(asset)+'&quot;,&quot;'+_esc(String(rr))+'&quot;,&quot;'+_esc(tf)+'&quot;)" style="padding:7px 12px;border-radius:5px;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);color:#c9a84c;font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;">Review Setup</button></div>'
     + '</div></div>';
 }
 
@@ -14924,8 +15102,9 @@ function _mktOpenSignalFromEl(el){
   if(window._sfResultCache && window._sfResultCache.source === 'market-scan'){
     window._sfResultCache = Object.assign({}, window._sfResultCache, {selected:_signalKey(o), source:'market-scan'});
   }
+  window._sfUseMarketHandoffOnce = true;
   setNav('signals');
-  showSignalFeed();
+  showSignalFeed({marketHandoff:true});
 }
 function _mktAnalyseSignalFromEl(el){
   if(!el) return;
@@ -15066,8 +15245,9 @@ async function _mktRunOpportunityScan(){
   if(oppBadge) oppBadge.textContent='scanning';
   try{
     var baseGroups=(typeof ALL_SCAN_GROUPS!=='undefined'&&ALL_SCAN_GROUPS.length?ALL_SCAN_GROUPS:[]).slice(0,5);
+    var mktScanTfs=['15m','30m','1h','4h','1d','1w'];
     var groups=baseGroups.map(function(g){
-      return {tickers:g.tickers,asset_type:g.asset_type,daily_only:!!g.daily_only,tfs:g.daily_only?['1d']:['1h','4h']};
+      return {tickers:g.tickers,asset_type:g.asset_type,daily_only:!!g.daily_only,tfs:g.daily_only?['1d']:mktScanTfs};
     });
     if(!groups.length) throw new Error('No scan groups configured');
     if(fill) fill.style.width='38%';
@@ -15093,7 +15273,6 @@ async function _mktRunOpportunityScan(){
       };
     });
     window._mktOpportunityCache={opps:opps,ts:Date.now()};
-    window._sfResultCache={html:'',opps:opps,displayOpps:opps,ts:Date.now(),source:'market-scan'};
     var state=_mktLiveCondition(window._mktLastLiveData||{}, _mktTickerMap());
     _mktRenderOpportunityDesk(opps,state,'live scan');
     _mktRenderCompactSignals(opps);
@@ -15231,7 +15410,7 @@ function showMarket(){
     <div id="mktCondLabel" class="mkt-cond-label">${condLabel}</div>
     <div id="mktCondDesc" class="mkt-cond-desc">${condDesc}</div>
     <div id="mktCondFilter" style="font-size:10px;color:rgba(237,232,216,.4);font-family:var(--mono);margin-top:4px;">${_condFilterDesc}</div>
-    <button id="mktCondCta" class="mkt-cond-cta" onclick="applyCondFilter('${condCls}');setNav('signals');showSignalFeed();">${_mktSigCountTxt} →</button>
+    <button id="mktCondCta" class="mkt-cond-cta" onclick="_sfOpenFilteredSignals('${condCls}');">${_mktSigCountTxt} →</button>
   </div>`;
 
   el.innerHTML=`
@@ -15243,7 +15422,7 @@ function showMarket(){
       <p id="mktOppCopy">Markets is your opportunity map: which asset classes are moving, where trade pressure is building, and which lanes deserve a deeper Signal review. Detailed entries, stops, targets, and full cards stay in Signal.</p>
       <div class="mkt-opp-actions">
         <button class="mkt-opp-btn primary" onclick="_mktOpenTopSignal();">Review top Signal</button>
-        <button class="mkt-opp-btn" onclick="window._condFilter=null;setNav('signals');showSignalFeed();">View all Signals</button>
+        <button class="mkt-opp-btn" onclick="_sfOpenFullSignals();">View all Signals</button>
         <button class="mkt-opp-btn" onclick="_mktRunOpportunityScan();">Rescan Market</button>
       </div>
     </div>
@@ -15373,7 +15552,7 @@ function showMarket(){
           <span id="mktBtLbl" style="font-size:10px;font-family:var(--mono);color:rgba(237,232,216,.5);white-space:nowrap;">DotVerse is backtesting signals before populating…</span>
         </div>
       </div>
-      <button class="flow-btn-next btn-pipeline" style="width:100%;justify-content:center;display:flex;align-items:center;gap:8px;" onclick="setNav('signals');showSignalFeed();">
+      <button class="flow-btn-next btn-pipeline" style="width:100%;justify-content:center;display:flex;align-items:center;gap:8px;" onclick="_sfOpenFullSignals();">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         View All Signals → SIGNAL
       </button>
@@ -15389,11 +15568,11 @@ function showMarket(){
   </div><!-- end sfSection-scanner -->
   <div class="flow-footer">
     <div class="flow-footer-left">
-      <div class="flow-footer-step">Step 1 of 6 · MARKET</div>
+      <div class="flow-footer-step">Step 2 of 7 · MARKET</div>
       <div class="flow-footer-msg">Market context loaded — ready to find your next trade</div>
     </div>
     <div class="flow-footer-right">
-      <button class="flow-btn-next btn-pipeline" onclick="setNav('signals');showSignalFeed();">Find Opportunities → SIGNAL</button>
+      <button class="flow-btn-next btn-pipeline" onclick="_sfOpenFullSignals();">Find Opportunities → SIGNAL</button>
     </div>
   </div>`;
   /* Animate sector bars in after render */
@@ -15482,7 +15661,7 @@ function _mktRenderCockpit(){
         <div style="font-size:10px;color:rgba(237,232,216,.4);margin-bottom:6px;">${m.desc}</div>
         <div style="font-size:10px;color:rgba(237,232,216,.6);line-height:1.4;">${m.why}</div>
         ${active?`<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(237,232,216,.06);font-family:var(--mono);font-size:8px;color:${vCol[v]};letter-spacing:.06em;">● ACTIVE</div>`:''}
-        <button onclick="event.stopPropagation();mktSetMode('${m.id}',this.closest('[onclick]'));window._sfPreserveStratModeOnce=true;setNav('signals');showSignalFeed();"
+        <button onclick="event.stopPropagation();mktSetMode('${m.id}',this.closest('[onclick]'));_sfOpenModeSignals('${m.id}');"
           style="margin-top:8px;width:100%;padding:5px 0;border-radius:5px;
                  background:${active?vBd[v]:'rgba(237,232,216,.06)'};
                  border:1px solid ${active?vBd[v]:'rgba(237,232,216,.1)'};
@@ -15609,7 +15788,7 @@ function mktSlotTrade(sym, entry, sl, tp, assetClass){
     reason: 'New listing momentum — enter at support, ride first-day move'
   });
   // Bounce straight to SIGNAL tab so user sees the opportunity card + can analyse
-  setNav('signals'); showSignalFeed();
+  _sfOpenFullSignals();
   // Auto-load the signal card
   setTimeout(()=>{
     const opp = {sym, sig:'BUY', entry, sl, tp1:tp, rr:'2.5', asset:assetClass, tf:window._activeSignal.tf, conf:78, reason:window._activeSignal.reason};
@@ -15868,8 +16047,7 @@ function mktAnalyseSym(sym, assetType){
   });
   window._calcPrefill = { sym: sym };
   // Route to SIGNAL so user can pick or confirm a signal for this asset
-  setNav('signals');
-  showSignalFeed();
+  _sfOpenFullSignals();
   // Auto-load analysis for the clicked ticker
   var qpInp = document.getElementById('qpTickerInput');
   if (qpInp) qpInp.value = sym;
@@ -18305,7 +18483,7 @@ async function showAlerts(){
     <div class="al-card-msg">${a.msg}</div>
     <div class="al-card-foot">
       ${a.unread?`<button class="al-ack-btn" onclick="this.closest('.al-card').classList.remove('unread','crit');this.style.display='none'">Acknowledge</button>`:''}
-      <button class="al-dis-btn">Dismiss</button>
+      <button class="al-dis-btn" onclick="this.closest('.al-card').remove();">Dismiss</button>
       ${a.isWatch?`<button class="al-rem-btn" onclick="removeWatch('${(a.watchTicker||'').replace(/'/g,'')}','${(a.watchTimeframe||'').replace(/'/g,'')}','${(a.watchAssetType||'').replace(/'/g,'')}')" title="Stop watching this ticker">Remove</button>`:''}
     </div>
   </div>`).join('');
@@ -18334,7 +18512,7 @@ async function showAlerts(){
   <div class="al-toolbar">
     ${filterPills}
     <div class="al-spacer"></div>
-    <button class="al-new-btn">
+    <button class="al-new-btn" onclick="var r=document.querySelector('.al-rule-section');if(r)r.scrollIntoView({behavior:'smooth',block:'start'});">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       New Rule
     </button>
@@ -18744,7 +18922,7 @@ function showUnderstand(){
       <div class="flow-empty-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--crys)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
       <div class="flow-empty-title">No signal selected</div>
       <div class="flow-empty-sub">Go to SIGNAL, pick one of the 10 ranked opportunities or run the scanner, then tap Analyse.</div>
-      <button class="flow-btn-next btn-pipeline" onclick="setNav('signals');showSignalFeed();">← Back to SIGNAL</button>
+      <button class="flow-btn-next btn-pipeline" onclick="_sfOpenFullSignals();">← Back to SIGNAL</button>
     </div>`;
     return;
   }
@@ -18764,7 +18942,7 @@ function showUnderstand(){
             style="font-family:var(--mono);font-size:11px;font-weight:600;padding:6px 14px;border-radius:5px;cursor:pointer;background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:rgba(201,168,76,.9);transition:all .15s;letter-spacing:.04em;">${tf}</button>
         `).join('')}
       </div>
-      <button class="flow-btn-next btn-pipeline" onclick="setNav('signals');showSignalFeed();setTimeout(()=>sfShowTab('signals'),60);" style="margin-top:4px;">
+      <button class="flow-btn-next btn-pipeline" onclick="_sfOpenFullSignals();setTimeout(()=>sfShowTab('signals'),60);" style="margin-top:4px;">
         View Top Signals for ${sig.sym} →
       </button>
       <div style="font-size:10px;color:rgba(237,232,216,.3);margin-top:-6px;">or go to SIGNAL tab to see ranked opportunities</div>
@@ -19405,15 +19583,15 @@ function showUnderstand(){
               <div style="display:flex;flex-direction:column;gap:4px;">
                 <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">BULL</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
-                  <div class="markov-cell" data-state="bull-to-bull" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                  <div class="markov-cell" data-state="bull-to-bull" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
                     <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>BB</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
                   </div>
-                  <div class="markov-cell" data-state="bull-to-neutral" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                  <div class="markov-cell" data-state="bull-to-neutral" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
                     <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>BN</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Neutral</div>
                   </div>
-                  <div class="markov-cell" data-state="bull-to-bear" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                  <div class="markov-cell" data-state="bull-to-bear" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
                     <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>BE</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Bearish</div>
                   </div>
@@ -19424,15 +19602,15 @@ function showUnderstand(){
               <div style="display:flex;flex-direction:column;gap:4px;">
                 <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">NEUTRAL</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
-                  <div class="markov-cell" data-state="neutral-to-bull" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                  <div class="markov-cell" data-state="neutral-to-bull" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
                     <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>NB</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Bullish</div>
                   </div>
-                  <div class="markov-cell" data-state="neutral-to-neutral" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                  <div class="markov-cell" data-state="neutral-to-neutral" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
                     <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>NN</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
                   </div>
-                  <div class="markov-cell" data-state="neutral-to-bear" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                  <div class="markov-cell" data-state="neutral-to-bear" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
                     <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>NE</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Bearish</div>
                   </div>
@@ -19443,15 +19621,15 @@ function showUnderstand(){
               <div style="display:flex;flex-direction:column;gap:4px;">
                 <div style="font-size:10px;color:rgba(237,232,216,.5);font-family:var(--mono);">BEAR</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
-                  <div class="markov-cell" data-state="bear-to-bull" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                  <div class="markov-cell" data-state="bear-to-bull" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
                     <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>EB</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Bullish</div>
                   </div>
-                  <div class="markov-cell" data-state="bear-to-neutral" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
-                    <div style="font-size:122px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>EN</sub></div>
+                  <div class="markov-cell" data-state="bear-to-neutral" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
+                    <div style="font-size:12px;font-weight:600;color:rgba(237,232,216,.85);">P<sub>EN</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Neutral</div>
                   </div>
-                  <div class="markov-cell" data-state="bear-to-bear" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:pointer;">
+                  <div class="markov-cell" data-state="bear-to-bear" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:8px 6px;text-align:center;cursor:default;">
                     <div style="font-size:12px;font-weight:600;color:#c9a84c;">P<sub>EE</sub></div>
                     <div style="font-size:10px;color:rgba(237,232,216,.7);">Stickiness</div>
                   </div>
@@ -19581,28 +19759,45 @@ function showUnderstand(){
           var _body  = _notHold&&_conf?'Confidence is above the minimum threshold. The indicators are in agreement. Size this trade and execute when ready.':_notHold?'Confidence is below 65% — DotVerse indicators do not fully agree. Consider waiting for a stronger setup or use a smaller position.':'The market is not showing a clear enough setup to trade right now. Wait for conditions to improve before committing money.';
           return '<div style="margin-bottom:12px;padding:10px 14px;border-radius:7px;'+_bg+'"><div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;'+_col+'">'+_title+'</div><div style="font-size:11px;color:var(--t3);margin-top:4px;line-height:1.5;">'+_body+'</div></div>';
         })()}
-        <div class="und-action-row">
-          <button class="btn-amber btn-pipeline" style="width:100%;font-size:13px;padding:12px;" onclick="setNav('size');showSize()">Size this trade →</button>
-        </div>
-        <div style="display:flex;gap:16px;margin-top:8px;justify-content:center;">
-          <span style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" onclick="setNav('verdict');showVerdict()">Run AI Verdict first</span>
-          <span style="font-size:11px;color:var(--t3);cursor:pointer;text-decoration:underline;text-underline-offset:2px;" onclick="setNav('signals');showSignalFeed()">Back to Signals list</span>
-        </div>
-        <div class="und-action-row" style="margin-top:8px;">
-          <button class="btn-ghost btn-pipeline" style="font-size:11px;" onclick="undRunBacktest()">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Backtest strategy
-          </button>
-          <button class="btn-ghost btn-pipeline" style="font-size:11px;" onclick="undCopyPine()">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            Copy Pine Script
-          </button>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-          <button id="undAlertBtn" class="btn-ghost btn-pipeline" style="font-size:11px;" onclick="dvSetWatch()">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            Set DotVerse Alert
-          </button>
+        <div style="margin-top:14px;border-top:1px solid rgba(237,232,216,.08);padding-top:14px;">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;">
+            <button class="btn-pipeline" onclick="setNav('verdict');showVerdict()" style="text-align:left;padding:12px 13px;border-radius:7px;border:1px solid rgba(201,168,76,.34);background:rgba(201,168,76,.11);color:var(--gold);cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                Verdict
+              </div>
+              <div style="margin-top:6px;font-size:11px;line-height:1.45;color:rgba(237,232,216,.62);">Challenge the setup before sizing.</div>
+            </button>
+            <button class="btn-pipeline" onclick="setNav('size');showSize()" style="text-align:left;padding:12px 13px;border-radius:7px;border:1px solid rgba(93,232,160,.28);background:rgba(93,232,160,.08);color:#5de8a0;cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+                Size
+              </div>
+              <div style="margin-top:6px;font-size:11px;line-height:1.45;color:rgba(237,232,216,.62);">Calculate cash in, lots, risk, and profit.</div>
+            </button>
+            <button class="btn-pipeline" onclick="undRunBacktest()" style="text-align:left;padding:12px 13px;border-radius:7px;border:1px solid rgba(237,232,216,.13);background:rgba(237,232,216,.045);color:rgba(237,232,216,.78);cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                Backtest
+              </div>
+              <div style="margin-top:6px;font-size:11px;line-height:1.45;color:rgba(237,232,216,.55);">Historical check. Trust only 30+ trades.</div>
+            </button>
+            <button class="btn-pipeline" onclick="undCopyPine()" style="text-align:left;padding:12px 13px;border-radius:7px;border:1px solid rgba(237,232,216,.13);background:rgba(237,232,216,.045);color:rgba(237,232,216,.78);cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Pine
+              </div>
+              <div style="margin-top:6px;font-size:11px;line-height:1.45;color:rgba(237,232,216,.55);">Copy TradingView research script, not a live order.</div>
+            </button>
+            <button id="undAlertBtn" class="btn-pipeline" onclick="dvSetWatch()" style="text-align:left;padding:12px 13px;border-radius:7px;border:1px solid rgba(237,232,216,.13);background:rgba(237,232,216,.045);color:rgba(237,232,216,.78);cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span class="und-alert-title">Alert</span>
+              </div>
+              <div class="und-alert-sub" style="margin-top:6px;font-size:11px;line-height:1.45;color:rgba(237,232,216,.55);">Watch this setup and notify on movement.</div>
+            </button>
+          </div>
+          <button onclick="_sfOpenFullSignals()" style="margin-top:10px;background:transparent;border:none;color:var(--t3);font-size:11px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;">Back to Signals list</button>
         </div>
         <div id="undBtPanel" style="display:none;margin-top:12px;background:rgba(10,14,22,.8);border:1px solid rgba(237,232,216,.13);border-radius:10px;padding:14px 16px;"><div id="undBtContent"></div></div>
       </div>
@@ -19771,36 +19966,50 @@ function showUnderstand(){
       <div class="und-card" data-guide="what-to-do-next" style="margin-top:12px;">
         <div class="und-card-title">What To Do Next</div>
         <div class="und-steps">
-          <div class="und-step done" data-guide="journey-step-discover">
+          <div class="und-step done" data-guide="journey-step-today">
             <div class="und-step-num">1</div>
             <div class="und-step-body">
-              <div class="und-step-title">Discover & select</div>
-              <div class="und-step-sub">Chosen from market scanner</div>
+              <div class="und-step-title">Plan today</div>
+              <div class="und-step-sub">Set the basket and risk goal</div>
+            </div>
+          </div>
+          <div class="und-step done" data-guide="journey-step-market">
+            <div class="und-step-num">2</div>
+            <div class="und-step-body">
+              <div class="und-step-title">Check market</div>
+              <div class="und-step-sub">Confirm conditions support trading</div>
             </div>
           </div>
           <div class="und-step done" data-guide="journey-step-read">
-            <div class="und-step-num">2</div>
+            <div class="und-step-num">3</div>
             <div class="und-step-body">
               <div class="und-step-title">Read this signal</div>
               <div class="und-step-sub">${sig.sig} · ${buildConfRing(sig.conf||88)}<span style="vertical-align:middle;font-size:12px">${(sig.conf&&sig.conf>0)?sig.conf+'% confidence':(sig.confLbl||'—')}</span></div>
             </div>
           </div>
           <div class="und-step active" data-guide="journey-step-understand">
-            <div class="und-step-num">3</div>
+            <div class="und-step-num">4</div>
             <div class="und-step-body">
               <div class="und-step-title">Understand it ← You are here</div>
               <div class="und-step-sub">Read the reasoning above</div>
             </div>
           </div>
+          <div class="und-step" data-guide="journey-step-verdict" onclick="setNav('verdict');showVerdict()">
+            <div class="und-step-num">5</div>
+            <div class="und-step-body">
+              <div class="und-step-title">Get verdict →</div>
+              <div class="und-step-sub">Ask the analyst engine to challenge the setup</div>
+            </div>
+          </div>
           <div class="und-step" data-guide="journey-step-size" onclick="setNav('size');showSize()">
-            <div class="und-step-num">4</div>
+            <div class="und-step-num">6</div>
             <div class="und-step-body">
               <div class="und-step-title">Size the trade →</div>
               <div class="und-step-sub">Calculate position & risk</div>
             </div>
           </div>
           <div class="und-step" data-guide="journey-step-execute" onclick="setNav('act');showAct()">
-            <div class="und-step-num">5</div>
+            <div class="und-step-num">7</div>
             <div class="und-step-body">
               <div class="und-step-title">Execute →</div>
               <div class="und-step-sub">Place trade via MT5 or manually</div>
@@ -19832,11 +20041,11 @@ function showUnderstand(){
   </div>
   <div class="flow-footer">
     <div class="flow-footer-left">
-      <div class="flow-footer-step">Step 3 of 6 · UNDERSTAND</div>
+      <div class="flow-footer-step">Step 4 of 7 · UNDERSTAND</div>
       <div class="flow-footer-msg">Signal analysed — calculate your exact position size next</div>
     </div>
     <div class="flow-footer-right">
-      <button class="flow-btn-back btn-pipeline" aria-label="Go back to signal feed" onclick="setNav('signals');showSignalFeed();">← SIGNAL</button>
+      <button class="flow-btn-back btn-pipeline" aria-label="Go back to signal feed" onclick="_sfOpenFullSignals();">← SIGNAL</button>
       <button class="flow-btn-next btn-pipeline" onclick="setNav('size');showSize();">Size Position → SIZE</button>
     </div>
   </div>`;
@@ -20996,7 +21205,7 @@ function showVerdict(){
         3. Come back to <span style="color:var(--gold)">Verdict</span> — the agents will be ready
       </div>
       <div style="margin-top:20px">
-        <button class="flow-btn-next btn-pipeline" onclick="setNav('signals');showSignalFeed()">Go to Signals</button>
+        <button class="flow-btn-next btn-pipeline" onclick="_sfOpenFullSignals()">Go to Signals</button>
       </div>
     </div>`;
     return;
@@ -21010,12 +21219,12 @@ function showVerdict(){
   // ── Live API integration ──
   _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy);
   // UX-12: If a pre-warm result is ready, render it immediately — no need to click Run Analysis
-  if (window._verdictPrewarmResult && !window._lastVerdict) {
+  if (window._verdictPrewarmResult && !window._lastVerdict && _verdictOwnsSignal(sig, '_verdictPrewarmSignalKey')) {
     _vRenderLive(sig, window._verdictPrewarmResult, window._verdictPrewarmStructured || null);
     return;
   }
   // If a verdict was already completed, restore it immediately instead of showing empty state
-  if (window._lastVerdict) {
+  if (window._lastVerdict && _verdictOwnsSignal(sig, '_lastVerdictSignalKey')) {
     _vRenderLive(sig, window._lastVerdict, window._structuredVerdict || null);
     return;
   }
@@ -21061,7 +21270,10 @@ function _vBuildSignalPayload(sig) {
 function _vPrewarm(){
   var sig = window._activeSignal || {};
   if (!sig.sym || sig.sig === 'HOLD') return;
-  if (window._verdictPrewarmJobId || window._verdictPrewarmResult) return; // already warming or done
+  var sigKey = _signalKey(sig);
+  if ((window._verdictPrewarmJobId || window._verdictPrewarmResult) && window._verdictPrewarmSignalKey === sigKey) return; // already warming or done
+  if (window._verdictPrewarmSignalKey && window._verdictPrewarmSignalKey !== sigKey) _resetVerdictStateForSignal('prewarm-signal-change');
+  window._verdictPrewarmSignalKey = sigKey;
   var ticker = (sig.sym || '').replace('/','').replace('-','');
   dvFetch('/api/verdict', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -21081,13 +21293,14 @@ function _vFetchLive(sig){
   if (!sig.sym) return;
   var ticker = (sig.sym || '').replace('/','').replace('-','');
   if (!ticker) return;
+  var sigKey = _signalKey(sig);
   // If pre-warm already has a finished result, render immediately
-  if (window._verdictPrewarmResult) {
+  if (window._verdictPrewarmResult && window._verdictPrewarmSignalKey === sigKey) {
     _vRenderLive(sig, window._verdictPrewarmResult, window._verdictPrewarmStructured);
     return;
   }
   // If pre-warm job is already running, just poll it
-  if (window._verdictPrewarmJobId) {
+  if (window._verdictPrewarmJobId && window._verdictPrewarmSignalKey === sigKey) {
     _vShowBanner('loading','Analysis running — AI agents studying the market…');
     _vPollResult(window._verdictPrewarmJobId, sig);
     return;
@@ -21100,7 +21313,7 @@ function _vFetchLive(sig){
     if (!r) { _vShowBanner('error','Could not reach the analysis server. Check your connection and try again.'); return; }
     if (r.status==='unavailable') { _vShowBanner('error','TradingAgents could not start. This usually means Python 3.10+ is not available on the server. Check Railway deploy logs for package install errors.'); return; }
     if (r.error) { _vShowBanner('error','Server error: '+r.error); return; }
-    if (r.job_id) { _vShowBanner('loading','Analysis running — AI agents studying the market…'); _vPollResult(r.job_id, sig); }
+    if (r.job_id) { window._verdictPrewarmSignalKey = sigKey; _vShowBanner('loading','Analysis running — AI agents studying the market…'); _vPollResult(r.job_id, sig); }
     else if (r.verdict) { _vRenderLive(sig, r.verdict, r.structured||null); } // cache hit
     else { _vShowBanner('error', 'Unexpected server response. Try again.'); }
   }).catch(function(){ _vShowBanner('error','Network error reaching the analysis server.'); });
@@ -21145,6 +21358,10 @@ function _vPollResult(jobId, sig){
       if (!r) return;
       if (r.status === 'finished'){
         clearInterval(window._verdictPollInterval); window._verdictPollInterval = null;
+        if (_signalKey(window._activeSignal || {}) !== _signalKey(sig)) {
+          _resetVerdictStateForSignal('poll-result-stale-signal');
+          return;
+        }
         if (r.result && r.result.verdict){
           _vRenderLive(sig, r.result.verdict, r.result.structured||null);
         } else {
@@ -21216,6 +21433,7 @@ function _vRenderLive(sig, verdict, structured){
     window._verdictChatJobId = window._verdictPrewarmJobId;
   }
   window._verdictPrewarmJobId = null;
+  window._lastVerdictSignalKey = _signalKey(sig);
   window._lastVerdict = verdict;
   window._structuredVerdict = structured || null;
   var s = structured || {};
@@ -21330,7 +21548,7 @@ function _vRenderLive(sig, verdict, structured){
   // ── Update persistent flow-footer for post-analysis state
   var ff = document.getElementById('verdictFlowFooter');
   if (ff) {
-    ff.innerHTML = '<div class="flow-footer-left"><div class="flow-footer-step">Step 4 of 6 · VERDICT</div><div class="flow-footer-msg">Analysis complete — review the verdict or continue to size your position</div></div><div class="flow-footer-right"><button class="flow-btn-back" onclick="_vGoUnderstand()">\u2190 Understand</button><button class="flow-btn-next" onclick="_vPreloadSize()">Size Position \u2192 SIZE</button></div>';
+    ff.innerHTML = '<div class="flow-footer-left"><div class="flow-footer-step">Step 5 of 7 · VERDICT</div><div class="flow-footer-msg">Analysis complete — review the verdict or continue to size your position</div></div><div class="flow-footer-right"><button class="flow-btn-back" onclick="_vGoUnderstand()">\u2190 Understand</button><button class="flow-btn-next" onclick="_vPreloadSize()">Size Position \u2192 SIZE</button></div>';
   }
 
   // Restore chat history after innerHTML (innerHTML wipes the DOM)
@@ -21631,7 +21849,7 @@ function _vRenderMock(el, sig, sym, entry, sl_val, tp, rr, conf, confLbl, isBuy)
   var ff = document.createElement('div');
   ff.className = 'flow-footer';
   ff.id = 'verdictFlowFooter';
-  ff.innerHTML = '<div class="flow-footer-left"><div class="flow-footer-step">Step 4 of 6 · VERDICT</div><div class="flow-footer-msg">Run the deep analysis or skip to size your position</div></div><div class="flow-footer-right"><button class="flow-btn-next btn-pipeline" onclick="_vPreloadSize()">Skip to Size →</button></div>';
+  ff.innerHTML = '<div class="flow-footer-left"><div class="flow-footer-step">Step 5 of 7 · VERDICT</div><div class="flow-footer-msg">Run the deep analysis or skip to size your position</div></div><div class="flow-footer-right"><button class="flow-btn-next btn-pipeline" onclick="_vPreloadSize()">Skip to Size →</button></div>';
   el.appendChild(ff);
 }
 
@@ -21796,7 +22014,7 @@ function showSize(){
     </div>
     <button class="sz-clear-btn" onclick="window._activeSignal=null;window._calcPrefill=null;window._verdictPlan=null;showSize()">Clear</button>
     <button onclick="setNav('verdict');showVerdict()" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:5px;color:var(--gold);font-size:10px;font-family:var(--mono);cursor:pointer;padding:4px 10px;white-space:nowrap">Verdict</button>
-  </div>`:'<div class="sz-no-signal">No signal loaded — enter your trade prices manually below or pick a signal from <span style="color:var(--crys);cursor:pointer;" onclick="setNav(\'signals\');showSignalFeed()">SIGNAL</span>.</div>'}
+  </div>`:'<div class="sz-no-signal">No signal loaded — enter your trade prices manually below or pick a signal from <span style="color:var(--crys);cursor:pointer;" onclick="_sfOpenFullSignals()">SIGNAL</span>.</div>'}
 
   ${(sig.sym && sig.entry) ? `
   <div id="szLiveBar" data-guide="size-live-price-bar" style="margin:0 0 12px 0;border-radius:8px;border:1px solid rgba(201,168,76,.25);background:rgba(201,168,76,.06);padding:12px 14px;transition:background .35s ease,border-color .35s ease;">
@@ -22215,7 +22433,7 @@ function showSize(){
 
   <div class="flow-footer" style="margin-top:16px;">
     <div class="flow-footer-left">
-      <div class="flow-footer-step">Step 5 of 6 · SIZE</div>
+      <div class="flow-footer-step">Step 6 of 7 · SIZE</div>
       <div class="flow-footer-msg">Position sized — ready to execute</div>
     </div>
     <div class="flow-footer-right">
@@ -23472,7 +23690,7 @@ function szUpdateCoach(){
          Your signal is loaded — the entry price (<strong style="color:var(--txt);">${sig.entry}</strong>) has been filled in on the left.<br>
          Check it matches where you plan to enter, then move to Step 2.`
       : `<strong style="color:var(--crys);">Step 1 of 3 — Enter your trade prices</strong><br>
-         Go to <span style="color:var(--crys);cursor:pointer;" onclick="setNav('signals');showSignalFeed()">SIGNAL</span> to pick a signal and auto-fill all fields,
+         Go to <span style="color:var(--crys);cursor:pointer;" onclick="_sfOpenFullSignals()">SIGNAL</span> to pick a signal and auto-fill all fields,
          or type your Entry Price and Stop Loss on the left.<br><br>
          <span style="color:var(--mut);font-size:11px;">Not sure? Entry is the price you buy or sell at. Stop Loss is the price where you exit if the trade goes wrong.</span>`;
     return;
@@ -24425,7 +24643,7 @@ function showAct(){
 
   <div class="flow-footer">
     <div class="flow-footer-left">
-      <div class="flow-footer-step">Step 6 of 6 · ACT</div>
+      <div class="flow-footer-step">Step 7 of 7 · ACT</div>
       <div id="actPortfolioStatus" style="font-size:11px;margin-top:3px;color:rgba(237,232,216,.5);">
         ${window._activeSignal&&window._activeSignal.sym&&window._activeSignal.sig&&window._activeSignal.sig!=='HOLD'
           ? '<span style="color:#5de8a0;">● '+window._activeSignal.sym+' '+window._activeSignal.sig+' ready to log</span>'
@@ -24870,7 +25088,7 @@ function actLogToPortfolio(){
   // No signal at all → go get one
   if(!sig || !sig.sym){
     _dvToast('No signal loaded yet — pick one from the SIGNAL tab first, then come back here','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
-    setTimeout(()=>{ setNav('signals'); showSignalFeed(); }, 1200);
+    setTimeout(()=>{ _sfOpenFullSignals(); }, 1200);
     return;
   }
   // Signal loaded but no direction (symbol only, not analysed) → remind user
@@ -27980,8 +28198,8 @@ window._dvGuide = {
   // ── WHAT TO DO NEXT (Understand tab) ─────────────────────────────────────
   'what-to-do-next': {
     title: 'What To Do Next',
-    body: 'DotVerse\'s 6-step trading flow. Each step must be completed before moving to the next. Step 1: Discover a signal. Step 2: Read the signal card. Step 3: Understand it (you are here). Step 4: Calculate your position size. Step 5: Execute the trade. The flow exists so beginners never skip a step and trade with incomplete information.',
-    example: 'Never jump from Step 2 (reading the signal) directly to Step 5 (executing). Understanding the signal and sizing the trade are mandatory — they define how much you risk.'
+    body: 'DotVerse\'s 7-step trading flow. Step 1: plan today. Step 2: check market conditions. Step 3: read the signal. Step 4: understand it. Step 5: get a verdict. Step 6: calculate position size. Step 7: execute the trade. The flow exists so beginners never skip a step and trade with incomplete information.',
+    example: 'Never jump from Step 3 (reading the signal) directly to Step 7 (executing). Understanding, verdict, and sizing are mandatory because they define why you trade and how much you risk.'
   },
 
   // ── ACCOUNT & RISK (Size tab) ─────────────────────────────────────────────
@@ -28306,23 +28524,38 @@ window._dvGuide = {
     body: 'Your first step is finding a signal. Use the Market tab to see overall conditions, then use the Scanner to find assets with high-confidence signals right now, or go directly to the Signal tab and analyse a specific asset.',
     example: 'Open Market tab → Fear & Greed 45 (Neutral) → VIX green FULL TRADE → open Scanner → find ETH 4H BUY 79% → proceed to Step 2 Read Signal.'
   },
+  'journey-step-today': {
+    title: 'Step 1 — Today',
+    body: 'Start with the Today tab. It turns your account size, risk preference, and daily target into a small plan before you start clicking signals.',
+    example: 'Account $5,000 · today risk budget $150 → DotVerse builds a basket plan before you choose the final setup.'
+  },
+  'journey-step-market': {
+    title: 'Step 2 — Market',
+    body: 'Check whether the broader market supports trading now. Market tells you where opportunities exist and whether conditions are supportive, cautious, or too noisy.',
+    example: 'Market shows forex opportunities but warns equities are choppy → focus on the forex shortlist first.'
+  },
   'journey-step-read': {
     title: 'Step 2 — Read Signal',
     body: 'Read the full signal card. Check: What is the direction? What is the confidence? What trade type is this? What are entry, stop loss, and target levels? What is the R:R ratio? Is the macro badge green? Only proceed if all of these make sense to you.',
     example: 'BUY · 82% CONFIRMED · Day Trade · Entry $3,200 · SL $3,050 · TP1 $3,450 · R:R 1:1.67 · VIX green → all conditions met → proceed to Understand.'
   },
   'journey-step-understand': {
-    title: 'Step 3 — Understand (You Are Here)',
+    title: 'Step 4 — Understand (You Are Here)',
     body: 'This tab explains WHY DotVerse generated this signal. Read the indicator confluence (how many checks agree), the order flow (what buyers and sellers are actually doing), and the multi-timeframe alignment (are higher timeframes confirming the direction?). Do not proceed to sizing until the thesis is clear to you.',
     example: 'Confluence 82% BUY · Order flow real buyers dominating · 4H and 1D both bullish → thesis confirmed → move to Size tab.'
   },
+  'journey-step-verdict': {
+    title: 'Step 5 — Verdict',
+    body: 'Verdict asks the analyst engine to challenge the trade before you size it. Use it to catch missing risks, weak fundamentals, or a bad market backdrop.',
+    example: 'Signal looks strong, but Verdict flags upcoming news and weak upside → reduce size or skip.'
+  },
   'journey-step-size': {
-    title: 'Step 4 — Size Your Trade',
+    title: 'Step 6 — Size Your Trade',
     body: 'The Size tab calculates exactly how many lots or units to buy, how much money you are risking, and what you stand to gain at each take profit. Enter your account size and risk percentage — DotVerse does the rest. Never skip this step. Trading without correct position sizing is gambling.',
     example: 'Account $5,000 · Risk 1% → DotVerse calculates: risk $50, position 0.03 lots, margin $152, TP1 profit $83. You know the exact numbers before you touch your broker.'
   },
   'journey-step-execute': {
-    title: 'Step 5 — Execute',
+    title: 'Step 7 — Execute',
     body: 'Open MT5 and enter the trade using the exact numbers DotVerse calculated: entry price, stop loss, lot size, take profit targets. Or use the automation engine — set your watch and DotVerse will monitor and manage the trade for you after entry.',
     example: 'MT5: New Order → Buy Limit 3200 → SL 3050 → TP 3450 → Lots 0.03 → Place. Or: click "Set Watch" in DotVerse → enable TRAIL and BE → DotVerse manages from here.'
   },
@@ -29230,29 +29463,33 @@ async function adminGrantByEmail(){
 
 <!-- ═══════════════ MOBILE BOTTOM TAB BAR ═══════════════ -->
 <div class="mobile-tab-bar" id="mobileTabBar">
+  <div class="mobile-tab" data-mob-nav="today" onclick="setNav('today');showToday();updateMobileTabs('today');">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    <span class="mobile-tab-label">Today</span>
+  </div>
   <div class="mobile-tab active" data-mob-nav="market" onclick="setNav('market');showMarket();updateMobileTabs('market');">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
     <span class="mobile-tab-label">Market</span>
   </div>
-  <div class="mobile-tab" data-mob-nav="signals" onclick="setNav('signals');showSignalFeed();updateMobileTabs('signals');">
+  <div class="mobile-tab" data-mob-nav="signals" onclick="_sfOpenFullSignals();updateMobileTabs('signals');">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
     <span class="mobile-tab-label">Signals</span>
   </div>
-  <div class="mobile-tab" data-mob-nav="portfolio" onclick="setNav('portfolio');showPortfolio();updateMobileTabs('portfolio');">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
-    <span class="mobile-tab-label">Portfolio</span>
+  <div class="mobile-tab" data-mob-nav="understand" onclick="_sfViewInUnderstand();updateMobileTabs('understand');">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+    <span class="mobile-tab-label">Understand</span>
   </div>
-  <div class="mobile-tab" data-mob-nav="agent" onclick="setNav('agent');showAgent();updateMobileTabs('agent');">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M2 15c0-3.5 2.5-6 6-6s6 2.5 6 6" stroke="currentColor" stroke-width="1.5"/></svg>
-    <span class="mobile-tab-label">Agent</span>
+  <div class="mobile-tab" data-mob-nav="verdict" onclick="setNav('verdict');showVerdict();updateMobileTabs('verdict');">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
+    <span class="mobile-tab-label">Verdict</span>
   </div>
-  <div class="mobile-tab" data-mob-nav="automations" onclick="setNav('automations');showAutomations();updateMobileTabs('automations');">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/></svg>
-    <span class="mobile-tab-label">Auto</span>
+  <div class="mobile-tab" data-mob-nav="size" onclick="setNav('size');showSize();updateMobileTabs('size');">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    <span class="mobile-tab-label">Size</span>
   </div>
-  <div class="mobile-tab" data-mob-nav="settings" onclick="setNav('settings');showSettings();updateMobileTabs('settings');">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
-    <span class="mobile-tab-label">Settings</span>
+  <div class="mobile-tab" data-mob-nav="act" onclick="setNav('act');showAct();updateMobileTabs('act');">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    <span class="mobile-tab-label">Act</span>
   </div>
 </div>
 </body>

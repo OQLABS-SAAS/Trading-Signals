@@ -93,7 +93,7 @@ def test_market_trade_cards_route_into_signal_journey():
 
     assert "function _mktOpenSignalFromEl(el)" in source
     assert "setNav('signals')" in source
-    assert "showSignalFeed()" in source
+    assert "showSignalFeed({marketHandoff:true})" in source
     assert "_rememberSignalHandoff(o,{handoffList:list,handoffSource:'market-scan'})" in open_body
     assert "_mktSelectedSignalHtml(o)" not in open_body
     assert "opps:[o]" not in open_body
@@ -119,5 +119,7 @@ def test_market_scan_uses_full_ticker_map_and_refreshes_market_payload():
     assert "function _mktTickerMap()" in source
     assert "const TM=_mktTickerMap()" in source
     assert "var state=_mktLiveCondition(window._mktLastLiveData||{}, _mktTickerMap())" in source
-    assert "window._sfResultCache={html:'',opps:opps,displayOpps:opps,ts:Date.now(),source:'market-scan'}" in source
+    assert "window._mktOpportunityCache={opps:opps,ts:Date.now()}" in source
+    assert "mktScanTfs=['15m','30m','1h','4h','1d','1w']" in source
+    assert "window._sfResultCache={html:'',opps:opps,displayOpps:opps,ts:Date.now(),source:'market-scan'}" not in source
     assert "window._sfResultCache=window._sfResultCache&&window._sfResultCache.html?window._sfResultCache" not in source

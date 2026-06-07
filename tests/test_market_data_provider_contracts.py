@@ -1,4 +1,7 @@
 from pathlib import Path
+import pandas as pd
+
+import app as dvapp
 
 
 APP = Path("app.py").read_text()
@@ -25,9 +28,11 @@ def test_prices_route_uses_provider_first_not_yfinance_batch():
 
 
 def test_scan_list_uses_provider_first_for_signal_voting():
-    block = _block('def scan_list():', "# /api/chat endpoint removed")
+    block = _block('def _scan_one_candidate(', "def _sort_scan_candidates")
     assert "provider_first_download(raw" in block
     assert "yf.download" not in block
+    assert '"provider_used": provider_trace.get("provider_used")' in block
+    assert '"fallback_used": provider_trace.get("fallback_used")' in block
 
 
 def test_analyze_and_backtest_have_provider_first_ohlc_paths():
@@ -61,3 +66,31 @@ def test_sync_backtest_tries_provider_first_before_direct_stooq_fallbacks():
     fmp_idx = block.index("FMP direct fallback")
 
     assert provider_idx < stooq_idx < fmp_idx
+
+
+def test_provider_first_download_attaches_actual_fallback_source(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "Open": [1.0] * 25,
+            "High": [1.1] * 25,
+            "Low": [0.9] * 25,
+            "Close": [1.05] * 25,
+            "Volume": [100] * 25,
+        },
+        index=pd.date_range("2026-01-01", periods=25, freq="D"),
+    )
+
+    monkeypatch.setattr(dvapp, "cache_get", lambda key: None)
+    monkeypatch.setattr(dvapp, "cache_set", lambda key, value: None)
+    monkeypatch.setattr(dvapp, "_fetch_eodhd", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dvapp, "_fetch_twelvedata", lambda *args, **kwargs: dvapp._build_chart_output(df, "1d"))
+    monkeypatch.setattr(dvapp, "_fetch_stooq", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dvapp, "_fetch_fmp", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dvapp, "_fetch_yahoo_v8", lambda *args, **kwargs: None)
+
+    out = dvapp.provider_first_download("EURUSD=X", period="1y", interval="1d", asset_type="forex")
+
+    trace = out.attrs["dotverse_provider_trace"]
+    assert trace["provider_used"] == "Twelve Data"
+    assert trace["fallback_used"] is True
+    assert trace["attempted"] == ["EODHD", "Twelve Data"]

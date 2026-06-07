@@ -42,6 +42,17 @@ def test_analyze_accepts_markov_payload_without_body_name_error(monkeypatch):
     calls = {}
     df = _market_df()
 
+    def fake_provider_download(*args, **kwargs):
+        out = df.copy()
+        out.attrs["dotverse_provider_trace"] = {
+            "policy": "provider-first-v1",
+            "provider_used": "EODHD",
+            "attempted": ["EODHD"],
+            "fallback_used": False,
+            "last_error": None,
+        }
+        return out
+
     def fake_get_analysis(*args, **kwargs):
         calls["use_markov"] = kwargs.get("use_markov")
         calls["markov_weight"] = kwargs.get("markov_weight")
@@ -55,7 +66,7 @@ def test_analyze_accepts_markov_payload_without_body_name_error(monkeypatch):
     monkeypatch.setattr(dvapp, "_redis_client", None)
     monkeypatch.setattr(dvapp, "_DBSession", None)
     monkeypatch.setattr(dvapp, "fetch_tv_data", lambda *args, **kwargs: {"tv_price": 100.5, "tv_rsi": 55, "tv_mtf": {}})
-    monkeypatch.setattr(dvapp, "provider_first_download", lambda *args, **kwargs: df)
+    monkeypatch.setattr(dvapp, "provider_first_download", fake_provider_download)
     monkeypatch.setattr(dvapp, "_fill_date_grid", lambda frame, *args, **kwargs: frame)
     monkeypatch.setattr(
         dvapp,
@@ -90,6 +101,63 @@ def test_analyze_accepts_markov_payload_without_body_name_error(monkeypatch):
 
     assert resp.status_code == 200, resp.get_data(as_text=True)
     assert calls == {"use_markov": True, "markov_weight": 0.42}
+    data = resp.get_json()
+    assert data["provider_used"] == "EODHD"
+    assert data["fallback_used"] is False
+    assert data["provider_trace"]["attempted"] == ["EODHD"]
+
+
+def test_markov_analysis_returns_ui_projection_fields(monkeypatch):
+    class FakeMarkovEngine:
+        def __init__(self, lookback=20):
+            self.lookback = lookback
+
+        def run(self, ticker, asset_type="stock", days=365, hmm_iterations=50):
+            return {
+                "ticker": ticker,
+                "asset_type": asset_type,
+                "state_labels": ["Bull", "Bear", "Sideways"],
+                "state_counts": {"Bull": 7, "Bear": 2, "Sideways": 1},
+                "transition_matrix": [
+                    [0.6, 0.2, 0.2],
+                    [0.3, 0.4, 0.3],
+                    [0.5, 0.2, 0.3],
+                ],
+                "multi_day_forecast_5d": [
+                    [0.55, 0.25, 0.2],
+                    [0.35, 0.35, 0.3],
+                    [0.45, 0.25, 0.3],
+                ],
+                "multi_day_forecast_10d": [
+                    [0.52, 0.28, 0.2],
+                    [0.38, 0.32, 0.3],
+                    [0.42, 0.28, 0.3],
+                ],
+                "multi_day_forecast_20d": [
+                    [0.5, 0.3, 0.2],
+                    [0.4, 0.3, 0.3],
+                    [0.4, 0.3, 0.3],
+                ],
+                "hmm_confirmation": {
+                    "agreement_rate": 0.71,
+                    "most_likely_regime_label": "Bull",
+                },
+            }
+
+    monkeypatch.setattr(dvapp, "MarkovEngine", FakeMarkovEngine)
+
+    resp = _authed_pro_client().get("/api/analysis/markov?ticker=AAPL&asset_type=stock")
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["bull_pct"] == 0.7
+    assert data["bear_pct"] == 0.2
+    assert data["current_state"] == "Bull"
+    assert data["hmm_aligned"] is True
+    assert data["p1_bull_pct"] == 0.6
+    assert data["p5_bull_pct"] == 0.55
+    assert data["p10_bull_pct"] == 0.52
+    assert data["p20_bull_pct"] == 0.5
 
 
 def test_scan_list_and_prices_routes_use_provider_first_without_external_services(monkeypatch):
@@ -98,7 +166,17 @@ def test_scan_list_and_prices_routes_use_provider_first_without_external_service
 
     def fake_provider(ticker, *args, **kwargs):
         calls["provider"].append((ticker, kwargs.get("asset_type")))
-        return df.copy()
+        out = df.copy()
+        out.attrs["dotverse_provider_trace"] = {
+            "policy": "provider-first-v1",
+            "primary": "EODHD when configured",
+            "fallbacks": ["Twelve Data", "Stooq", "FMP", "Yahoo v8", "safe_download"],
+            "provider_used": "EODHD",
+            "attempted": ["EODHD"],
+            "fallback_used": False,
+            "last_error": None,
+        }
+        return out
 
     monkeypatch.setattr(dvapp, "_redis_client", None)
     monkeypatch.setattr(dvapp, "provider_first_download", fake_provider)
@@ -147,12 +225,112 @@ def test_scan_list_and_prices_routes_use_provider_first_without_external_service
     assert ("AAPL", "stock") in calls["provider"]
 
 
+def test_signal_universe_run_projects_canonical_provider_first_contract(monkeypatch):
+    calls = {"provider": []}
+    df = _market_df()
+
+    def fake_provider(ticker, *args, **kwargs):
+        calls["provider"].append((ticker, kwargs.get("asset_type")))
+        out = df.copy()
+        out.attrs["dotverse_provider_trace"] = {
+            "policy": "provider-first-v1",
+            "primary": "EODHD when configured",
+            "fallbacks": ["Twelve Data", "Stooq", "FMP", "Yahoo v8", "safe_download"],
+            "provider_used": "EODHD",
+            "attempted": ["EODHD"],
+            "fallback_used": False,
+            "last_error": None,
+        }
+        return out
+
+    monkeypatch.setattr(dvapp, "_redis_client", None)
+    monkeypatch.setattr(dvapp, "provider_first_download", fake_provider)
+    monkeypatch.setattr(
+        dvapp,
+        "calculate_indicators",
+        lambda *args, **kwargs: {
+            "price": 100.5,
+            "chg_1d": 1.2,
+            "rsi": 55,
+            "vol_ratio": 1.1,
+            "ema_trend": "MIXED",
+            "supertrend": "NEUTRAL",
+        },
+    )
+    monkeypatch.setattr(
+        dvapp,
+        "get_analysis",
+        lambda *args, **kwargs: {
+            "signal": "BUY",
+            "entry": 100,
+            "stop_loss": 95,
+            "tp1": 110,
+            "summary": "Test setup",
+            "confidence": "MEDIUM",
+            "confidence_label": "LIKELY",
+        },
+    )
+    monkeypatch.setattr(dvapp, "detect_counter_trade", lambda *args, **kwargs: {"counter_trade": False})
+    monkeypatch.setattr(dvapp, "calculate_win_rate", lambda *args, **kwargs: {"win_rate": 60, "sample_size": 40})
+
+    resp = _authed_pro_client().post(
+        "/api/signal-universe/run",
+        json={"groups": [{"tickers": ["eurusd"], "asset_type": "fx", "tfs": ["1h"]}]},
+    )
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["ready"] is True
+    assert data["run_id"].startswith("sigrun_")
+    assert data["provider_policy_version"] == "provider-first-v1"
+    assert data["request_count"] == 1
+    assert data["scan_scope"] == [{"asset_type": "forex", "timeframe": "1h", "tickers": ["EURUSD"]}]
+    assert data["count"] == 1
+    assert data["results"] == data["candidates"]
+    candidate = data["candidates"][0]
+    assert data["provider_health"] == {
+        "ready": True,
+        "candidate_count": 1,
+        "ready_count": 1,
+        "failed_count": 0,
+        "provider_counts": {"EODHD": 1},
+        "fallback_count": 0,
+        "latest_data_timestamp_utc": candidate["data_timestamp_utc"],
+        "unique_errors": [],
+        "provider_policy_version": "provider-first-v1",
+    }
+    assert candidate["candidate_id"] == "FOREX:EURUSD=X:1H:BUY"
+    assert candidate["asset_type"] == "forex"
+    assert candidate["signal"] == "BUY"
+    assert candidate["provider_trace"]["policy"] == "provider-first-v1"
+    assert candidate["provider_used"] == "EODHD"
+    assert candidate["fallback_used"] is False
+    assert candidate["provider_trace"]["attempted"] == ["EODHD"]
+    assert candidate["data_timestamp_utc"]
+    assert ("EURUSD=X", "forex") in calls["provider"]
+
+
+def test_signal_universe_run_keeps_group_timeframe_scans_concurrent():
+    source = open(dvapp.__file__).read()
+    start = source.index('def signal_universe_run():')
+    end = source.index('@app.route("/api/scan-list"', start)
+    block = source[start:end]
+
+    assert "ThreadPoolExecutor(max_workers=max_workers)" in block
+    assert "max_workers = min(6, len(scan_requests))" in block
+    assert "as_completed(futures)" in block
+
+
 def test_provider_first_preserves_monthly_interval_for_mtf_trend(monkeypatch):
     calls = []
 
     monkeypatch.setattr(dvapp, "cache_get", lambda _key: None)
     monkeypatch.setattr(dvapp, "cache_set", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(dvapp, "fetch_chart_direct", lambda ticker, asset_type, timeframe: calls.append((ticker, asset_type, timeframe)) or None)
+    monkeypatch.setattr(
+        dvapp,
+        "fetch_chart_direct_with_trace",
+        lambda ticker, asset_type, timeframe: (calls.append((ticker, asset_type, timeframe)) or None, dvapp._provider_trace(None, [])),
+    )
     monkeypatch.setattr(dvapp, "safe_download", lambda *args, **kwargs: pd.DataFrame())
 
     dvapp.provider_first_download("AAPL", period="10y", interval="1mo", asset_type="stock")
