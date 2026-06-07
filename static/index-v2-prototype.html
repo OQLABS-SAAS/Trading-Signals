@@ -12283,6 +12283,7 @@ function _todayConfirmAndPlace(trades){
       +'<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.6);margin-top:6px;line-height:1.5;">That is '+pct.toFixed(2)+'% of your account, after spread, fees and slippage. 🛡 Each stop sits <strong style="color:rgba(237,232,216,.85)">at your broker</strong> — it protects you even if you close DotVerse or lose internet.</div>'
     +'</div>'
     +'<div id="todayConfirmStatus" style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);margin-bottom:10px;min-height:13px;"></div>'
+    +'<div id="todayConfirmResult" style="display:none;margin-bottom:12px;"></div>'
     +'<div style="display:flex;gap:10px;">'
       +'<button id="todayCfCancel" style="flex:1;padding:12px;border-radius:8px;border:1px solid rgba(237,232,216,.2);background:transparent;color:rgba(237,232,216,.7);font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;">Cancel</button>'
       +'<button id="todayCfGo" style="flex:1.4;padding:12px;border-radius:8px;border:none;background:#5de8a0;color:#06140c;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.03em;">Place '+(trades.length>1?'all '+trades.length:'trade')+' →</button>'
@@ -12295,13 +12296,100 @@ function _todayConfirmAndPlace(trades){
   document.getElementById('todayCfGo').onclick=async function(){
     var btn=this; btn.disabled=true; btn.textContent='Placing…';
     var st=document.getElementById('todayConfirmStatus');
-    var r=await _todaySendOrders(trades, function(done,total){ if(st) st.textContent=done+'/'+total+' sent…'; });
-    close();
-    if(typeof _dvToast==='function'){
-      if(r.ok>0) _dvToast(r.ok+' order'+(r.ok>1?'s':'')+' queued for MT5 — opening Act tab','rgba(93,232,160,.15)','rgba(93,232,160,.4)');
-      else _dvToast(r.lastError||('Order'+(trades.length>1?'s':'')+' failed — check MT5 connection'),'rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    var resultPanel=document.getElementById('todayConfirmResult');
+    var r;
+    try{
+      r=await _todaySendOrders(trades, function(done,total){ if(st) st.textContent=done+'/'+total+' sent…'; });
+    }catch(e){
+      r={ok:0,fail:(trades.length||1),lastError:e&&e.message?e.message:'Unexpected error',legs:[]};
     }
-    if(r.ok>0){ setTimeout(function(){ if(typeof setNav==='function')setNav('act'); if(typeof showAct==='function')showAct(); if(typeof mt5Poll==='function'){ setTimeout(mt5Poll,600); setTimeout(mt5Poll,2500); } },700); }
+    if(st) st.textContent='';
+    // ── Per-leg result panel ──────────────────────────────────────────────
+    // Track which legs failed so retry can exclude already-placed legs.
+    var _failedLegs=(r.legs||[]).filter(function(l){ return !l.ok; });
+    var _okLegs=(r.legs||[]).filter(function(l){ return l.ok; });
+    var allOk=r.fail===0&&r.ok>0;
+    var allFail=r.ok===0;
+    var partial=r.ok>0&&r.fail>0;
+    if(allOk){
+      // All good — close overlay and navigate to Act tab.
+      close();
+      if(typeof _dvToast==='function') _dvToast(r.ok+' order'+(r.ok>1?'s':'')+' queued for MT5 — opening Act tab','rgba(93,232,160,.15)','rgba(93,232,160,.4)');
+      setTimeout(function(){ if(typeof setNav==='function')setNav('act'); if(typeof showAct==='function')showAct(); if(typeof mt5Poll==='function'){ setTimeout(mt5Poll,600); setTimeout(mt5Poll,2500); } },700);
+    } else {
+      // Partial or total failure — show per-leg breakdown inside the modal;
+      // do NOT close (user must acknowledge and optionally retry).
+      btn.disabled=false;
+      btn.style.display='none'; // hide Place button; retry or close takes over
+      var esc=function(s){ return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); };
+      var legRows=(r.legs||[]).map(function(l){
+        var icon=l.ok?'<span style="color:#5de8a0;">&#10003;</span>':'<span style="color:#e8706e;">&#10005;</span>';
+        var label=esc(l.symbol)+' L#'+l.legIndex+' ('+esc(l.target)+')';
+        var detail=l.ok
+          ?'<span style="color:rgba(93,232,160,.7);">queued — order #'+esc(l.order_id)+'</span>'
+          :'<span style="color:#e8706e;">'+esc(l.error)+'</span>';
+        return '<div style="display:flex;align-items:baseline;gap:6px;padding:4px 0;border-bottom:1px solid rgba(237,232,216,.055);font-size:10.5px;">'+icon+' <span style="font-family:var(--mono);color:rgba(237,232,216,.8);">'+label+'</span> <span style="margin-left:auto;">'+detail+'</span></div>';
+      }).join('');
+      var headerColor=partial?'#c9a84c':'#e8706e';
+      var headerBg=partial?'rgba(201,168,76,.08)':'rgba(232,112,110,.08)';
+      var headerBorder=partial?'rgba(201,168,76,.3)':'rgba(232,112,110,.3)';
+      var headerText=partial?r.ok+' of '+(r.ok+r.fail)+' legs placed — '+r.fail+' failed':'All '+r.fail+' leg'+(r.fail>1?'s':'')+' failed';
+      var retryBtn=_failedLegs.length>0
+        ?'<button id="todayCfRetry" style="margin-top:10px;width:100%;padding:10px;border-radius:7px;border:1px solid rgba(232,112,110,.4);background:rgba(232,112,110,.10);color:#e8706e;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Retry '+_failedLegs.length+' failed leg'+((_failedLegs.length>1)?'s':'')+' →</button>'
+        :'';
+      resultPanel.innerHTML='<div style="border:1px solid '+headerBorder+';background:'+headerBg+';border-radius:9px;padding:12px 14px;">'
+        +'<div style="font-family:var(--mono);font-size:11px;font-weight:700;color:'+headerColor+';margin-bottom:8px;">'+headerText+'</div>'
+        +'<div>'+legRows+'</div>'
+        +retryBtn
+      +'</div>';
+      resultPanel.style.display='';
+      // Wire retry button — only resends failed legs; already-placed legs are excluded.
+      if(_failedLegs.length>0){
+        document.getElementById('todayCfRetry').onclick=async function(){
+          var rb=this; rb.disabled=true; rb.textContent='Retrying…';
+          if(st) st.textContent='';
+          var r2;
+          try{
+            r2=await _todaySendOrders(_failedLegs.map(function(l){ return l._trade; }), function(done,total){ if(st) st.textContent=done+'/'+total+' sent…'; }, _failedLegs);
+          }catch(e2){
+            r2={ok:0,fail:_failedLegs.length,lastError:e2&&e2.message?e2.message:'Retry error',legs:[]};
+          }
+          if(st) st.textContent='';
+          var totalOk=_okLegs.length+r2.ok;
+          var totalFail=r2.fail;
+          if(totalFail===0){
+            close();
+            if(typeof _dvToast==='function') _dvToast(totalOk+' order'+(totalOk>1?'s':'')+' queued for MT5 — opening Act tab','rgba(93,232,160,.15)','rgba(93,232,160,.4)');
+            setTimeout(function(){ if(typeof setNav==='function')setNav('act'); if(typeof showAct==='function')showAct(); if(typeof mt5Poll==='function'){ setTimeout(mt5Poll,600); setTimeout(mt5Poll,2500); } },700);
+          } else {
+            // Update failed legs list for a possible further retry.
+            _failedLegs=(r2.legs||[]).filter(function(l){ return !l.ok; });
+            _okLegs=_okLegs.concat((r2.legs||[]).filter(function(l){ return l.ok; }));
+            var newRows=(r2.legs||[]).map(function(l){
+              var icon=l.ok?'<span style="color:#5de8a0;">&#10003;</span>':'<span style="color:#e8706e;">&#10005;</span>';
+              var label=esc(l.symbol)+' L#'+l.legIndex+' ('+esc(l.target)+')';
+              var detail=l.ok
+                ?'<span style="color:rgba(93,232,160,.7);">queued — order #'+esc(l.order_id)+'</span>'
+                :'<span style="color:#e8706e;">'+esc(l.error)+'</span>';
+              return '<div style="display:flex;align-items:baseline;gap:6px;padding:4px 0;border-bottom:1px solid rgba(237,232,216,.055);font-size:10.5px;">'+icon+' <span style="font-family:var(--mono);color:rgba(237,232,216,.8);">'+label+'</span> <span style="margin-left:auto;">'+detail+'</span></div>';
+            }).join('');
+            var newHeader=r2.ok>0?r2.ok+' more placed — '+_failedLegs.length+' still failing':_failedLegs.length+' leg'+((_failedLegs.length>1)?'s still failing':' still failing');
+            var newRetry=_failedLegs.length>0
+              ?'<button id="todayCfRetry" style="margin-top:10px;width:100%;padding:10px;border-radius:7px;border:1px solid rgba(232,112,110,.4);background:rgba(232,112,110,.10);color:#e8706e;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;">Retry '+_failedLegs.length+' failed leg'+((_failedLegs.length>1)?'s':'')+' →</button>'
+              :'';
+            resultPanel.innerHTML='<div style="border:1px solid rgba(232,112,110,.3);background:rgba(232,112,110,.08);border-radius:9px;padding:12px 14px;">'
+              +'<div style="font-family:var(--mono);font-size:11px;font-weight:700;color:#e8706e;margin-bottom:8px;">'+newHeader+'</div>'
+              +'<div>'+newRows+'</div>'
+              +newRetry
+            +'</div>';
+            if(_failedLegs.length>0){
+              var nb=document.getElementById('todayCfRetry');
+              if(nb) nb.onclick=rb.onclick; // re-wire with updated closure
+            }
+          }
+        };
+      }
+    }
   };
 }
 // Shared order-submit loop — used by manual confirm AND auto-place. Sends asset_type
@@ -12318,14 +12406,29 @@ function _todayMt5Lots(o){
   var u=(o._size&&o._size.units)||0, cs=_todayContractSize(o)||1;
   return u/cs;
 }
-async function _todaySendOrders(trades, onProgress){
+// _todaySendOrders — shared order-submit loop used by manual confirm AND auto-place.
+// Returns {ok, fail, lastError, legs} where legs is an array of per-leg result objects:
+//   { symbol, legIndex, target, ok, order_id (if ok), error (if failed), _trade }
+// The _trade back-reference lets the retry path reconstruct the exact request without
+// re-expanding the full trades array (so already-placed legs are never re-sent).
+// The optional legSubset param is used by the retry path: pass the failed legs array
+// directly to re-send only those specific {symbol,legIndex,target,_trade,_leg} items.
+async function _todaySendOrders(trades, onProgress, legSubset){
 	var ok=0, fail=0, lastError='';
+	var legs=[];
 	var queue=[];
-	(trades||[]).forEach(function(o){
-	  _todayLadderLegs(o).forEach(function(l){ queue.push({trade:o, leg:l}); });
-	});
+	if(legSubset && legSubset.length){
+	  // Retry path — legSubset is the _failedLegs array from the previous run.
+	  // Each entry already has {_trade, _leg} set by the first run.
+	  legSubset.forEach(function(l){ queue.push({trade:l._trade, leg:l._leg}); });
+	} else {
+	  (trades||[]).forEach(function(o){
+	    _todayLadderLegs(o).forEach(function(l){ queue.push({trade:o, leg:l}); });
+	  });
+	}
 	for(var i=0;i<queue.length;i++){
 	  var o=queue[i].trade, leg=queue[i].leg; var tv=(o.bullCount||0)+(o.bearCount||0);
+	  var legResult={symbol:o.sym, legIndex:leg.idx, target:leg.target||'tp1', ok:false, order_id:null, error:null, _trade:o, _leg:leg};
 	  try{
 	    var res=await dvOrderFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
 	      ticker:o.sym, asset_type:o.asset, order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
@@ -12338,11 +12441,17 @@ async function _todaySendOrders(trades, onProgress){
 	      comment:'DotVerse Today L#'+leg.idx+' '+(leg.target||'tp1').toUpperCase()+' '+(o.sig||'')+' '+o.sym,
 	      entry_confluence: tv>0?((o.bullCount||0)/tv):null, entry_atr:o.atr||null
 	    })});
-	    if(res&&res.order_id) ok++; else { fail++; lastError=_mt5OrderErrorText(res); }
-	  }catch(e){ fail++; lastError=e&&e.message?e.message:'Order failed — check MT5 connection'; }
+	    if(res&&res.order_id){ ok++; legResult.ok=true; legResult.order_id=res.order_id; }
+	    else { fail++; legResult.error=_mt5OrderErrorText(res); lastError=legResult.error; }
+	  }catch(e){
+	    fail++;
+	    legResult.error=e&&e.message?e.message:'Order failed — check MT5 connection';
+	    lastError=legResult.error;
+	  }
+	  legs.push(legResult);
 	  if(onProgress) onProgress(ok+fail, queue.length);
 	}
-	return {ok:ok, fail:fail, lastError:lastError};
+	return {ok:ok, fail:fail, lastError:lastError, legs:legs};
 }
 function _todaySetAutoPlace(on){ window._todayCfg.autoPlace=!!on; var l=document.getElementById('todayAutoPlace'); if(l&&l.parentNode){ var box=l.parentNode; box.style.borderColor=on?'rgba(232,112,110,.4)':'rgba(237,232,216,.14)'; box.style.background=on?'rgba(232,112,110,.07)':'rgba(237,232,216,.02)'; } }
 // Auto-place: fire every valid trade automatically after a short, cancelable countdown.
