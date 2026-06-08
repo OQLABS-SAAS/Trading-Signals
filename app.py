@@ -1762,12 +1762,23 @@ def calculate_indicators(df, timeframe="1d", asset_type="stock"):
     tr  = pd.concat([high - low,
                      (high - close.shift()).abs(),
                      (low  - close.shift()).abs()], axis=1).max(axis=1)
-    # ── 2c: Smoothed ATR — Wilder ATR14 smoothed over 100-bar rolling mean ──
-    # Raw ATR14 is too noisy for stop sizing. Rolling mean of ATR14 gives a
-    # stable baseline that doesn't overreact to individual volatile bars.
+    # ── 2c: ATR for SL/TP/sizing — Wilder ATR(14), current bar ──────────────
+    # CR-5 fix: SL/TP/sizing must use the CURRENT Wilder ATR(14) so stops
+    # reflect actual recent volatility.  The old 100-bar rolling mean caused
+    # stops placed inside noise during volatility spikes and unreachable TPs
+    # during calm.  The regime-detection block below (lines _atr50_mean /
+    # _regime_ratio) uses atr_raw directly and is unchanged.
+    # NaN guard: if the series is too short for Wilder smoothing to converge,
+    # fall back to the simple mean of available TR values — never produce 0 or NaN.
     atr_raw    = rma(tr, 14)
+    _atr_raw_last = atr_raw.iloc[-1]
+    if pd.isna(_atr_raw_last):
+        # Short series — use mean of available non-NaN TR as best estimate
+        _fallback = tr.dropna()
+        _atr_raw_last = float(_fallback.mean()) if len(_fallback) > 0 else float(close.iloc[-1]) * 0.01
+    atr        = float(_atr_raw_last)
+    # atr_smooth kept for reference only (no longer used for SL/TP).
     atr_smooth = atr_raw.rolling(100, min_periods=14).mean()
-    atr        = float(atr_smooth.iloc[-1])
 
     # G1: Market regime — current ATR14 vs its own 50-period rolling mean.
     # Ratio < 0.70 → RANGING  (ATR significantly below its average = choppy, low-volatility sideways market)
@@ -4947,8 +4958,16 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
                 spread_pips_val = None
                 position_pct = None
             else:
-                # ── 3c: Position size for 1% account risk ──────────────────────
-                position_pct = round(min(entry / risk, 100.0), 1)
+                # CR-4: position_pct was computed as round(min(entry / risk, 100), 1)
+                # where entry = current price and risk = abs(entry - stop_loss).
+                # That expression is price / stop_distance — a dimensionless leverage
+                # ratio, NOT a portfolio percentage. Displaying it as a position-size
+                # "%" is dimensionally wrong and misleads real-money traders.
+                # Correct position sizing (e.g. "$X to risk 1% of $10,000") requires
+                # account balance, which get_analysis() does not receive.
+                # Field removed rather than faked. The Size tab computes real lot
+                # sizes from actual account balance and risk settings.
+                position_pct = None
         else:
             rr1 = rr2 = rr3 = None
             position_pct = None
@@ -7415,6 +7434,68 @@ def _get_automation_settings(user_id):
                 "alert_tp": True, "alert_sl": True,
                 "alert_daily_summary": False, "alert_time": "08:00"}
 
+# ---------------------------------------------------------------------------
+# Forex USD-per-quote-currency conversion table.
+# Mirrors the frontend window._forexUsdRates fallback so backend sizing is
+# consistent when no live rate feed is available in this call context.
+# Keys are the 3-letter quote currency (counter currency of the pair).
+# The value is the multiplier to convert 1 unit of quote ccy → USD.
+#   • USD-quote pairs  (EURUSD, GBPUSD…): quote=USD → 1.0
+#   • USD-base pairs   (USDJPY, USDCAD…): quote=JPY/CAD → 1/spot
+#   • Cross pairs      (EURJPY, GBPJPY…): quote=JPY     → 1/spot
+# ---------------------------------------------------------------------------
+_FOREX_QUOTE_TO_USD: dict = {
+    "USD": 1.0,
+    "JPY": 1 / 150.0,
+    "GBP": 1.27,
+    "EUR": 1.08,
+    "AUD": 0.67,
+    "NZD": 0.61,
+    "CAD": 1 / 1.35,
+    "CHF": 1 / 0.90,
+    "INR": 1 / 83.0,
+    "CNH": 1 / 7.2,
+    "MXN": 1 / 17.0,
+}
+
+
+def _forex_usd_per_pip_per_lot(ticker: str, pip_size: float, entry: float) -> float:
+    """Return the USD value of 1 pip for 1 standard lot (100,000 units).
+
+    Formula: pip_value_usd = pip_size * 100_000 * usd_per_quote_ccy
+
+    For USD-base pairs (USDJPY, USDCAD, USDCHF) the pip value depends on the
+    current price (pip_size / entry * 100_000), which is equivalent to using
+    usd_per_quote = 1/entry and multiplying by pip_size * 100_000 — both
+    expressions are identical.  The price-based form is preferred here because
+    it uses the live entry rather than a stale fallback rate.
+
+    For USD-quote pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) pip_value = 10 USD
+    exactly (pip_size=0.0001, 0.0001*100000=10, usd_per_USD=1).
+
+    For crosses (EURJPY, GBPJPY, EURGBP …) pip_value is in the counter
+    currency, converted via the fallback table _FOREX_QUOTE_TO_USD.
+    """
+    sym = str(ticker).upper().replace("=X", "").replace("/", "").replace("-", "")
+    contract_size = 100_000
+    if len(sym) < 6:
+        # Malformed ticker — fall back to the old $10/pip assumption so we
+        # never return 0 and block a trade for a minor symbol quirk.
+        return pip_size * contract_size  # ≈ $10 for 4dp pairs
+
+    quote_ccy = sym[3:6]  # e.g. 'GBPJPY' → 'JPY', 'EURUSD' → 'USD'
+    base_ccy  = sym[0:3]  # e.g. 'GBPJPY' → 'GBP', 'USDJPY' → 'USD'
+
+    if base_ccy == "USD" and entry and entry > 0:
+        # USD-base pair: pip value in USD = pip_size / price * 100_000
+        # This is exact — uses live entry, not a stale table value.
+        return (pip_size / entry) * contract_size
+
+    # USD-quote or cross pair: look up usd_per_quote from the fallback table.
+    usd_per_quote = _FOREX_QUOTE_TO_USD.get(quote_ccy, 1.0)
+    return pip_size * contract_size * usd_per_quote
+
+
 def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0, ticker=""):
     """Calculate appropriate lot size for an auto-scan signal."""
     if not entry or not sl or entry == sl or account_balance <= 0:
@@ -7424,12 +7505,16 @@ def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0, ticker=
     if sl_dist == 0:
         return 0.0
     if asset_type == "forex":
-        # 1 std lot = 100,000 units; pip value ~$10/lot for USD-quoted pairs.
-        # JPY pairs (USDJPY, EURJPY…) use 2dp pricing so pip_size = 0.01.
-        # Must check the ticker name, NOT the price value.
-        pip_size = 0.01 if "JPY" in str(ticker).upper() else 0.0001
-        pips = sl_dist / pip_size
-        lots = risk_amt / max(pips * 10, 0.01)
+        # pip_size: JPY pairs use 2-decimal pricing (0.01), all others 0.0001.
+        # pip_val_usd: USD value of 1 pip per standard lot — depends on the
+        # quote currency of the pair, NOT a flat $10/pip assumption.
+        #   • USD-quote (EURUSD, GBPUSD…): $10/pip — same as before.
+        #   • USD-base  (USDJPY, USDCAD…): pip_size/entry * 100k — exact.
+        #   • Cross     (EURJPY, EURGBP…): pip_size * 100k * usd_per_quote.
+        pip_size     = 0.01 if "JPY" in str(ticker).upper() else 0.0001
+        pips         = sl_dist / pip_size
+        pip_val_usd  = _forex_usd_per_pip_per_lot(ticker, pip_size, entry)
+        lots = risk_amt / max(pips * pip_val_usd, 1e-8)
     else:
         # Commodities, indices, stocks, crypto.
         # For commodities the SL distance is in price-per-unit (e.g. $/oz for silver),
@@ -9009,6 +9094,27 @@ def mt5_submit_order():
         )
         db.add(order)
         db.commit()
+        # A2 fix: wire automation flags into watch_registry so run_watch_job applies
+        # BE, trailing, invalidation, TP alerts etc. to this live trade.
+        # The MT5 ticket is not known yet (EA hasn't confirmed); entry_price is
+        # updated to the actual fill price in mt5_confirm_order once the EA reports back.
+        _ensure_watch_for_order(
+            user_id     = user_id,
+            ticker      = order_request.ticker,
+            asset_type  = order_request.asset_type,
+            timeframe   = order_request.timeframe,
+            be_on       = order_request.be,
+            trail_on    = order_request.trailing,
+            macro_on    = order_request.macro,
+            inval_on    = order_request.inval,
+            sent_on     = order_request.sent,
+            tp1_on      = order_request.tp1_alert,
+            tp2_on      = order_request.tp2_alert,
+            weekend_on  = order_request.weekend,
+            entry_price = order_request.price or None,
+            entry_atr   = order_request.entry_atr,
+            last_signal = order_request.direction,
+        )
         return jsonify({
             "status": "pending",
             "order_id": order.id,
@@ -9303,6 +9409,46 @@ def mt5_confirm_order():
                     "tp3":       order.tp3,
                     "timeframe": order.timeframe,
                 }
+        # A2 fix: on fill, update the watch entry's entry_price to the actual fill price
+        # so run_watch_job BE/TP calculations use the real execution price, not the
+        # requested limit price.  Only meaningful for BUY/SELL orders with a timeframe.
+        if (status == "filled" and fill_price is not None and order
+                and order.order_type in ("BUY", "SELL")
+                and order.timeframe):
+            _uid = str(order.user_id or "default")
+            _mt5_sym = str(order.symbol or "").upper()
+            _tf      = order.timeframe
+            # Find the matching watch by searching for an entry whose MT5 symbol
+            # matches the order symbol and whose timeframe matches.
+            with watch_lock:
+                for _wkey, _wval in watch_registry.items():
+                    if (_wval.get("user_id") == _uid
+                            and _wval.get("timeframe") == _tf
+                            and _mt5_symbol(_wval.get("ticker", ""),
+                                            _wval.get("asset_type", "forex")).upper() == _mt5_sym):
+                        _wval["entry_price"] = float(fill_price)
+                        break
+            # Persist fill_price to DB watch row (best-effort)
+            try:
+                _wdb = _DBSession() if _DBSession else None
+                if _wdb:
+                    try:
+                        _wrow = _wdb.query(Watch).filter(
+                            Watch.user_id  == _uid,
+                            Watch.timeframe == _tf,
+                        ).all()
+                        for _wr in _wrow:
+                            if (_mt5_symbol(_wr.ticker, _wr.asset_type).upper() == _mt5_sym):
+                                _wr.entry_price = float(fill_price)
+                                break
+                        _wdb.commit()
+                    except Exception as _wpe:
+                        _wdb.rollback()
+                        print(f"[watch_wire] confirm fill_price DB update failed: {_wpe}")
+                    finally:
+                        _wdb.close()
+            except Exception as _woe:
+                print(f"[watch_wire] confirm fill_price outer error: {_woe}")
         return jsonify({"status": "ok",
                         "tp2": order.tp2 if order else None,
                         "tp3": order.tp3 if order else None})
@@ -15819,6 +15965,124 @@ class ScanAlert(_Base):
     sent_at          = Column(DateTime, default=datetime.utcnow)
 
 # ─── WATCH DB HELPERS ─────────────────────────────────────────
+
+def _ensure_watch_for_order(user_id, ticker, asset_type, timeframe,
+                            be_on, trail_on, macro_on, inval_on, sent_on,
+                            tp1_on, tp2_on, weekend_on,
+                            entry_price=None, entry_atr=None,
+                            last_signal=None):
+    """Create or update a watch_registry entry and DB Watch row for an MT5 order
+    that has at least one automation flag set.  Called from mt5_submit_order after
+    the MT5Order row is committed.
+
+    Design constraints:
+    - Uses the same key scheme as the rest of the registry: {user_id}_{ticker}_{timeframe}
+    - ticker is the DotVerse-normalised ticker (not the MT5 symbol), matching what
+      run_watch_job uses to look up prices via provider_first_download.
+    - Merges into an existing watch if one already exists (does NOT clobber last_signal,
+      last_check, etc. that run_watch_job may have already populated).
+    - If no automation flag is True, this function is a no-op — it does not create
+      a watch entry for orders without automations.
+    - Does NOT touch run_watch_job logic.
+    """
+    if not any([be_on, trail_on, macro_on, inval_on, sent_on, tp1_on, tp2_on, weekend_on]):
+        return  # No automations requested — no watch needed from this path
+
+    if not timeframe:
+        # Cannot build a meaningful watch without a timeframe — run_watch_job uses it
+        # to determine check intervals. Skip rather than create a broken entry.
+        print(f"[watch_wire] {ticker} order has automations but no timeframe — watch skipped")
+        return
+
+    key = f"{user_id}_{ticker}_{timeframe}"
+    default_channels = ["telegram"]
+
+    with watch_lock:
+        if key in watch_registry:
+            # Merge: update automation flags and entry data, leave runtime fields intact
+            w = watch_registry[key]
+            w["be_on"]      = w.get("be_on",      False) or be_on
+            w["trail_on"]   = w.get("trail_on",   False) or trail_on
+            w["macro_on"]   = w.get("macro_on",   False) or macro_on
+            w["inval_on"]   = w.get("inval_on",   False) or inval_on
+            w["sent_on"]    = w.get("sent_on",    False) or sent_on
+            w["tp1_on"]     = w.get("tp1_on",     False) or tp1_on
+            w["tp2_on"]     = w.get("tp2_on",     False) or tp2_on
+            w["weekend_on"] = w.get("weekend_on", False) or weekend_on
+            if entry_price is not None:
+                w["entry_price"] = entry_price
+            if entry_atr is not None:
+                w["entry_atr"] = entry_atr
+            if last_signal and not w.get("last_signal"):
+                w["last_signal"] = last_signal
+        else:
+            watch_registry[key] = {
+                "user_id":        user_id,
+                "ticker":         ticker,
+                "asset_type":     asset_type,
+                "timeframe":      timeframe,
+                "alert_channels": default_channels,
+                "last_signal":    last_signal,
+                "last_check":     None,
+                "last_reason":    "Not checked yet",
+                "last_price":     None,
+                "added_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+                "be_on":      be_on,
+                "trail_on":   trail_on,
+                "macro_on":   macro_on,
+                "inval_on":   inval_on,
+                "sent_on":    sent_on,
+                "tp1_on":     tp1_on,
+                "tp2_on":     tp2_on,
+                "weekend_on": weekend_on,
+                "entry_price": entry_price,
+                "entry_atr":   entry_atr,
+            }
+
+    # Persist to DB so watch survives server restart / other workers pick it up
+    _save_watch_to_db(ticker, asset_type, timeframe, default_channels, user_id,
+                      be_on=be_on, trail_on=trail_on, macro_on=macro_on,
+                      inval_on=inval_on, sent_on=sent_on,
+                      tp1_on=tp1_on, tp2_on=tp2_on, weekend_on=weekend_on,
+                      entry_price=entry_price, entry_atr=entry_atr)
+    print(f"[watch_wire] {key}: watch ensured "
+          f"be={be_on} trail={trail_on} macro={macro_on} inval={inval_on} "
+          f"sent={sent_on} tp1={tp1_on} tp2={tp2_on} wknd={weekend_on} "
+          f"entry={entry_price} atr={entry_atr}")
+
+
+def _update_watch_fill_price(user_id, ticker, timeframe, fill_price):
+    """On mt5_confirm (status=filled): update the watch's entry_price to the actual
+    fill price so run_watch_job BE/TP calculations use the real execution price.
+    Best-effort — never raises; a missing watch is not an error here."""
+    if not ticker or not timeframe or fill_price is None:
+        return
+    try:
+        fp = float(fill_price)
+    except (TypeError, ValueError):
+        return
+    key = f"{user_id}_{ticker}_{timeframe}"
+    with watch_lock:
+        if key in watch_registry:
+            watch_registry[key]["entry_price"] = fp
+
+    # Update DB row so the corrected fill_price survives restart
+    if not _DBSession:
+        return
+    db = _DBSession()
+    try:
+        existing = db.query(Watch).filter_by(
+            user_id=user_id, ticker=ticker, timeframe=timeframe
+        ).first()
+        if existing:
+            existing.entry_price = fp
+            db.commit()
+    except Exception as _e:
+        db.rollback()
+        print(f"[watch_wire] fill_price DB update failed for {key}: {_e}")
+    finally:
+        db.close()
+
 
 def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="legacy",
                       be_on=False, trail_on=False, macro_on=False, inval_on=False, sent_on=False,
