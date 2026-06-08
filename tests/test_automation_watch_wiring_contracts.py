@@ -515,3 +515,281 @@ def test_existing_scanner_watch_unaffected_by_wiring(monkeypatch):
     assert w11 is not None
     assert w11["be_on"] is True
     _clear_key(key11)
+
+
+# ── test 6: Act-tab fallback POST includes automation flags ──────────────────
+# Behavioral / string test on the HTML: the _actExecuteGo body must contain
+# be/trailing/entry_atr fields sourced from _szLadderAuto / sig.atr.
+
+def test_act_execute_go_post_body_contains_automation_fields():
+    """_actExecuteGo's dvOrderFetch POST body must include be, trailing,
+    macro, inval, sent, tp1_alert, tp2_alert, weekend, entry_atr.
+    This is a string-level contract test on the HTML source."""
+    html_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "static", "index-v2-prototype.html",
+    )
+    with open(html_path, "r", encoding="utf-8") as fh:
+        src = fh.read()
+
+    # Find the _actExecuteGo function block
+    start = src.find("function _actExecuteGo(){")
+    assert start != -1, "_actExecuteGo function not found in HTML"
+
+    # Extract a generous window (5000 chars) covering the entire function body
+    block = src[start : start + 5000]
+
+    # The POST body must include all automation flag fields
+    for field in ("be:", "trailing:", "macro:", "inval:", "sent:",
+                  "tp1_alert:", "tp2_alert:", "weekend:", "entry_atr:"):
+        assert field in block, (
+            f"_actExecuteGo POST body is missing field '{field}' — "
+            f"Act-tab orders will not wire into BE/trailing automations"
+        )
+
+    # Must read automation settings from _szLadderAuto / _szDefaultAuto
+    assert "_szLadderAuto" in block or "_szDefaultAuto" in block, (
+        "_actExecuteGo must source automation settings from _szLadderAuto or _szDefaultAuto"
+    )
+
+    # Must source entry_atr from sig.atr (the active signal's ATR)
+    assert "sig.atr" in block, (
+        "_actExecuteGo must set entry_atr from sig.atr so the watch job has the ATR"
+    )
+
+
+# ── test 7: GAP-2 BE block self-heals missing entry_atr via live ATR ─────────
+
+def test_be_self_heals_missing_entry_atr_via_live_atr(monkeypatch):
+    """When be_on=True but entry_atr is None, run_watch_job must self-heal
+    by patching entry_atr from the live ATR computed by calculate_indicators.
+    The watch entry's entry_atr must be updated in-place — NOT a silent skip."""
+    key = "u20_EURUSD=X_1h"
+    _clear_key(key)
+
+    # Stub out everything that run_watch_job touches
+    monkeypatch.setattr(dvapp, "_DBSession", None)
+    monkeypatch.setattr(dvapp, "_save_watch_to_db", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "_redis_client", None)
+    monkeypatch.setattr(dvapp, "send_telegram", lambda msg: None)
+    monkeypatch.setattr(dvapp, "_push_notification", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "_get_automation_settings",
+                        lambda uid: {"market_alerts_on": False, "trailing_atr_mult": 1.0})
+
+    # Stub provider_first_download to return minimal OHLCV so the job reaches the BE block
+    import pandas as pd
+    import numpy as np
+
+    _n = 60
+    _dates = pd.date_range("2025-01-01", periods=_n, freq="1h")
+    _close = [1.1000 + 0.0001 * i for i in range(_n)]
+    fake_df = pd.DataFrame({
+        "Open":  _close,
+        "High":  [c + 0.0005 for c in _close],
+        "Low":   [c - 0.0005 for c in _close],
+        "Close": _close,
+        "Volume": [1000] * _n,
+    }, index=_dates)
+
+    monkeypatch.setattr(dvapp, "provider_first_download", lambda *a, **kw: fake_df)
+    monkeypatch.setattr(dvapp, "_fill_date_grid", lambda df, *a, **kw: df)
+    monkeypatch.setattr(dvapp, "pre_screen", lambda ind: {"reason": "stub"})
+
+    # calculate_indicators must return a live ATR > 0
+    _live_atr = 0.0042
+    monkeypatch.setattr(dvapp, "calculate_indicators",
+                        lambda df, *a, **kw: {"atr": _live_atr, "price": 1.1060})
+
+    # Register a watch: be_on=True, entry_atr=None (the gap condition)
+    from datetime import datetime, timezone
+    with dvapp.watch_lock:
+        dvapp.watch_registry[key] = {
+            "user_id":    "u20",
+            "ticker":     "EURUSD=X",
+            "asset_type": "forex",
+            "timeframe":  "1h",
+            "alert_channels": [],
+            "last_signal":  "BUY",
+            "last_check":   None,  # ensure the job processes this watch
+            "last_reason":  None,
+            "last_price":   None,
+            "added_at":     "2025-01-01 00:00 UTC",
+            "be_on":      True,
+            "trail_on":   False,
+            "macro_on":   False,
+            "inval_on":   False,
+            "sent_on":    False,
+            "tp1_on":     False,
+            "tp2_on":     False,
+            "weekend_on": False,
+            "entry_price": 1.1000,
+            "entry_atr":   None,   # ← the gap: missing ATR
+        }
+
+    try:
+        dvapp.run_watch_job()
+    except Exception:
+        pass  # other parts of the job may fail in test isolation; we only care about entry_atr
+
+    with dvapp.watch_lock:
+        w = dvapp.watch_registry.get(key)
+
+    # After the job runs, entry_atr must be healed from the live ATR — NOT still None
+    assert w is not None
+    assert w.get("entry_atr") is not None, (
+        "entry_atr must be self-healed from live ATR when be_on=True and entry_atr is missing"
+    )
+    assert float(w["entry_atr"]) > 0, (
+        f"entry_atr must be > 0 after self-heal, got {w['entry_atr']}"
+    )
+    _clear_key(key)
+
+
+# ── test 8: GAP-2 trail block emits warning when live ATR is 0 ───────────────
+
+def test_trail_on_with_zero_live_atr_sets_automation_warning(monkeypatch):
+    """When trail_on=True but the live ATR from calculate_indicators is 0,
+    run_watch_job must set automation_warning on the watch entry — NOT silently skip."""
+    key = "u21_GBPUSD=X_4h"
+    _clear_key(key)
+
+    monkeypatch.setattr(dvapp, "_DBSession", None)
+    monkeypatch.setattr(dvapp, "_save_watch_to_db", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "_redis_client", None)
+    monkeypatch.setattr(dvapp, "send_telegram", lambda msg: None)
+    monkeypatch.setattr(dvapp, "_push_notification", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "_get_automation_settings",
+                        lambda uid: {"market_alerts_on": False, "trailing_atr_mult": 1.0})
+
+    import pandas as pd
+    _n = 60
+    _dates = pd.date_range("2025-01-01", periods=_n, freq="4h")
+    _c = [1.2700 + 0.0001 * i for i in range(_n)]
+    fake_df = pd.DataFrame({
+        "Open": _c, "High": [c + 0.0008 for c in _c],
+        "Low":  [c - 0.0008 for c in _c], "Close": _c,
+        "Volume": [500] * _n,
+    }, index=_dates)
+
+    monkeypatch.setattr(dvapp, "provider_first_download", lambda *a, **kw: fake_df)
+    monkeypatch.setattr(dvapp, "_fill_date_grid", lambda df, *a, **kw: df)
+    monkeypatch.setattr(dvapp, "pre_screen", lambda ind: {"reason": "stub"})
+
+    # Live ATR = 0 — simulates a broken market data provider
+    monkeypatch.setattr(dvapp, "calculate_indicators",
+                        lambda df, *a, **kw: {"atr": 0, "price": 1.2750})
+
+    with dvapp.watch_lock:
+        dvapp.watch_registry[key] = {
+            "user_id":    "u21",
+            "ticker":     "GBPUSD=X",
+            "asset_type": "forex",
+            "timeframe":  "4h",
+            "alert_channels": [],
+            "last_signal":  "BUY",
+            "last_check":   None,
+            "last_reason":  None,
+            "last_price":   None,
+            "added_at":     "2025-01-01 00:00 UTC",
+            "be_on":      False,
+            "trail_on":   True,   # ← trail on, live ATR = 0
+            "macro_on":   False,
+            "inval_on":   False,
+            "sent_on":    False,
+            "tp1_on":     False,
+            "tp2_on":     False,
+            "weekend_on": False,
+            "entry_price": 1.2700,
+            "entry_atr":   0.0080,
+        }
+
+    try:
+        dvapp.run_watch_job()
+    except Exception:
+        pass
+
+    with dvapp.watch_lock:
+        w = dvapp.watch_registry.get(key)
+
+    assert w is not None
+    assert w.get("automation_warning"), (
+        "automation_warning must be set when trail_on=True but live ATR=0 — "
+        "trailing must NOT be a silent no-op"
+    )
+    assert "trail" in w["automation_warning"].lower() or "atr" in w["automation_warning"].lower(), (
+        "automation_warning must mention 'trail' or 'atr' so the cause is clear"
+    )
+    _clear_key(key)
+
+
+# ── test 9: GAP-2 BE emits warning when both entry_atr and live ATR are 0 ────
+
+def test_be_on_with_no_atr_at_all_sets_automation_warning(monkeypatch):
+    """When be_on=True, entry_atr is None, AND live ATR=0, the job must set
+    automation_warning on the watch entry — not silently skip."""
+    key = "u22_XAUUSD_1d"
+    _clear_key(key)
+
+    monkeypatch.setattr(dvapp, "_DBSession", None)
+    monkeypatch.setattr(dvapp, "_save_watch_to_db", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "_redis_client", None)
+    monkeypatch.setattr(dvapp, "send_telegram", lambda msg: None)
+    monkeypatch.setattr(dvapp, "_push_notification", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "_get_automation_settings",
+                        lambda uid: {"market_alerts_on": False, "trailing_atr_mult": 1.0})
+
+    import pandas as pd
+    _n = 60
+    _dates = pd.date_range("2025-01-01", periods=_n, freq="1d")
+    _c = [2000.0 + i for i in range(_n)]
+    fake_df = pd.DataFrame({
+        "Open": _c, "High": [c + 5 for c in _c],
+        "Low":  [c - 5 for c in _c], "Close": _c,
+        "Volume": [1000] * _n,
+    }, index=_dates)
+
+    monkeypatch.setattr(dvapp, "provider_first_download", lambda *a, **kw: fake_df)
+    monkeypatch.setattr(dvapp, "_fill_date_grid", lambda df, *a, **kw: df)
+    monkeypatch.setattr(dvapp, "pre_screen", lambda ind: {"reason": "stub"})
+
+    # Both entry_atr and live ATR are 0/None
+    monkeypatch.setattr(dvapp, "calculate_indicators",
+                        lambda df, *a, **kw: {"atr": 0, "price": 2060.0})
+
+    with dvapp.watch_lock:
+        dvapp.watch_registry[key] = {
+            "user_id":    "u22",
+            "ticker":     "XAUUSD",
+            "asset_type": "commodity",
+            "timeframe":  "1d",
+            "alert_channels": [],
+            "last_signal":  "BUY",
+            "last_check":   None,
+            "last_reason":  None,
+            "last_price":   None,
+            "added_at":     "2025-01-01 00:00 UTC",
+            "be_on":      True,
+            "trail_on":   False,
+            "macro_on":   False,
+            "inval_on":   False,
+            "sent_on":    False,
+            "tp1_on":     False,
+            "tp2_on":     False,
+            "weekend_on": False,
+            "entry_price": 2000.0,
+            "entry_atr":   None,   # ← missing
+        }
+
+    try:
+        dvapp.run_watch_job()
+    except Exception:
+        pass
+
+    with dvapp.watch_lock:
+        w = dvapp.watch_registry.get(key)
+
+    assert w is not None
+    assert w.get("automation_warning"), (
+        "automation_warning must be set when be_on=True but both entry_atr and live ATR are 0"
+    )
+    _clear_key(key)

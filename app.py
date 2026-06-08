@@ -5976,6 +5976,30 @@ def run_watch_job():
                 # Per-watch trail_on takes precedence over global setting.
                 # w["trail_on"] is set from the Watch DB record loaded into watch_registry.
                 _per_watch_trail = w.get("trail_on", False)
+                # GAP-2 trailing: if trail_on is set but live ATR is unavailable,
+                # emit a one-time warning and mark the watch so it is not a silent no-op.
+                if _per_watch_trail and atr_val <= 0:
+                    _warn_key = f"trail_atr_warn:{key}"
+                    _already_warned = False
+                    try:
+                        if _redis_client:
+                            _already_warned = bool(_redis_client.get(_warn_key))
+                    except Exception:
+                        pass
+                    if not _already_warned:
+                        _warn_msg = (
+                            f"[trail] INACTIVE for {ticker} ({timeframe}): trail_on=True but "
+                            f"live ATR is 0 or unavailable — trailing stop cannot fire. "
+                            f"Will retry next tick. Check market data provider."
+                        )
+                        print(_warn_msg)
+                        with watch_lock:
+                            watch_registry[key]["automation_warning"] = _warn_msg
+                        try:
+                            if _redis_client:
+                                _redis_client.setex(_warn_key, 3600, "1")  # re-warn every hour
+                        except Exception:
+                            pass
                 if _per_watch_trail and atr_val > 0:
                     atr_mult   = float(cfg.get("trailing_atr_mult", 1.0))
                     trail_dist = _atr_to_pips(atr_val * atr_mult, asset_type, price_val)
@@ -6041,6 +6065,42 @@ def run_watch_job():
                 try:
                     _be_entry    = w.get("entry_price") or None
                     _be_atr      = w.get("entry_atr")   or None
+                    # GAP-2 BE: entry_atr missing/zero → self-heal using live ATR from ind.
+                    # ind is computed above from the same bar data the job already fetched,
+                    # so this is free (no extra network call).  Update the registry so
+                    # future ticks also benefit; never place any order on a live ATR alone —
+                    # the full BE condition check below still applies.
+                    if _be_entry and (not _be_atr or float(_be_atr) <= 0):
+                        _live_atr = ind.get("atr") or 0
+                        if _live_atr > 0:
+                            _be_atr = float(_live_atr)
+                            with watch_lock:
+                                watch_registry[key]["entry_atr"] = _be_atr
+                            print(f"[be] {ticker} ({timeframe}): entry_atr was missing — "
+                                  f"self-healed with live ATR {_be_atr:.6g}; BE now active")
+                        else:
+                            # Live ATR also unavailable — emit one-time warning, not silent.
+                            _be_warn_key = f"be_atr_warn:{key}"
+                            _be_warned = False
+                            try:
+                                if _redis_client:
+                                    _be_warned = bool(_redis_client.get(_be_warn_key))
+                            except Exception:
+                                pass
+                            if not _be_warned:
+                                _be_warn_msg = (
+                                    f"[be] INACTIVE for {ticker} ({timeframe}): be_on=True but "
+                                    f"entry_atr is missing and live ATR is 0 — BE cannot fire. "
+                                    f"Will retry next tick."
+                                )
+                                print(_be_warn_msg)
+                                with watch_lock:
+                                    watch_registry[key]["automation_warning"] = _be_warn_msg
+                                try:
+                                    if _redis_client:
+                                        _redis_client.setex(_be_warn_key, 3600, "1")
+                                except Exception:
+                                    pass
                     if _be_entry and _be_atr and _be_atr > 0:
                         _be_uid  = str(w.get("user_id", "default"))
                         with mt5_state_lock:

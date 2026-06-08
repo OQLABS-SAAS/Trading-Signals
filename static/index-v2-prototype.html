@@ -25443,7 +25443,16 @@ function _actExecuteGo(){
       return;
     }
     status.innerHTML='<span style="color:#d4b87a;">Sending '+executionLegs.length+' MT5 order'+(executionLegs.length===1?'':'s')+'...</span>';
+    // Snapshot entry ATR and confluence at submission time — same pattern as _szSendOneLeg.
+    // Used by run_watch_job for BE/trailing distance and signal-invalidation detection.
+    const _actEntryAtr  = sig.atr || null;
+    const _actTotalVotes = (sig.bullCount||0) + (sig.bearCount||0);
+    const _actEntryConf  = _actTotalVotes > 0 ? ((sig.bullCount||0) / _actTotalVotes) : null;
     const orderRequests = executionLegs.map(function(leg){
+      // Per-leg automation settings: mirror _szSendOneLeg's lookup so Act-tab orders
+      // wire into the same BE/trailing/macro automations as Size-tab ladder orders.
+      var _actLegIdx = (leg.idx != null ? leg.idx - 1 : 0); // leg.idx is 1-based
+      var _actAuto = (window._szLadderAuto && window._szLadderAuto[_actLegIdx]) || _szDefaultAuto();
       return dvOrderFetch('/api/mt5/order',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -25457,7 +25466,15 @@ function _actExecuteGo(){
         tp1: leg.assignedTp != null ? parseFloat(leg.assignedTp) : (parseFloat(sig.tp)||null),
         order_type: mt5OrderMode,
         timeframe: sig.tf || '',
-        signal_id: sig.id||(sig.sym+':'+sig.tf+':'+sig.sig+':leg'+(leg.idx||1)+':'+Date.now())
+        signal_id: sig.id||(sig.sym+':'+sig.tf+':'+sig.sig+':leg'+(leg.idx||1)+':'+Date.now()),
+        // Automation flags — same field names as normalize_mt5_submit_order expects,
+        // copied from _szSendOneLeg so Act-tab orders wire into BE/trailing watch job.
+        be: !!_actAuto.be, trailing: !!_actAuto.trail,
+        macro: !!_actAuto.macro, inval: !!_actAuto.inval,
+        sent: !!_actAuto.sent, tp1_alert: !!_actAuto.tp1, tp2_alert: !!_actAuto.tp2,
+        weekend: !!_actAuto.weekend,
+        entry_atr:        _actEntryAtr,
+        entry_confluence: _actEntryConf
       })
       }).then(function(res){ return {leg:leg,res:res}; }).catch(function(err){
         return {leg:leg,res:{error:'request_failed',message:(err&&err.message)||'MT5 order request failed'}};
