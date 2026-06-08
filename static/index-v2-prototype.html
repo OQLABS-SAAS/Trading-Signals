@@ -9926,7 +9926,8 @@ async function dvRunAnalyze(){
       atr:data.atr, volRatio:data.vol_ratio,
       bullCount:data.bullish_count||data.bull_score||0,
       bearCount:data.bearish_count||data.bear_score||0,
-      positionPct:data.position_pct,
+      // positionPct removed (CR-4): was entry/stop_distance, not a portfolio %.
+      // Real sizing lives in the Size tab (account balance + risk model).
       emaFastPeriod:data.ema_fast_period||9,
       emaSlowPeriod:data.ema_slow_period||21,
       winRate:data.win_rate, sampleSize:data.sample_size,
@@ -11695,7 +11696,7 @@ function _todayRenderPlan(){
     var _slPctAway=_entryN>0?Math.abs((_entryN-_slN)/_entryN*100):0;
     var _tps=[o.tp,o.tp2,o.tp3].filter(function(t){return t;});
     var _fx=_todayUsdPerQuote(o);
-    var _pipSize=o.asset==='forex'?((/JPY$/.test((o.sym||'').toUpperCase()))?0.01:0.0001):0;
+    var _pipSize=o.asset==='forex'?(((o.sym||'').toUpperCase().includes('JPY'))?0.01:0.0001):0;
     var _pipVal=_pipSize?(s.units*_pipSize*_fx):0, _slPips=_pipSize?(Math.abs(_entryN-_slN)/_pipSize):0;
     return '<div style="border:1px solid rgba(237,232,216,.12);border-radius:10px;padding:14px 16px;margin-bottom:10px;background:rgba(237,232,216,.02);">'
       + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">'
@@ -12422,6 +12423,15 @@ function _todayConfirmAndPlace(trades){
 // matching EXACTLY what the card/confirm shows. Forex: 100,000 units = 1.00 lot (the card
 // label divides by 100,000). Other classes: the card shows raw units/shares/contracts,
 // which the EA normalises to the broker's lot step/min — so pass them through.
+
+// _normalizeAssetType — canonical mapping from internal scan/signal asset codes to the
+// MT5/EA asset_type string. Must be applied to every order POST so the EA uses the correct
+// lot/contract handling. equity→stock, auto→stock; all other values pass through unchanged.
+// Used by _todaySendOrders and the Size/Act send paths.
+function _normalizeAssetType(a){
+  return ({equity:'stock', auto:'stock'})[a] || a;
+}
+
 function _todayMt5Lots(o){
   // The sizer now computes real broker lots (units / contract size) for EVERY asset.
   // Previously this divided only forex by 100k and sent raw units for commodities/
@@ -12455,7 +12465,7 @@ async function _todaySendOrders(trades, onProgress, legSubset){
 	  var legResult={symbol:o.sym, legIndex:leg.idx, target:leg.target||'tp1', ok:false, order_id:null, error:null, _trade:o, _leg:leg};
 	  try{
 	    var res=await dvOrderFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-	      ticker:o.sym, asset_type:o.asset, order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
+	      ticker:o.sym, asset_type:_normalizeAssetType(o.asset), order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
 	      entry:o.entry, sl:o.sl, tp1:leg.tp||o.tp, tp2:null, tp3:null, timeframe:o.tf||'',
 	      trailing:!!(leg.trailing||(o._autos&&o._autos.trail)),
 	      be:!!(o._autos&&o._autos.be), macro:!!(o._autos&&o._autos.macro),
@@ -19445,7 +19455,7 @@ function showUnderstand(){
   if (sig.sym && sig.tf && !sig.markov && !sig._markovLoading) {
     // Fetch Markov matrix data from backend
     sig._markovLoading = true;
-    var _mkAsset = ({equity:'stock', auto:'stock'})[sig.asset || sig.asset_type] || sig.asset || sig.asset_type || 'stock';
+    var _mkAsset = _normalizeAssetType(sig.asset || sig.asset_type || 'stock');
     var _mkUrl = '/api/analysis/markov?ticker=' + encodeURIComponent(sig.sym) + '&asset_type=' + encodeURIComponent(_mkAsset);
     dvFetchT(_mkUrl, {}, 15000).then(function(r) {
       sig._markovLoading = false;
@@ -23727,7 +23737,7 @@ function _szBuildExecutionLegs(){
   var tp2 = num(document.getElementById('szTP2')?.value || sig.tp2) || num(sig.tp2) || null;
   var tp3 = num(document.getElementById('szTP3')?.value || sig.tp3) || num(sig.tp3) || null;
   var rawAsset = document.getElementById('szType')?.value || sig.asset || 'crypto';
-  var assetType = ({equity:'stock', auto:'stock'})[rawAsset] || rawAsset;
+  var assetType = _normalizeAssetType(rawAsset);
   var quoteUsd = _szUsdPerPriceUnit(assetType, sig.sym || '');
   var levOrContr = parseFloat(document.getElementById('szLev')?.value) || 1;
   var contractSize = _szBrokerLotUnits(assetType, sig.sym || '');
@@ -23914,7 +23924,7 @@ async function _szLadderSubmitGo() {
   const tp2    = parseFloat((document.getElementById('szTP2')?.value||sig.tp2||'').replace(/,/g,'')) || parseFloat(sig.tp2) || null;
   const tp3    = parseFloat((document.getElementById('szTP3')?.value||sig.tp3||'').replace(/,/g,'')) || parseFloat(sig.tp3) || null;
   const _rawAssetType = document.getElementById('szType')?.value || sig.asset || 'crypto';
-  const assetType = ({equity:'stock', auto:'stock'})[_rawAssetType] || _rawAssetType;
+  const assetType = _normalizeAssetType(_rawAssetType);
   const orderType = 'Market';
   const direction = (sig.sig||'BUY').toUpperCase();
   const legs = _szBuildExecutionLegs();
@@ -24302,7 +24312,10 @@ function szCalc(){
       // Cross pair (e.g. EURJPY, GBPJPY, AUDJPY, EURGBP): pip value is in
       // counter currency. Convert to USD using cached rates — fall back to
       // sensible defaults if rates haven't loaded yet.
-      var counter=ticker.slice(-3);
+      // Strip Yahoo Finance suffix (=X) and pair separators so that
+      // 'GBPJPY=X'.replace(...)= 'GBPJPY' → slice(3,6) = 'JPY', not 'Y=X'.
+      var _normTicker=ticker.replace(/=X$/i,'').replace(/[\/\-]/g,'').toUpperCase();
+      var counter=_normTicker.length>=6?_normTicker.slice(3,6):_normTicker.slice(3);
       var convRate=_forexUsdRate(counter);
       pipValPerLot=pipSize*contractSize*convRate;
     } else {
@@ -25419,7 +25432,7 @@ function _actExecuteGo(){
       executionLegs.push({
         idx: 1,
         lots: fallbackQty,
-        assetType: (window._szLastCalc&&window._szLastCalc.assetType) || ({equity:'stock', auto:'stock'})[sig.asset] || sig.asset || 'crypto',
+        assetType: (window._szLastCalc&&window._szLastCalc.assetType) || _normalizeAssetType(sig.asset || 'crypto'),
         assignedTp: parseFloat(sig.tp)||null
       });
     }
@@ -25436,7 +25449,7 @@ function _actExecuteGo(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         ticker: sig.sym,
-        asset_type: leg.assetType || (window._szLastCalc&&window._szLastCalc.assetType) || ({equity:'stock', auto:'stock'})[sig.asset] || sig.asset || 'crypto',
+        asset_type: leg.assetType || (window._szLastCalc&&window._szLastCalc.assetType) || _normalizeAssetType(sig.asset || 'crypto'),
         direction: (sig.sig||'BUY').toUpperCase(),
         lots: parseFloat(leg.lots)||0,
         entry: parseFloat(sig.entry)||0,

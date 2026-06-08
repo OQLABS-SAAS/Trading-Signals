@@ -155,9 +155,13 @@ class TestBackendForexAndNonCommodityUnchanged:
         assert result == 0.5
 
     def test_usdjpy_forex(self):
-        # 10 pip SL on USDJPY: pip_size=0.01, pips=10, pip_val=$10/lot => lots=1.0
+        # 10 pip SL on USDJPY @ 145.00: pip_size=0.01, pips=10
+        # pip_val_usd = (0.01/145.00)*100_000 ≈ 6.897/lot
+        # lots = $100 / (10 * 6.897) ≈ 1.45
+        # Updated from 1.0 (old $10/pip flat) to correct rate-based value (CR-3 fix).
         result = self._lot("USDJPY", "forex", 145.00, 144.90)
-        assert result == 1.0
+        expected = round(100.0 / (10 * (0.01 / 145.00) * 100_000), 2)
+        assert result == expected, f"USDJPY: expected {expected} lots, got {result}"
 
     def test_btc_crypto(self):
         # Crypto: contract_size=1 so lots = risk / sl_dist
