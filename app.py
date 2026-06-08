@@ -9997,6 +9997,26 @@ def mt5_close_position():
         return jsonify({"error": f"Invalid ticket ID '{ticket}' — demo trades cannot be closed via API"}), 400
     db = _DBSession()
     try:
+        # S-7: verify the ticket belongs to this user (or "default" for single-user installs).
+        # A filled BUY/SELL MT5Order with mt5_ticket == ticket must exist for this user.
+        owned = db.query(MT5Order).filter(
+            MT5Order.mt5_ticket == ticket_int,
+            MT5Order.order_type.in_(["BUY", "SELL"]),
+            MT5Order.user_id.in_([user_id, "default"]),
+        ).first()
+        if not owned:
+            return jsonify({"error": f"Position {ticket_int} not found or not yours"}), 403
+
+        # B1: dedup — if a pending/executing CLOSE for this ticket already exists, return it.
+        existing_close = db.query(MT5Order).filter(
+            MT5Order.close_ticket == ticket_int,
+            MT5Order.order_type == "CLOSE",
+            MT5Order.user_id.in_([user_id, "default"]),
+            MT5Order.status.in_(["pending", "executing"]),
+        ).first()
+        if existing_close:
+            return jsonify({"status": "duplicate", "id": existing_close.id})
+
         order = MT5Order(
             user_id      = user_id,
             symbol       = symbol,
@@ -10031,8 +10051,31 @@ def mt5_set_trailing():
     if not _DBSession:
         return jsonify({"error": "Database not available"}), 503
     try:
+        ticket_int = int(ticket)
+    except (TypeError, ValueError):
+        return jsonify({"error": f"Invalid ticket ID '{ticket}'"}), 400
+    try:
         db = _DBSession()
         try:
+            # S-8: verify the ticket belongs to this user (or "default" for single-user installs).
+            owned = db.query(MT5Order).filter(
+                MT5Order.mt5_ticket == ticket_int,
+                MT5Order.order_type.in_(["BUY", "SELL"]),
+                MT5Order.user_id.in_([user_id, "default"]),
+            ).first()
+            if not owned:
+                return jsonify({"error": f"Position {ticket_int} not found or not yours"}), 403
+
+            # B1: dedup — if a pending/executing TRAILING for this ticket already exists, return it.
+            existing_trailing = db.query(MT5Order).filter(
+                MT5Order.close_ticket == ticket_int,
+                MT5Order.order_type == "TRAILING",
+                MT5Order.user_id.in_([user_id, "default"]),
+                MT5Order.status.in_(["pending", "executing"]),
+            ).first()
+            if existing_trailing:
+                return jsonify({"status": "duplicate", "ticket": ticket, "order_id": existing_trailing.id})
+
             order = MT5Order(
                 user_id      = user_id,
                 symbol       = "AUTO",
@@ -10040,7 +10083,7 @@ def mt5_set_trailing():
                 volume       = 0,
                 price        = float(pips),
                 action       = "trailing",
-                close_ticket = int(ticket),
+                close_ticket = ticket_int,
                 status       = "pending",
                 comment      = f"Trailing stop {pips} pips",
             )
@@ -10061,17 +10104,21 @@ def mt5_set_trailing():
 
 _BINANCE_BASE = "https://api.binance.com"
 
-def _binance_signed_request(key_id, method, path, params=None):
+def _binance_signed_request(key_id, method, path, params=None, user_id=None):
     """Make a signed Binance REST API call using user's stored ExchangeKey.
-    key_id: ExchangeKey.id — used to look up + decrypt API credentials.
+    key_id:  ExchangeKey.id — used to look up + decrypt API credentials.
+    user_id: REQUIRED for security — key must belong to this user (defense-in-depth S-1).
     Returns (response_json, error_string). Error string is None on success."""
     if not _DBSession:
         return None, "Database not available"
+    if user_id is None:
+        return None, "user_id required to look up exchange key"
     db = _DBSession()
     try:
         ek = db.query(ExchangeKey).filter(
             ExchangeKey.id == key_id,
-            ExchangeKey.exchange == "binance"
+            ExchangeKey.exchange == "binance",
+            ExchangeKey.user_id == int(user_id),
         ).first()
         if not ek:
             return None, "Exchange key not found"
@@ -10177,7 +10224,8 @@ def binance_place_order():
         exchange_key_id,
         "POST",
         "/api/v3/order",
-        binance_params
+        binance_params,
+        user_id=user_id,
     )
     if error:
         # Save failed attempt
@@ -10308,7 +10356,8 @@ def binance_cancel_order(order_id):
                 order.exchange_key_id,
                 "DELETE",
                 "/api/v3/order",
-                {"symbol": order.symbol, "orderId": int(order.exchange_order_id)}
+                {"symbol": order.symbol, "orderId": int(order.exchange_order_id)},
+                user_id=user_id,
             )
             if error:
                 return jsonify({"error": f"Binance cancel failed: {error}"}), 502
@@ -10348,7 +10397,7 @@ def binance_balance():
         finally:
             db.close()
 
-    result, error = _binance_signed_request(exchange_key_id, "GET", "/api/v3/account")
+    result, error = _binance_signed_request(exchange_key_id, "GET", "/api/v3/account", user_id=user_id)
     if error:
         return jsonify({"error": error}), 502
 
@@ -10375,25 +10424,29 @@ def binance_balance():
 
 _COINBASE_BASE = "https://api.coinbase.com/api/v3/brokerage"
 
-def _coinbase_signed_request(key_id, method, path, body=None):
+def _coinbase_signed_request(key_id, method, path, body=None, user_id=None):
     """Make a signed Coinbase Advanced Trade API call using user's stored ExchangeKey.
-    
+
     Coinbase uses HMAC-SHA256 signature with headers:
       CB-ACCESS-KEY: API key name
       CB-ACCESS-SIGN: Base64(HMAC-SHA256(secret, timestamp + method + path + body))
       CB-ACCESS-TIMESTAMP: Unix timestamp in seconds
       CB-ACCESS-PASSPHRASE: Passphrase
-    
-    key_id: ExchangeKey.id — used to look up + decrypt API credentials.
+
+    key_id:  ExchangeKey.id — used to look up + decrypt API credentials.
+    user_id: REQUIRED for security — key must belong to this user (defense-in-depth S-1).
     Returns (response_json, error_string). Error string is None on success.
     """
     if not _DBSession:
         return None, "Database not available"
+    if user_id is None:
+        return None, "user_id required to look up exchange key"
     db = _DBSession()
     try:
         ek = db.query(ExchangeKey).filter(
             ExchangeKey.id == key_id,
-            ExchangeKey.exchange == "coinbase"
+            ExchangeKey.exchange == "coinbase",
+            ExchangeKey.user_id == int(user_id),
         ).first()
         if not ek:
             return None, "Coinbase exchange key not found"
@@ -10559,7 +10612,8 @@ def coinbase_place_order():
         exchange_key_id,
         "POST",
         "/orders",
-        coinbase_body
+        coinbase_body,
+        user_id=user_id,
     )
 
     if error:
@@ -10704,7 +10758,8 @@ def coinbase_cancel_order(order_id):
                 order.exchange_key_id,
                 "POST",
                 "/orders/batch_cancel",
-                cancel_body
+                cancel_body,
+                user_id=user_id,
             )
             if error:
                 return jsonify({"error": f"Coinbase cancel failed: {error}"}), 502
@@ -10744,7 +10799,7 @@ def coinbase_balance():
         finally:
             db.close()
 
-    result, error = _coinbase_signed_request(exchange_key_id, "GET", "/accounts")
+    result, error = _coinbase_signed_request(exchange_key_id, "GET", "/accounts", user_id=user_id)
     if error:
         return jsonify({"error": error}), 502
 
