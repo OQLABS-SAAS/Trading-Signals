@@ -23746,8 +23746,14 @@ async function _szLadderSubmitGo() {
     if (status) status.innerHTML = '<span style="color:rgba(232,112,110,.9);">Enter entry and stop loss before submitting</span>';
     return;
   }
-  if (status) status.innerHTML = '<span style="color:rgba(201,168,76,.9);">Submitting ' + legs.length + ' orders…</span>';
-  let ok = 0, fail = 0;
+  // ── Per-leg result tracking — same shape as _todaySendOrders legs array ──
+  // { symbol, legIndex, target, ok, order_id, error, _legSnapshot }
+  // _legSnapshot stores the original leg object so retry can reconstruct the
+  // exact request without re-calling _szBuildExecutionLegs (which would include
+  // already-placed legs in the expansion — the primary double-placement guard).
+  var _szLegResults = [];
+  var _szOkLegs = [];
+  var _szFailedLegs = [];
   // TP price map — each row sends ONLY its assigned TP to MT5 so it closes at
   // that exact target. SL cascade (breakeven after TP1, lock-TP1 after TP2)
   // is handled automatically by the EA via the /api/mt5/alert endpoint.
@@ -23757,52 +23763,165 @@ async function _szLadderSubmitGo() {
   const _totalVotes = (sig.bullCount||0) + (sig.bearCount||0);
   const _entryConf  = _totalVotes > 0 ? ((sig.bullCount||0) / _totalVotes) : null;
   const _entryAtr   = sig.atr || null;
-  for (let i = 0; i < legs.length; i++) {
-	    const leg = legs[i];
-	    const risk = leg.riskPct;
-	    const lots = parseFloat((leg.lots || 0).toFixed(6));
-    const target  = leg.target || (i===0?'tp1':i===1?'tp2':'tp3');
-    // Resolve the single TP price this position will close at
-    const assignedTp = leg.assignedTp != null ? leg.assignedTp : (target === 'trail' ? null : (tpPriceMap[target] || sig.tp));
-    const isTrailing = !!leg.trailing;
-    const auto = (window._szLadderAuto && window._szLadderAuto[i]) || _szDefaultAuto();
+
+  // ── Shared helper: send a single leg to /api/mt5/order ──────────────────────
+  // Returns a legResult object. Takes the original leg object plus its original
+  // zero-based index (used for the auto-settings lookup via _szLadderAuto).
+  async function _szSendOneLeg(leg, origIdx) {
+    var risk = leg.riskPct;
+    var lots = parseFloat((leg.lots || 0).toFixed(6));
+    var target = leg.target || (origIdx===0?'tp1':origIdx===1?'tp2':'tp3');
+    var assignedTp = leg.assignedTp != null ? leg.assignedTp : (target === 'trail' ? null : (tpPriceMap[target] || sig.tp));
+    var isTrailing = !!leg.trailing;
+    var auto = (window._szLadderAuto && window._szLadderAuto[origIdx]) || _szDefaultAuto();
+    var legResult = {
+      symbol: sig.sym,
+      legIndex: leg.idx || (origIdx + 1),
+      target: target,
+      ok: false,
+      order_id: null,
+      error: null,
+      _legSnapshot: leg,
+      _origIdx: origIdx
+    };
     try {
-      const res = await dvOrderFetch('/api/mt5/order', {
+      var res = await dvOrderFetch('/api/mt5/order', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
-	          ticker: sig.sym, order_type: orderType, lots: lots, direction: direction,
-	          asset_type: assetType,
-	          entry: entry, sl: sl,
+          ticker: sig.sym, order_type: orderType, lots: lots, direction: direction,
+          asset_type: assetType,
+          entry: entry, sl: sl,
           // Only the assigned TP — not all three — so position closes precisely at target
           tp1: assignedTp, tp2: null, tp3: null,
           trailing: isTrailing,
           be: !!auto.be, macro: !!auto.macro, inval: !!auto.inval, sent: !!auto.sent,
           tp1_alert: !!auto.tp1, tp2_alert: !!auto.tp2, weekend: !!auto.weekend,
-          comment: 'DotVerse L#' + (i+1) + ' ' + target.toUpperCase() + ' @ ' + risk + '%',
+          comment: 'DotVerse L#' + (leg.idx||(origIdx+1)) + ' ' + target.toUpperCase() + ' @ ' + risk + '%',
           // Snapshot for signal-invalidation and ATR-expansion detection in watch job
           entry_confluence: _entryConf,
           entry_atr:        _entryAtr
         })
       });
-      if (res && res.order_id) ok++; else { fail++; window._szLastOrderError=_mt5OrderErrorText(res); }
-    } catch(e) { fail++; window._szLastOrderError=e&&e.message?e.message:'Order failed — check MT5 connection'; }
+      if (res && res.order_id) { legResult.ok = true; legResult.order_id = res.order_id; }
+      else { legResult.error = _mt5OrderErrorText(res); }
+    } catch(e) {
+      legResult.error = e && e.message ? e.message : 'Order failed — check MT5 connection';
+    }
+    return legResult;
   }
-  if (status) {
-    const okCol  = ok > 0 ? 'rgba(93,232,160,.9)' : 'rgba(237,232,216,.5)';
-    const failCol= fail > 0 ? 'rgba(232,112,110,.9)' : 'rgba(237,232,216,.5)';
-    status.innerHTML = '<span style="color:' + okCol + ';">' + ok + ' submitted</span>'
-                     + (fail > 0 ? '  <span style="color:' + failCol + ';">' + fail + ' failed' + (window._szLastOrderError?' · '+_escHtml(window._szLastOrderError):'') + '</span>' : '')
-                     + '  · Tickets will appear in the ACT tab as the EA fills them.';
+
+  // ── Shared helper: render per-leg breakdown into szLadderStatus ─────────────
+  // Shows ✓/✗ per leg with order_id or reason; appends a "Retry N failed legs →"
+  // button when there are failures. The retry button is wired inline so it closes
+  // over the mutable _szFailedLegs / _szOkLegs state.
+  function _szRenderLegStatus() {
+    if (!status) return;
+    var ok = _szOkLegs.length, fail = _szFailedLegs.length;
+    var allResults = _szOkLegs.concat(_szFailedLegs);
+    // Sort by legIndex so display order is stable regardless of result order.
+    allResults.sort(function(a,b){ return (a.legIndex||0) - (b.legIndex||0); });
+    var esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); };
+    var legRows = allResults.map(function(l){
+      var icon = l.ok ? '<span style="color:#5de8a0;">&#10003;</span>' : '<span style="color:#e8706e;">&#10005;</span>';
+      var label = esc(l.symbol) + ' L#' + l.legIndex + ' (' + esc(l.target) + ')';
+      var detail = l.ok
+        ? '<span style="color:rgba(93,232,160,.7);">queued — order #' + esc(l.order_id) + '</span>'
+        : '<span style="color:#e8706e;">' + esc(l.error) + '</span>';
+      return '<div style="display:flex;align-items:baseline;gap:6px;padding:3px 0;border-bottom:1px solid rgba(237,232,216,.055);font-size:10px;">'
+        + icon + ' <span style="font-family:var(--mono);color:rgba(237,232,216,.8);">' + label + '</span>'
+        + ' <span style="margin-left:auto;">' + detail + '</span></div>';
+    }).join('');
+    var headerColor = (ok > 0 && fail > 0) ? '#c9a84c' : fail > 0 ? '#e8706e' : '#5de8a0';
+    var headerBg    = (ok > 0 && fail > 0) ? 'rgba(201,168,76,.08)' : fail > 0 ? 'rgba(232,112,110,.08)' : 'rgba(93,232,160,.08)';
+    var headerBorder= (ok > 0 && fail > 0) ? 'rgba(201,168,76,.3)' : fail > 0 ? 'rgba(232,112,110,.3)' : 'rgba(93,232,160,.3)';
+    var headerText  = fail === 0
+      ? (ok + ' leg' + (ok>1?'s':'') + ' placed — tickets will appear in Act as the EA fills them')
+      : ok > 0
+        ? (ok + ' of ' + (ok+fail) + ' legs placed — ' + fail + ' failed')
+        : ('All ' + fail + ' leg' + (fail>1?'s':'') + ' failed');
+    var retryHtml = fail > 0
+      ? '<button id="szLadderRetryBtn" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:1px solid rgba(232,112,110,.4);background:rgba(232,112,110,.10);color:#e8706e;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;">Retry ' + fail + ' failed leg' + (fail>1?'s':'') + ' →</button>'
+      : '';
+    status.innerHTML = '<div style="border:1px solid ' + headerBorder + ';background:' + headerBg + ';border-radius:8px;padding:10px 12px;">'
+      + '<div style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + headerColor + ';margin-bottom:6px;">' + headerText + '</div>'
+      + '<div>' + legRows + '</div>'
+      + retryHtml
+      + '</div>';
+    // Wire retry button — only re-sends _szFailedLegs; _szOkLegs are never touched.
+    // Double-placement prevention: we iterate _szFailedLegs (which excludes all
+    // previously successful legs) and use the _legSnapshot / _origIdx stored at
+    // first-run time, so re-expanding _szBuildExecutionLegs() is never needed.
+    if (fail > 0) {
+      var retryBtn = document.getElementById('szLadderRetryBtn');
+      if (retryBtn) {
+        retryBtn.onclick = async function() {
+          var rb = this; rb.disabled = true; rb.textContent = 'Retrying…';
+          if (status) status.innerHTML = '<span style="color:rgba(201,168,76,.9);">Retrying ' + _szFailedLegs.length + ' leg' + (_szFailedLegs.length>1?'s':'') + '…</span>';
+          var retryResults = [];
+          try {
+            for (var ri = 0; ri < _szFailedLegs.length; ri++) {
+              var fl = _szFailedLegs[ri];
+              var rr = await _szSendOneLeg(fl._legSnapshot, fl._origIdx);
+              retryResults.push(rr);
+            }
+          } catch(e2) {
+            // Defensive — _szSendOneLeg absorbs exceptions internally; this
+            // catches any unexpected throw outside the inner try/catch.
+          }
+          // Merge retry results back into ok/failed partitions.
+          var newOk = retryResults.filter(function(r){ return r.ok; });
+          var newFail = retryResults.filter(function(r){ return !r.ok; });
+          _szOkLegs = _szOkLegs.concat(newOk);
+          _szFailedLegs = newFail;
+          _szRenderLegStatus();
+          // Navigate to Act if all are now placed.
+          if (_szFailedLegs.length === 0 && _szOkLegs.length > 0) {
+            var totalOk = _szOkLegs.length;
+            if (typeof _dvToast === 'function') _dvToast('Ladder sent: ' + totalOk + ' order' + (totalOk>1?'s':'') + ' queued for MT5 — opening Act tab to track', 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
+            setTimeout(function(){
+              if (typeof setNav === 'function') setNav('act');
+              if (typeof showAct === 'function') showAct();
+              if (typeof mt5Poll === 'function') { setTimeout(mt5Poll, 600); setTimeout(mt5Poll, 2500); setTimeout(mt5Poll, 5500); }
+            }, 800);
+          }
+        };
+      }
+    }
   }
+
+  // ── Main submit loop ─────────────────────────────────────────────────────────
+  if (status) status.innerHTML = '<span style="color:rgba(201,168,76,.9);">Submitting ' + legs.length + ' order' + (legs.length>1?'s':'') + '…</span>';
+  try {
+    for (var i = 0; i < legs.length; i++) {
+      var legResult = await _szSendOneLeg(legs[i], i);
+      _szLegResults.push(legResult);
+      if (legResult.ok) _szOkLegs.push(legResult); else _szFailedLegs.push(legResult);
+    }
+  } catch(e) {
+    // Should not reach here (inner try/catch in _szSendOneLeg) but keeps
+    // the status area from being stuck if something unexpected throws.
+    if (status) status.innerHTML = '<span style="color:rgba(232,112,110,.9);">Unexpected error: ' + _escHtml(e && e.message ? e.message : String(e)) + '</span>';
+    return;
+  }
+
+  var okCount = _szOkLegs.length, failCount = _szFailedLegs.length;
   if (typeof _dvToast === 'function') {
-    if (ok > 0) _dvToast('Ladder sent: ' + ok + ' orders queued for MT5 — opening Act tab to track', 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
-    else _dvToast(window._szLastOrderError||'All ladder orders failed — check MT5 connection', 'rgba(232,112,110,.15)', 'rgba(232,112,110,.4)');
+    if (okCount > 0 && failCount === 0)
+      _dvToast('Ladder sent: ' + okCount + ' order' + (okCount>1?'s':'') + ' queued for MT5 — opening Act tab to track', 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
+    else if (okCount > 0)
+      _dvToast(okCount + ' of ' + legs.length + ' legs placed — ' + failCount + ' failed. Check the Size tab to retry.', 'rgba(201,168,76,.15)', 'rgba(201,168,76,.4)');
+    else
+      _dvToast(((_szFailedLegs[0]&&_szFailedLegs[0].error)||'All ladder orders failed — check MT5 connection'), 'rgba(232,112,110,.15)', 'rgba(232,112,110,.4)');
   }
+
+  _szRenderLegStatus();
+
   // After at least one successful submission, jump to ACT so user sees the
-  // live trades populate as the EA fills them.
-  if (ok > 0) {
-    setTimeout(() => {
+  // live trades populate as the EA fills them.  Only navigate when all legs
+  // are green (partial failure keeps user in Size tab so they can retry).
+  if (okCount > 0 && failCount === 0) {
+    setTimeout(function() {
       if (typeof setNav === 'function') setNav('act');
       if (typeof showAct === 'function') showAct();
       // Force a state refresh so the Active Trades panel pulls latest
