@@ -7431,9 +7431,78 @@ def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0, ticker=
         pips = sl_dist / pip_size
         lots = risk_amt / max(pips * 10, 0.01)
     else:
-        # Crypto, indices, commodities, stocks — direct
-        lots = risk_amt / sl_dist
+        # Commodities, indices, stocks, crypto.
+        # For commodities the SL distance is in price-per-unit (e.g. $/oz for silver),
+        # so P&L per lot = sl_dist × contract_size.  Dividing only by sl_dist produces
+        # a number in "units", not lots, and inflates size by up to ~5,000×.
+        contract_size = _contract_size_for_ticker(ticker, asset_type)
+        if contract_size is None:
+            # Unknown commodity/futures — contract size is unverified.
+            # Return 0 so the caller treats this as non-tradeable rather than
+            # silently placing an order at a dangerously wrong size.
+            return 0.0
+        lots = risk_amt / (sl_dist * contract_size)
     return round(max(lots, 0.0), 2)
+
+
+# Contract sizes (instrument units per 1.0 lot) for non-forex assets.
+# Indices, stocks, crypto: 1 (units == shares / coins / index points).
+# Keys are matched case-insensitively; both Yahoo Finance ticker forms
+# (GC=F, SI=F …) and broker symbol forms (XAUUSD, XAGUSD, WTI …) are listed.
+_COMMODITY_CONTRACT_SIZES = {
+    # Gold
+    "GC=F":   100,   "XAUUSD": 100,   "GOLD": 100,
+    # Silver — the critical one: 5,000 oz/lot on CME standard contract
+    "SI=F":   5000,  "XAGUSD": 5000,  "SILVER": 5000,
+    # Crude oil
+    "CL=F":   1000,  "WTI":    1000,  "USOIL": 1000,  "UKOIL": 1000,
+    "BRENT":  1000,
+    # Natural gas
+    "NG=F":   10000, "NGAS":   10000, "NATGAS": 10000,
+    # Copper
+    "HG=F":   25000, "COPPER": 25000,
+    # Platinum / palladium (standard MT5 broker contract = 100 oz/lot;
+    # NOTE: CME full contract is 50 oz but MT5 spot CFDs typically use 100 oz —
+    # verify with your specific broker before trading these.)
+    "XPTUSD": 100,   "PLATINUM": 100,
+    "XPDUSD": 100,   "PALLADIUM": 100,
+}
+
+
+def _contract_size_for_ticker(ticker: str, asset_type: str):
+    """Return the number of instrument units per 1.0 lot for the given ticker.
+
+    Returns 1 for indices, stocks and crypto (lot == 1 unit).
+    Returns the appropriate commodity contract size for known commodity tickers.
+    Returns None for unknown commodity/futures tickers so callers can refuse to size
+    rather than silently using a guessed contract size on a real-money order.
+    """
+    t = str(ticker).upper().strip()
+    if asset_type == "commodity" or t.endswith("=F"):
+        size = _COMMODITY_CONTRACT_SIZES.get(t)
+        if size is not None:
+            return float(size)
+        # Fuzzy fallback for broker aliases not in the map
+        if "XAG" in t or t.startswith("SI"):
+            return 5000.0
+        if "XAU" in t or t.startswith("GC"):
+            return 100.0
+        if any(x in t for x in ("WTI", "USOIL", "BRENT", "UKOIL")) or t.startswith("CL"):
+            return 1000.0
+        if "NGAS" in t or "NATGAS" in t or t.startswith("NG"):
+            return 10000.0
+        if "COPPER" in t or t.startswith("HG"):
+            return 25000.0
+        if "XPT" in t or "PLATINUM" in t:
+            return 100.0
+        if "XPD" in t or "PALLADIUM" in t:
+            return 100.0
+        # Unknown commodity/futures ticker — refuse to guess a contract size.
+        # Returning None causes _calc_auto_lot to return 0 (non-tradeable).
+        print(f"[sizing] unknown commodity contract size for {ticker!r}; refusing to size")
+        return None
+    # indices, stocks, crypto: 1 unit per lot
+    return 1.0
 
 # ─── WATCHLIST ────────────────────────────────────────────────
 # Balance: volatile (crypto) + non-volatile (forex/indices), scalp + swing

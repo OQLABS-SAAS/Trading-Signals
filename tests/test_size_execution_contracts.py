@@ -16,9 +16,15 @@ def test_size_has_shared_contract_size_helpers_for_execution_quantities():
     assert "function _szBrokerLotUnits(assetType, sym)" in HTML
     assert "function _szNativeLotsFromUnits(units, assetType, sym)" in HTML
     assert "if(a === 'fx' || a === 'forex'" in HTML
-    assert "if(/XAG/.test(s)) return 5000" in HTML
-    assert "if(/XAU/.test(s)) return 100" in HTML
-    assert "if(/(WTI|USOIL|UKOIL|BRENT|CL)/.test(s)) return 1000" in HTML
+    # CR-1: XAG check now includes SI=F and SILVER for Yahoo-ticker coverage
+    assert "/XAG/.test(s)" in HTML
+    assert "return 5000" in HTML
+    # CR-1: XAU check now includes GC=F and GOLD
+    assert "/XAU/.test(s)" in HTML
+    assert "return 100" in HTML
+    # CR-1: crude check now uses explicit CL=F alongside WTI/USOIL/UKOIL/BRENT
+    assert "WTI|USOIL|UKOIL|BRENT" in HTML
+    assert "return 1000" in HTML
 
 
 def test_size_summary_uses_broker_lots_not_raw_commodity_units():

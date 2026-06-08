@@ -10991,11 +10991,23 @@ function _szContractSize(assetType, sym, forexContractSize){
   if(typeof _todayContractSize === 'function') return _todayContractSize({asset:assetType, sym:sym});
   if(assetType === 'commodity'){
     var s = String(sym || '').toUpperCase();
-    if(/XAG/.test(s)) return 5000;
-    if(/XAU/.test(s)) return 100;
-    if(/(WTI|USOIL|UKOIL|BRENT|CL)/.test(s)) return 1000;
-    if(/(NATGAS|NGAS)/.test(s) || /^NG/.test(s)) return 10000;
-    return 100;
+    // Silver: Yahoo ticker SI=F or broker symbol XAGUSD
+    if(/XAG/.test(s) || s === 'SI=F' || s === 'SILVER') return 5000;
+    // Gold: Yahoo ticker GC=F or broker symbol XAUUSD
+    if(/XAU/.test(s) || s === 'GC=F' || s === 'GOLD') return 100;
+    // Crude oil: CL=F, WTI, USOIL, UKOIL, BRENT
+    if(/(WTI|USOIL|UKOIL|BRENT)/.test(s) || s === 'CL=F') return 1000;
+    // Natural gas: NG=F, NGAS, NATGAS
+    if(/(NATGAS|NGAS)/.test(s) || s === 'NG=F' || /^NG/.test(s)) return 10000;
+    // Copper: HG=F or COPPER
+    if(s === 'COPPER' || s === 'HG=F' || /^HG/.test(s)) return 25000;
+    // Platinum / Palladium (100 oz/lot on standard MT5 spot CFD)
+    if(/XPT/.test(s) || /PLATINUM/.test(s)) return 100;
+    if(/XPD/.test(s) || /PALLADIUM/.test(s)) return 100;
+    // Unknown commodity/futures ticker — return null so callers treat as non-tradeable.
+    // Do NOT silently return 100; an unverified contract size on a real-money order is unsafe.
+    if(/=F$/.test(s) || s.length > 0) return null;
+    return null;
   }
   return 1;
 }
@@ -11052,11 +11064,22 @@ function _todayContractSize(o){
   var a=o&&o.asset, s=((o&&o.sym)||'').toUpperCase();
   if(a==='forex') return 100000;                 // 1 lot = 100,000 base units
   if(a==='commodity'){
-    if(/XAG/.test(s)) return 5000;               // silver   5,000 oz / lot
-    if(/XAU/.test(s)) return 100;                // gold       100 oz / lot
-    if(/(WTI|USOIL|UKOIL|BRENT|CL)/.test(s)) return 1000;     // crude  1,000 bbl / lot
-    if(/(NATGAS|NGAS)/.test(s) || /^NG/.test(s)) return 10000; // nat gas 10,000 MMBtu / lot
-    return 100;                                  // generic metal/commodity fallback
+    // Silver: Yahoo ticker SI=F or broker symbol XAGUSD
+    if(/XAG/.test(s) || s === 'SI=F' || s === 'SILVER') return 5000;  // 5,000 oz / lot
+    // Gold: Yahoo ticker GC=F or broker symbol XAUUSD
+    if(/XAU/.test(s) || s === 'GC=F' || s === 'GOLD') return 100;     // 100 oz / lot
+    // Crude oil: CL=F, WTI, USOIL, UKOIL, BRENT
+    if(/(WTI|USOIL|UKOIL|BRENT)/.test(s) || s === 'CL=F') return 1000;     // 1,000 bbl / lot
+    // Natural gas: NG=F, NGAS, NATGAS
+    if(/(NATGAS|NGAS)/.test(s) || s === 'NG=F' || /^NG/.test(s)) return 10000; // 10,000 MMBtu / lot
+    // Copper: HG=F or COPPER
+    if(s === 'COPPER' || s === 'HG=F' || /^HG/.test(s)) return 25000;  // 25,000 lbs / lot
+    // Platinum / Palladium (100 oz/lot on standard MT5 spot CFD)
+    if(/XPT/.test(s) || /PLATINUM/.test(s)) return 100;
+    if(/XPD/.test(s) || /PALLADIUM/.test(s)) return 100;
+    // Unknown commodity/futures ticker — return null so callers treat as non-tradeable.
+    // Do NOT silently return 100; an unverified contract size on a real-money order is unsafe.
+    return null;
   }
   return 1;                                      // crypto (coin), stock (share), index (unit / $1-pt)
 }
