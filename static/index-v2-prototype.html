@@ -14162,6 +14162,156 @@ function _getVolRegime(atr, tf){
   return             {regime:'Normal',   desc:'Stable conditions · good for signals',  color:'#5de8a0',              barPct:50};
 }
 
+/* ── Signals Clarity Header ────────────────────────────────────────
+   Builds a compact, display-only summary bar shown at the top of the
+   Signals feed.  Reads window._dvSignalUniverseRun (set by the scan
+   engine — never recomputes a scan).  Gracefully omits each section
+   when data is absent or unparseable.
+──────────────────────────────────────────────────────────────────── */
+function _sfBuildClarityHeader() {
+  var run = window._dvSignalUniverseRun;
+  // If no scan has run yet show a neutral hint and nothing else
+  if (!run) {
+    return '<div id="sfClarityHeader" style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.35);margin-bottom:14px;padding:9px 14px;border:1px dashed rgba(237,232,216,.1);border-radius:7px;">'
+      + 'Run a scan to see freshness, scope, and data-source health here.'
+      + '</div>';
+  }
+
+  /* ── 1. Scan time ── */
+  var scanTimeTxt = '';
+  try {
+    var ts = run.as_of_utc;
+    if (ts) {
+      var d = new Date(ts);
+      if (!isNaN(d.getTime())) {
+        var diffMs = Date.now() - d.getTime();
+        if (diffMs >= 0) {                        // never show negative / future
+          var diffSec = Math.floor(diffMs / 1000);
+          var relTxt;
+          if      (diffSec < 60)  relTxt = 'just now';
+          else if (diffSec < 120) relTxt = '1m ago';
+          else if (diffSec < 3600) relTxt = Math.floor(diffSec / 60) + 'm ago';
+          else if (diffSec < 7200) relTxt = '1h ago';
+          else                    relTxt = Math.floor(diffSec / 3600) + 'h ago';
+          scanTimeTxt = 'Scanned ' + relTxt;
+        }
+      }
+    }
+  } catch(e) { /* omit gracefully */ }
+
+  /* ── 2. Scope summary ── */
+  var scopeTxt = '';
+  try {
+    var scope = run.scan_scope;
+    if (Array.isArray(scope) && scope.length > 0) {
+      var totalSyms = 0;
+      var assetSet  = {};
+      scope.forEach(function(s) {
+        if (Array.isArray(s.tickers)) totalSyms += s.tickers.length;
+        if (s.asset_type) assetSet[s.asset_type] = 1;
+      });
+      var classes = Object.keys(assetSet);
+      var classStr = classes.length > 0
+        ? classes.map(function(c){ return c.charAt(0).toUpperCase()+c.slice(1); }).join(' · ')
+        : '';
+      if (totalSyms > 0) {
+        scopeTxt = totalSyms + ' symbol' + (totalSyms === 1 ? '' : 's');
+        if (classStr) scopeTxt += ' · ' + classStr;
+      }
+    }
+  } catch(e) { /* omit gracefully */ }
+
+  /* ── 3. Active-filter chips ── */
+  var filterChipsHtml = '';
+  try {
+    var f = _sfFilter || {};
+    var DEFAULTS = { asset:'all', dir:'all', status:'all', conf:'all', sort:'confidence', verified:false };
+    var chips = [];
+    // _condFilter (Market → Signals routing filter)
+    if (window._condFilter && window._condFilter.badge) {
+      chips.push({ label: window._condFilter.badge, color: window._condFilter.color || 'rgba(201,168,76,.9)' });
+    }
+    if (f.asset && f.asset !== 'all')  chips.push({ label: f.asset.toUpperCase(), color: 'rgba(237,232,216,.75)' });
+    if (f.dir   && f.dir   !== 'all')  chips.push({ label: f.dir.toUpperCase(), color: f.dir==='long'?'rgba(93,232,160,.85)':'rgba(232,112,110,.85)' });
+    if (f.status && f.status !== 'all') chips.push({ label: f.status.toUpperCase(), color: 'rgba(237,232,216,.65)' });
+    if (f.conf  && f.conf  !== 'all')  chips.push({ label: 'CONF ≥'+f.conf+'%', color: 'rgba(201,168,76,.85)' });
+    if (window._sfVerifiedOnly)        chips.push({ label: 'VERIFIED ONLY', color: 'rgba(93,232,160,.85)' });
+
+    var chipMarkup = chips.map(function(c){
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;'
+        + 'background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);'
+        + 'font-size:9px;font-weight:700;letter-spacing:.06em;color:'+c.color+';white-space:nowrap;">'
+        + c.label + '</span>';
+    }).join('');
+
+    // Always-visible Clear filters button
+    var clearBtn = '<button onclick="_sfClearAllFilters();" style="'
+      + 'background:transparent;border:1px solid rgba(255,255,255,.14);color:rgba(237,232,216,.45);'
+      + 'font-size:9px;font-weight:600;font-family:var(--mono);padding:2px 9px;border-radius:4px;'
+      + 'cursor:pointer;letter-spacing:.04em;white-space:nowrap;transition:opacity .15s;'
+      + '" onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">'
+      + 'Clear filters</button>';
+
+    filterChipsHtml = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+      + (chipMarkup || '<span style="font-size:9px;color:rgba(237,232,216,.3);font-family:var(--mono);">No active filters</span>')
+      + clearBtn
+      + '</div>';
+  } catch(e) { /* omit gracefully */ }
+
+  /* ── 4. Provider-health line ── */
+  var healthTxt = '';
+  try {
+    var ph = run.provider_health;
+    if (ph && typeof ph === 'object') {
+      var ready  = typeof ph.ready_count   === 'number' ? ph.ready_count   : null;
+      var failed = typeof ph.failed_count  === 'number' ? ph.failed_count  : null;
+      if (ready !== null) {
+        healthTxt = ready + ' signal' + (ready === 1 ? '' : 's');
+        if (failed !== null && failed > 0) {
+          healthTxt += ' · <span style="color:rgba(232,112,110,.75);">' + failed + ' source' + (failed===1?'':'s') + ' had errors</span>';
+        }
+      }
+    }
+  } catch(e) { /* omit gracefully */ }
+
+  /* ── Assemble ── */
+  var rows = [];
+  // Row 1: scan time (left) + scope (right)
+  if (scanTimeTxt || scopeTxt) {
+    var r1left  = scanTimeTxt ? '<span style="color:rgba(237,232,216,.7);">' + scanTimeTxt + '</span>' : '';
+    var r1right = scopeTxt    ? '<span style="color:rgba(237,232,216,.45);">' + scopeTxt + '</span>' : '';
+    var sep     = (r1left && r1right) ? '<span style="color:rgba(237,232,216,.2);margin:0 6px;">·</span>' : '';
+    rows.push('<div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;margin-bottom:7px;">' + r1left + sep + r1right + '</div>');
+  }
+  // Row 2: filter chips
+  if (filterChipsHtml) {
+    rows.push('<div style="margin-bottom:7px;">' + filterChipsHtml + '</div>');
+  }
+  // Row 3: provider health
+  if (healthTxt) {
+    rows.push('<div style="color:rgba(237,232,216,.4);">' + healthTxt + '</div>');
+  }
+
+  if (rows.length === 0) return '';
+
+  return '<div id="sfClarityHeader" style="'
+    + 'font-family:var(--mono);font-size:10px;line-height:1.5;'
+    + 'margin-bottom:14px;padding:10px 14px;'
+    + 'background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.09);border-radius:7px;">'
+    + rows.join('')
+    + '</div>';
+}
+
+/* Resets both _sfFilter and _condFilter then re-renders signals */
+function _sfClearAllFilters() {
+  _sfFilter = { asset:'all', dir:'all', status:'all', conf:'all', sort:'confidence', verified:false };
+  window._sfVerifiedOnly = false;
+  window._condFilter = null;
+  window._sfResultCache = null;
+  var el = document.getElementById('dashContent');
+  if (el) el.innerHTML = _sfRender();
+}
+
 function _sfRender(){
   /* ── Condition filter banner ── */
   let condFilterBanner = '';
@@ -14268,6 +14418,7 @@ function _sfRender(){
 
     <!-- sfSection: Top Signals -->
     <div id="sfSection-signals">
+    ${_sfBuildClarityHeader()}
     ${condFilterBanner}
     <!-- ① Top 10 Winning Opportunities -->
     <div class="opp-section-head">
