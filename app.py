@@ -16172,6 +16172,10 @@ def _load_watches_from_db():
                         "tp1_on":     getattr(r, "tp1_on",     False) or False,
                         "tp2_on":     getattr(r, "tp2_on",     False) or False,
                         "weekend_on": getattr(r, "weekend_on", False) or False,
+                        # A2 fix: entry_price / entry_atr required by BE and TP alert logic
+                        # in run_watch_job.  Persist across restarts by loading from DB.
+                        "entry_price": getattr(r, "entry_price", None),
+                        "entry_atr":   getattr(r, "entry_atr",   None),
                     }
                     loaded += 1
         print(f"[watch] Loaded {loaded} watches from DB")
