@@ -685,7 +685,16 @@ def _sanitize(obj):
     return obj
 
 app = Flask(__name__, static_folder="static")
-CORS(app, supports_credentials=True)
+# S-4: do NOT use wildcard CORS with credentials — that lets ANY website make
+# authenticated requests (and place trades) on a logged-in user's behalf. Restrict
+# to the prod origin + localhost dev; operators can add origins (e.g. staging or a
+# custom domain) via the CORS_ALLOWED_ORIGINS env var (comma-separated) without a code change.
+_CORS_ALLOWED_ORIGINS = [
+    "https://dot-verse.up.railway.app",
+    "http://localhost:5000", "http://localhost:3000",
+    "http://127.0.0.1:5000", "http://127.0.0.1:3000",
+] + [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+CORS(app, supports_credentials=True, origins=_CORS_ALLOWED_ORIGINS)
 
 # ─── SSE BROADCAST INFRASTRUCTURE ─────────────────────────────
 # Each subscribed client gets its own thread-safe queue.
