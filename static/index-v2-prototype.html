@@ -23547,7 +23547,30 @@ function szLadderRender() {
         <span>Best case (all TP3): <strong style="color:rgba(93,232,160,.9);">+$${bestCaseAllTp3.toLocaleString(undefined,{maximumFractionDigits:0})}</strong></span>
       </div>
     </div>`;
-	  })();
+	  })() +
+  // ── MAX TOTAL LOSS safety card — multi-leg basket, shown only in multi mode ──
+  // This is the single most important pre-trade safety number: if every leg hits
+  // its stop, how much dollar-loss and what % of account does that represent?
+  // Formula: sum of each leg's moneyAtRisk (acct * riskPct/100); shown only when
+  // there are 2+ rows and we have a valid entry+SL so the numbers are real.
+  (() => {
+    if (_isSingle || !acct || totalRisk <= 0 || _rowsToRender.length < 2) return '';
+    const pct = totalRisk / acct * 100;
+    const n = _rowsToRender.length;
+    // Severity colour for the % badge
+    let pctCol = pct <= 3 ? 'rgba(93,232,160,.95)' : pct <= 6 ? 'rgba(201,168,76,.95)' : pct <= 10 ? 'rgba(232,165,80,.95)' : 'rgba(232,112,110,.95)';
+    return `<div id="szMaxTotalLossCard" data-sz-worst-case="true" style="margin-top:8px;padding:13px 16px;background:rgba(232,112,110,.09);border:2px solid rgba(232,112,110,.45);border-radius:8px;">
+      <div style="font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:.9px;color:rgba(232,112,110,.65);text-transform:uppercase;margin-bottom:5px;">Worst case — if ALL ${n} legs stop out</div>
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div id="szMaxTotalLossDollar" style="font-family:var(--mono);font-size:26px;font-weight:700;color:#e8706e;line-height:1;">−$${totalRisk.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+          <div style="font-family:var(--mono);font-size:9.5px;color:rgba(237,232,216,.5);margin-top:3px;">max total loss · all ${n} stops hit</div>
+        </div>
+        <div id="szMaxTotalLossPctBadge" style="font-family:var(--mono);font-size:18px;font-weight:700;color:${pctCol};background:rgba(232,112,110,.07);border:1px solid rgba(232,112,110,.25);border-radius:5px;padding:4px 10px;line-height:1.3;">${pct.toFixed(2)}%<div style="font-size:8px;color:rgba(237,232,216,.45);font-weight:400;margin-top:1px;">of account</div></div>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42);margin-top:7px;line-height:1.5;">= sum of each leg's stop-loss risk · account $${acct.toLocaleString(undefined,{maximumFractionDigits:0})} · ${n} MT5 orders</div>
+    </div>`;
+  })();
 	  // Keep the main Trade Amount field honest in ladder mode. The rows are the
 	  // source of truth there, so the top amount must equal the SUM of ladder cash-in
 	  // amounts after risk presets, manual row edits, and Flow Apply.
@@ -23893,10 +23916,13 @@ function _szConfirmTrade(onConfirm){
       +'<div style="font-size:9px;color:rgba(237,232,216,.42);letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px;">Orders DotVerse will send to MT5</div>'
       +legRows
     +'</div>':'')
-    +'<div style="background:rgba(232,112,110,.08);border:1px solid rgba(232,112,110,.3);border-radius:9px;padding:12px 14px;margin-bottom:13px;">'
-      +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">Planned stop risk</div>'
-      +'<div style="font-family:var(--mono);font-size:24px;font-weight:700;color:#e8706e;line-height:1;">'+money(-totRisk)+'</div>'
-      +'<div style="font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.6);margin-top:6px;line-height:1.5;">That is '+(acct>0?(totRisk/acct*100).toFixed(2):'0')+'% of your account under the planned stop. Your broker stop is the protection point; fast gaps, rejected fills, or severe slippage can make the final loss differ.</div>'
+    +'<div id="szCfMaxLossCard" data-sz-worst-case="true" style="background:rgba(232,112,110,.09);border:2px solid rgba(232,112,110,.45);border-radius:9px;padding:12px 14px;margin-bottom:13px;">'
+      +'<div style="font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px;color:rgba(232,112,110,.65);">'+(nT>1?'Max total loss — if ALL '+nT+' legs stop out':'Planned stop risk')+'</div>'
+      +'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">'
+        +'<div id="szCfMaxLossDollar" style="font-family:var(--mono);font-size:26px;font-weight:700;color:#e8706e;line-height:1;">'+money(-totRisk)+'</div>'
+        +'<div id="szCfMaxLossPct" style="font-family:var(--mono);font-size:17px;font-weight:700;color:#e8706e;opacity:.85;">'+(acct>0?(totRisk/acct*100).toFixed(2):'0')+'%<span style="font-size:9px;font-weight:400;color:rgba(237,232,216,.45);margin-left:3px;">of account</span></div>'
+      +'</div>'
+      +'<div style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.55);margin-top:6px;line-height:1.5;">'+(nT>1?'All '+nT+' MT5 stops hit simultaneously — worst case total. ':'')+'Your broker stop is the protection point; fast gaps, rejected fills, or severe slippage can make the final loss differ.</div>'
     +'</div>'
     +_szCfAccountBannerHtml
     +'<div style="display:flex;gap:10px;">'
