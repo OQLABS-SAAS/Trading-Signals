@@ -14664,38 +14664,47 @@ async function scRunScan(){
   _scShowBtProgress(tickers.length);
 
   var data;
-  if(['all','buy','sell'].includes(af)){
-    // Grouped dispatch: send each asset class separately so normalise_ticker works correctly
-    var _grps=[
-      {tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD'],asset_type:'crypto'},
-      {tickers:['AAPL','NVDA','TSLA','SPY'],         asset_type:'stock'},
-      {tickers:['EURUSD','GBPUSD'],                  asset_type:'forex'},
-      {tickers:['XAUUSD','USOIL'],                   asset_type:'commodity'}
-    ];
-    var _grpRes=await Promise.all(_grps.map(function(g){
-      return dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({tickers:g.tickers,asset_type:g.asset_type,timeframe:tf})});
-    }));
-    var _merged=_grpRes.flatMap(function(d){return(d&&d.results)||[];});
-    data={results:_merged};
-  } else {
-    data=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tickers,asset_type:atMap[af]||'crypto',timeframe:tf})});
-  }
+  try {
+    if(['all','buy','sell'].includes(af)){
+      // Grouped dispatch: send each asset class separately so normalise_ticker works correctly
+      var _grps=[
+        {tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD'],asset_type:'crypto'},
+        {tickers:['AAPL','NVDA','TSLA','SPY'],         asset_type:'stock'},
+        {tickers:['EURUSD','GBPUSD'],                  asset_type:'forex'},
+        {tickers:['XAUUSD','USOIL'],                   asset_type:'commodity'}
+      ];
+      var _grpRes=await Promise.all(_grps.map(function(g){
+        return dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({tickers:g.tickers,asset_type:g.asset_type,timeframe:tf})});
+      }));
+      var _merged=_grpRes.flatMap(function(d){return(d&&d.results)||[];});
+      data={results:_merged};
+    } else {
+      data=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({tickers,asset_type:atMap[af]||'crypto',timeframe:tf})});
+    }
 
-  // Complete progress bar then render results after brief pause so user sees 100%
-  _scCompleteBtProgress();
-  await new Promise(function(r){setTimeout(r,350);});
+    // Complete progress bar then render results after brief pause so user sees 100%
+    _scCompleteBtProgress();
+    await new Promise(function(r){setTimeout(r,350);});
 
-  if(btn){btn.disabled=false;btn.innerHTML=ICON+' Run Scan';}
-  const sub=document.querySelector('#sfSection-scanner .opp-section-sub');
-  if(data&&Array.isArray(data.results)&&data.results.length){
-    window._scLiveData=data.results;
-    _scRenderLive(data.results,tf);
-    if(sub){const t=new Date();sub.textContent='Scanned: '+t.toLocaleTimeString()+' · '+data.results.length+' instruments · DotVerse 65% gate';}
-  } else {
-    _scApplyFilters();
-    if(sub) sub.textContent='Live scan unavailable · showing cached data';
+    const sub=document.querySelector('#sfSection-scanner .opp-section-sub');
+    if(data&&Array.isArray(data.results)&&data.results.length){
+      window._scLiveData=data.results;
+      _scRenderLive(data.results,tf);
+      if(sub){const t=new Date();sub.textContent='Scanned: '+t.toLocaleTimeString()+' · '+data.results.length+' instruments · DotVerse 65% gate';}
+    } else {
+      _scApplyFilters();
+      if(sub) sub.textContent='Live scan unavailable · showing cached data';
+    }
+  } catch(e) {
+    _scCompleteBtProgress();
+    const sub=document.querySelector('#sfSection-scanner .opp-section-sub');
+    if(sub) sub.textContent='Scan failed — tap to retry';
+    const body=document.getElementById('scTableBody');
+    if(body) body.innerHTML='<tr><td colspan="9" style="text-align:center;padding:20px;font-size:12px;font-family:var(--mono);"><span style="color:var(--red);">Scan failed.</span> <a href="#" onclick="event.preventDefault();scRunScan();" style="color:var(--crys);text-decoration:underline;">Tap to retry</a></td></tr>';
+  } finally {
+    if(btn){btn.disabled=false;btn.innerHTML=ICON+' Run Scan';}
   }
 }
 function _scRenderLive(results,tf){
@@ -17888,13 +17897,23 @@ function rmPollOptimise(){
     }).catch(()=>{el.innerHTML='<span style="color:var(--mut);">Log in to check live result.</span>';});
 }
 function rmRunFullCheck(){
-  rmRunVar(); rmRunStress();
   const dot=document.getElementById('rmHealthDot');
   const title=document.getElementById('rmHealthTitle');
   const sub=document.getElementById('rmHealthSub');
   if(dot){dot.style.background='rgba(237,232,216,.2)';dot.style.borderColor='var(--crys)';dot.textContent='…';}
   if(title) title.textContent='Running VaR + Stress Test…';
   if(sub) sub.textContent='Results will update the panels below.';
+  Promise.all([rmRunVar(), rmRunStress()]).then(function(){
+    const t=new Date();
+    const ts=t.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+    if(dot){dot.style.background='rgba(93,232,160,.18)';dot.style.borderColor='var(--grn)';dot.textContent='✓';}
+    if(title) title.textContent='Safety check complete';
+    if(sub) sub.textContent='VaR and stress test finished at '+ts+'. Review the panels below.';
+  }).catch(function(){
+    if(dot){dot.style.background='rgba(232,112,110,.15)';dot.style.borderColor='var(--red)';dot.textContent='!';}
+    if(title) title.textContent='Safety check incomplete';
+    if(sub) sub.textContent='One or more checks failed. See panel errors below.';
+  });
 }
 
 function rmStressCalc(idx, shock, notional){
@@ -17908,6 +17927,7 @@ function rmStressCalc(idx, shock, notional){
   }
   // recalculate total
   let total=0;
+  // NOTE: these are illustrative example notionals, not the user's real positions
   const notionals=[26804,10816,10698,13280,97400,3571];
   for(let i=0;i<6;i++){
     const sl=document.getElementById('stress_slider_'+i);
@@ -17917,6 +17937,15 @@ function rmStressCalc(idx, shock, notional){
   if(tot){
     tot.textContent=(total<0?'−$':'$')+Math.abs(Math.round(total)).toLocaleString();
     tot.style.color=total<0?'var(--red)':'var(--grn)';
+    // Show disclaimer so the user is not misled by the hardcoded example portfolio
+    let lbl=document.getElementById('rmStressTotalDisclaimer');
+    if(!lbl){
+      lbl=document.createElement('div');
+      lbl.id='rmStressTotalDisclaimer';
+      lbl.style.cssText='margin-top:6px;font-size:10px;font-family:var(--mono);color:rgba(201,168,76,.75);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:5px;padding:4px 8px;display:inline-block;';
+      lbl.textContent='Illustrative example portfolio — not your live positions';
+      tot.parentNode.insertBefore(lbl, tot.nextSibling);
+    }
   }
 }
 
@@ -17926,6 +17955,7 @@ function rmPresetShock(preset){
     severe:[-30,-30,-25,-20,-10,-40],
     crash: [-50,-50,-45,-35,-15,-60],
   };
+  // NOTE: these are illustrative example notionals, not the user's real positions
   const notionals=[26804,10816,10698,13280,97400,3571];
   const vals=shocks[preset]||shocks.mild;
   vals.forEach((s,i)=>{
