@@ -342,10 +342,29 @@ def _build_harness() -> bool:
         "var _todayLeverageReal = false;\n"
         "function _szBrokerLeverageValue(){ return 100; }\n"
     )
-    # chunk1: _szNormalizeAssetType … closing } of _todaySizeTrade (lines 10944–11194)
-    chunk1 = "".join(lines[10943:11194])
-    # chunk2: window._forexUsdRates = … closing } of _forexUsdRate (lines 21324–21348)
-    chunk2 = "".join(lines[21323:21348])
+    # Extract by function NAME (brace-balanced), not hardcoded line numbers, so an
+    # unrelated edit elsewhere in the HTML can't shift the slice and break the harness.
+    src = "".join(lines)
+    def _through_fn(start_marker, end_fn):
+        si = src.find(start_marker)
+        fi = src.find("function " + end_fn, si if si >= 0 else 0)
+        if si < 0 or fi < 0:
+            raise RuntimeError("harness: marker not found for " + end_fn)
+        depth = 0; started = False; j = fi
+        while j < len(src):
+            ch = src[j]
+            if ch == "{":
+                depth += 1; started = True
+            elif ch == "}":
+                depth -= 1
+                if started and depth == 0:
+                    return src[si:j + 1]
+            j += 1
+        raise RuntimeError("harness: unbalanced braces for " + end_fn)
+    # chunk1: _szNormalizeAssetType … through the close of _todaySizeTrade
+    chunk1 = _through_fn("function _szNormalizeAssetType(", "_todaySizeTrade")
+    # chunk2: the _forexUsdRate function (rate cache already defined in prefix)
+    chunk2 = _through_fn("function _forexUsdRate(", "_forexUsdRate")
     harness = prefix + chunk1 + "\n" + chunk2
     _HARNESS.write_text(harness)
     return True

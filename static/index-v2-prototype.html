@@ -16186,9 +16186,10 @@ async function _mktUpdateLiveData(){
            p>=100?p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):
            p>=1?p.toFixed(4):p.toPrecision(4);
   }
+  function _mktShowPriceError(){ try{ var box=document.getElementById('mktCondBox'); if(box){ box.style.cursor='pointer'; box.onclick=function(){ _mktUpdateLiveData(); }; box.innerHTML='<span style="color:#e8706e;font-family:var(--mono);font-size:12px;font-weight:600;">Market data unavailable</span> <span style="color:rgba(237,232,216,.6);font-family:var(--mono);font-size:11px;">— tap to retry</span>'; } }catch(_e){} }
   try{
     const data=await dvFetch('/api/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:yfTickers})});
-    if(!data) return;
+    if(!data){ _mktShowPriceError(); return; }
     window._mktLastLiveData=data;
     var liveState=_mktLiveCondition(data, TM);
     _mktUpdateConditionChip(liveState);
@@ -16260,7 +16261,7 @@ async function _mktUpdateLiveData(){
         heatContainer.innerHTML=cells||'<div style="grid-column:1/-1;text-align:center;padding:16px;color:rgba(237,232,216,.3);font-size:11px;">No heatmap data available</div>';
       }
     }
-  }catch(e){}
+  }catch(e){ _mktShowPriceError(); }
   // Fetch live economic calendar — ALWAYS replaces, no hardcoded fallback
   try{
     const cal=await dvFetch('/api/econ-calendar');
