@@ -18324,12 +18324,13 @@ def _remember_verdict_job(verdict_key, job_id):
 
 
 @app.route("/api/verdict/status", methods=["GET"])
+@require_admin
 def verdict_status():
-    """Public diagnostic — no auth required.
+    """Admin-only diagnostic.
 
-    Reports whether the worker process is actually alive and how deep the queue
-    is. This is the single curl I want to be able to run to know "can verdict
-    jobs run right now or not".
+    Was previously public and leaked provider-key status, Python version, and
+    RQ worker/queue internals to logged-out users (P0-1). Now admin-gated.
+    Reports whether the worker process is actually alive and how deep the queue is.
     """
     import sys
     workers_alive = 0
