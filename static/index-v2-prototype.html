@@ -13586,7 +13586,23 @@ async function _sfFetchSignals(){
   /* ── Phase 1: Scan for live signals ── */
   // Always use getElementById here — sfBtFill/sfBtLbl are now outside sfOppsList
   // and therefore survive any list.innerHTML replacement below.
-  _sfSetProgress(null, null, 5, 'Scanning markets for live signals — takes 20–30s…');
+  _sfSetProgress(null, null, 5, 'Finding live setups across all markets…');
+  // Always-visible elapsed ticker so the scan never looks frozen on ANY path (fast
+  // consolidated OR slow fan-out). Self-terminates when a real phase/progress message
+  // replaces the label, or after 60s. This is the beginner's #1 trust moment.
+  (function(){
+    var _t0 = Date.now(); var _lastSet = '';
+    if(window._sfScanTicker){ clearInterval(window._sfScanTicker); }
+    window._sfScanTicker = setInterval(function(){
+      var el = document.getElementById('sfBtLbl');
+      if(!el){ return; }
+      if(_lastSet && el.textContent !== _lastSet){ clearInterval(window._sfScanTicker); window._sfScanTicker = null; return; }
+      var s = Math.round((Date.now() - _t0)/1000);
+      if(s > 60){ clearInterval(window._sfScanTicker); window._sfScanTicker = null; return; }
+      _lastSet = 'Finding live setups across all markets… ' + s + 's';
+      el.textContent = _lastSet;
+    }, 700);
+  })();
   if(list) list.innerHTML = '<div style="padding:36px 20px;text-align:center">'
     + '<div style="width:32px;height:32px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 14px"></div>'
     + '<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Running DotVerse analysis across the shared scanner universe…</div>'
