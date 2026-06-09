@@ -4188,6 +4188,12 @@ def detect_smc_structures(df):
         lo  = df["low"].values
         cl  = df["close"].values
         op  = df["open"].values
+        # ── Anti-repaint: drop the live, still-forming candle so structure is read
+        # ONLY from confirmed (closed) bars. Without this, an unconfirmed FVG/
+        # displacement/liquidity/CHoCH on the current bar can spike confidence and
+        # then vanish on the next tick — making a SELL look valid into an up-move.
+        if len(cl) >= 21:
+            hi, lo, cl, op = hi[:-1], lo[:-1], cl[:-1], op[:-1]
         n   = len(hi)
 
         # ── ATR for displacement threshold ─────────────────────────────────
@@ -4496,9 +4502,17 @@ def get_analysis(ticker, asset_type, ind, timeframe, tv=None, mtf=None, user_id=
     _adx_data     = ind.get("adx") or {}
     _adx_strength = _adx_data.get("trend_strength", "UNKNOWN")
     if _adx_strength == "STRONG":
-        # Strong trend — confirms whichever direction the other indicators show
-        bullish_count += 1 if bullish_count >= bearish_count else 0
-        bearish_count += 1 if bearish_count > bullish_count else 0
+        # ADX is non-directional — it can only CONFIRM an existing directional lead,
+        # never create one. Reinforce whichever side the other indicators already
+        # favour; on a true tie there is no direction to confirm, so add neutral.
+        # (Previously a tie defaulted bullish — that manufactured BUYs in downtrends
+        # and failed to let a SELL stand when price was actually falling.)
+        if bullish_count > bearish_count:
+            bullish_count += 1
+        elif bearish_count > bullish_count:
+            bearish_count += 1
+        else:
+            neutral_count += 1
     elif _adx_strength == "MODERATE":
         neutral_count += 1   # moderate trend — no strong confirmation
     else:
