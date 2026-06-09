@@ -288,10 +288,16 @@ class TestFrontendGBPJPYPipValPerLot:
             "_forexUsdRate JPY case is missing or changed"
         )
 
-    def test_forexUsdRate_default_is_1(self):
-        """_forexUsdRate default case must return 1 (no unknown-currency contamination)."""
-        assert "default: return 1" in HTML, (
-            "_forexUsdRate default case 'return 1' not found"
+    def test_forexUsdRate_default_is_null_not_1(self):
+        """_forexUsdRate default case must return null for exotic/unknown quote currencies.
+
+        The old 'default: return 1' silently used rate=1 for ZAR, TRY, NOK etc,
+        causing sizing errors of 10–32×.  The safe behavior is null so the szCalc
+        exotic-FX guard can refuse to size instead of placing a wrong order.
+        """
+        assert "default: return null" in HTML, (
+            "_forexUsdRate default case must be 'return null' (not 'return 1') — "
+            "unknown exotic quote currencies must refuse to size, not silently use rate=1"
         )
 
     def test_gbpjpy_normalized_counter_is_jpy_not_yequalsx(self):

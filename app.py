@@ -7552,7 +7552,12 @@ def _forex_usd_per_pip_per_lot(ticker: str, pip_size: float, entry: float) -> fl
         return (pip_size / entry) * contract_size
 
     # USD-quote or cross pair: look up usd_per_quote from the fallback table.
-    usd_per_quote = _FOREX_QUOTE_TO_USD.get(quote_ccy, 1.0)
+    # Do NOT default to 1.0 for unknown quote currencies — that silently produces
+    # sizing errors of 10–32× for exotic pairs (ZAR, TRY, NOK, SEK, DKK, HKD …).
+    # Return None so _calc_auto_lot can refuse to size rather than place a wrong order.
+    if quote_ccy not in _FOREX_QUOTE_TO_USD:
+        return None  # caller must treat as non-tradeable
+    usd_per_quote = _FOREX_QUOTE_TO_USD[quote_ccy]
     return pip_size * contract_size * usd_per_quote
 
 
@@ -7574,6 +7579,11 @@ def _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=1.0, ticker=
         pip_size     = 0.01 if "JPY" in str(ticker).upper() else 0.0001
         pips         = sl_dist / pip_size
         pip_val_usd  = _forex_usd_per_pip_per_lot(ticker, pip_size, entry)
+        if pip_val_usd is None:
+            # Unknown quote currency — refuse to size rather than use a wrong rate.
+            # _forex_usd_per_pip_per_lot returns None for exotic pairs outside the
+            # 11-currency fallback table (ZAR, TRY, NOK, SEK, DKK, HKD, SGD …).
+            return 0.0
         lots = risk_amt / max(pips * pip_val_usd, 1e-8)
     else:
         # Commodities, indices, stocks, crypto.

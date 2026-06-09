@@ -11020,7 +11020,12 @@ function _szNativeLotsFromUnits(units, assetType, sym){
   units = parseFloat(units) || 0;
   assetType = _szNormalizeAssetType(assetType);
   if(assetType === 'stock' || assetType === 'crypto') return units;
-  return units / (_szBrokerLotUnits(assetType, sym) || 1);
+  var cs = _szBrokerLotUnits(assetType, sym);
+  // cs===null means unknown commodity contract size — return 0 so the caller
+  // treats this as non-tradeable rather than silently using contract_size=1
+  // (which would oversize a real-money order by up to 5,000×).
+  if(cs === null || cs === undefined) return 0;
+  return units / cs;
 }
 function _szFormatNativeSize(units, assetType, sym){
   units = parseFloat(units) || 0;
@@ -11085,8 +11090,13 @@ function _todayContractSize(o){
   return 1;                                      // crypto (coin), stock (share), index (unit / $1-pt)
 }
 // Broker minimum / step expressed in INSTRUMENT UNITS = lots × contract size.
+// When cs is null (unknown commodity) return nullCs:true so _todaySizeTrade can
+// flag the item as non-tradeable rather than computing NaN/Infinity lots.
 function _todayLotUnits(o){
   var sp=_TODAY_LOTSPEC[o.asset]||{lotMin:0.01,lotStep:0.01}, cs=_todayContractSize(o);
+  if(cs===null || cs===undefined){
+    return {cs:null, stepUnits:0, minUnits:0, nullCs:true};
+  }
   return {cs:cs, stepUnits:sp.lotStep*cs, minUnits:sp.lotMin*cs};
 }
 // Back-compat shim: a few call sites still read _TODAY_LOT[asset].{step,min} in units.
@@ -11134,6 +11144,18 @@ function _todaySizeTrade(o, acct, riskPct){
   var riskD=(acct||0)*((riskPct||1)/100);       // USD the trader risks
   var unitsRaw = (rm.riskPerUnit>0) ? riskD/rm.riskPerUnit : 0; // instrument units whose FINAL loss incl costs fits riskD
   var LOT = _todayLotUnits(o);             // {cs, stepUnits, minUnits} — broker step/min in units
+  // ── SAFETY GUARD: unknown commodity contract size ──────────────────────────
+  // When LOT.nullCs is true the contract size is unknown (null).  Computing
+  // lots = units / null = Infinity and tradeable = units>=0 = true would allow
+  // the trade to be queued and sent to MT5 at a catastrophically wrong size.
+  // Return early with tradeable:false and a clear reason instead.
+  if(LOT.nullCs){
+    return { units:0, lots:0, contractSize:null, notional:0, tradeable:false,
+             minLot:0, riskPctReq:(riskPct||1), netLoss:0, netTP1:0,
+             grossRisk:0, rr:0, leveraged:true, lev:1, levReal:false, marginReq:0,
+             riskPctOfAcct:0, notionalPctOfAcct:0, spreadD:0, feeD:0, slipD:0, costD:0,
+             unitLabel:'—', sizeReason:'contract size unknown — cannot size safely' };
+  }
   // Round DOWN to the broker lot step (in units) so actual risk never EXCEEDS the target.
   // Epsilon guards floating-point boundaries (e.g. 999.9999 that should be 1000).
   var units = LOT.stepUnits>0 ? Math.floor(unitsRaw/LOT.stepUnits + 1e-9)*LOT.stepUnits : unitsRaw;
@@ -21306,6 +21328,8 @@ function _forexUsdRate(counter){
   // Returns the multiplier to convert pip value from counter currency to USD.
   // For counter=JPY: 1 pip = 0.01 JPY * 100k = 1000 JPY. USD value = 1000 / USDJPY
   // For counter=GBP: 1 pip = 0.0001 GBP * 100k = 10 GBP. USD value = 10 * GBPUSD
+  // Returns null for unknown quote currencies (ZAR, TRY, NOK, SEK, DKK, HKD, SGD …)
+  // so callers can refuse to size rather than silently using rate=1 (10–32× off).
   var r=window._forexUsdRates||{};
   switch(counter){
     case 'USD': return 1;
@@ -21319,7 +21343,7 @@ function _forexUsdRate(counter){
     case 'INR': return r.USDINR ? 1/r.USDINR : 1/83;
     case 'CNH': return r.USDCNH ? 1/r.USDCNH : 1/7.2;
     case 'MXN': return r.USDMXN ? 1/r.USDMXN : 1/17;
-    default: return 1;
+    default: return null; // unknown quote currency — caller must refuse to size
   }
 }
 async function _refreshForexRates(){
@@ -24302,6 +24326,43 @@ function szCalc(){
   const lev=marginLev;
   let posSize, posVal, lots, lotsDisplay, margin;
 
+  // ── SAFETY GUARD: unknown commodity contract size ─────────────────────────
+  // If contractSize is null the broker lot units are unknown for this commodity.
+  // Sizing anyway (using contract_size=1 via the old '|| 1' fallback) would
+  // send an order up to 5,000× too large on a real-money account.
+  // Refuse here with a clear message; known instruments pass through unchanged.
+  if(assetType==='commodity' && (contractSize===null || contractSize===undefined)){
+    _s('szSonarSize','—'); _s('szSonarMargin','—'); _s('szSonarRR','—');
+    _s('szStopLine','Contract size unknown for '+ticker+' — cannot size this instrument safely. Add it to the contract-size map before trading.');
+    const rb=document.getElementById('szRRBar'); if(rb)rb.style.display='none';
+    const tt=document.getElementById('szTPTable'); if(tt)tt.style.display='none';
+    window._szLastCalc = { account:acct, posSize:0, lots:0, lotsDisplay:'—', assetType, moneyAtRisk:0, tradeAmount:0, cashIn:0, margin:0, riskPct:0, mode:'single' };
+    if(typeof szLadderRender==='function'&&document.getElementById('szLadderRows')){ try{szLadderRender();}catch(e){} }
+    updateFlowBadge();
+    return;
+  }
+
+  // ── SAFETY GUARD: exotic forex quote currency (unknown conversion rate) ───
+  // Forex pairs whose quote currency is not in the 11-currency table would fall
+  // back to rate=1, producing sizing that is wildly wrong for currencies like
+  // ZAR (~18×), TRY (~32×), NOK (~10×) etc.  Refuse rather than silently err.
+  if(assetType==='forex'){
+    var _normT2=ticker.replace(/=X$/i,'').replace(/[\/\-]/g,'').toUpperCase();
+    var _q2=_normT2.length>=6?_normT2.slice(3,6):_normT2.slice(3);
+    var _knownQuotes=['USD','JPY','GBP','EUR','CHF','AUD','NZD','CAD','INR','CNH','MXN'];
+    var _isUSDBase2=_normT2.startsWith('USD');
+    if(!_isUSDBase2 && _q2 && _knownQuotes.indexOf(_q2)<0){
+      _s('szSonarSize','—'); _s('szSonarMargin','—'); _s('szSonarRR','—');
+      _s('szStopLine','Quote currency '+_q2+' conversion rate unknown — cannot size '+ticker+' safely. USD-base pairs (USD'+_q2+') use live price and are not affected.');
+      const rb=document.getElementById('szRRBar'); if(rb)rb.style.display='none';
+      const tt=document.getElementById('szTPTable'); if(tt)tt.style.display='none';
+      window._szLastCalc = { account:acct, posSize:0, lots:0, lotsDisplay:'—', assetType, moneyAtRisk:0, tradeAmount:0, cashIn:0, margin:0, riskPct:0, mode:'single' };
+      if(typeof szLadderRender==='function'&&document.getElementById('szLadderRows')){ try{szLadderRender();}catch(e){} }
+      updateFlowBadge();
+      return;
+    }
+  }
+
   if(assetType==='forex'){
     const isUSDBase=ticker.startsWith('USD')&&!ticker.endsWith('USD');
     const isUSDQuote=ticker.endsWith('USD');
@@ -24334,6 +24395,9 @@ function szCalc(){
     lots=_szNativeLotsFromUnits(posSize, assetType, ticker);
     lotsDisplay=_szFormatNativeSize(posSize, assetType, ticker);
   } else {
+    // commodity / index / stock
+    // posSize is in instrument units; _szNativeLotsFromUnits divides by contractSize.
+    // Unknown commodity bailed out above, so contractSize is non-null here.
     posSize=moneyAtRisk/(slDist||1);
     posVal=posSize*(assetPrice||entry);
     margin=posVal/(marginLev||1);
