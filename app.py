@@ -14645,6 +14645,7 @@ def backtest_route():
                 ).dropna()
             if not df_bt.empty and len(df_bt) >= 15:
                 prices_hist  = [float(v) for v in df_bt["Close"].squeeze().dropna()]
+                opens_hist   = [float(v) for v in ((df_bt["Open"] if "Open" in df_bt.columns else df_bt["Close"]).squeeze().dropna())]
                 highs_hist   = [float(v) for v in df_bt["High"].squeeze().dropna()]
                 lows_hist    = [float(v) for v in df_bt["Low"].squeeze().dropna()]
                 dates_hist   = [str(d.date()) for d in df_bt.index]
@@ -14717,6 +14718,7 @@ def backtest_route():
                 ).dropna()
             if not df_bt.empty and len(df_bt) >= 15:
                 prices_hist  = [float(v) for v in df_bt["Close"].squeeze().dropna()]
+                opens_hist   = [float(v) for v in ((df_bt["Open"] if "Open" in df_bt.columns else df_bt["Close"]).squeeze().dropna())]
                 highs_hist   = [float(v) for v in df_bt["High"].squeeze().dropna()]
                 lows_hist    = [float(v) for v in df_bt["Low"].squeeze().dropna()]
                 dates_hist   = [str(d.date()) for d in df_bt.index]
@@ -14747,6 +14749,9 @@ def backtest_route():
     # Ensure all arrays are the same length (trim to shortest)
     _n = min(len(prices_hist), len(highs_hist), len(lows_hist), len(volumes_hist))
     prices_hist  = prices_hist[:_n]
+    # CR-7: keep opens_hist index-aligned with the other trimmed arrays (or fall
+    # back to the trimmed closes when this source had no Open column).
+    opens_hist   = (opens_hist[:_n] if "opens_hist" in locals() else prices_hist[:])
     highs_hist   = highs_hist[:_n]
     lows_hist    = lows_hist[:_n]
     volumes_hist = volumes_hist[:_n]
@@ -15041,6 +15046,10 @@ def backtest_route():
     _warmup       = 50 if timeframe.lower() in _short_tf_set else 200
     scan_start    = max(_warmup, len(prices_hist) - 2500)
 
+    # CR-7: ensure an opens array exists even on the close-only fallback path,
+    # so next-bar-open entry never throws.
+    if "opens_hist" not in locals():
+        opens_hist = prices_hist
     trades = []
     i = scan_start
     while i < len(prices_hist) - 1:  # -1 because we need at least bar i+1 for forward scan
@@ -15056,8 +15065,13 @@ def backtest_route():
         if not is_entry:
             i += 1; continue
 
-        # Entry price = close of the signal bar
-        hist_entry = prices_hist[i]
+        # Entry price = NEXT bar's open (CR-7 fix). The signal is only known after
+        # bar i CLOSES, so the earliest realistic fill is bar i+1's open. Filling at
+        # the signal bar's own close is look-ahead that overstates the win rate.
+        entry_idx = i + 1
+        if entry_idx >= len(prices_hist):
+            i += 1; continue
+        hist_entry = opens_hist[entry_idx] if (entry_idx < len(opens_hist) and opens_hist[entry_idx] > 0) else prices_hist[entry_idx]
         if hist_entry <= 0:
             i += 1; continue
 
@@ -15078,35 +15092,40 @@ def backtest_route():
         # Scan forward bars for SL / TP hit using HIGH and LOW (not just close)
         # This matches TradingView's intrabar detection — if the wick touched the
         # level, TV counts it as hit even if close didn't reach it.
-        max_hold = min(100, len(prices_hist) - i - 1)
+        # Scan from the ENTRY bar (i+1) forward. We entered at i+1's open, so that
+        # bar's own high/low can resolve the trade — but bar i's data can NEVER
+        # decide it. exit_bar is measured from the signal bar i so the advancement
+        # logic below (i += exit_bar + 1) is unchanged.
+        max_hold = min(100, len(prices_hist) - entry_idx)
         outcome  = None
         r_mult   = 0.0
         exit_bar = max_hold
-        for j in range(1, max_hold + 1):
-            bar_high = highs_hist[i + j] if (i + j) < len(highs_hist) else prices_hist[i + j]
-            bar_low  = lows_hist[i + j]  if (i + j) < len(lows_hist)  else prices_hist[i + j]
+        for j in range(0, max_hold):
+            b = entry_idx + j
+            bar_high = highs_hist[b] if b < len(highs_hist) else prices_hist[b]
+            bar_low  = lows_hist[b]  if b < len(lows_hist)  else prices_hist[b]
             if is_long:
                 # SL check uses bar low (worst case within bar)
                 if bar_low <= h_sl:
-                    outcome = "loss"; r_mult = -1.0; exit_bar = j; break
+                    outcome = "loss"; r_mult = -1.0; exit_bar = j + 1; break
                 # TP checks use bar high (best case within bar) — highest TP first
                 elif h_tp3 and bar_high >= h_tp3:
-                    outcome = "win_tp3"; r_mult = r3 or r1; exit_bar = j; break
+                    outcome = "win_tp3"; r_mult = r3 or r1; exit_bar = j + 1; break
                 elif h_tp2 and bar_high >= h_tp2:
-                    outcome = "win_tp2"; r_mult = r2 or r1; exit_bar = j; break
+                    outcome = "win_tp2"; r_mult = r2 or r1; exit_bar = j + 1; break
                 elif bar_high >= h_tp1:
-                    outcome = "win_tp1"; r_mult = r1; exit_bar = j; break
+                    outcome = "win_tp1"; r_mult = r1; exit_bar = j + 1; break
             else:
                 # SL check uses bar high (worst case for short)
                 if bar_high >= h_sl:
-                    outcome = "loss"; r_mult = -1.0; exit_bar = j; break
+                    outcome = "loss"; r_mult = -1.0; exit_bar = j + 1; break
                 # TP checks use bar low (best case for short)
                 elif h_tp3 and bar_low <= h_tp3:
-                    outcome = "win_tp3"; r_mult = r3 or r1; exit_bar = j; break
+                    outcome = "win_tp3"; r_mult = r3 or r1; exit_bar = j + 1; break
                 elif h_tp2 and bar_low <= h_tp2:
-                    outcome = "win_tp2"; r_mult = r2 or r1; exit_bar = j; break
+                    outcome = "win_tp2"; r_mult = r2 or r1; exit_bar = j + 1; break
                 elif bar_low <= h_tp1:
-                    outcome = "win_tp1"; r_mult = r1; exit_bar = j; break
+                    outcome = "win_tp1"; r_mult = r1; exit_bar = j + 1; break
 
         # Trades that neither hit TP nor SL within max_hold bars are timed out.
         # IMPORTANT: for timeouts we advance only 1 bar past the entry bar, NOT
