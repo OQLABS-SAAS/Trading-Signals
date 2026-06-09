@@ -169,7 +169,7 @@ def test_signal_schema_normalizes_fx_to_forex_before_sizing():
 
 
 def test_shared_scan_base_prefers_canonical_signal_universe_with_legacy_fallback():
-    start = HTML.index("async function _runScanBase(groups, signal)")
+    start = HTML.index("async function _runScanBase(groups, signal")
     end = HTML.index("async function _sfFetchSignals", start)
     block = HTML[start:end]
 

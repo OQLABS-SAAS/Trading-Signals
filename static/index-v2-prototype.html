@@ -13471,7 +13471,9 @@ const ALL_SCAN_GROUPS = [
 const ALL_SCAN_TFS = ['15m','30m','1h','4h','1d','1w','1mo'];
 
 // Shared scan engine — parallel POSTs to /api/scan-list for each group × timeframe
-async function _runScanBase(groups, signal) {
+// onProgress(done, total, foundSoFar) is called as batches complete so the UI can
+// show live progress instead of a frozen "Scanning…" bar (the #1 user-journey pain).
+async function _runScanBase(groups, signal, onProgress) {
   var _scanErrors = [];
   var _scanTotal = 0;
   try {
@@ -13517,6 +13519,8 @@ async function _runScanBase(groups, signal) {
       };
     });
   });
+  // Live progress so the scan never looks frozen (the #1 user-journey pain).
+  if(typeof onProgress==='function'){ try{ onProgress(0, _requests.length, 0); }catch(_e){} }
   // Process requests in batches of 6 (max concurrent)
   var _results = [];
   var CONCURRENCY = 6;
@@ -13541,6 +13545,7 @@ async function _runScanBase(groups, signal) {
         _results = _results.concat(s.value.results);
       }
     });
+    if(typeof onProgress==='function'){ try{ onProgress(Math.min(i + CONCURRENCY, _requests.length), _requests.length, _results.length); }catch(_e){} }
   }
   return { results: _results, errors: _scanErrors, total: _scanTotal };
 }
@@ -13625,7 +13630,10 @@ async function _sfFetchSignals(){
         tfs: g.daily_only ? ['1d'] : _scanTfs
       };
     });
-    var res = await _runScanBase(groups);
+    var res = await _runScanBase(groups, null, function(done, total, found){
+      var pct = total>0 ? Math.round(5 + (done/total)*90) : 5;
+      _sfSetProgress(null, null, pct, 'Scanning '+done+' of '+total+' market·timeframes… '+found+' signal'+(found===1?'':'s')+' found so far');
+    });
     _scanErrors = res.errors || [];
     _scanTotal = res.total || 0;
     if(res && res.results && res.results.length > 0){
