@@ -13105,8 +13105,11 @@ def analyze():
 
 @app.route("/api/diag", methods=["GET"])
 @login_required
+@require_admin
 def diag():
-    """Diagnostic endpoint — test data source connectivity from this server."""
+    """Admin-only diagnostic — test data source connectivity from this server.
+    (S-6/S-9: gated to admin so provider/connectivity internals aren't exposed to
+    every logged-in user; its siblings diag-eodhd/diag-scan were already admin-only.)"""
     import traceback
     ticker = request.args.get("ticker", "AAPL")
     results = {"ticker": ticker, "server_time": datetime.utcnow().isoformat()}
