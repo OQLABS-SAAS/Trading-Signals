@@ -6722,6 +6722,10 @@ let authStep=1;
 let selectedRole='trader';
 let selectedAssets=['stocks','crypto'];
 let selectedRisk='moderate';
+// Captured step-1 credentials (persisted across re-renders)
+let _suCapturedEmail='';
+let _suCapturedName='';
+let _suCapturedPass='';
 
 function showAuthPanel(mode){
   var ts=document.getElementById('tabSignIn'), tc=document.getElementById('tabCreate');
@@ -6795,6 +6799,7 @@ function renderSignup(){
         <input type="password" placeholder="••••••••" id="suPass">
       </div>
       <div class="field"><label>Confirm password</label><input type="password" placeholder="••••••••" id="suPass2"></div>
+      <div id="suInlineErr" style="display:none;font-family:var(--mono);font-size:11.5px;color:#e05555;background:rgba(224,85,85,.08);border:1px solid rgba(224,85,85,.25);border-radius:5px;padding:8px 10px;margin-bottom:10px;"></div>
       <button class="btn-amber" onclick="authNext()">Continue <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;vertical-align:middle;"><polyline points="9 18 15 12 9 6"/></svg></button>
       <div class="auth-foot">Already have an account? <a onclick="showAuthPanel('signin')">Sign in</a></div>`;
   } else if(authStep===2){
@@ -6889,11 +6894,12 @@ function renderSignup(){
           <svg class="si-arr" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
       </div>
-      <button class="btn-amber" onclick="goDash()">
+      <div id="suRegErr" style="display:none;font-family:var(--mono);font-size:11.5px;color:#e05555;background:rgba(224,85,85,.08);border:1px solid rgba(224,85,85,.25);border-radius:5px;padding:8px 10px;margin-bottom:10px;"></div>
+      <button id="suBtnComplete" class="btn-amber" onclick="doRegister()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 1.4 13.58M4.93 4.93a10 10 0 0 0-1.4 13.58M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
         Complete Setup in Settings
       </button>
-      <button class="btn-ghost-full" onclick="goDash()">Skip — Go to Dashboard</button>`;
+      <button id="suBtnSkip" class="btn-ghost-full" onclick="doRegister()">Skip — Go to Dashboard</button>`;
   }
   document.getElementById('authPanel').innerHTML=body;
 }
@@ -6903,8 +6909,90 @@ function toggleAsset(id){
   if(i>-1) selectedAssets.splice(i,1); else selectedAssets.push(id);
   renderSignup();
 }
-function authNext(){ authStep=Math.min(authStep+1,4); renderSignup(); }
+function _suShowErr(msg){
+  var el=document.getElementById('suInlineErr');
+  if(el){ el.textContent=msg; el.style.display=msg?'block':'none'; }
+}
+function authNext(){
+  if(authStep===1){
+    // Capture and validate step-1 fields before advancing
+    var nameEl=document.getElementById('suName');
+    var emailEl=document.getElementById('suEmail');
+    var passEl=document.getElementById('suPass');
+    var pass2El=document.getElementById('suPass2');
+    var name=(nameEl&&nameEl.value)||'';
+    var email=(emailEl&&emailEl.value)||'';
+    var pass=(passEl&&passEl.value)||'';
+    var pass2=(pass2El&&pass2El.value)||'';
+    // Inline validation
+    if(!name.trim()){ _suShowErr('Please enter your full name.'); nameEl&&nameEl.focus(); return; }
+    if(!email.trim()||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())){ _suShowErr('Please enter a valid email address.'); emailEl&&emailEl.focus(); return; }
+    if(pass.length<8||!/[0-9]/.test(pass)||!/[^A-Za-z0-9]/.test(pass)){ _suShowErr('Password must be at least 8 characters and include a number and a symbol.'); passEl&&passEl.focus(); return; }
+    if(pass!==pass2){ _suShowErr('Passwords do not match.'); pass2El&&pass2El.focus(); return; }
+    // All good — capture into module-scope
+    _suCapturedName=name.trim();
+    _suCapturedEmail=email.trim();
+    _suCapturedPass=pass;
+  }
+  authStep=Math.min(authStep+1,4); renderSignup();
+}
 function authBack(){ authStep=Math.max(authStep-1,1); renderSignup(); }
+
+async function doRegister(){
+  // Re-validate captured credentials (guards against Skip from step 4 before step 1 was filled)
+  if(!_suCapturedEmail||!_suCapturedName||!_suCapturedPass){
+    // Credentials were never collected — send user back to step 1
+    authStep=1; renderSignup();
+    // After re-render, show inline error
+    setTimeout(function(){ _suShowErr('Please complete your account details before continuing.'); },0);
+    return;
+  }
+  // Re-run client-side validation on captured values (defensive)
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(_suCapturedEmail)){
+    authStep=1; renderSignup();
+    setTimeout(function(){ _suShowErr('Please enter a valid email address.'); },0);
+    return;
+  }
+  if(_suCapturedPass.length<8||!/[0-9]/.test(_suCapturedPass)||!/[^A-Za-z0-9]/.test(_suCapturedPass)){
+    authStep=1; renderSignup();
+    setTimeout(function(){ _suShowErr('Password must be at least 8 characters and include a number and a symbol.'); },0);
+    return;
+  }
+  // Disable both final-step buttons during request
+  var btnPrimary=document.getElementById('suBtnComplete');
+  var btnSkip=document.getElementById('suBtnSkip');
+  if(btnPrimary){ btnPrimary.disabled=true; btnPrimary.textContent='Creating account…'; }
+  if(btnSkip){ btnSkip.disabled=true; }
+  try{
+    var r=await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({email:_suCapturedEmail,name:_suCapturedName,password:_suCapturedPass})});
+    var d=await r.json();
+    if(r.ok && d.status==='ok'){
+      window._dvAuthenticated=true;
+      // Persist risk tolerance to localStorage (existing pattern in the file)
+      var riskMap={conservative:5,moderate:10,aggressive:20};
+      var riskPct=riskMap[selectedRisk]||10;
+      try{ localStorage.setItem('dotverse_default_risk',String(riskPct)); }catch(e){}
+      goDash(d);
+    } else if(r.status===409){
+      // Email already registered — show inline error with sign-in offer
+      var errEl=document.getElementById('suRegErr');
+      if(errEl){ errEl.innerHTML='Email already registered — <a onclick="showAuthPanel(\'signin\')" style="color:var(--amb);cursor:pointer;text-decoration:underline;">sign in instead</a>'; errEl.style.display='block'; }
+      if(btnPrimary){ btnPrimary.disabled=false; btnPrimary.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;vertical-align:middle;margin-right:6px;"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 1.4 13.58M4.93 4.93a10 10 0 0 0-1.4 13.58M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Complete Setup in Settings'; }
+      if(btnSkip){ btnSkip.disabled=false; }
+    } else {
+      // 400 / 500 — show server message inline
+      var errEl=document.getElementById('suRegErr');
+      if(errEl){ errEl.textContent=(d&&d.message)||'Registration failed — please try again.'; errEl.style.display='block'; }
+      if(btnPrimary){ btnPrimary.disabled=false; btnPrimary.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;vertical-align:middle;margin-right:6px;"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 1.4 13.58M4.93 4.93a10 10 0 0 0-1.4 13.58M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Complete Setup in Settings'; }
+      if(btnSkip){ btnSkip.disabled=false; }
+    }
+  }catch(e){
+    var errEl=document.getElementById('suRegErr');
+    if(errEl){ errEl.textContent='Network error — try again.'; errEl.style.display='block'; }
+    if(btnPrimary){ btnPrimary.disabled=false; btnPrimary.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;vertical-align:middle;margin-right:6px;"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 1.4 13.58M4.93 4.93a10 10 0 0 0-1.4 13.58M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Complete Setup in Settings'; }
+    if(btnSkip){ btnSkip.disabled=false; }
+  }
+}
 
 // ── DASHBOARD ──────────────────────────────────────────────────
 function buildDash(){
