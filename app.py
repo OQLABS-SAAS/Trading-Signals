@@ -18487,9 +18487,31 @@ def _run_verdict_job(ticker, trade_date_str, signal_ctx=None):
         if not structured:
             structured = build_fallback_structured(state, decision)
         tf_key = str((signal_ctx or {}).get("tf") or "4H").lower()
-        return {"ticker": ticker, "timeframe": tf_key, "verdict": decision, "structured": structured, "status": "complete"}
+        return {"ticker": ticker, "timeframe": tf_key, "verdict": decision, "structured": structured,
+                "status": "complete", "direction": _verdict_dir_token(signal_ctx), "date": trade_date_str}
     except Exception as e:
         return {"error": str(e), "status": "failed"}
+
+
+def _verdict_dir_token(signal_ctx):
+    """BUY/SELL/NA direction token from a signal context (dict or str), for cache keying."""
+    d = ""
+    if isinstance(signal_ctx, dict):
+        d = str(signal_ctx.get("signal") or signal_ctx.get("direction") or signal_ctx.get("action") or "")
+    elif isinstance(signal_ctx, str):
+        d = signal_ctx
+    d = d.strip().upper()
+    if d in ("BUY", "LONG"):
+        return "BUY"
+    if d in ("SELL", "SHORT"):
+        return "SELL"
+    return (d[:8] or "NA")
+
+
+def _verdict_cache_key(ticker, tf_key, direction, date_str):
+    """V-1: verdict cache key includes direction + date so one user's BUY verdict is
+    never served to another user's SELL request, and stale-date verdicts aren't reused."""
+    return "verdict:" + str(ticker) + ":" + str(tf_key).lower() + ":" + str(direction) + ":" + str(date_str)
 
 @app.route("/api/verdict", methods=["POST"])
 @login_required
@@ -18515,8 +18537,11 @@ def verdict_enqueue():
         except Exception:
             pass
 
-    # Check Redis cache (1-hour TTL)
-    cache_key = "verdict:" + ticker + ":" + tf_key
+    # Check Redis cache (1-hour TTL). Key includes direction + date (V-1) so a BUY
+    # verdict is never served to a SELL request, and stale-date verdicts aren't reused.
+    _v_dir  = _verdict_dir_token(signal_ctx)
+    _v_date = body.get("date") or datetime.utcnow().strftime("%Y-%m-%d")
+    cache_key = _verdict_cache_key(ticker, tf_key, _v_dir, _v_date)
     if _redis_client:
         try:
             cached = _redis_client.get(cache_key)
@@ -18540,7 +18565,7 @@ def verdict_enqueue():
             "retry_after_seconds": retry_after,
         }), 429
 
-    inflight_key = f"verdict_inflight:{ticker}:{tf_key}"
+    inflight_key = f"verdict_inflight:{ticker}:{tf_key}:{_v_dir}:{_v_date}"
     existing_job_id = _get_existing_verdict_job(inflight_key)
     if existing_job_id:
         return jsonify({
@@ -18589,7 +18614,7 @@ def verdict_result(job_id):
             result = job.result
             # Cache in Redis if successful
             if result and result.get("status") == "complete":
-                cache_key = "verdict:" + result.get("ticker","") + ":" + str(result.get("timeframe") or "4h").lower()
+                cache_key = _verdict_cache_key(result.get("ticker",""), result.get("timeframe") or "4h", result.get("direction","NA"), result.get("date",""))
                 if _redis_client:
                     try:
                         _redis_client.setex(cache_key, 3600, json.dumps(result))
