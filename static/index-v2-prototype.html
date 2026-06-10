@@ -10201,7 +10201,7 @@ function pfUpdateHealth(positions, varData) {
   // here produced $38 vs the card's $37,572. Single source of truth: varData.
   const _naiveSum = Array.isArray(positions) ? positions.reduce((sum, p) => sum + (parseFloat(p.size)||0) * (parseFloat(p.entry_price)||0), 0) : 0;
   const total = (varData && parseFloat(varData.portfolio_value)) || _naiveSum;
-  if(totalVal) totalVal.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+  if(totalVal) totalVal.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
   if(varStat) varStat.textContent = varPct.toFixed(1) + '% VaR';
   if(posStat) posStat.textContent = (Array.isArray(positions) ? positions.length : 0) + ' positions';
   if(ts) ts.textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -16175,6 +16175,9 @@ function showMarket(){
   });
   /* Fetch live signals — fires after DOM is painted */
   setTimeout(function(){ _mktFetchTopSignals(); _mktRenderCockpit(); _mktUpdateLiveData(); _loadFearGreed(); _loadSectors(); }, 50);
+  // ITEM 5: watchdog — if the first price call silently stalled, retry once
+  // at +9s instead of leaving the tab on "Loading…" forever.
+  setTimeout(function(){ if(!window._mktLastLiveData) _mktUpdateLiveData(); }, 9000);
 }
 
 function _mktRenderCockpit(){
@@ -16418,7 +16421,11 @@ async function _mktUpdateLiveData(){
            p>=100?p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):
            p>=1?p.toFixed(4):p.toPrecision(4);
   }
-  function _mktShowPriceError(){ try{ var box=document.getElementById('mktCondBox'); if(box){ box.style.cursor='pointer'; box.onclick=function(){ _mktUpdateLiveData(); }; box.innerHTML='<span style="color:#e8706e;font-family:var(--mono);font-size:12px;font-weight:600;">Market data unavailable</span> <span style="color:rgba(237,232,216,.6);font-family:var(--mono);font-size:11px;">— tap to retry</span>'; }
+  function _mktShowPriceError(){ try{
+    // Don't clobber a successful render (a slow first call aborting AFTER a
+    // retry already populated the tab must not paint a false error).
+    if(window._mktLastLiveData) return;
+    var box=document.getElementById('mktCondBox'); if(box){ box.style.cursor='pointer'; box.onclick=function(){ _mktUpdateLiveData(); }; box.innerHTML='<span style="color:#e8706e;font-family:var(--mono);font-size:12px;font-weight:600;">Market data unavailable</span> <span style="color:rgba(237,232,216,.6);font-family:var(--mono);font-size:11px;">— tap to retry</span>'; }
     // ITEM 5: when the price fetch fails, the heatmap must NOT sit on
     // "Loading heatmap…" forever — give it its own error→retry state.
     var hm=document.querySelector('.mkt-heatmap');
@@ -16427,7 +16434,16 @@ async function _mktUpdateLiveData(){
     }
   }catch(_e){} }
   try{
-    const data=await dvFetch('/api/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:yfTickers})});
+    // ITEM 5 ROOT FIX (live-diagnosed 2026-06-10): /api/prices answers in
+    // ~0.5s when healthy, but the FIRST call on tab-open could hang with no
+    // timeout — leaving the whole tab on "Loading…" forever. Abort at 12s so
+    // the error→retry state actually triggers.
+    const _mktAc=new AbortController();
+    const _mktTo=setTimeout(function(){ try{_mktAc.abort();}catch(_e){} },12000);
+    let data;
+    try{
+      data=await dvFetch('/api/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:yfTickers}),signal:_mktAc.signal});
+    } finally { clearTimeout(_mktTo); }
     if(!data){ _mktShowPriceError(); return; }
     window._mktLastLiveData=data;
     var liveState=_mktLiveCondition(data, TM);
@@ -16715,7 +16731,10 @@ async function showPortfolio(){
     const varAmtStr=parseFloat(varAmt).toFixed(2);
     const varPctStr=parseFloat(varPct).toFixed(2);
     const portValNum=varData.portfolio_value||positions.reduce((s,p)=>s+(parseFloat(p.entry_price)||0)*(parseFloat(p.size)||0),0)||0;
-    const portVal='$'+Number(portValNum).toLocaleString();
+    // ITEM 3 (real root cause, found live): bare toLocaleString() rendered
+    // $37.571976 as "$37.572" — which READS as thirty-seven thousand. Pin to
+    // exactly 2 decimals so the card and the top banner show the same money.
+    const portVal='$'+Number(portValNum).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
     const portStd=varData.portfolio_std!=null?(varData.portfolio_std*100).toFixed(2):'1.50';
     let hBg='rgba(93,232,160,.12)',hBd='rgba(93,232,160,.3)',hTxt='#5de8a0',hMsg='Portfolio healthy';
     const _vp=parseFloat(varData.var_1d_pct!=null?varData.var_1d_pct:varData.var_pct)||0;
