@@ -16360,6 +16360,13 @@ def _init_db():
         for _stmt in [
             "ALTER TABLE signal_history ADD COLUMN IF NOT EXISTS account_id INTEGER",
             "CREATE INDEX IF NOT EXISTS ix_signal_history_account_id ON signal_history(account_id)",
+            # 2026-06-10 MONEY PATH (live order placement): these MUST exist.
+            # They were first added to the big block above, which silently
+            # aborts as one transaction - the exact disease this isolated
+            # list exists to cure.
+            "ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS account_id INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_mt5_orders_account_id ON mt5_orders(account_id)",
+            "ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS requeue_count INTEGER DEFAULT 0",
         ]:
             try:
                 with _db_engine.begin() as _c2:
