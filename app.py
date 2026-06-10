@@ -8662,7 +8662,42 @@ def _find_recent_duplicate_mt5_order(db, user_id, account_id, symbol, direction,
     return None
 
 
+def _find_live_position_for_order(order):
+    """Look through live EA telemetry for a position whose comment carries
+    this order's id ('DotVerse #<id>'). Returns the position dict or None."""
+    needle = f"DotVerse #{order.id}"
+    keys = [str(order.user_id or ""), "default"]
+    try:
+        with mt5_state_lock:
+            for key in keys:
+                state = mt5_state.get(key)
+                if not isinstance(state, dict):
+                    continue
+                for pos in (state.get("positions") or []):
+                    if needle in str(pos.get("comment") or ""):
+                        return pos
+    except Exception:
+        pass
+    return None
+
+
 def _requeue_stale_executing_mt5_orders(db, ea_uid=None, ea_account_id=None, stale_seconds=180):
+    """DOUBLE-PLACE PROTECTION (2026-06-10 hardening).
+
+    Old behaviour flipped any stale 'executing' order back to 'pending'
+    unconditionally and REPEATEDLY — if the EA had actually placed the trade
+    but its /api/mt5/confirm was lost (network blip, redeploy), the EA would
+    re-execute the same order every cycle: unbounded duplicate positions.
+
+    New behaviour, per stale order:
+      1. RECONCILE: if live EA telemetry already shows a position tagged
+         'DotVerse #<id>', the trade DID execute — mark it filled from the
+         telemetry instead of requeueing. Self-heals lost confirms.
+      2. RETRY ONCE: otherwise requeue a single time (covers 'EA never
+         received it').
+      3. FAIL SAFE: a second stall marks the order 'failed' with an explicit
+         check-your-terminal message — never an infinite replacement loop.
+    """
     cutoff = datetime.utcnow() - timedelta(seconds=stale_seconds)
     try:
         query = db.query(MT5Order).filter(
@@ -8677,10 +8712,35 @@ def _requeue_stale_executing_mt5_orders(db, ea_uid=None, ea_account_id=None, sta
                 query = query.filter(MT5Order.user_id.in_(uid_filter))
         rows = query.all()
     except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return 0
     count = 0
     for order in rows:
+        live_pos = _find_live_position_for_order(order)
+        if live_pos is not None:
+            order.status = "filled"
+            try:
+                if live_pos.get("ticket") and not order.mt5_ticket:
+                    order.mt5_ticket = int(live_pos.get("ticket"))
+                if live_pos.get("open_price") and not order.fill_price:
+                    order.fill_price = float(live_pos.get("open_price"))
+            except Exception:
+                pass
+            order.comment = ((order.comment or "") + " | reconciled from EA telemetry (confirm was lost)")[:255]
+            continue
+        requeues = int(getattr(order, "requeue_count", 0) or 0)
+        if requeues >= 1:
+            order.status = "failed"
+            order.comment = ((order.comment or "") + " | unconfirmed after retry — CHECK MT5 MANUALLY before re-placing")[:255]
+            continue
         order.status = "pending"
+        try:
+            order.requeue_count = requeues + 1
+        except Exception:
+            pass
         count += 1
     return count
 
@@ -8946,7 +9006,11 @@ def mt5_submit_order():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         db.rollback()
-        return jsonify({"error": str(e)}), 500
+        # ERROR HYGIENE (2026-06-10): the owner saw a raw psycopg2 dump in the
+        # UI. Technical detail goes to the server log; the trader gets a human
+        # sentence and the guarantee that nothing was placed.
+        print(f"[mt5/order] INTERNAL ERROR for user {user_id}: {e}")
+        return jsonify({"error": "Your order could not be saved — a server problem occurred. Nothing was placed at your broker. Try again in a minute."}), 500
     finally:
         db.close()
 
@@ -15737,6 +15801,7 @@ class MT5Order(_Base):
     tp2_alert        = Column(Boolean,    nullable=True, default=False)   # TP2 hit alert
     weekend          = Column(Boolean,    nullable=True, default=False)   # weekend guard
     account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=True, index=True)
+    requeue_count   = Column(Integer, nullable=True, default=0)   # double-place guard: max 1 automatic requeue
     created_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
     filled_at   = Column(DateTime,   nullable=True)
 
@@ -16213,6 +16278,7 @@ def _init_db():
                 # prod INSERTs/SELECTs touching account_id aborted the transaction
                 # ('current transaction is aborted' on every order placement).
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS account_id INTEGER"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS requeue_count INTEGER DEFAULT 0"))
                 # Phase A/B/C/D automation tables (idempotent)
                 _conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS notifications (

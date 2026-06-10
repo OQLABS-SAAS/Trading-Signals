@@ -9651,9 +9651,72 @@ function _mt5OrderErrorText(res){
   if(!res) return 'Order failed — check MT5 connection';
   if(res.required_tier) return 'Upgrade required: MT5 live execution requires '+String(res.required_tier).toUpperCase()+' tier.';
   if(res.login_required || res._httpStatus===401) return 'Sign in again before placing live trades.';
-  if(res.error) return String(res.error);
-  if(res.message) return String(res.message);
+  var raw = res.error ? String(res.error) : (res.message ? String(res.message) : '');
+  if(raw) return _dvHumanizeError(raw);
   return 'Order failed — check MT5 connection';
+}
+// ─── ERROR HYGIENE (2026-06-10, Omar saw a raw psycopg2 dump) ─────────
+// A trader must NEVER read SQL, stack traces, or driver internals. Map any
+// technical error to a short human sentence; keep the technical detail in
+// the console for debugging.
+function _dvHumanizeError(raw){
+  var s=String(raw||'');
+  try{ console.error('[dotverse] technical error detail:', s); }catch(_e){}
+  var low=s.toLowerCase();
+  if(low.length<160 && !/psycopg2|sqlalchemy|traceback|sql:|insert into|select |update |delete from|\(builtins\.|exception/.test(low)) return s; // already human
+  if(/psycopg2|sqlalchemy|sql:|insert into|transaction is aborted/.test(low))
+    return 'Your order could not be saved — the database hit a problem. Nothing was placed at your broker. Try again in a minute; if it repeats, tell support.';
+  if(/timeout|timed out/.test(low))
+    return 'The server took too long to respond. Nothing was placed — try again.';
+  if(/connection|network|fetch/.test(low))
+    return 'Connection problem reaching DotVerse. Nothing was placed — check your internet and try again.';
+  return 'Something went wrong on our side. Nothing was placed at your broker. Try again in a minute; if it repeats, tell support.';
+}
+// ─── LOT SIZE EXPLAINER ──────────────────────────────────────
+// One standard everywhere: say what the size MEANS for the trade — money
+// controlled, cash used, loss at the stop — and grade it so a beginner
+// instantly knows if it's sane. Grading by stop-risk % of account:
+//   <0.5% TINY · <1% SMALL · ≤2% MODERATE · ≤5% LARGE · >5% OVERSIZED
+function _dvSizeClass(riskPct, marginPct){
+  if(riskPct==null||!isFinite(riskPct)) return null;
+  var c = riskPct<0.5 ? {label:'TINY — very safe', color:'#5de8a0', bg:'rgba(93,232,160,.1)'}
+    : riskPct<1   ? {label:'SMALL — safe', color:'#5de8a0', bg:'rgba(93,232,160,.1)'}
+    : riskPct<=2  ? {label:'MODERATE', color:'#c9a84c', bg:'rgba(201,168,76,.12)'}
+    : riskPct<=5  ? {label:'LARGE', color:'#e8a06e', bg:'rgba(232,160,110,.12)'}
+    : {label:'OVERSIZED — beyond safe limits', color:'#e8706e', bg:'rgba(232,112,110,.12)'};
+  if(marginPct!=null && isFinite(marginPct) && marginPct>=50 && riskPct<=5){
+    c={label:c.label.split(' — ')[0]+' risk, HEAVY cash-in', color:'#e8a06e', bg:'rgba(232,160,110,.12)'};
+  }
+  return c;
+}
+function _dvLotExplainText(calc, sym){
+  if(!calc || !(calc.lots>0||calc.posSize>0)) return null;
+  var m=function(v){ return '$'+Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}); };
+  var m2=function(v){ return '$'+Number(v||0).toFixed(2); };
+  var unit=calc.lotsDisplay||((calc.lots||0).toFixed(2)+' lots');
+  var s=sym||'this market';
+  return '<b>'+unit+'</b> means you control <b>'+m(calc.tradeAmount)+'</b> of '+s
+    +' using <b>'+m(calc.cashIn)+'</b> of your cash.'
+    +' If your stop is hit you lose <b style="color:#e8706e;">'+m2(calc.moneyAtRisk)+'</b>'
+    +(calc.account>0?' = <b>'+(calc.moneyAtRisk/calc.account*100).toFixed(2)+'%</b> of your account':'')+'.';
+}
+function _dvRenderLotExplain(calc, sym){
+  var anchor=document.getElementById('szTradeSizePct');
+  if(!anchor||!anchor.parentNode) return;
+  var el=document.getElementById('szLotExplain');
+  if(!calc || !(calc.lots>0||calc.posSize>0) || !(calc.account>0)){ if(el) el.style.display='none'; return; }
+  if(!el){
+    el=document.createElement('div');
+    el.id='szLotExplain';
+    el.style.cssText='margin-top:6px;padding:9px 11px;border-radius:6px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.12);font-family:var(--mono);font-size:10.5px;line-height:1.55;color:rgba(237,232,216,.75);';
+    anchor.parentNode.insertBefore(el, anchor.nextSibling);
+  }
+  var riskPct=calc.account>0?(calc.moneyAtRisk/calc.account*100):null;
+  var marginPct=calc.account>0?(calc.cashIn/calc.account*100):null;
+  var cls=_dvSizeClass(riskPct, marginPct);
+  var chip=cls?'<span style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.05em;color:'+cls.color+';background:'+cls.bg+';border:1px solid '+cls.color+'33;">'+cls.label+'</span>':'';
+  el.innerHTML=_dvLotExplainText(calc, sym)+chip;
+  el.style.display='block';
 }
 function _mt5OrderErrorHtml(res){
   var txt=_mt5OrderErrorText(res);
@@ -11061,7 +11124,43 @@ function applyCondFilter(type, label, desc){
 }
 
 // ═══════════════════════ TODAY — daily plan home ═══════════════════════
-window._todayCfg = window._todayCfg || { acct:0, riskPct:3, profitGoal:500, maxPerClass:99, maxTrades:6, ladderMode:'beginner', autoPlace:false, classes:['crypto','stock','forex','commodity','index'] };
+// 2026-06-10 (Omar-reported): "Today never loads my criteria." Root causes:
+// (1) _todayCfg was session-only — every page load silently reset markets,
+// risk % and profit goal to defaults; (2) Settings → Asset Preferences was
+// never read by Today at all. Now: criteria persist, and on first use the
+// market classes seed from the user's saved Asset Preferences.
+function _todaySettingsClasses(){
+  try{
+    var v=JSON.parse(_dvRead('dv_sett_assets'));
+    if(Array.isArray(v)&&v.length){
+      var map={stocks:'stock',crypto:'crypto',forex:'forex',macro:'commodity'};
+      var out=[]; v.forEach(function(id){ var c=map[id]; if(c&&out.indexOf(c)<0) out.push(c); });
+      if(out.indexOf('commodity')>=0 && out.indexOf('index')<0) out.push('index'); // macro = commodities + indices
+      if(out.length) return out;
+    }
+  }catch(e){}
+  return null;
+}
+window._todayCfg = window._todayCfg || (function(){
+  var def={ acct:0, riskPct:3, profitGoal:500, maxPerClass:99, maxTrades:6, ladderMode:'beginner', autoPlace:false,
+            classes:(_todaySettingsClasses()||['crypto','stock','forex','commodity','index']) };
+  try{
+    var saved=JSON.parse(_dvRead('dv_todayCfg')||'null');
+    if(saved&&typeof saved==='object'){
+      for(var k in saved){ if(Object.prototype.hasOwnProperty.call(saved,k)) def[k]=saved[k]; }
+      if(!Array.isArray(def.classes)||!def.classes.length) def.classes=['crypto','stock','forex','commodity','index'];
+    }
+  }catch(e){}
+  def.acct=0;            // account always re-pulled live from the broker
+  def.autoPlace=false;   // SAFETY: auto-place must never persist across sessions
+  return def;
+})();
+function _todaySaveCfg(){
+  try{
+    var c=window._todayCfg||{};
+    _dvWrite('dv_todayCfg', JSON.stringify({riskPct:c.riskPct,profitGoal:c.profitGoal,maxPerClass:c.maxPerClass,maxTrades:c.maxTrades,ladderMode:c.ladderMode,classes:c.classes}));
+  }catch(e){}
+}
 window._todayPlan = window._todayPlan || [];
 window._todayLeverage = window._todayLeverage || 100;
 window._szBrokerLeverage = window._szBrokerLeverage || window._todayLeverage || 100;
@@ -11207,6 +11306,7 @@ function _szHasCalculatedQuantity(calc){
 function _todayToggleClass(id, btn){
   var c=window._todayCfg, i=c.classes.indexOf(id);
   if(i>=0) c.classes.splice(i,1); else c.classes.push(id);
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   if(btn){ var on=c.classes.indexOf(id)>=0;
     btn.style.borderColor=on?'rgba(201,168,76,.5)':'rgba(237,232,216,.15)';
     btn.style.background=on?'rgba(201,168,76,.12)':'transparent';
@@ -11454,6 +11554,7 @@ function _todaySetRiskPreset(mode){
 function _todaySetMarketPreset(v){
   var c=window._todayCfg||{};
   c.classes = v==='forex' ? ['forex','commodity'] : v==='crypto' ? ['crypto'] : ['crypto','stock','forex','commodity','index'];
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   showToday();
 }
 function _todaySelectTrade(idx){ window._todaySelectedIdx=idx; window._todayExpandedIdx=idx; _todayRenderPlan(); }
@@ -24208,6 +24309,7 @@ function _szConfirmTrade(onConfirm){
       +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Trade</span><span><strong>'+sig.sym+'</strong> · '+dir+' · '+nT+(nT>1?' trades':' trade')+'</span></div>'
       +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Cash in</span><span>'+money(totMargin)+'</span></div>'
       +'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">Position value</span><span>'+money(totNotional)+'</span></div>'
+      +((typeof _dvLotExplainText==='function'&&window._szLastCalc&&_dvLotExplainText(window._szLastCalc, sig.sym))?'<div style="margin-top:4px;padding:8px 10px;border-radius:6px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);font-size:10px;line-height:1.55;color:rgba(237,232,216,.7);">'+_dvLotExplainText(window._szLastCalc, sig.sym)+'</div>':'')
       +(totScale>0?'<div style="display:flex;justify-content:space-between;"><span style="color:rgba(237,232,216,.45)">If it works (typical exit)</span><span style="color:#5de8a0;">+'+money(totScale)+'</span></div>':'')
     +'</div>'
     +(nT>1?'<div style="background:rgba(237,232,216,.035);border:1px solid rgba(237,232,216,.1);border-radius:9px;padding:10px 12px;margin-bottom:13px;font-family:var(--mono);font-size:10.5px;color:rgba(237,232,216,.72);">'
@@ -25000,6 +25102,9 @@ function szCalc(){
   // to do this before szCalc existed, so risk/account/amount edits left the
   // ladder stale even while the summary changed.
   window._szLastCalc = { account: acct, posSize, lots, lotsDisplay, assetType, moneyAtRisk: _moneyAtRiskEff, tradeAmount: posVal, cashIn: margin, margin: margin, riskPct: _riskPctShown, mode: 'single' };
+  // ─── LOT-SIZE PLAIN-ENGLISH EXPLAINER (Omar, 3.5 months of asking) ───
+  // A beginner must never wonder "what is 0.02 lots and is it safe?"
+  if (typeof _dvRenderLotExplain === 'function') _dvRenderLotExplain(window._szLastCalc, sig && sig.sym);
   if(typeof szLadderRender === 'function' && document.getElementById('szLadderRows')){
     try{ szLadderRender(); }catch(e){}
   }

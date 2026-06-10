@@ -115,6 +115,7 @@ function _szHasCalculatedQuantity(calc){
 function _todayToggleClass(id, btn){
   var c=window._todayCfg, i=c.classes.indexOf(id);
   if(i>=0) c.classes.splice(i,1); else c.classes.push(id);
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   if(btn){ var on=c.classes.indexOf(id)>=0;
     btn.style.borderColor=on?'rgba(201,168,76,.5)':'rgba(237,232,216,.15)';
     btn.style.background=on?'rgba(201,168,76,.12)':'transparent';
