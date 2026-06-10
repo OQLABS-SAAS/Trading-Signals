@@ -325,6 +325,12 @@ void PushState()
    double profit     = AccountInfoDouble(ACCOUNT_PROFIT);
    string currency   = AccountInfoString(ACCOUNT_CURRENCY);
    int    leverage   = (int)AccountInfoInteger(ACCOUNT_LEVERAGE);  // e.g. 100 = 1:100
+   // Item 1 root fix: push demo/live mode + identity so DotVerse can show
+   // the truth instead of "MODE UNKNOWN". trade_mode: 0=demo,1=contest,2=real.
+   int    tradeMode  = (int)AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   long   login      = AccountInfoInteger(ACCOUNT_LOGIN);
+   string server     = AccountInfoString(ACCOUNT_SERVER);
+   string company    = AccountInfoString(ACCOUNT_COMPANY);
 
    // --- Open positions ---
    string posJson = "[";
@@ -358,9 +364,11 @@ void PushState()
    string body = StringFormat(
       "{\"user_id\":\"%s\","
       "\"account\":{\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,"
-                   "\"free_margin\":%.2f,\"profit\":%.2f,\"currency\":\"%s\",\"leverage\":%d},"
+                   "\"free_margin\":%.2f,\"profit\":%.2f,\"currency\":\"%s\",\"leverage\":%d,"
+                   "\"trade_mode\":%d,\"login\":%I64d,\"server\":\"%s\",\"company\":\"%s\"},"
       "\"positions\":%s}",
-      g_userId, balance, equity, margin, freeMargin, profit, currency, leverage, posJson
+      g_userId, balance, equity, margin, freeMargin, profit, currency, leverage,
+      tradeMode, login, server, company, posJson
    );
 
    HttpPost("/api/mt5/push", body);

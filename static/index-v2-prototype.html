@@ -7619,9 +7619,13 @@ function _renderAcctCard(a){
   var statusLabel = a.connected ? 'Connected' : 'Disconnected';
   var statusBg    = a.connected ? 'rgba(93,232,160,.12)' : 'rgba(237,232,216,.06)';
   var statusTxt   = a.connected ? 'var(--grn)' : 'var(--t3)';
+  // Item 1 safety: three-way badge. UNKNOWN must NEVER render as DEMO —
+  // assuming "practice" on a real account is the dangerous direction.
   var liveBadge = a.account_type === 'LIVE'
     ? '<span style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(232,112,110,.15);color:var(--red);font-weight:700;letter-spacing:.04em;margin-left:6px;">LIVE</span>'
-    : '<span style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(237,232,216,.06);color:var(--t3);font-weight:600;letter-spacing:.04em;margin-left:6px;">DEMO</span>';
+    : a.account_type === 'DEMO'
+      ? '<span style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(237,232,216,.06);color:var(--t3);font-weight:600;letter-spacing:.04em;margin-left:6px;">DEMO</span>'
+      : '<span title="DotVerse could not confirm whether this account is demo or live. Verify in MT5 before trading." style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(201,168,76,.15);color:#c9a84c;font-weight:700;letter-spacing:.04em;margin-left:6px;">MODE UNKNOWN</span>';
   var balanceStr = (a.balance != null) ? '$' + Number(a.balance).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
   var equityStr  = (a.equity != null)  ? '$' + Number(a.equity).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
   return `<div style="background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;display:flex;align-items:center;gap:12px;">
@@ -7642,12 +7646,12 @@ function _renderAcctCard(a){
         <span><span style="color:var(--t3);">Equity:</span> <span style="font-family:var(--mono);color:var(--t2);">${equityStr}</span></span>
       </div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+    ${a._virtual ? '' : `<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
       <button onclick="_showAcctModal(${a.id})" title="Edit account"
         style="padding:5px 10px;border-radius:4px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);color:var(--t2);font-size:10px;cursor:pointer;">Edit</button>
       <button onclick="_deleteAccount(${a.id},'${_escHtml(a.name)}')" title="Delete account"
         style="padding:5px 10px;border-radius:4px;background:rgba(232,112,110,.06);border:1px solid rgba(232,112,110,.15);color:var(--red);font-size:10px;cursor:pointer;">Delete</button>
-    </div>
+    </div>`}
   </div>`;
 }
 
@@ -7656,17 +7660,72 @@ function _escHtml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// ─── ITEM 1: SHARED ACCOUNTS NORMALIZER ──────────────────────
+// One source of truth for "what accounts exist". The persisted list
+// (/api/accounts) wins; if it is EMPTY but a live EA is streaming to
+// /api/mt5/state, surface that EA as a virtual connected account so
+// the header / Settings / Agent never say "no account" while the app
+// is reading live money from it.
+function _dvVirtualEaAccount(st){
+  if(!st || st.connected !== true) return null;
+  var acct = st.account || {};
+  var mode = (typeof _mt5AccountMode==='function' ? _mt5AccountMode(st) : '') || 'UNKNOWN';
+  window._dvLiveEaState = st;
+  return {
+    id:'__mt5_live__',
+    _virtual: true,
+    name: 'MT5 via EA',
+    broker: 'MetaTrader 5',
+    server: acct.server || '',
+    login: acct.login != null ? String(acct.login) : '',
+    account_number: acct.login != null ? String(acct.login) : (acct.account_number != null ? String(acct.account_number) : ''),
+    currency: acct.currency || 'USD',
+    account_type: mode,
+    connected: true,
+    online: true,
+    status: 'online',
+    balance: (acct.balance != null) ? parseFloat(acct.balance) : null,
+    equity: (acct.equity != null) ? parseFloat(acct.equity) : null,
+    leverage: (acct.leverage != null) ? parseInt(acct.leverage) : null,
+    last_seen: st.last_seen || null
+  };
+}
+async function _dvAccountsNormalized(){
+  var persisted = [];
+  try{
+    var r = await dvFetch('/api/accounts');
+    if(r && Array.isArray(r.accounts)) persisted = r.accounts;
+  }catch(e){}
+  if(persisted.length) return persisted;
+  try{
+    var st = await dvFetch('/api/mt5/state');
+    var v = _dvVirtualEaAccount(st);
+    if(v) return [v];
+  }catch(e){}
+  return [];
+}
+// Card for the virtual (EA-streaming, not yet registered) account.
+function _renderVirtualEaCard(a){
+  var modeWarn = (a.account_type !== 'LIVE' && a.account_type !== 'DEMO')
+    ? '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.25);font-size:10px;color:#c9a84c;">&#9888; Could not confirm demo vs LIVE for this connection. Treat it as REAL money and verify in MT5 before placing any trade.</div>'
+    : '';
+  return _renderAcctCard(a)
+    + '<div style="margin-top:6px;padding:10px 14px;border-radius:8px;background:rgba(93,232,160,.04);border:1px dashed rgba(93,232,160,.25);">'
+    +   '<div style="font-size:11px;color:var(--t2);">Your EA is connected and streaming live data, but this account isn\'t saved yet. Save it to name it and keep it across sessions.</div>'
+    +   modeWarn
+    +   '<button onclick="_showAcctModal()" style="margin-top:8px;padding:6px 14px;border-radius:5px;background:rgba(93,232,160,.12);border:1px solid rgba(93,232,160,.35);color:var(--grn);font-size:11px;font-weight:600;cursor:pointer;">Save this account</button>'
+    + '</div>';
+}
 async function _loadAcctList(){
   var el = document.getElementById('mt5AcctList');
   if(!el) return;
   try{
-    var r = await dvFetch('/api/accounts');
-    if(!r || !r.accounts) throw new Error('Invalid response');
-    _mt5Accounts = r.accounts;
-    if(_mt5Accounts.length === 0){
+    var accounts = await _dvAccountsNormalized();
+    _mt5Accounts = accounts;
+    if(accounts.length === 0){
       el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--t3);font-size:12px;">No accounts yet. Click <strong>+ Connect</strong> to add your first MT5 account.</div>';
     } else {
-      el.innerHTML = _mt5Accounts.map(function(a){ return _renderAcctCard(a); }).join('');
+      el.innerHTML = accounts.map(function(a){ return a._virtual ? _renderVirtualEaCard(a) : _renderAcctCard(a); }).join('');
     }
     _updateGlobalConnIndicator();
   }catch(e){
@@ -8038,6 +8097,13 @@ async function _agentLoadAccounts(){
   if(settingsAccounts&&Array.isArray(settingsAccounts.accounts)) sawResponse=true;
   accounts=settingsAccounts&&Array.isArray(settingsAccounts.accounts)?settingsAccounts.accounts:null;
   if(accounts&&accounts.length) return {source:'settings_accounts',dashboard:dashboard,accounts:_agentRememberAccounts(accounts)};
+  // Item 1: final fallback — a live EA streaming to /api/mt5/state IS a
+  // connected account; never report "none" while the app reads its money.
+  try{
+    var st=await dvFetch('/api/mt5/state');
+    var v=_dvVirtualEaAccount(st);
+    if(v){ sawResponse=true; return {source:'mt5_state',dashboard:dashboard,accounts:_agentRememberAccounts([v])}; }
+  }catch(e){}
   return {source:sawResponse?'empty':'none',dashboard:dashboard,accounts:[]};
 }
 
@@ -9773,7 +9839,7 @@ async function qpAnalyse(presetTicker, presetTf) {
         return;
       }
 
-      statusEl.textContent = rawOpps.length + ' signal(s) found for ' + sym + (scanErrors.length ? ' (' + scanErrors.length + ' scan(s) failed)' : '');
+      statusEl.textContent = _dvSignalCountLabel(rawOpps) + ' for ' + sym + (scanErrors.length ? ' (' + scanErrors.length + ' scan(s) failed)' : '');
       if (clearBtn) clearBtn.style.display = '';
 
       var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
@@ -9910,7 +9976,7 @@ async function qpScanAll() {
     }
 
     // Fix 3: Append error count when results exist
-    statusEl.textContent = rawOpps.length + ' signal(s) found across all markets' + (result.errors.length ? ' (' + result.errors.length + ' scan(s) failed)' : '');
+    statusEl.textContent = _dvSignalCountLabel(rawOpps) + ' across all markets' + (result.errors.length ? ' (' + result.errors.length + ' scan(s) failed)' : '');
     clearBtn.style.display = '';
 
     // Render compact signal cards (no backtesting — pure scan results inline)
@@ -10129,7 +10195,12 @@ function pfUpdateHealth(positions, varData) {
   if(banner){ banner.style.background = bg; banner.style.borderColor = border; }
   if(dot) dot.style.background = color;
   if(text) text.textContent = label;
-  const total = Array.isArray(positions) ? positions.reduce((sum, p) => sum + (parseFloat(p.size)||0) * (parseFloat(p.entry_price)||0), 0) : 0;
+  // ITEM 3 FIX: "Total Value" MUST equal the "Portfolio Value" card. The card
+  // uses the backend's contract-size-aware portfolio_value (a 0.01-lot FX trade
+  // is ~$1k notional, not size×price=$38). Recomputing a naive size×entry sum
+  // here produced $38 vs the card's $37,572. Single source of truth: varData.
+  const _naiveSum = Array.isArray(positions) ? positions.reduce((sum, p) => sum + (parseFloat(p.size)||0) * (parseFloat(p.entry_price)||0), 0) : 0;
+  const total = (varData && parseFloat(varData.portfolio_value)) || _naiveSum;
   if(totalVal) totalVal.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
   if(varStat) varStat.textContent = varPct.toFixed(1) + '% VaR';
   if(posStat) posStat.textContent = (Array.isArray(positions) ? positions.length : 0) + ' positions';
@@ -11472,7 +11543,7 @@ async function _todayBuildPlan(){
   if(!c.acct){ area.innerHTML='<div style="padding:26px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:#e8706e;line-height:1.7;">Enter your account size above so DotVerse can size each trade safely.</div>'; return; }
   window._todayFreeMargin = window._mt5AccountBalance || c.acct;
   try{ await _refreshForexRates(); }catch(e){}   // load quote→USD rates BEFORE sizing (JPY pairs etc.)
-  area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning your markets for the best setups… 20–30s</div></div>';
+  area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div id="todayScanProgress" style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning your markets for the best setups… 20–30s</div></div>';
   // Multi-timeframe scan: use the same full universe as the shared scanner so Today
   // can choose from the same broad opportunity pool, then narrow it to an account-fit plan.
   var baseGroups=(typeof ALL_SCAN_GROUPS!=='undefined'?ALL_SCAN_GROUPS:[]).map(function(g){
@@ -11509,7 +11580,18 @@ async function _todayBuildPlan(){
       });
     });
   }
-  var _ji=0;
+  var _ji=0, _jDone=0;
+  // ITEM 4: live progress for the Today basket scan — same pattern as the
+  // Signal tab scanner. Updates the spinner caption AND the "Scanning forex
+  // crypto…" strip so the scan never looks frozen.
+  function _todayScanProgress(){
+    var uniq=(typeof _dvUniqueSignalCount==='function')?_dvUniqueSignalCount(opps):opps.length;
+    var msg='Scanning '+_jDone+' of '+jobs.length+' market scans… '+uniq+' setup'+(uniq===1?'':'s')+' found';
+    var cap=document.getElementById('todayScanProgress');
+    if(cap) cap.textContent=msg;
+    var strip=document.querySelector('.today-v2-scan');
+    if(strip && !strip._dvStatic) strip.innerHTML='<span>'+msg+'</span>';
+  }
   async function _scanWorker(){
     while(_ji<jobs.length){
       var job=jobs[_ji++];
@@ -11517,12 +11599,21 @@ async function _todayBuildPlan(){
         var r=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:job.tickers, asset_type:job.asset, timeframe:job.tf})});
         _ingest((r&&r.results)||[], job.tf, job.asset);
       }catch(e){}
+      _jDone++; _todayScanProgress();
     }
   }
   try{
     var _pool=[]; for(var _k=0;_k<Math.min(4,jobs.length);_k++) _pool.push(_scanWorker());
     await Promise.all(_pool);
   }catch(e){}
+  // ITEM 4: close out the progress strip honestly once the scan finishes.
+  (function(){
+    var _uniq=(typeof _dvUniqueSignalCount==='function')?_dvUniqueSignalCount(opps):opps.length;
+    var _strip=document.querySelector('.today-v2-scan');
+    if(_strip) _strip.innerHTML='<span>Scan complete</span><span>'+_uniq+' setup'+(_uniq===1?'':'s')+' found</span>';
+    var _cap=document.getElementById('todayScanProgress');
+    if(_cap) _cap.textContent='Scan complete — '+_uniq+' setup'+(_uniq===1?'':'s')+' found';
+  })();
   // Quality-FIRST ranking: composite quality score, then confidence.
   opps.sort(function(a,b){ return (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0); });
   // Prefer setups that clear a quality floor; only fall below it if we'd otherwise have too
@@ -13068,21 +13159,10 @@ function _todayBridgeMt5StateToGlobalAccount(d){
   if(!d||!d.account||!Array.isArray(window._mt5Accounts)) return;
   var acct=d.account||{}, login=String(acct.login||acct.account_number||'');
   if(!window._mt5Accounts.length && d.connected===true){
-    window._mt5Accounts=[{
-      id:'__mt5_live__',
-      name:'MT5 Live',
-      account_number:login,
-      login:login,
-      broker:'MetaTrader 5',
-      account_type:'LIVE',
-      connected:true,
-      online:true,
-      status:'online',
-      balance:acct.balance,
-      equity:acct.equity,
-      leverage:acct.leverage,
-      last_seen:d.last_seen
-    }];
+    // Item 1: use the shared virtual-account builder — honest mode
+    // (LIVE/DEMO/UNKNOWN), never a hardcoded label.
+    var _v=_dvVirtualEaAccount(d);
+    window._mt5Accounts=_v?[_v]:[];
     if(typeof _updateGlobalConnIndicator==='function') _updateGlobalConnIndicator();
     return;
   }
@@ -13438,11 +13518,32 @@ function showSignalFeed(opts){
 /* ── Backtest scan cache: {key → {data, ts}} — 30-min TTL ── */
 window._btScanCache = window._btScanCache || {};
 
+// ─── ITEM 2: ONE CANONICAL SIGNAL COUNT ──────────────────────
+// Scans cover each symbol on several timeframes, so raw result counts
+// multi-count the same opportunity (ETHUSD 15m/1h/4h = 3 rows, ONE setup).
+// Every user-facing count (header metric, nav badge, scan status) MUST go
+// through this: unique setups deduped by symbol+direction.
+function _dvUniqueSignalCount(opps){
+  var seen={}, n=0;
+  (opps||[]).forEach(function(o){
+    if(!o) return;
+    var k=(o.sym||o.ticker||o.symbol||'')+':'+(o.sig||o.signal||'');
+    if(!seen[k]){ seen[k]=1; n++; }
+  });
+  return n;
+}
+function _dvSignalCountLabel(opps){
+  var raw=(opps||[]).length, uniq=_dvUniqueSignalCount(opps);
+  return raw>uniq
+    ? raw+' scanned across timeframes → '+uniq+' unique setup'+(uniq===1?'':'s')
+    : uniq+' unique setup'+(uniq===1?'':'s');
+}
 function _sfUpdateMetrics(opps){
   var set=function(id,v){var e=document.getElementById(id);if(e)e.textContent=v;};
-  var total=opps?opps.length:0;
+  var raw=opps?opps.length:0;
+  var total=_dvUniqueSignalCount(opps);   // canonical: unique setups
   set('sfMetricVal0', String(total));
-  set('sfMetricSub0', total>0 ? total+' active signals' : 'scanning…');
+  set('sfMetricSub0', total>0 ? (raw>total ? raw+' rows scanned across timeframes' : total+' active signals') : 'scanning…');
   var badge=document.getElementById('navSignalBadge');
   if(badge) badge.textContent = total>0 ? String(total) : '—';
   if(opps&&opps.length){
@@ -13648,7 +13749,7 @@ async function _sfFetchSignals(){
     });
     var res = await _runScanBase(groups, null, function(done, total, found){
       var pct = total>0 ? Math.round(5 + (done/total)*90) : 5;
-      _sfSetProgress(null, null, pct, 'Scanning '+done+' of '+total+' market·timeframes… '+found+' signal'+(found===1?'':'s')+' found so far');
+      _sfSetProgress(null, null, pct, 'Scanning '+done+' of '+total+' market·timeframes… '+found+' timeframe hit'+(found===1?'':'s')+' so far');
     });
     _scanErrors = res.errors || [];
     _scanTotal = res.total || 0;
@@ -14435,7 +14536,17 @@ function _sfBuildClarityHeader() {
       if (ready !== null) {
         healthTxt = ready + ' signal' + (ready === 1 ? '' : 's');
         if (failed !== null && failed > 0) {
-          healthTxt += ' · <span style="color:rgba(232,112,110,.75);">' + failed + ' source' + (failed===1?'':'s') + ' had errors</span>';
+          // ITEM 6: honest + useful error line. "failed" counts symbol·timeframe
+          // scans (NOT data sources), backend already dedupes the causes into
+          // unique_errors. Show impact, not a bare scary number.
+          var _uniqErrs = Array.isArray(ph.unique_errors) ? ph.unique_errors.filter(Boolean) : [];
+          var _provs = (ph.provider_counts && typeof ph.provider_counts === 'object') ? Object.keys(ph.provider_counts).filter(function(p){return p&&p!=='unknown';}) : [];
+          var _causeTip = _escHtml(_uniqErrs.length ? _uniqErrs.join('  |  ') : 'temporary data-provider errors');
+          var _nCauses = Math.max(1, _uniqErrs.length);
+          var _total = (typeof ph.candidate_count === 'number' && ph.candidate_count > 0) ? ph.candidate_count : (ready + failed);
+          healthTxt += ' · <span title="' + _causeTip + '" style="color:rgba(201,168,76,.85);cursor:help;border-bottom:1px dotted rgba(201,168,76,.4);">'
+            + failed + ' of ' + _total + ' symbol scans failed (' + _nCauses + ' distinct cause' + (_nCauses===1?'':'s') + ') — signals still found from the rest</span>'
+            + (_provs.length ? ' · <span style="color:rgba(237,232,216,.35);">data: ' + _escHtml(_provs.join(', ')) + '</span>' : '');
         }
       }
     }
@@ -16307,7 +16418,14 @@ async function _mktUpdateLiveData(){
            p>=100?p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):
            p>=1?p.toFixed(4):p.toPrecision(4);
   }
-  function _mktShowPriceError(){ try{ var box=document.getElementById('mktCondBox'); if(box){ box.style.cursor='pointer'; box.onclick=function(){ _mktUpdateLiveData(); }; box.innerHTML='<span style="color:#e8706e;font-family:var(--mono);font-size:12px;font-weight:600;">Market data unavailable</span> <span style="color:rgba(237,232,216,.6);font-family:var(--mono);font-size:11px;">— tap to retry</span>'; } }catch(_e){} }
+  function _mktShowPriceError(){ try{ var box=document.getElementById('mktCondBox'); if(box){ box.style.cursor='pointer'; box.onclick=function(){ _mktUpdateLiveData(); }; box.innerHTML='<span style="color:#e8706e;font-family:var(--mono);font-size:12px;font-weight:600;">Market data unavailable</span> <span style="color:rgba(237,232,216,.6);font-family:var(--mono);font-size:11px;">— tap to retry</span>'; }
+    // ITEM 5: when the price fetch fails, the heatmap must NOT sit on
+    // "Loading heatmap…" forever — give it its own error→retry state.
+    var hm=document.querySelector('.mkt-heatmap');
+    if(hm && hm.querySelector('.mkt-heat-loading')){
+      hm.innerHTML='<div class="mkt-heat-loading" onclick="_mktUpdateLiveData()" style="grid-column:1/-1;text-align:center;padding:24px;color:#e8706e;font-size:11px;font-family:var(--mono);cursor:pointer;">Heatmap unavailable — tap to retry</div>';
+    }
+  }catch(_e){} }
   try{
     const data=await dvFetch('/api/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:yfTickers})});
     if(!data){ _mktShowPriceError(); return; }
@@ -16448,17 +16566,22 @@ function mktToggleRow(rowId, rowEl){
   if(arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
 }
 
+// ITEM 5: per-section state — gauge shows "unavailable" instead of a stuck "—".
+function _fearGreedFail(){
+  var lbl = document.getElementById('mktFearGreedLbl');
+  if(lbl) lbl.textContent = 'Fear & Greed Index · unavailable right now';
+}
 async function _loadFearGreed(){
   try{
     var r = await dvFetch('/api/fear-greed');
-    if(!r || r.value == null || isNaN(r.value)) return;
+    if(!r || r.value == null || isNaN(r.value)) { _fearGreedFail(); return; }
     var val = document.getElementById('mktFearGreedVal');
     var pin = document.getElementById('mktFearGreedPin');
     var lbl = document.getElementById('mktFearGreedLbl');
     if(val){ val.textContent = r.value; val.style.color = r.classification === 'Fear' ? '#e8706e' : r.classification === 'Greed' ? '#5de8a0' : 'rgba(237,232,216,.82)'; }
     if(pin) pin.style.left = Math.min(100, Math.max(0, isFinite(r.value) ? r.value : 50)) + '%';
     if(lbl) lbl.textContent = 'Fear & Greed Index' + (r.classification ? ' · ' + r.classification : '');
-  }catch(e){}
+  }catch(e){ _fearGreedFail(); }
 }
 
 async function _loadSectors(){
@@ -23725,6 +23848,8 @@ function szLadderRender() {
 	      if (tsNote && acct > 0) {
 	        tsNote.textContent = '= ' + (totalMargin / acct * 100).toFixed(1) + '% cash in · controls $' + Math.round(totalTradeAmount).toLocaleString() + ' position value';
 	        tsNote.style.display = 'block';
+	        // ITEM 7: same concentration warning for the LADDER total cash-in.
+	        if (typeof window._szUpdateConcWarn === 'function') window._szUpdateConcWarn(totalMargin / acct * 100, totalRisk);
 	      }
 	    }
 	    const setText = function(id,v){ const e=document.getElementById(id); if(e) e.textContent=v; };
@@ -24442,6 +24567,28 @@ function szCalc(){
 
   const moneyAtRisk = acct*(riskPct/100);
 
+  // ITEM 7: concentration transparency. The sizing MATH is correct, but a
+  // "1% risk" trade with a tight stop can still tie up a huge share of the
+  // account as cash-in (live example: 69.1%). When cash-in ≥ 25% of the
+  // account, say so plainly next to the cash-in line — beginners read "1%
+  // risk" as "1% of my money is involved", which is false.
+  function _szUpdateConcWarn(cashPct, riskDollars){
+    var anchor=document.getElementById('szTradeSizePct');
+    var w=document.getElementById('szConcWarn');
+    if(cashPct==null || !isFinite(cashPct) || cashPct<25){ if(w) w.style.display='none'; return; }
+    if(!anchor || !anchor.parentNode) return;
+    if(!w){
+      w=document.createElement('div');
+      w.id='szConcWarn';
+      w.style.cssText='margin-top:6px;padding:8px 10px;border-radius:6px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.3);font-family:var(--mono);font-size:10px;line-height:1.5;color:#c9a84c;';
+      anchor.parentNode.insertBefore(w, anchor.nextSibling);
+    }
+    var riskTxt=(riskDollars!=null&&isFinite(riskDollars)&&riskDollars>0)?('$'+Number(riskDollars).toFixed(2)):'your planned stop amount';
+    w.innerHTML='&#9888; This uses <b>'+cashPct.toFixed(1)+'%</b> of your account in one position. Your planned loss at the stop is '+riskTxt+', but a sudden gap past your stop can lose more than planned — and this cash is locked while the trade is open.';
+    w.style.display='block';
+  }
+  window._szUpdateConcWarn=_szUpdateConcWarn;
+
   // Risk hint
   const rh=document.getElementById('szRiskHint');
   if(rh && acct>0 && riskPct>0){
@@ -24455,7 +24602,8 @@ function szCalc(){
     if(tradeSize>0&&acct>0){
       tsNote.textContent='= '+(tradeSize/acct*100).toFixed(1)+'% cash in from your account';
       tsNote.style.display='block';
-    } else tsNote.style.display='none';
+      _szUpdateConcWarn(tradeSize/acct*100, moneyAtRisk);
+    } else { tsNote.style.display='none'; _szUpdateConcWarn(null); }
   }
 
   // Helper: set text safely
@@ -29061,8 +29209,8 @@ window._dvGuide = {
   // ── MULTI-TRADE LADDER (Size tab) ─────────────────────────────────────────
   'ladder-row': {
     title: 'Multi-Trade Ladder Row',
-    body: 'One simulated entry at a different risk % for the same signal. The ladder lets you plan a scaled entry — entering a small position now and adding more if price confirms the direction. Each row shows the exact lots/units, money at risk, and potential profit at each take profit level.',
-    example: 'Row 1: 0.5% risk, small entry to test the trade. Row 2: 1% risk, add if price holds. Row 3: 2% risk, full position once confirmed.'
+    body: 'One slice of the same trade at a different risk %. IMPORTANT: this ladder is a SCALE-OUT plan — every row opens at the SAME entry price now, and each row has its own take-profit so you lock in profit in stages as price moves your way. It does NOT add to your position later ("scale-in" is a different technique DotVerse does not do yet). Use a ladder instead of a single trade when you want to bank partial profit early while letting the rest run; use a single trade when you want one clean exit.',
+    example: 'Row 1: 0.02 lots exits at TP1 (profit banked early). Row 2: 0.03 lots exits at TP2. Row 3: 0.01 lots rides to TP3. All three open together at the same entry, each with its own SL/TP.'
   },
   'ladder-preset-conservative': {
     title: 'Conservative Ladder (0.5% × 5)',

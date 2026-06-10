@@ -259,10 +259,6 @@ function _todaySizeTrade(o, acct, riskPct){
            notionalPctOfAcct: acct>0?(notional/acct*100):0,
            spreadD:spreadD, feeD:feeD, slipD:slipD, costD:costD, unitLabel:unitLabel };
 }
-
-window._forexUsdRates = {USDCAD:1.35,USDCHF:0.90,USDJPY:150,USDINR:83,
-                          USDCNH:7.2,USDMXN:17,EURUSD:1.08,GBPUSD:1.27,
-                          AUDUSD:0.67,NZDUSD:0.61};
 function _forexUsdRate(counter){
   // Returns the multiplier to convert pip value from counter currency to USD.
   // For counter=JPY: 1 pip = 0.01 JPY * 100k = 1000 JPY. USD value = 1000 / USDJPY
