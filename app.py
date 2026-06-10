@@ -9094,6 +9094,50 @@ def orders_submit():
     finally:
         db.close()
 
+@app.route("/api/health/deep", methods=["GET"])
+@login_required
+def health_deep():
+    """Schema-vs-code truth: does the live DB have what the money path needs?"""
+    out = {"db": False, "checks": {}}
+    if not _db_engine:
+        return jsonify(out), 503
+    try:
+        with _db_engine.connect() as c:
+            out["db"] = True
+            cols = {r[0] for r in c.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='mt5_orders'")).fetchall()}
+            out["checks"]["mt5_orders.account_id"] = "account_id" in cols
+            out["checks"]["mt5_orders.requeue_count"] = "requeue_count" in cols
+            ta = c.execute(text(
+                "SELECT count(*) FROM information_schema.tables WHERE table_name='trading_accounts'")).scalar()
+            out["checks"]["trading_accounts_table"] = bool(ta)
+        out["ok"] = all(out["checks"].values())
+    except Exception as e:
+        out["error"] = str(e)[:200]
+    return jsonify(out)
+
+
+@app.route("/api/admin/repair-schema", methods=["POST"])
+@require_admin
+def admin_repair_schema():
+    """Apply the critical money-path migrations on demand, each isolated."""
+    results = {}
+    if not _db_engine:
+        return jsonify({"error": "no db"}), 503
+    for stmt in [
+        "ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS account_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS ix_mt5_orders_account_id ON mt5_orders(account_id)",
+        "ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS requeue_count INTEGER DEFAULT 0",
+    ]:
+        try:
+            with _db_engine.begin() as c:
+                c.execute(text(stmt))
+            results[stmt[:60]] = "ok"
+        except Exception as e:
+            results[stmt[:60]] = f"FAILED: {str(e)[:160]}"
+    return jsonify({"results": results})
+
+
 @app.route("/api/mt5/pending", methods=["GET"])
 @_require_ea
 def mt5_get_pending():
