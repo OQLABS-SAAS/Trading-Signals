@@ -9010,7 +9010,23 @@ def mt5_submit_order():
         # UI. Technical detail goes to the server log; the trader gets a human
         # sentence and the guarantee that nothing was placed.
         print(f"[mt5/order] INTERNAL ERROR for user {user_id}: {e}")
-        return jsonify({"error": "Your order could not be saved — a server problem occurred. Nothing was placed at your broker. Try again in a minute."}), 500
+        _msg = "Your order could not be saved — a server problem occurred. Nothing was placed at your broker. Try again in a minute."
+        try:
+            _u = db2 = None
+            from flask import session as _sess
+            if str(_sess.get("role") or "") == "admin" or True:  # admin check via DB below
+                pass
+        except Exception:
+            pass
+        try:
+            _udb = _DBSession();
+            _urow = _udb.query(User).filter_by(id=int(user_id)).first() if user_id and str(user_id).isdigit() else None
+            if _urow is not None and getattr(_urow, "role", "") == "admin":
+                _msg += " [debug for admin: " + type(e).__name__ + ": " + str(e)[:160] + "]"
+            _udb.close()
+        except Exception:
+            pass
+        return jsonify({"error": _msg}), 500
     finally:
         db.close()
 
@@ -9104,6 +9120,12 @@ def health_deep():
     try:
         with _db_engine.connect() as c:
             out["db"] = True
+            for model in (MT5Order, TradingAccount):
+                tname = model.__tablename__
+                dbcols = {r[0] for r in c.execute(text(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name='" + tname + "'")).fetchall()}
+                missing = [col.name for col in model.__table__.columns if col.name not in dbcols]
+                out["checks"][tname + "_missing_columns"] = missing or "none"
             cols = {r[0] for r in c.execute(text(
                 "SELECT column_name FROM information_schema.columns WHERE table_name='mt5_orders'")).fetchall()}
             out["checks"]["mt5_orders.account_id"] = "account_id" in cols
@@ -9111,7 +9133,7 @@ def health_deep():
             ta = c.execute(text(
                 "SELECT count(*) FROM information_schema.tables WHERE table_name='trading_accounts'")).scalar()
             out["checks"]["trading_accounts_table"] = bool(ta)
-        out["ok"] = all(out["checks"].values())
+        out["ok"] = all((v == "none" if isinstance(v, (list, str)) and not isinstance(v, bool) else bool(v)) for v in out["checks"].values())
     except Exception as e:
         out["error"] = str(e)[:200]
     return jsonify(out)
@@ -9124,11 +9146,21 @@ def admin_repair_schema():
     results = {}
     if not _db_engine:
         return jsonify({"error": "no db"}), 503
-    for stmt in [
-        "ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS account_id INTEGER",
-        "CREATE INDEX IF NOT EXISTS ix_mt5_orders_account_id ON mt5_orders(account_id)",
-        "ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS requeue_count INTEGER DEFAULT 0",
-    ]:
+    stmts = []
+    try:
+        with _db_engine.connect() as c0:
+            for model in (MT5Order, TradingAccount):
+                tname = model.__tablename__
+                dbcols = {r[0] for r in c0.execute(text(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name='" + tname + "'")).fetchall()}
+                for col in model.__table__.columns:
+                    if col.name not in dbcols:
+                        ctype = col.type.compile(_db_engine.dialect)
+                        stmts.append(f"ALTER TABLE {tname} ADD COLUMN IF NOT EXISTS {col.name} {ctype}")
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+    stmts.append("CREATE INDEX IF NOT EXISTS ix_mt5_orders_account_id ON mt5_orders(account_id)")
+    for stmt in stmts:
         try:
             with _db_engine.begin() as c:
                 c.execute(text(stmt))
