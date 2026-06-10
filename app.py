@@ -9493,6 +9493,62 @@ def mt5_level_alert():
 
     return jsonify({"status": "ok"})
 
+def _ensure_account_from_ea_push(user_id, ea_account_id, account_info):
+    """ROOT FIX for 'trades don't fire on MT5' (2026-06-10).
+
+    Owner intent: a live EA streaming telemetry IS a connected account. But
+    /api/mt5/order requires a persisted TradingAccount row, and a user whose
+    EA authenticates via the legacy per-user secret has NONE — so every order
+    submit failed with 'select a connected MT5 account before placing this
+    trade'. Auto-register the account from the first authenticated EA push.
+
+    Conservative by design: only fires for an attributable user (never the
+    legacy 'default' bucket), only when the user has ZERO active accounts,
+    and stores mode honestly ('UNKNOWN' until the EA reports trade_mode —
+    never assumes DEMO on a possibly-live account). Idempotent.
+    """
+    if not _DBSession:
+        return
+    uid = str(user_id or "").strip()
+    if uid in ("", "default", "None"):
+        return
+    if ea_account_id:  # EA already bound to a saved per-account secret
+        return
+    db = _DBSession()
+    try:
+        exists = db.query(TradingAccount.id).filter(
+            TradingAccount.user_id == uid,
+            TradingAccount.is_active == True,
+        ).first()
+        if exists:
+            return
+        info = account_info if isinstance(account_info, dict) else {}
+        login = str(info.get("login") or info.get("account_number") or "").strip()
+        row = TradingAccount(
+            user_id        = uid,
+            name           = "MT5 via EA",
+            broker         = str(info.get("company") or "MetaTrader 5")[:64],
+            server         = str(info.get("server") or "")[:64] or None,
+            account_number = login[:32] or None,
+            account_type   = normalize_mt5_account_type(info),  # DEMO/LIVE/UNKNOWN — honest
+            currency       = str(info.get("currency") or "USD")[:8],
+            platform       = "MT5",
+            status         = "connected",
+            last_seen      = datetime.utcnow(),
+            is_active      = True,
+        )
+        db.add(row)
+        db.commit()
+        try:
+            print(f"[mt5] auto-registered TradingAccount {row.id} for user {uid} from EA push")
+        except Exception:
+            pass
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 @app.route("/api/mt5/push", methods=["POST"])
 @_require_ea
 def mt5_push_state():
@@ -9501,6 +9557,11 @@ def mt5_push_state():
     user_id   = getattr(request, 'ea_user_id', None) or body.get("user_id", "default")
     ea_account_id = getattr(request, "ea_account_id", None)
     account   = annotate_mt5_account_mode(body.get("account", {}))
+    # ROOT FIX: live EA = connected account (see _ensure_account_from_ea_push).
+    try:
+        _ensure_account_from_ea_push(user_id, ea_account_id, account)
+    except Exception:
+        pass
     positions = body.get("positions", [])
     spreads   = body.get("spreads", {})     # Phase 1.2: live spread map {symbol: spread_pts}
     payload_seq = body.get("seq") or body.get("sequence")
