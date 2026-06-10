@@ -8622,6 +8622,14 @@ def _find_recent_duplicate_mt5_order(db, user_id, account_id, symbol, direction,
             MT5Order.created_at >= cutoff,
         ).all()
     except Exception:
+        # 2026-06-10: NEVER swallow a query error without rolling back — a
+        # failed SELECT here left the session in 'transaction is aborted'
+        # state and every subsequent order INSERT failed with a cryptic
+        # InFailedSqlTransaction instead of the real cause.
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return None
     def same_num(a, b):
         if a is None and b is None:
@@ -16200,6 +16208,11 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp1_alert BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS tp2_alert BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS weekend BOOLEAN DEFAULT FALSE"))
+                # 2026-06-10 ROOT FIX (live order placement failed): the MT5Order
+                # model gained account_id but this migration was never added, so
+                # prod INSERTs/SELECTs touching account_id aborted the transaction
+                # ('current transaction is aborted' on every order placement).
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS account_id INTEGER"))
                 # Phase A/B/C/D automation tables (idempotent)
                 _conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS notifications (
