@@ -9156,7 +9156,7 @@ def admin_repair_schema():
                 for col in model.__table__.columns:
                     if col.name not in dbcols:
                         ctype = col.type.compile(_db_engine.dialect)
-                        stmts.append(f"ALTER TABLE {tname} ADD COLUMN IF NOT EXISTS {col.name} {ctype}")
+                        stmts.append(f'ALTER TABLE {tname} ADD COLUMN IF NOT EXISTS "{col.name}" {ctype}')
     except Exception as e:
         return jsonify({"error": str(e)[:200]}), 500
     stmts.append("CREATE INDEX IF NOT EXISTS ix_mt5_orders_account_id ON mt5_orders(account_id)")
@@ -16341,7 +16341,7 @@ def _init_db():
                 # Widen action column — original VARCHAR(8) too short for "modify_sl" (9 chars)
                 _conn.execute(text("ALTER TABLE mt5_orders ALTER COLUMN action TYPE VARCHAR(32)"))
                 # Automation flag columns for TODAY tab — sent with orders so EA can apply per-trade automations
-                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS trailing BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text('ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS "trailing" BOOLEAN DEFAULT FALSE'))  # ROOT CAUSE OF MONTHS OF ABORTED MIGRATIONS: unquoted Postgres reserved word
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS be BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS macro BOOLEAN DEFAULT FALSE"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS inval BOOLEAN DEFAULT FALSE"))
