@@ -7,7 +7,7 @@
 //
 //  To force a full cache wipe on next deploy: bump CACHE_VER
 // =============================================================
-const CACHE_VER = 'dv-v17';
+const CACHE_VER = 'dv-v18';
 const STATIC_ASSETS = [
   '/icon-192.png',
   '/icon-512.png',

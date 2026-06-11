@@ -7239,42 +7239,65 @@ function drawPnlChart(){
   const W=cv.offsetWidth||600,H=160;
   cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
-  const n=90; const pad={l:12,r:12,t:8,b:20};
-  // fill background with theme bg
   ctx.fillStyle=th.bg; ctx.fillRect(0,0,W,H);
-  // generate seeded-looking data (stable per session)
-  const rng=()=>Math.random();
-  let p1=0,p2=0; const d1=[],d2=[];
-  for(let i=0;i<n;i++){p1+=(rng()-.44)*.8;d1.push(p1);p2+=(rng()-.49)*.6;d2.push(p2);}
-  const allV=[...d1,...d2];
-  const minV=Math.min(...allV),maxV=Math.max(...allV),rngV=maxV-minV||1;
-  const toX=i=>pad.l+i*(W-pad.l-pad.r)/(n-1);
-  const toY=v=>pad.t+(1-(v-minV)/rngV)*(H-pad.t-pad.b);
-  // grid lines from theme gridCol
-  ctx.strokeStyle=th.gridCol; ctx.lineWidth=1;
-  for(let i=0;i<=4;i++){const y=pad.t+(H-pad.t-pad.b)/4*i; ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke();}
-  // area fill — theme areaGrad
-  const grad=ctx.createLinearGradient(0,pad.t,0,H-pad.b);
-  grad.addColorStop(0,th.areaGrad[0]); grad.addColorStop(1,th.areaGrad[1]);
-  ctx.fillStyle=grad;
-  ctx.beginPath(); ctx.moveTo(toX(0),toY(d1[0]));
-  d1.forEach((_,i)=>ctx.lineTo(toX(i),toY(d1[i])));
-  ctx.lineTo(toX(n-1),H-pad.b); ctx.lineTo(toX(0),H-pad.b); ctx.closePath(); ctx.fill();
-  // portfolio line — theme lineCol
-  ctx.strokeStyle=th.lineCol; ctx.lineWidth=1.8; ctx.lineJoin='round';
-  ctx.beginPath(); d1.forEach((_,i)=>{i===0?ctx.moveTo(toX(i),toY(d1[i])):ctx.lineTo(toX(i),toY(d1[i]));});ctx.stroke();
-  // benchmark line — dimmed emaCol[1]
-  ctx.strokeStyle=th.emaCol[1]; ctx.lineWidth=1.2;
-  ctx.setLineDash([3,4]);
-  ctx.beginPath(); d2.forEach((_,i)=>{i===0?ctx.moveTo(toX(i),toY(d2[i])):ctx.lineTo(toX(i),toY(d2[i]));});ctx.stroke();
-  ctx.setLineDash([]);
-  // current value dot glow
-  const lastX=toX(n-1), lastY=toY(d1[n-1]);
-  ctx.beginPath(); ctx.arc(lastX,lastY,3.5,0,Math.PI*2);
-  ctx.fillStyle=th.lineCol; ctx.fill();
-  const glow=ctx.createRadialGradient(lastX,lastY,0,lastX,lastY,10);
-  glow.addColorStop(0,th.areaGrad[0]); glow.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(lastX,lastY,10,0,Math.PI*2); ctx.fill();
+  // Fetch real cumulative P&L from closed trades via /api/performance/pnl
+  dvFetch('/api/performance/pnl').then(function(data){
+    cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
+    ctx.scale(dpr,dpr);
+    ctx.fillStyle=th.bg; ctx.fillRect(0,0,W,H);
+    const pts=(data&&Array.isArray(data.pnl))?data.pnl:[];
+    const pad={l:12,r:12,t:8,b:20};
+    // Empty state: no closed trades yet
+    if(!pts||pts.length===0){
+      // EMPTY-STATE-PNL-MARKER
+      ctx.fillStyle='rgba(237,232,216,.35)';
+      ctx.font='12px Inter,sans-serif';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.fillText('No closed trades yet — your real P&L will plot here as you close trades.',W/2,H/2);
+      return;
+    }
+    const n=pts.length;
+    const minV=Math.min(0,...pts),maxV=Math.max(0,...pts),rngV=maxV-minV||1;
+    const toX=i=>pad.l+i*(W-pad.l-pad.r)/(n>1?n-1:1);
+    const toY=v=>pad.t+(1-(v-minV)/rngV)*(H-pad.t-pad.b);
+    // grid lines
+    ctx.strokeStyle=th.gridCol; ctx.lineWidth=1;
+    for(let i=0;i<=4;i++){const y=pad.t+(H-pad.t-pad.b)/4*i; ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke();}
+    // zero line if range spans positive and negative
+    if(minV<0&&maxV>0){
+      const zy=toY(0);
+      ctx.strokeStyle='rgba(237,232,216,.18)'; ctx.lineWidth=1;
+      ctx.setLineDash([4,4]);
+      ctx.beginPath();ctx.moveTo(pad.l,zy);ctx.lineTo(W-pad.r,zy);ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // area fill
+    const lastPositive=pts[pts.length-1]>=0;
+    const grad=ctx.createLinearGradient(0,pad.t,0,H-pad.b);
+    grad.addColorStop(0,lastPositive?th.areaGrad[0]:'rgba(232,112,110,.22)');
+    grad.addColorStop(1,lastPositive?th.areaGrad[1]:'rgba(232,112,110,.03)');
+    ctx.fillStyle=grad;
+    ctx.beginPath(); ctx.moveTo(toX(0),toY(pts[0]));
+    pts.forEach((_,i)=>ctx.lineTo(toX(i),toY(pts[i])));
+    ctx.lineTo(toX(n-1),H-pad.b); ctx.lineTo(toX(0),H-pad.b); ctx.closePath(); ctx.fill();
+    // equity curve line
+    ctx.strokeStyle=lastPositive?th.lineCol:'#e8706e'; ctx.lineWidth=1.8; ctx.lineJoin='round';
+    ctx.beginPath(); pts.forEach((_,i)=>{i===0?ctx.moveTo(toX(i),toY(pts[i])):ctx.lineTo(toX(i),toY(pts[i]));});ctx.stroke();
+    // current value dot + glow
+    const lastX=toX(n-1), lastY=toY(pts[n-1]);
+    ctx.beginPath(); ctx.arc(lastX,lastY,3.5,0,Math.PI*2);
+    ctx.fillStyle=lastPositive?th.lineCol:'#e8706e'; ctx.fill();
+    const glow=ctx.createRadialGradient(lastX,lastY,0,lastX,lastY,10);
+    glow.addColorStop(0,lastPositive?th.areaGrad[0]:'rgba(232,112,110,.4)'); glow.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(lastX,lastY,10,0,Math.PI*2); ctx.fill();
+  }).catch(function(){
+    ctx.fillStyle='rgba(237,232,216,.25)';
+    ctx.font='11px Inter,sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('P&L chart unavailable — log in to see your real track record.',W/2,H/2);
+  });
 }
 
 function drawPerfChart(){
@@ -8244,6 +8267,7 @@ function showSettings(tab){
     // F1.1 — load persisted Connections values from /api/settings
     if (typeof _loadConnSettings === 'function') _loadConnSettings();
   }
+  if(tab==='alerts'){ setTimeout(function(){ if(typeof dvLoadScanAlerts==='function') dvLoadScanAlerts(); }, 50); }
 }
 
 
@@ -9670,6 +9694,14 @@ function _spAlerts(){
     {id:'atch-hc',    name:'High-Agreement Only',sub:'Suppress signals below your indicator agreement threshold',svg:'<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>',on:(_dvRead('nc-atch-hc')==='1')},
   ];
   return `<div class="sett-sect">
+    <div class="sett-sect-title" style="display:flex;align-items:center;gap:8px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(93,232,160,.75)" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      Telegram Signals — live auto-scan
+    </div>
+    <div class="sett-sect-sub">These are the exact signals sent to your Telegram, with the dollar amounts explained.</div>
+    <div id="tgScanFeed" style="margin-top:10px;font-size:11px;color:rgba(220,200,140,.7);font-family:var(--mono);">Loading…</div>
+  </div>
+  <div class="sett-sect">
     <div class="sett-sect-title">Alert Thresholds</div>
     <div class="sett-sect-sub">Fine-tune when alerts fire. Adjust sensitivity to match your trading style.</div>
     <div class="at-grid">
@@ -9721,6 +9753,55 @@ function _spAlerts(){
     </div>
   </div>
   ${_saveBtn('Save Changes')}`;
+}
+function dvLoadScanAlerts(){
+  var feed=document.getElementById('tgScanFeed');
+  if(!feed)return;
+  fetch('/api/scan-alerts').then(function(r){return r.json();}).then(function(d){
+    var alerts=d.alerts||[];
+    if(!alerts.length){
+      feed.innerHTML='<div style="color:rgba(200,190,170,.45);font-size:11px;padding:10px 0;">No signals yet — the scanner runs every 15 minutes and posts here and to Telegram.</div>';
+      return;
+    }
+    function _relTime(iso){
+      if(!iso)return '';
+      var diff=Math.floor((Date.now()-new Date(iso))/1000);
+      if(diff<60)return diff+'s ago';
+      if(diff<3600)return Math.floor(diff/60)+'m ago';
+      if(diff<86400)return Math.floor(diff/3600)+'h ago';
+      return Math.floor(diff/86400)+'d ago';
+    }
+    var html=alerts.map(function(a){
+      var isBuy=a.signal==='BUY';
+      var sigCol=isBuy?'rgba(93,232,160,.9)':'rgba(240,120,120,.9)';
+      var tagCol=a.trade_type==='scalping'?'rgba(96,165,250,.8)':'rgba(201,168,76,.8)';
+      var tag=a.trade_type==='scalping'?'SCALP':'SWING';
+      var dollarLine='';
+      if(a.risk_usd!=null&&a.profit_usd!=null){
+        dollarLine='<div style="color:rgba(93,232,160,.7);margin-top:2px;">'+
+          a.lot+' lots &middot; risks $'+Number(a.risk_usd).toLocaleString()+
+          ' &middot; +$'+Number(a.profit_usd).toLocaleString()+' at TP1</div>';
+      } else if(a.lot){
+        dollarLine='<div style="color:rgba(200,190,170,.5);margin-top:2px;">'+a.lot+' lots</div>';
+      }
+      var entry=a.entry?Number(a.entry).toPrecision(5):'—';
+      var sl=a.sl?Number(a.sl).toPrecision(5):'—';
+      var tp1=a.tp1?Number(a.tp1).toPrecision(5):'—';
+      return '<div style="padding:8px 10px;margin-bottom:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:6px;">'+
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">'+
+          '<span style="font-size:9px;font-weight:700;color:'+tagCol+';letter-spacing:.05em;padding:1px 5px;border:1px solid '+tagCol+';border-radius:3px;">'+tag+'</span>'+
+          '<span style="font-size:11px;font-weight:700;color:'+sigCol+';">'+a.signal+'</span>'+
+          '<span style="font-size:11px;font-weight:600;color:rgba(237,232,216,.85);">'+a.ticker+'</span>'+
+          '<span style="margin-left:auto;font-size:10px;color:rgba(200,190,170,.4);">'+_relTime(a.sent_at)+'</span>'+
+        '</div>'+
+        '<div style="color:rgba(200,190,170,.55);font-size:10px;">Entry '+entry+' &middot; SL '+sl+' &middot; TP1 '+tp1+'</div>'+
+        dollarLine+
+      '</div>';
+    }).join('');
+    feed.innerHTML=html;
+  }).catch(function(){
+    feed.innerHTML='<div style="color:rgba(240,120,120,.55);font-size:11px;padding:6px 0;">Could not load signals.</div>';
+  });
 }
 function updAtSlider(key,unit,val,mn,mx){
   _settSliders[key]=parseFloat(val);
@@ -18733,36 +18814,74 @@ async function rmRunVar(){
   }catch(e){el.innerHTML='<span style="color:#e8706e;">Error computing VaR.</span>';}
 }
 async function rmRunStress(){
-  const pv=parseFloat((document.getElementById('rmStressPortValue')||{}).value)||10000;
   const el=document.getElementById('rmStressResult'); if(!el) return;
-  el.innerHTML='<span style="color:var(--mut);">Running stress test…</span>';
+  el.innerHTML='<span style="color:var(--mut);">Loading positions…</span>';
   try{
-    const d=await dvFetch('/api/stress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_value:pv})});
-    if(!d||d.error){el.innerHTML='<span style="color:#e8706e;">'+(d&&d.error?d.error:'No positions to stress-test. Add positions on the Portfolio page.')+'</span>';return;}
-    const results=d.rows||[];
-    if(!results.length){el.innerHTML='<span style="color:var(--mut);">No positions to stress-test. Add positions on the Portfolio page first.</span>';return;}
-    const totalPnl=d.total_pnl_usd||0;
-    const totalPct=d.total_pnl_pct||0;
-    const rows=results.map(r=>{
-      const clr=r.pnl_usd>=0?'#5de8a0':'#e8706e';
-      return`<tr style="border-bottom:1px solid var(--bd);">
-        <td style="padding:5px 8px;font-family:var(--mono);font-size:11px;">${r.ticker}</td>
-        <td style="padding:5px 8px;font-family:var(--mono);font-size:10px;color:var(--mut);">${r.asset_type}</td>
-        <td style="padding:5px 8px;font-family:var(--mono);font-size:11px;color:var(--mut);">${r.alloc_usd!=null?'$'+parseFloat(r.alloc_usd).toFixed(0):(r.alloc_pct||'—')+'%'}</td>
-        <td style="padding:5px 8px;font-family:var(--mono);font-size:11px;color:var(--mut);">${r.shock_pct}%</td>
-        <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-size:11px;color:${clr};font-weight:700;">${r.pnl_usd>=0?'+':''}$${Math.abs(r.pnl_usd).toFixed(2)}</td>
-      </tr>`;}).join('');
-    const totalClr=totalPnl>=0?'#5de8a0':'#e8706e';
-    el.innerHTML=`<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;">
-      <thead><tr style="border-bottom:1px solid var(--bd);">
-        <th style="text-align:left;padding:5px 8px;color:var(--mut);">TICKER</th>
-        <th style="text-align:left;padding:5px 8px;color:var(--mut);">TYPE</th>
-        <th style="text-align:left;padding:5px 8px;color:var(--mut);">ALLOC</th>
-        <th style="text-align:left;padding:5px 8px;color:var(--mut);">SHOCK</th>
-        <th style="text-align:right;padding:5px 8px;color:var(--mut);">STRESSED P&L</th>
-      </tr></thead><tbody>${rows}</tbody></table>
-      <div style="margin-top:10px;font-size:12px;color:var(--txt);">Total stressed P&L: <span style="color:${totalClr};font-weight:700;">${totalPnl>=0?'+':''}$${Math.abs(totalPnl).toFixed(2)} (${totalPct.toFixed(2)}%)</span></div>`;
-  }catch(e){el.innerHTML='<span style="color:#e8706e;">Error running stress test.</span>';}
+    // Load real open positions from /api/mt5/state
+    const state=await dvFetch('/api/mt5/state');
+    const rawPos=(state&&Array.isArray(state.positions))?state.positions:[];
+    // STRESS-TEST-NO-POSITIONS-EMPTY-STATE
+    if(!rawPos.length){
+      el.innerHTML='<span style="color:var(--mut);">No open positions to stress-test. Open a position (or connect MT5) and it will appear here.</span>';
+      window._rmStressPositions=[];
+      return;
+    }
+    // Compute notional per position: FX = 100000 × lots × price; others = lots × price
+    const FX_CONTRACT=100000;
+    const mapped=rawPos.map(function(p){
+      const sym=(p.symbol||'').toUpperCase();
+      const vol=parseFloat(p.volume||p.lots||0);
+      const price=parseFloat(p.open_price||p.price_open||p.entry||0);
+      // Infer asset_type from symbol if not present
+      let at=(p.asset_type||'').toLowerCase();
+      if(!at){
+        if(/^[A-Z]{6}$/.test(sym)||sym.includes('USD')||sym.includes('EUR')||sym.includes('GBP')||sym.includes('JPY')) at='forex';
+        else if(sym.includes('BTC')||sym.includes('ETH')||sym.includes('XRP')||sym.includes('LTC')) at='crypto';
+        else at='stock';
+      }
+      const cs=at==='forex'?FX_CONTRACT:1;
+      const notional=vol*cs*price||0;
+      return {symbol:sym,notional:Math.round(notional),asset_type:at,volume:vol,price:price};
+    });
+    window._rmStressPositions=mapped;
+    // Default shocks per asset class
+    const defaultShocks={crypto:-30,forex:-10,stock:-20,index:-15,commodity:-20,default:-20};
+    // Build slider rows per real position
+    let sliderHtml='';
+    mapped.forEach(function(p,i){
+      const shock=defaultShocks[p.asset_type]!=null?defaultShocks[p.asset_type]:defaultShocks.default;
+      const pnl=p.notional*(shock/100);
+      const clr=pnl>=0?'var(--grn)':'var(--red)';
+      sliderHtml+=`<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(237,232,216,.07);flex-wrap:wrap;">
+        <span style="font-family:var(--mono);font-size:11px;width:80px;flex-shrink:0;">${p.symbol}</span>
+        <span style="font-size:9px;color:var(--mut);font-family:var(--mono);width:52px;flex-shrink:0;">${p.asset_type}</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--mut);width:72px;flex-shrink:0;">$${p.notional.toLocaleString()}</span>
+        <input id="stress_slider_${i}" type="range" min="-80" max="20" value="${shock}" step="1"
+          oninput="rmStressCalc(${i},parseInt(this.value),${p.notional})"
+          style="flex:1;min-width:100px;accent-color:var(--amb);">
+        <span id="stress_shock_${i}" style="font-family:var(--mono);font-size:11px;color:var(--mut);width:38px;text-align:right;">${shock}%</span>
+        <span id="stress_pnl_${i}" style="font-family:var(--mono);font-size:11px;font-weight:700;width:80px;text-align:right;color:${clr};">${pnl<0?'−$':'$'}${Math.abs(Math.round(pnl)).toLocaleString()}</span>
+      </div>`;
+    });
+    // Initial total
+    const initTotal=mapped.reduce(function(s,p){
+      const shock=defaultShocks[p.asset_type]!=null?defaultShocks[p.asset_type]:defaultShocks.default;
+      return s+p.notional*(shock/100);
+    },0);
+    const totalClr=initTotal>=0?'#5de8a0':'#e8706e';
+    el.innerHTML=`<div style="margin-bottom:10px;">
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        <button onclick="rmPresetShock('mild')" style="font-size:10px;padding:4px 10px;background:rgba(237,232,216,.08);color:var(--mut);border:1px solid rgba(237,232,216,.18);border-radius:5px;cursor:pointer;font-family:var(--mono);">Mild −10%</button>
+        <button onclick="rmPresetShock('severe')" style="font-size:10px;padding:4px 10px;background:rgba(237,232,216,.08);color:var(--mut);border:1px solid rgba(237,232,216,.18);border-radius:5px;cursor:pointer;font-family:var(--mono);">Severe −30%</button>
+        <button onclick="rmPresetShock('crash')" style="font-size:10px;padding:4px 10px;background:rgba(232,112,110,.08);color:#e8706e;border:1px solid rgba(232,112,110,.25);border-radius:5px;cursor:pointer;font-family:var(--mono);">Crash −50%</button>
+      </div>
+      <div style="display:flex;gap:10px;font-size:9px;color:var(--mut);font-family:var(--mono);padding:0 0 6px 0;border-bottom:1px solid rgba(237,232,216,.1);">
+        <span style="width:80px;">SYMBOL</span><span style="width:52px;">TYPE</span><span style="width:72px;">NOTIONAL</span><span style="flex:1;">SHOCK</span><span style="width:38px;text-align:right;">%</span><span style="width:80px;text-align:right;">P&L</span>
+      </div>
+      ${sliderHtml}
+      <div style="margin-top:10px;font-size:12px;color:var(--txt);">Total stressed P&L: <span id="rmStressTotal" style="color:${totalClr};font-weight:700;">${initTotal<0?'−$':'$'}${Math.abs(Math.round(initTotal)).toLocaleString()}</span></div>
+    </div>`;
+  }catch(e){el.innerHTML='<span style="color:#e8706e;">Error loading positions for stress test.</span>';}
 }
 function rmCorrToggle(ticker, btn){
   const inp=document.getElementById('rmCorrTickers'); if(!inp) return;
@@ -18851,6 +18970,10 @@ function rmRunFullCheck(){
   });
 }
 
+// _rmStressPositions: real open positions loaded from /api/mt5/state by rmRunStress.
+// Each entry: { symbol, notional, asset_type }
+window._rmStressPositions = [];
+
 function rmStressCalc(idx, shock, notional){
   const shockEl=document.getElementById('stress_shock_'+idx);
   const pnlEl=document.getElementById('stress_pnl_'+idx);
@@ -18860,42 +18983,34 @@ function rmStressCalc(idx, shock, notional){
     pnlEl.textContent=(pnl<0?'−$':'$')+Math.abs(Math.round(pnl)).toLocaleString();
     pnlEl.style.color=pnl<0?'var(--red)':'var(--grn)';
   }
-  // recalculate total
+  // recalculate total using real positions loaded from /api/mt5/state
+  const positions=window._rmStressPositions||[];
   let total=0;
-  // NOTE: these are illustrative example notionals, not the user's real positions
-  const notionals=[26804,10816,10698,13280,97400,3571];
-  for(let i=0;i<6;i++){
+  positions.forEach(function(p,i){
     const sl=document.getElementById('stress_slider_'+i);
-    if(sl) total+=notionals[i]*(parseInt(sl.value)/100);
-  }
+    if(sl) total+=p.notional*(parseInt(sl.value)/100);
+  });
   const tot=document.getElementById('rmStressTotal');
   if(tot){
     tot.textContent=(total<0?'−$':'$')+Math.abs(Math.round(total)).toLocaleString();
     tot.style.color=total<0?'var(--red)':'var(--grn)';
-    // Show disclaimer so the user is not misled by the hardcoded example portfolio
-    let lbl=document.getElementById('rmStressTotalDisclaimer');
-    if(!lbl){
-      lbl=document.createElement('div');
-      lbl.id='rmStressTotalDisclaimer';
-      lbl.style.cssText='margin-top:6px;font-size:10px;font-family:var(--mono);color:rgba(201,168,76,.75);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:5px;padding:4px 8px;display:inline-block;';
-      lbl.textContent='Illustrative example portfolio — not your live positions';
-      tot.parentNode.insertBefore(lbl, tot.nextSibling);
-    }
   }
 }
 
 function rmPresetShock(preset){
   const shocks={
-    mild:  [-10,-10,-10,-10,-5,-15],
-    severe:[-30,-30,-25,-20,-10,-40],
-    crash: [-50,-50,-45,-35,-15,-60],
+    mild:  {crypto:-10,forex:-10,stock:-10,index:-10,commodity:-5,default:-15},
+    severe:{crypto:-30,forex:-30,stock:-25,index:-20,commodity:-10,default:-40},
+    crash: {crypto:-50,forex:-50,stock:-45,index:-35,commodity:-15,default:-60},
   };
-  // NOTE: these are illustrative example notionals, not the user's real positions
-  const notionals=[26804,10816,10698,13280,97400,3571];
-  const vals=shocks[preset]||shocks.mild;
-  vals.forEach((s,i)=>{
+  const positions=window._rmStressPositions||[];
+  if(!positions.length) return;
+  const presetMap=shocks[preset]||shocks.mild;
+  positions.forEach(function(p,i){
+    const at=(p.asset_type||'default').toLowerCase();
+    const s=presetMap[at]!=null?presetMap[at]:presetMap.default;
     const sl=document.getElementById('stress_slider_'+i);
-    if(sl){ sl.value=s; rmStressCalc(i,s,notionals[i]); }
+    if(sl){ sl.value=s; rmStressCalc(i,s,p.notional); }
   });
 }
 

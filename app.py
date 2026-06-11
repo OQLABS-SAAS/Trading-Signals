@@ -7463,6 +7463,47 @@ def _job_market_alert(session_name, emoji, note):
     except Exception as e:
         print(f"[market_alert] {session_name}: {e}")
 
+# Lookup dict: ticker -> asset_type for all AUTO_WATCHLIST instruments.
+# Used by _signal_money and /api/scan-alerts so we never add a DB column.
+_AUTO_WATCHLIST_ASSET = {inst["ticker"]: inst["asset_type"] for inst in AUTO_WATCHLIST}
+
+
+def _signal_money(lot, entry, sl, tp1, asset_type, ticker):
+    """Return {'risk_usd': float|None, 'profit_usd': float|None} for a scan signal.
+
+    Computes dollar risk (entry→SL distance) and dollar reward (entry→TP1 distance)
+    for the given lot size.  Returns None values rather than raising on bad inputs.
+
+    Forex:  risk = lot * (|entry-sl| / pip_size) * pip_val_usd_per_lot
+    Other:  risk = lot * |entry-sl| * contract_size
+    """
+    try:
+        lot   = float(lot   or 0)
+        entry = float(entry or 0)
+        sl    = float(sl    or 0)
+        tp1   = float(tp1   or 0)
+        if lot <= 0 or entry <= 0 or sl <= 0 or entry == sl:
+            return {"risk_usd": None, "profit_usd": None}
+
+        if asset_type == "forex":
+            pip_size = 0.01 if "JPY" in str(ticker).upper() else 0.0001
+            pipval   = _forex_usd_per_pip_per_lot(ticker, pip_size, entry)
+            if pipval is None:
+                return {"risk_usd": None, "profit_usd": None}
+            risk_usd   = lot * (abs(entry - sl)  / pip_size) * pipval
+            profit_usd = lot * (abs(tp1  - entry) / pip_size) * pipval if tp1 > 0 else None
+        else:
+            cs = _contract_size_for_ticker(ticker, asset_type)
+            if cs is None:
+                return {"risk_usd": None, "profit_usd": None}
+            risk_usd   = lot * abs(entry - sl)  * cs
+            profit_usd = lot * abs(tp1  - entry) * cs if tp1 > 0 else None
+
+        return {"risk_usd": risk_usd, "profit_usd": profit_usd}
+    except Exception:
+        return {"risk_usd": None, "profit_usd": None}
+
+
 def _is_duplicate_scan_alert(ticker, signal, timeframe, trade_type):
     """Return True if an identical alert was sent within the dedup window."""
     if not _DBSession:
@@ -7605,6 +7646,17 @@ def _job_auto_scan():
             type_tag  = "SCALP" if trade_type == "scalping" else "SWING"
             sig_emoji = "🟢" if sig == "BUY" else "🔴"
             conf_pct_str = "100%" if conf_weight == 1.0 else ("75%" if conf_weight == 0.75 else "50%")
+            _money = _signal_money(lot, entry, sl, tp1, asset_type, ticker)
+            _risk_usd   = _money["risk_usd"]
+            _profit_usd = _money["profit_usd"]
+            if _risk_usd is not None and _profit_usd is not None:
+                _lot_line = (
+                    f"Lot size: {lot:.2f} lots\n"
+                    f"💵 Risks ≈ ${_risk_usd:,.0f} if stop hit · Targets ≈ ${_profit_usd:,.0f} at TP1\n"
+                    f"({conf_label} — {conf_pct_str} allocation)"
+                )
+            else:
+                _lot_line = f"Lot size: {lot:.2f} lots ({conf_label} — {conf_pct_str} allocation)"
             tg_msg = (
                 f"{sig_emoji} {type_tag} SIGNAL — {ticker}\n"
                 f"Direction: {sig}  |  TF: {tf.upper()}\n"
@@ -7612,7 +7664,7 @@ def _job_auto_scan():
                 f"SL:     {sl:.5g}\n"
                 f"TP1:    {tp1:.5g}  |  TP2: {tp2:.5g}  |  TP3: {tp3:.5g}\n"
                 f"R:R     1:{rr:.1f}\n"
-                f"Lot size: {lot:.2f} lots ({conf_label} — {conf_pct_str} allocation)\n"
+                f"{_lot_line}\n"
                 f"Confidence: HIGH"
             )
             # Save scan alert first to get its ID for the callback button
@@ -7639,9 +7691,18 @@ def _job_auto_scan():
                           "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
                           "lot": lot, "trade_type": trade_type, "rr": rr,
                           "asset_type": asset_type}
+            if _risk_usd is not None and _profit_usd is not None:
+                _notif_body = (
+                    f"Entry {entry:.5g} · SL {sl:.5g} · TP1 {tp1:.5g} · "
+                    f"{lot:.2f} lots · risks ${_risk_usd:,.0f} · +${_profit_usd:,.0f} at TP1 · R:R 1:{rr:.1f}"
+                )
+            else:
+                _notif_body = (
+                    f"Entry {entry:.5g} · SL {sl:.5g} · TP1 {tp1:.5g} · {lot:.2f} lots · R:R 1:{rr:.1f}"
+                )
             _push_notification("default", "scan",
                                 f"{sig_emoji} {type_tag}: {ticker} {sig}",
-                                f"Entry {entry:.5g} · SL {sl:.5g} · TP1 {tp1:.5g} · {lot:.2f} lots · R:R 1:{rr:.1f}",
+                                _notif_body,
                                 data=notif_data)
             found += 1
             _cb_count += 1
@@ -14775,6 +14836,52 @@ def scan_list():
 
 
 # /api/chat endpoint removed
+
+@app.route("/api/scan-alerts", methods=["GET"])
+@login_required
+def get_scan_alerts():
+    """Return the last 30 auto-scan signals newest-first, with dollar amounts.
+
+    Each alert includes risk_usd / profit_usd computed via _signal_money so the
+    numbers exactly match what was sent to Telegram.  asset_type is re-derived
+    from AUTO_WATCHLIST (no DB column needed).
+    """
+    if not _DBSession:
+        return jsonify({"alerts": []})
+    try:
+        db = _DBSession()
+        rows = db.query(ScanAlert).order_by(ScanAlert.sent_at.desc()).limit(30).all()
+        db.close()
+    except Exception:
+        return jsonify({"alerts": []})
+
+    alerts = []
+    for row in rows:
+        asset_type = _AUTO_WATCHLIST_ASSET.get(row.ticker, "crypto")
+        money = _signal_money(row.lot_size, row.entry, row.sl, row.tp1, asset_type, row.ticker)
+        # Clean display ticker: strip Yahoo suffixes for readability
+        display = (row.ticker or "")
+        for suffix in ("=X", "-USD", "=F", "^"):
+            display = display.replace(suffix, "")
+        alerts.append({
+            "id":          row.id,
+            "ticker":      display,
+            "ticker_raw":  row.ticker,
+            "signal":      row.signal,
+            "timeframe":   row.timeframe,
+            "trade_type":  row.trade_type,
+            "entry":       row.entry,
+            "sl":          row.sl,
+            "tp1":         row.tp1,
+            "tp2":         row.tp2,
+            "tp3":         row.tp3,
+            "lot":         row.lot_size,
+            "risk_usd":    round(money["risk_usd"])    if money["risk_usd"]    is not None else None,
+            "profit_usd":  round(money["profit_usd"])  if money["profit_usd"]  is not None else None,
+            "sent_at":     row.sent_at.isoformat() + "Z" if row.sent_at else None,
+        })
+    return jsonify({"alerts": alerts})
+
 
 def _prices_call_with_timeout(fn, timeout_s, label, ticker):
     """Run fn() in a thread, return its result or None on timeout/error.
