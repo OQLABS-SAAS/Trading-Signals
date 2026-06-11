@@ -63,6 +63,7 @@ def test_act_executes_every_size_ladder_leg_not_only_first_one():
     assert "Exact MT5 orders" in HTML
     assert "Orders DotVerse will send to MT5" in HTML
     assert "TP ${target} · risk $" in HTML
-    assert "' lots</span>'" in HTML
+    # Confirm modal leg row now includes entry price + notional alongside lots
+    assert "lots" in HTML and "pos</span>" in HTML
     assert "Place MT5 order${_actMultiLeg?'s':''}" in HTML
     assert "Place '+nT+' MT5 order" in HTML
