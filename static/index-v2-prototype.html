@@ -11652,12 +11652,29 @@ function _todaySettingsClasses(){
   }catch(e){}
   return null;
 }
+/* _todayDefaultHorizon(): returns {horizon, profitGoal} by inspecting intent goals.
+   Picks smallest set horizon; derives missing values via fixed ratios. */
+function _todayDefaultHorizon(){
+  var iv={}; try{ iv=_dvIntentGet()||{}; }catch(e){}
+  var g=(iv.goals)||{};
+  var daily=parseFloat(g.daily)||0, weekly=parseFloat(g.weekly)||0, monthly=parseFloat(g.monthly)||0;
+  var h='weekly', val=0;
+  if(daily>0){ h='daily'; val=daily; }
+  else if(weekly>0){ h='weekly'; val=weekly; }
+  else if(monthly>0){ h='monthly'; val=monthly; }
+  // Derive val if zero
+  if(h==='daily'&&!(val>0)) val=weekly>0?weekly/5:(monthly>0?monthly/21.67:500);
+  if(h==='weekly'&&!(val>0)) val=daily>0?daily*5:(monthly>0?monthly/4.33:500);
+  if(h==='monthly'&&!(val>0)) val=weekly>0?weekly*4.33:(daily>0?daily*21.67:500);
+  return {horizon:h, profitGoal:Math.round(val)||500};
+}
+
 window._todayCfg = window._todayCfg || (function(){
   // P1: read max_open_risk_pct from dvIntent (fallback 3 — old hardcoded default)
   var _intentRisk = (function(){ try{ var iv=_dvIntentGet(); return (iv&&iv.risk&&iv.risk.max_open_risk_pct!=null)?iv.risk.max_open_risk_pct:3; }catch(e){ return 3; } })();
   // P1: read weekly goal from dvIntent (fallback 500 — old hardcoded default)
   var _intentWeekly = (function(){ try{ var iv=_dvIntentGet(); return (iv&&iv.goals&&iv.goals.weekly!=null)?iv.goals.weekly:500; }catch(e){ return 500; } })();
-  var def={ acct:0, riskPct:_intentRisk, profitGoal:_intentWeekly, maxPerClass:99, maxTrades:6, ladderMode:'beginner', autoPlace:false,
+  var def={ acct:0, riskPct:_intentRisk, profitGoal:_intentWeekly, maxPerClass:99, maxTrades:6, ladderMode:'beginner', autoPlace:false, goalHorizon:'weekly',
             classes:(_todaySettingsClasses()||['crypto','stock','forex','commodity','index']) };
   try{
     var saved=JSON.parse(_dvRead('dv_todayCfg')||'null');
@@ -11673,7 +11690,7 @@ window._todayCfg = window._todayCfg || (function(){
 function _todaySaveCfg(){
   try{
     var c=window._todayCfg||{};
-    _dvWrite('dv_todayCfg', JSON.stringify({riskPct:c.riskPct,profitGoal:c.profitGoal,maxPerClass:c.maxPerClass,maxTrades:c.maxTrades,ladderMode:c.ladderMode,classes:c.classes}));
+    _dvWrite('dv_todayCfg', JSON.stringify({riskPct:c.riskPct,profitGoal:c.profitGoal,maxPerClass:c.maxPerClass,maxTrades:c.maxTrades,ladderMode:c.ladderMode,classes:c.classes,goalHorizon:c.goalHorizon||'weekly'}));
   }catch(e){}
 }
 window._todayPlan = window._todayPlan || [];
@@ -12085,11 +12102,11 @@ function showToday(){
 	  var p=_todayPreset(c.ladderMode);
 	  el.innerHTML =
 	    '<div class="today-page">'
-	    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">Tell DotVerse your weekly profit target. It returns a live basket, sizes every trade, expands each ladder, and lets you fire the whole plan only after review.</div></div><div class="pg-hd-right">'+_todayPill('Practice-first','green')+_todayPill('Live prices monitored','gold')+'</div></div>'
+	    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">Tell DotVerse your daily, weekly, or monthly profit target. It returns a live basket, sizes every trade, expands each ladder, and lets you fire the whole plan only after review.</div></div><div class="pg-hd-right">'+_todayPill('Practice-first','green')+_todayPill('Live prices monitored','gold')+'</div></div>'
 	    + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>Plan criteria</h2><button class="td-btn primary" onclick="_todayBuildPlan()">Find trades</button></div><div class="td-pad">'
 	      + '<div class="td-grid td-four">'
 	        + '<div class="td-field"><label>Account size</label><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)"></div>'
-	        + '<div class="td-field"><label>Weekly profit target</label><input id="todayProfitGoal" type="number" step="10" min="0" value="'+(c.profitGoal||500)+'" oninput="_todaySetProfitGoal(this.value)"></div>'
+	        + (function(){ var _dh=_todayDefaultHorizon(); var _h=c.goalHorizon||_dh.horizon||'weekly'; var _lbl={'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[_h]||'Weekly'; var _gv=c.profitGoal||_dh.profitGoal||500; return '<div class="td-field"><label><span id="todayHorizonLabel">'+_lbl+' profit target</span></label><select id="todayHorizon" onchange="_todaySetHorizon(this.value)" style="margin-bottom:4px;width:100%;"><option value="daily"'+((_h==='daily')?' selected':'')+'>Daily</option><option value="weekly"'+((_h==='weekly')?' selected':'')+'>Weekly</option><option value="monthly"'+((_h==='monthly')?' selected':'')+'>Monthly</option></select><input id="todayProfitGoal" type="number" step="10" min="0" value="'+_gv+'" oninput="_todaySetProfitGoal(this.value)"></div>'; })()
 	        + '<div class="td-field"><label>Risk per trade</label><input id="todayRisk" type="number" step="0.05" min="0.05" max="'+_TODAY_PER_CAP+'" value="'+(c.riskPct||p.riskPct)+'" oninput="_todaySetGlobalRisk(this.value)"></div>'
 	        + '<div class="td-field"><label>Markets</label><select onchange="_todaySetMarketPreset(this.value)"><option value="all">Forex, gold, crypto, indices</option><option value="forex">Forex only</option><option value="crypto">Crypto only</option></select></div>'
 	        + '<div class="td-field"><label>Broker leverage</label><select id="todayLev" onchange="_todaySetLeverage(this.value)">'+_dvBrokerLeverageOptions(window._todayLeverage||100)+'</select></div>'
@@ -12836,6 +12853,37 @@ function _todaySetProfitGoal(v){
   var n=parseFloat(v)||0; window._todayCfg.profitGoal=n;
   if((window._todayPlan||[]).length && typeof _todayRenderPlan==='function') _todayRenderPlan();
   else if((window._todayOpps||[]).length) _todayReselect();
+  else if(typeof _todayRenderTop==='function') _todayRenderTop();
+}
+/* _todaySetHorizon(h): switches the active goal horizon (daily/weekly/monthly),
+   seeds profitGoal from intent (with cross-horizon derivation), persists, refreshes UI. */
+function _todaySetHorizon(h){
+  var c=window._todayCfg; if(!c) return;
+  h = h||'weekly'; c.goalHorizon=h;
+  // Seed profitGoal from intent for the chosen horizon, with cross-derivation
+  var iv={}; try{ iv=_dvIntentGet()||{}; }catch(e){}
+  var g=(iv.goals)||{};
+  var daily=parseFloat(g.daily)||0, weekly=parseFloat(g.weekly)||0, monthly=parseFloat(g.monthly)||0;
+  var seeded=0;
+  if(h==='daily'){
+    seeded=daily>0?daily:(weekly>0?weekly/5:(monthly>0?monthly/21.67:0));
+  } else if(h==='weekly'){
+    seeded=weekly>0?weekly:(daily>0?daily*5:(monthly>0?monthly/4.33:0));
+  } else if(h==='monthly'){
+    seeded=monthly>0?monthly:(weekly>0?weekly*4.33:(daily>0?daily*21.67:0));
+  }
+  seeded=Math.round(seeded)||0;
+  if(seeded>0) c.profitGoal=seeded;
+  // Update label and input value in the DOM (both render paths use same id)
+  var lbl={'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[h]||'Weekly';
+  var lEl=document.getElementById('todayHorizonLabel'); if(lEl) lEl.textContent=lbl+' profit target';
+  var gEl=document.getElementById('todayProfitGoal'); if(gEl&&seeded>0) gEl.value=seeded;
+  var sel=document.getElementById('todayHorizon'); if(sel) sel.value=h;
+  // Persist via same path as _todaySetProfitGoal path
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
+  // Re-render top/plan
+  if((window._todayPlan||[]).length && typeof _todayRenderPlan==='function') _todayRenderPlan();
+  else if((window._todayOpps||[]).length && typeof _todayReselect==='function') _todayReselect();
   else if(typeof _todayRenderTop==='function') _todayRenderTop();
 }
 function _todaySetGlobalLadder(mode){
@@ -13728,22 +13776,38 @@ function _todayAllocate(plan, acct, basketRisk){
 // Returns {ahead: bool, pct: number, horizon: string} from intent + briefing cache.
 // No intent set → returns {ahead: false, pct: 0, horizon: null} — back-compat.
 function _todayGoalPace(){
+  // No intent / no goals → back-compat: {ahead: false, pct:0, horizon:null}
   try{
     var iv = _dvIntentGet();
     var g  = (iv && iv.goals) || {};
-    // Pick smallest set horizon: daily → weekly → monthly
-    var horizon = null, goalVal = 0, pnlVal = 0;
     var briefing = window._dvBriefing || {};
     var pnl = briefing.pnl || {};
-    if(g.daily > 0){
-      horizon = 'daily'; goalVal = g.daily;
-      pnlVal  = parseFloat(pnl.today || 0);
-    } else if(g.weekly > 0){
-      horizon = 'weekly'; goalVal = g.weekly;
-      pnlVal  = parseFloat(pnl.week || 0);
-    } else if(g.monthly > 0){
-      horizon = 'monthly'; goalVal = g.monthly;
-      pnlVal  = parseFloat(pnl.month || 0);
+    // Use the CHOSEN horizon from _todayCfg if set; fall back to smallest intent horizon
+    var chosenH = (window._todayCfg && window._todayCfg.goalHorizon) || null;
+    var horizon = null, goalVal = 0, pnlVal = 0;
+    // Map chosen horizon → pnl key
+    var _pnlKey = {daily:'today', weekly:'week', monthly:'month'};
+    if(chosenH && (chosenH==='daily'||chosenH==='weekly'||chosenH==='monthly')){
+      horizon = chosenH;
+      // Use intent goal for this horizon; derive if missing
+      if(chosenH==='daily') goalVal=parseFloat(g.daily)||0;
+      else if(chosenH==='weekly') goalVal=parseFloat(g.weekly)||0;
+      else if(chosenH==='monthly') goalVal=parseFloat(g.monthly)||0;
+      // Fall back to cfg.profitGoal if intent doesn't have it
+      if(!(goalVal>0)) goalVal=parseFloat((window._todayCfg||{}).profitGoal)||0;
+      pnlVal = parseFloat(pnl[_pnlKey[chosenH]] || 0);
+    } else {
+      // Fall back: pick smallest set horizon from intent
+      if(g.daily > 0){
+        horizon = 'daily'; goalVal = g.daily;
+        pnlVal  = parseFloat(pnl.today || 0);
+      } else if(g.weekly > 0){
+        horizon = 'weekly'; goalVal = g.weekly;
+        pnlVal  = parseFloat(pnl.week || 0);
+      } else if(g.monthly > 0){
+        horizon = 'monthly'; goalVal = g.monthly;
+        pnlVal  = parseFloat(pnl.month || 0);
+      }
     }
     if(!horizon) return {ahead: false, pct: 0, horizon: null};
     var pct = goalVal > 0 ? (pnlVal / goalVal * 100) : 0;
@@ -13945,7 +14009,7 @@ function showToday(){
     + '<div class="today-v2-setup">'
       + '<div class="today-v2-field"><div class="td-mini">Mode</div><div class="today-v2-value gold">Basket risk</div></div>'
       + '<div class="today-v2-field"><div class="td-mini">Account equity</div><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#ede8d8;font-family:var(--mono);font-size:16px;"><div id="todayAcctSource" class="today-v2-copy" style="font-size:10px;margin-top:4px">'+_todayAccountSourceLabel()+'</div></div>'
-      + '<div class="today-v2-field"><div class="td-mini">Weekly target</div><input id="todayProfitGoal" type="number" step="10" min="0" value="'+(c.profitGoal||500)+'" oninput="_todaySetProfitGoal(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#5de8a0;font-family:var(--mono);font-size:16px;"></div>'
+      + (function(){ var _dh=_todayDefaultHorizon(); var _h=c.goalHorizon||_dh.horizon||'weekly'; var _lbl={'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[_h]||'Weekly'; var _gv=c.profitGoal||_dh.profitGoal||500; return '<div class="today-v2-field"><div class="td-mini"><span id="todayHorizonLabel">'+_lbl+' profit target</span></div><select id="todayHorizon" onchange="_todaySetHorizon(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(93,232,160,.25);border-radius:4px;outline:0;color:rgba(93,232,160,.8);font-family:var(--mono);font-size:12px;padding:3px 4px;"><option value="daily"'+((_h==="daily")?" selected":"")+'>Daily</option><option value="weekly"'+((_h==="weekly")?" selected":"")+'>Weekly</option><option value="monthly"'+((_h==="monthly")?" selected":"")+'>Monthly</option></select><input id="todayProfitGoal" type="number" step="10" min="0" value="'+_gv+'" oninput="_todaySetProfitGoal(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#5de8a0;font-family:var(--mono);font-size:16px;"></div>'; })()
       + '<div class="today-v2-field"><div class="td-mini">Max combined risk</div><input id="todayRisk" type="number" step="0.1" min="0.1" max="12" value="'+(c.riskPct||3)+'" oninput="_todaySetGlobalRisk(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#e8706e;font-family:var(--mono);font-size:16px;"><div class="today-v2-copy" style="font-size:10px;margin-top:4px">Total planned stop-loss risk across this basket until trades close.</div></div>'
       + '<button class="today-v2-btn" onclick="'+(protect?'_todayV2ProtectSummary()':'_todayBuildPlan()')+'">'+(protect?'Review protection':'Find safest path')+'</button>'
     + '</div>'
@@ -13978,11 +14042,12 @@ function _todayRenderTop(){
   var protect=_todayProtectMode();
   if(protect){ avail=0; newPct=0; }
   var prog=_todayWeeklyTargetProgress(), progressLabel=prog.known?_todayMoney2(prog.value):'Monitoring';
+  var _horizonLbl = ({'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[(c.goalHorizon||'weekly')])||'Weekly';
   var verdictCopy=protect
-    ? 'Weekly target is reached or marked reached. DotVerse pauses new entries, protects open winners, and keeps alerts live for TP, SL, break-even, trailing, and invalidation events.'
+    ? _horizonLbl+' target is reached or marked reached. DotVerse pauses new entries, protects open winners, and keeps alerts live for TP, SL, break-even, trailing, and invalidation events.'
     : (used>0.01
-      ? 'There are clean setups, but open risk is already using part of the weekly budget. DotVerse will prefer fewer trades, stronger R:R, and protected scale-outs.'
-      : 'There are clean setups and no open risk is using the weekly budget right now. DotVerse will still stay selective and avoid forcing size just to hit a target.');
+      ? 'There are clean setups, but open risk is already using part of the '+_horizonLbl.toLowerCase()+' budget. DotVerse will prefer fewer trades, stronger R:R, and protected scale-outs.'
+      : 'There are clean setups and no open risk is using the '+_horizonLbl.toLowerCase()+' budget right now. DotVerse will still stay selective and avoid forcing size just to hit a target.');
   // P3 — goal-aware pace explanation line (only shown when tightening is active)
   var paceMsg = window._todayPaceMsg || null;
   var paceBanner = paceMsg
@@ -13992,10 +14057,10 @@ function _todayRenderTop(){
     '<div class="today-v2-top">'
       + '<div class="today-v2-verdict"><div class="td-mini">Should I trade today?</div><h2 class="'+(protect?'green':'')+'">'+(protect?'Protect target':'Selective only')+'</h2><div class="today-v2-copy">'+verdictCopy+'</div>'
         + paceBanner
-        + '<div class="today-v2-readiness"><div class="today-v2-mini"><div class="td-mini">Today action</div><b class="'+(protect?'green':'gold')+'">'+(protect?'Protect only':'Selective')+'</b></div><div class="today-v2-mini"><div class="td-mini">Weekly progress</div><b class="'+(protect?'green':'blue')+'">'+progressLabel+'</b></div><div class="today-v2-mini"><div class="td-mini">New entries</div><b class="'+(protect?'red':'green')+'">'+(protect?'Paused':'Allowed')+'</b></div></div>'
+        + '<div class="today-v2-readiness"><div class="today-v2-mini"><div class="td-mini">Today action</div><b class="'+(protect?'green':'gold')+'">'+(protect?'Protect only':'Selective')+'</b></div><div class="today-v2-mini"><div class="td-mini">'+_horizonLbl+' progress</div><b class="'+(protect?'green':'blue')+'">'+progressLabel+'</b></div><div class="today-v2-mini"><div class="td-mini">New entries</div><b class="'+(protect?'red':'green')+'">'+(protect?'Paused':'Allowed')+'</b></div></div>'
       + '</div>'
       + '<div class="td-card"><div class="td-card-head"><h2>Risk budget</h2><span class="td-pill gold">basket-first</span></div><div class="today-v2-risk">'
-        + '<div class="today-v2-riskTop"><div class="today-v2-field"><div class="td-mini">Account equity</div><div class="today-v2-value">'+(acct?_todayMoney(acct):'--')+'</div><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+_todayAccountSourceLabel()+'</div></div><div class="today-v2-field"><div class="td-mini">Weekly target</div><div class="today-v2-value green">+'+_todayMoney2(c.profitGoal||500)+'</div></div><div class="today-v2-field"><div class="td-mini">Open risk used</div><div class="today-v2-value gold">'+used.toFixed(1)+'%</div></div><div class="today-v2-field"><div class="td-mini">'+(protect?'New risk status':'New risk available')+'</div><div class="today-v2-value '+(protect?'red':'green')+'">'+(protect?'Paused':avail.toFixed(1)+'%')+'</div></div></div>'
+        + '<div class="today-v2-riskTop"><div class="today-v2-field"><div class="td-mini">Account equity</div><div class="today-v2-value">'+(acct?_todayMoney(acct):'--')+'</div><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+_todayAccountSourceLabel()+'</div></div><div class="today-v2-field"><div class="td-mini">'+_horizonLbl+' target</div><div class="today-v2-value green">+'+_todayMoney2(c.profitGoal||500)+'</div></div><div class="today-v2-field"><div class="td-mini">Open risk used</div><div class="today-v2-value gold">'+used.toFixed(1)+'%</div></div><div class="today-v2-field"><div class="td-mini">'+(protect?'New risk status':'New risk available')+'</div><div class="today-v2-value '+(protect?'red':'green')+'">'+(protect?'Paused':avail.toFixed(1)+'%')+'</div></div></div>'
         + '<div class="today-v2-rail"><span class="today-v2-used" style="width:'+usedPct+'%"></span><span class="today-v2-new" style="width:'+newPct+'%"></span></div>'
         + '<div class="today-v2-legend"><span class="today-v2-key"><span class="today-v2-sq gold"></span>'+used.toFixed(1)+'% already open</span><span class="today-v2-key"><span class="today-v2-sq"></span>'+(protect?'new entries paused':avail.toFixed(1)+'% available for Today')+'</span><span>Max combined risk: <strong class="red">'+cap.toFixed(1)+'%</strong></span></div>'
         + '<div class="today-v2-copy" style="margin-top:12px">This is not daily risk and not trade size. It is the combined planned stop-loss risk for the selected basket while those trades are open.</div>'
@@ -14008,7 +14073,7 @@ function _todayRenderPlan(){
   _todayRenderTop();
   var plan=window._todayPlan||[], c=window._todayCfg||{}, acct=c.acct||_todaySyncAccountFromDom();
   if(!plan.length){
-    area.innerHTML='<div class="td-card"><div class="td-pad" style="text-align:center;padding:34px 20px;"><div style="font-family:var(--syne);font-size:18px;margin-bottom:8px;">Ready when you are.</div><div class="today-v2-copy" style="max-width:520px;margin:0 auto;">Set account equity, weekly target, and max basket risk. DotVerse will scan all supported assets and timeframes, then return a beginner-readable basket.</div></div></div>';
+    area.innerHTML='<div class="td-card"><div class="td-pad" style="text-align:center;padding:34px 20px;"><div style="font-family:var(--syne);font-size:18px;margin-bottom:8px;">Ready when you are.</div><div class="today-v2-copy" style="max-width:520px;margin:0 auto;">Set account equity, your daily, weekly, or monthly profit target, and max basket risk. DotVerse will scan all supported assets and timeframes, then return a beginner-readable basket.</div></div></div>';
     return;
   }
   var money=_todayMoney, money2=_todayMoney2, pxFmt=function(v){ v=parseFloat(v); return !isFinite(v)?'--':(v>=1000?v.toLocaleString('en-US',{maximumFractionDigits:2}):v>=1?String(+v.toFixed(4)):String(+v.toPrecision(4))); };
@@ -19944,6 +20009,14 @@ async function showAlerts(){
   <div class="pg-hd">
     <div class="pg-hd-left"><div class="pg-hd-title">Alerts</div><div class="pg-hd-sub">${unreadCount} unread · ${requireActionCount} require action</div></div>
   </div>
+  <div style="background:rgba(93,232,160,.04);border:1px solid rgba(93,232,160,.18);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:rgba(93,232,160,.9);font-family:var(--mono);margin-bottom:4px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(93,232,160,.8)" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      📲 Telegram Signals — live auto-scan
+    </div>
+    <div style="font-size:11px;color:rgba(200,190,170,.55);margin-bottom:10px;">The exact signals sent to your Telegram, with dollar amounts.</div>
+    <div id="tgScanFeed" style="font-size:11px;color:rgba(220,200,140,.7);font-family:var(--mono);">Loading…</div>
+  </div>
   <div style="font-size:10px;color:rgba(237,232,216,.35);margin:-8px 0 12px;line-height:1.5;">Notifications from your watchlist & price alerts. Add tickers to your Watchlist on the Understand page to receive alerts here.</div>
   <div class="al-toolbar">
     ${filterPills}
@@ -19979,7 +20052,7 @@ async function showAlerts(){
       <button onclick="setPriceAlert()" style="background:rgba(237,232,216,.12);border:1px solid rgba(237,232,216,.25);border-radius:6px;color:rgba(237,232,216,.85);font-size:11px;padding:6px 12px;cursor:pointer;font-weight:600;font-family:var(--mono)">Set Alert</button>
     </div>
   </div>`;
-  setTimeout(()=>{ dvLoadWatchAlerts(); _initTgInput(); }, 50);
+  setTimeout(()=>{ dvLoadWatchAlerts(); _initTgInput(); if(typeof dvLoadScanAlerts==='function') dvLoadScanAlerts(); }, 50);
 }
 
 // ══════════════════════════════════════════════════════════════
