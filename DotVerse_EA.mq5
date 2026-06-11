@@ -361,14 +361,25 @@ void PushState()
    }
    posJson += "]";
 
+   // A4: read trade-permission flags fresh every push (NOT cached — running EA
+   // must report current toggle state so DotVerse can surface the exact OFF switch).
+   int terminalTradeAllowed = (int)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
+   int mqlTradeAllowed      = (int)MQLInfoInteger(MQL_TRADE_ALLOWED);
+   int accountTradeAllowed  = (int)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
+   int accountTradeExpert   = (int)AccountInfoInteger(ACCOUNT_TRADE_EXPERT);
+
    string body = StringFormat(
       "{\"user_id\":\"%s\","
       "\"account\":{\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,"
                    "\"free_margin\":%.2f,\"profit\":%.2f,\"currency\":\"%s\",\"leverage\":%d,"
                    "\"trade_mode\":%d,\"login\":%I64d,\"server\":\"%s\",\"company\":\"%s\"},"
+      "\"terminal_trade_allowed\":%d,\"mql_trade_allowed\":%d,"
+      "\"account_trade_allowed\":%d,\"account_trade_expert\":%d,"
       "\"positions\":%s}",
       g_userId, balance, equity, margin, freeMargin, profit, currency, leverage,
-      tradeMode, login, server, company, posJson
+      tradeMode, login, server, company,
+      terminalTradeAllowed, mqlTradeAllowed, accountTradeAllowed, accountTradeExpert,
+      posJson
    );
 
    HttpPost("/api/mt5/push", body);

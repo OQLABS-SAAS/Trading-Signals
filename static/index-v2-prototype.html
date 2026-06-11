@@ -6152,10 +6152,16 @@ setInterval(_renderSessionBar, 60000);
 
 // ── Dashboard date + clock — updates the previously hardcoded "Apr 24, 2026"
 // header and the dashClock UTC timer in the live badge.
+function _dvFmtHeaderDate(dt) {
+  // Uppercase short date for header: "WED 10 JUN 2026"
+  var days  = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  var months= ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  return days[dt.getDay()] + ' ' + dt.getDate() + ' ' + months[dt.getMonth()] + ' ' + dt.getFullYear();
+}
 function _updateDashHeader() {
   const dt = new Date();
   const dEl = document.getElementById('dashDate');
-  if (dEl) dEl.textContent = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (dEl) dEl.textContent = _dvFmtHeaderDate(dt);
   const cEl = document.getElementById('dashClock');
   if (cEl) {
     const hh = String(dt.getUTCHours()).padStart(2,'0');
@@ -6204,7 +6210,7 @@ function setNav(id){
   // Restore top bar label when leaving Agent tab
   if (id !== 'agent') {
     var label = document.querySelector('.dtop-label');
-    if(label) label.innerHTML = 'TRADING DASHBOARD &middot; <span id="dashDate">&mdash;</span>';
+    if(label) label.innerHTML = 'TRADING DASHBOARD &middot; <span id="dashDate">' + _dvFmtHeaderDate(new Date()) + '</span>';
   }
   
   // Close agent client dropdown when clicking outside
@@ -6569,6 +6575,22 @@ function goDash(u){
   try{ dvFetch('/api/signals/history?limit=30').then(function(d){ if(d&&Array.isArray(d)){ window._sigHistory=d; renderSigHistoryPanel(); } }); }catch(e){}
   try{ wlRender(document.getElementById('wlRows')); }catch(e){}
   try{ dvFetch('/api/notifications').then(function(d){ if(d&&Array.isArray(d.notifications)){ window._notifications=d.notifications; } }); }catch(e){}
+  // P1: load intent on login (non-blocking; populates localStorage cache)
+  try{ _dvIntentLoad(); }catch(e){}
+  // P2: logon briefing — fetch once per login, show dismissible panel.
+  // sessionStorage flag 'dv_briefing_seen' is cleared on each login so the
+  // panel always shows on a fresh login and stays dismissed within the session.
+  try{ sessionStorage.removeItem('dv_briefing_seen'); }catch(e){}
+  try{
+    fetch('/api/briefing', {credentials:'include'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if(!d) return;
+        window._dvBriefing = d;  // cache for P3 pace gate
+        _dvShowBriefing(d);
+      })
+      .catch(function(){});
+  }catch(e){}
   try{ dvFetch('/api/automation/settings').then(function(d){
     if(!d) return;
     if(d.breakeven_on            != null) _autoSettings.breakeven           = !!d.breakeven_on;
@@ -7328,10 +7350,197 @@ function drawAllocChart(){
   });
 }
 
+// ── P2: Logon Briefing panel ──────────────────────────────────────────────
+// Shown once per login (sessionStorage 'dv_briefing_seen' cleared on goDash).
+// Dismiss clears the flag; reopening the page within the same session → skip.
+// No LLM calls — deterministic facts assembled by /api/briefing.
+
+function _dvBriefingFmt(v, prefix){
+  if(v == null || v === '' || isNaN(parseFloat(v))) return '--';
+  var n = parseFloat(v);
+  return (prefix||'') + (n >= 0 ? '+' : '') + n.toFixed(2);
+}
+
+function _dvBriefingPct(pct){
+  if(pct == null) return '';
+  return ' (' + parseFloat(pct).toFixed(0) + '%)';
+}
+
+function _dvShowBriefing(d){
+  // Only show once per login session
+  try{ if(sessionStorage.getItem('dv_briefing_seen')) return; }catch(e){}
+
+  var g = (d && d.goals) || {};
+  var pnl = (d && d.pnl) || {};
+  var stance = (d && d.stance) || {};
+  var positions = (d && d.open_positions) || [];
+  var eq = (d && d.equity != null) ? parseFloat(d.equity) : null;
+
+  // Build goal rows — only horizons with a value set (or derived)
+  var goalRows = '';
+  var horizons = [
+    {key:'daily', label:'Daily goal', pnlKey:'today'},
+    {key:'weekly', label:'Weekly goal', pnlKey:'week'},
+    {key:'monthly', label:'Monthly goal', pnlKey:'month'},
+  ];
+  horizons.forEach(function(h){
+    var gv = g[h.key];
+    if(!(gv > 0)) return;
+    var isDerived = g[h.key + '_derived'] === true;
+    var pv = parseFloat(pnl[h.pnlKey] || 0);
+    var pct = gv > 0 ? Math.min(pv / gv * 100, 999) : 0;
+    var bar = Math.max(0, Math.min(100, pct));
+    var barCol = pct >= 100 ? 'rgba(93,232,160,.7)' : (pct >= 50 ? 'rgba(201,168,76,.7)' : 'rgba(232,112,110,.6)');
+    goalRows +=
+      '<div style="margin-bottom:10px;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">'
+      + '<span style="font-size:11px;color:rgba(237,232,216,.7);">' + h.label + (isDerived ? ' <span style="opacity:.55">(derived)</span>' : '') + '</span>'
+      + '<span style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.85);">'
+      + _dvBriefingFmt(pv, '$') + ' / $' + parseFloat(gv).toFixed(0) + _dvBriefingPct(pct)
+      + '</span></div>'
+      + '<div style="height:4px;background:rgba(237,232,216,.1);border-radius:2px;">'
+      + '<div style="height:4px;width:' + bar + '%;background:' + barCol + ';border-radius:2px;transition:width .4s;"></div>'
+      + '</div></div>';
+  });
+  if(!goalRows) goalRows = '<div style="font-size:11px;color:rgba(237,232,216,.45);padding:4px 0;">No goals set — add them in Settings → Your goals.</div>';
+
+  // Open positions summary
+  var posRows = '';
+  positions.slice(0, 8).forEach(function(p){
+    var sym = p.symbol || '?', side = p.side || '';
+    var pft = parseFloat(p.profit || 0);
+    var pftCol = pft >= 0 ? 'rgba(93,232,160,.85)' : 'rgba(232,112,110,.85)';
+    posRows += '<div style="display:flex;justify-content:space-between;font-size:11px;font-family:var(--mono);padding:3px 0;border-bottom:1px solid rgba(237,232,216,.06);">'
+      + '<span>' + sym + ' <span style="opacity:.55">' + side + '</span></span>'
+      + '<span style="color:' + pftCol + '">' + (pft >= 0 ? '+' : '') + pft.toFixed(2) + '</span>'
+      + '</div>';
+  });
+  if(!posRows) posRows = '<div style="font-size:11px;color:rgba(237,232,216,.45);padding:4px 0;">No open MT5 positions.</div>';
+
+  // Stance styling
+  var stanceMode = stance.mode || 'no_goal';
+  var stanceCol = stanceMode === 'ahead' ? 'rgba(93,232,160,.9)' : (stanceMode === 'on_track' ? 'rgba(201,168,76,.9)' : (stanceMode === 'behind' ? 'rgba(232,112,110,.9)' : 'rgba(237,232,216,.55)'));
+  var stanceBg  = stanceMode === 'ahead' ? 'rgba(93,232,160,.07)' : (stanceMode === 'on_track' ? 'rgba(201,168,76,.07)' : (stanceMode === 'behind' ? 'rgba(232,112,110,.07)' : 'rgba(237,232,216,.04)'));
+
+  // Build panel
+  var panel = document.createElement('div');
+  panel.id = 'dvBriefingPanel';
+  panel.setAttribute('data-dv-briefing-panel', '1');
+  panel.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:9800;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.65);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);';
+  panel.innerHTML =
+    '<div style="background:var(--surface,#1a1c2a);border:1px solid rgba(237,232,216,.14);border-radius:10px;max-width:520px;width:calc(100% - 32px);max-height:88vh;overflow-y:auto;padding:24px 24px 20px;box-shadow:0 8px 40px rgba(0,0,0,.5);">'
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;">'
+    + '<div><div style="font-family:var(--syne,sans-serif);font-size:16px;font-weight:700;color:rgba(237,232,216,.95);">Today\'s briefing</div>'
+    + (eq != null ? '<div style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);margin-top:2px;">Equity: $' + eq.toLocaleString('en-US',{maximumFractionDigits:2}) + (d.open_risk != null ? ' &nbsp;|&nbsp; Open risk: ' + parseFloat(d.open_risk).toFixed(2) + '%' : '') + '</div>' : '')
+    + '</div>'
+    + '<button onclick="_dvDismissBriefing()" style="background:none;border:none;color:rgba(237,232,216,.4);font-size:18px;cursor:pointer;padding:0 4px;line-height:1;" title="Dismiss">&times;</button>'
+    + '</div>'
+    // Stance banner
+    + '<div style="background:' + stanceBg + ';border:1px solid ' + stanceCol.replace('.9',',.25') + ';border-radius:6px;padding:10px 12px;margin-bottom:16px;">'
+    + '<div style="font-size:11px;color:' + stanceCol + ';font-family:var(--mono);">' + (stance.text || 'No goal set.') + '</div>'
+    + '</div>'
+    // P&L
+    + '<div style="margin-bottom:14px;">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:rgba(237,232,216,.45);margin-bottom:8px;">Realised P&amp;L</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
+    + _dvBriefingKPI('Today', _dvBriefingFmt(pnl.today, '$'))
+    + _dvBriefingKPI('Week', _dvBriefingFmt(pnl.week, '$'))
+    + _dvBriefingKPI('Month', _dvBriefingFmt(pnl.month, '$'))
+    + '</div></div>'
+    // Goals
+    + '<div style="margin-bottom:14px;">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:rgba(237,232,216,.45);margin-bottom:8px;">Goal pace</div>'
+    + goalRows
+    + '</div>'
+    // Open positions
+    + '<div style="margin-bottom:18px;">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:rgba(237,232,216,.45);margin-bottom:6px;">Open positions (' + positions.length + ')</div>'
+    + posRows
+    + '</div>'
+    // Dismiss button
+    + '<button onclick="_dvDismissBriefing()" style="width:100%;padding:10px;background:rgba(237,232,216,.08);border:1px solid rgba(237,232,216,.14);border-radius:6px;color:rgba(237,232,216,.7);font-size:12px;cursor:pointer;font-family:var(--mono);">Got it — start trading</button>'
+    + '</div>';
+
+  document.body.appendChild(panel);
+}
+
+function _dvBriefingKPI(label, value){
+  return '<div style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.1);border-radius:5px;padding:8px 10px;">'
+    + '<div style="font-size:9px;color:rgba(237,232,216,.45);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">' + label + '</div>'
+    + '<div style="font-family:var(--mono);font-size:13px;color:rgba(237,232,216,.9);">' + value + '</div>'
+    + '</div>';
+}
+
+function _dvDismissBriefing(){
+  try{ sessionStorage.setItem('dv_briefing_seen', '1'); }catch(e){}
+  var panel = document.getElementById('dvBriefingPanel');
+  if(panel && panel.parentNode) panel.parentNode.removeChild(panel);
+}
+
+
 // ── Settings state — persisted in localStorage ────────────────────────────
 // Dual-read helper: sessionStorage first (reliable on file://), then localStorage
 function _dvRead(k){ var v=null; try{v=sessionStorage.getItem(k);}catch(e){} if(!v){try{v=localStorage.getItem(k);}catch(e){}} return v; }
 function _dvWrite(k,v){ try{sessionStorage.setItem(k,v);}catch(e){} try{localStorage.setItem(k,v);}catch(e){} }
+
+// ── P1 dvIntent store ──────────────────────────────────────────────────────
+// Canonical intent shape (mirrors backend _INTENT_DEFAULT).
+// localStorage key: 'dvIntent'
+var _DV_INTENT_KEY = 'dvIntent';
+var _DV_INTENT_DEFAULT = {
+  goals:   { daily: null, weekly: null, monthly: null, currency: 'USD' },
+  risk:    { max_per_trade_pct: 1.0, max_open_risk_pct: 3.0, daily_loss_stop_pct: null },
+  markets: [],
+  hours:   null
+};
+function _dvIntentGet() {
+  /* Sync read from localStorage cache. Returns a merged object with defaults
+     for any keys not yet saved — zero behaviour change for new users. */
+  try {
+    var raw = localStorage.getItem(_DV_INTENT_KEY);
+    if (!raw) return JSON.parse(JSON.stringify(_DV_INTENT_DEFAULT));
+    var stored = JSON.parse(raw);
+    if (!stored || typeof stored !== 'object') return JSON.parse(JSON.stringify(_DV_INTENT_DEFAULT));
+    // Deep-merge with defaults so added keys are always present
+    var out = JSON.parse(JSON.stringify(_DV_INTENT_DEFAULT));
+    if (stored.goals  && typeof stored.goals  === 'object') Object.assign(out.goals,  stored.goals);
+    if (stored.risk   && typeof stored.risk   === 'object') Object.assign(out.risk,   stored.risk);
+    if (Array.isArray(stored.markets)) out.markets = stored.markets;
+    if (stored.hours  === null || typeof stored.hours === 'object') out.hours = stored.hours;
+    return out;
+  } catch(e) { return JSON.parse(JSON.stringify(_DV_INTENT_DEFAULT)); }
+}
+async function _dvIntentSave(intent) {
+  /* PUT to /api/intent, update localStorage cache on success.
+     Returns the server response (with reconciled goals) or null on error. */
+  try {
+    var r = await fetch('/api/intent', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(intent)
+    });
+    var data = await r.json();
+    if (r.ok && data && data.intent) {
+      try { localStorage.setItem(_DV_INTENT_KEY, JSON.stringify(data.intent)); } catch(e) {}
+      return data.intent;
+    }
+    console.warn('[dvIntent] save failed:', data && data.error);
+    return null;
+  } catch(e) { console.warn('[dvIntent] save error:', e.message); return null; }
+}
+async function _dvIntentLoad() {
+  /* Called on login: fetch from server, update cache. */
+  try {
+    var r = await fetch('/api/intent', { credentials: 'include' });
+    if (!r.ok) return;
+    var data = await r.json();
+    if (data && typeof data === 'object') {
+      try { localStorage.setItem(_DV_INTENT_KEY, JSON.stringify(data)); } catch(e) {}
+    }
+  } catch(e) { /* silent — cache stays as fallback */ }
+}
+// ── end dvIntent store ─────────────────────────────────────────────────────
 
 var _settAssets  = (function(){ try{ var v=JSON.parse(_dvRead('dv_sett_assets')); if(Array.isArray(v)) return v; }catch(e){} return ['stocks','crypto','forex']; })();
 var _settRisk    = _dvRead('dv_sett_risk')    || 'moderate';
@@ -7544,6 +7753,8 @@ function _spConnections(){
       <button onclick="_showAcctModal()" style="padding:5px 14px;border-radius:5px;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.3);color:var(--amb);font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.05em;cursor:pointer;">+ Connect</button>
     </div>
     <div class="sett-sect-sub">Manage your MetaTrader 5 connections. Each account gets a unique EA secret for the DotVerse expert advisor.</div>
+    <!-- A4: trade-permission banner — populated by _loadAcctList when EA is connected -->
+    <div id="mt5PermBanner" style="display:none;"></div>
     <div id="mt5AcctList" style="display:flex;flex-direction:column;gap:10px;">
       <div style="padding:24px;text-align:center;color:var(--t3);font-size:12px;">Loading accounts...</div>
     </div>
@@ -7728,6 +7939,23 @@ async function _loadAcctList(){
       el.innerHTML = accounts.map(function(a){ return a._virtual ? _renderVirtualEaCard(a) : _renderAcctCard(a); }).join('');
     }
     _updateGlobalConnIndicator();
+    // A4: fetch EA state and show trade-permission banner if an issue is present
+    try {
+      var st = await dvFetch('/api/mt5/state');
+      var pb = document.getElementById('mt5PermBanner');
+      if (pb) {
+        if (st && st.trade_permission_issue) {
+          pb.innerHTML = '<div class="dv-trade-alert" style="margin-bottom:10px;">'
+            + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+            + '<span>' + st.trade_permission_issue + '</span>'
+            + '</div>';
+          pb.style.display = '';
+        } else {
+          pb.innerHTML = '';
+          pb.style.display = 'none';
+        }
+      }
+    } catch(e){}
   }catch(e){
     el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--red);font-size:12px;">Failed to load accounts.</div>';
   }
@@ -7978,6 +8206,7 @@ function showSettings(tab){
     {id:'portfolio',  label:'Portfolio'},
     {id:'alerts',     label:'Alert Thresholds'},
     {id:'timezone',   label:'Timezone & Hours'},
+    {id:'intent',     label:'Your goals & limits'},
   ];
   if(isAdmin) tabs.push({id:'users', label:'User Management'});
   const navHtml=tabs.map(t=>`<div class="sett-snav-item${tab===t.id?' on':''}" onclick="showSettings('${t.id}')">${t.label}</div>`).join('');
@@ -7990,6 +8219,7 @@ function showSettings(tab){
   else if(tab==='portfolio')panelHtml=_spPortfolio();
   else if(tab==='alerts')   panelHtml=_spAlerts();
   else if(tab==='timezone') panelHtml=_spTimezone();
+  else if(tab==='intent')   panelHtml=_spIntent();
   else if(tab==='users' && isAdmin) panelHtml=_spUsers();
   el.innerHTML=`<div class="sett-outer">
     <div class="sett-hd">
@@ -9557,10 +9787,210 @@ function _spTimezone(){
       </div>
     </div>
   </div>
-  ${_saveBtn('Save Changes')}`;
+  ${_saveBtn('Save Changes')}
+  <div id="settDangerZone" class="sett-sect" style="border-color:rgba(224,85,85,.25);margin-top:20px;">
+    <div class="sett-sect-title" style="color:rgba(224,85,85,.85);display:flex;align-items:center;gap:8px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(224,85,85,.85)" stroke-width="2.2"><path d="M12 2L2 22h20L12 2zM12 9v6M12 18h.01"/></svg>
+      Danger Zone
+    </div>
+    <div class="sett-sect-sub" style="color:rgba(224,85,85,.6);">Irreversible actions — these permanently delete your data and cannot be undone.</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;background:rgba(224,85,85,.05);border:1px solid rgba(224,85,85,.15);border-radius:6px;">
+      <div>
+        <div style="font-size:12px;font-weight:500;color:rgba(237,232,216,.8);">Reset All Data</div>
+        <div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:3px;">Permanently deletes all journal entries, trade history, positions, and settings data.</div>
+      </div>
+      <button id="pfResetBtn" onclick="pfMasterReset()"
+        style="background:transparent;border:1px solid rgba(224,85,85,.35);border-radius:5px;color:rgba(224,85,85,.7);font-size:10px;font-family:var(--mono);padding:7px 14px;cursor:pointer;transition:all .2s;letter-spacing:.04em;white-space:nowrap;flex-shrink:0;"
+        onmouseover="this.style.background='rgba(224,85,85,.12)';this.style.borderColor='rgba(224,85,85,.6)';this.style.color='rgba(224,85,85,.95)'"
+        onmouseout="this.style.background='transparent';this.style.borderColor='rgba(224,85,85,.35)';this.style.color='rgba(224,85,85,.7)'"
+        title="Permanently delete all portfolio positions, journal entries, trade history, signal history, and equity snapshots">
+        Reset All Data
+      </button>
+    </div>
+  </div>`;
 }
 function selectSettTz(tz){ _settTz=tz; showSettings('timezone'); }
 function _initTzClocks(){}
+
+// ── P1 Intent editor panel ─────────────────────────────────────────────────
+function _spIntent() {
+  /* Settings sub-panel: "Your goals & limits"
+     Reads from _dvIntentGet() for rendering; saves via _dvIntentSave(). */
+  var intent = _dvIntentGet();
+  var g = intent.goals || {};
+  var r = intent.risk  || {};
+  var mkts = Array.isArray(intent.markets) ? intent.markets : [];
+
+  var _VALID_MARKETS = ['crypto','forex','stock','index','commodity'];
+  var _MKT_LABELS    = {crypto:'Crypto',forex:'Forex',stock:'Stocks',index:'Indices',commodity:'Commodities'};
+
+  var inpStyle = 'background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.15);border-radius:5px;padding:7px 10px;font-family:var(--mono);font-size:12px;color:var(--t1);outline:none;width:100%;box-sizing:border-box;margin-top:5px;';
+  var labelStyle = 'font-family:var(--mono);font-size:10px;font-weight:400;letter-spacing:.08em;color:var(--t3);text-transform:uppercase;';
+
+  function _goalField(id, label, val, derived) {
+    var note = derived ? ' <span style="color:var(--t3);font-size:10px;">(derived)</span>' : '';
+    var extra = derived ? 'opacity:0.6;' : '';
+    return '<div style="flex:1;min-width:120px;">'
+      + '<div style="' + labelStyle + '">' + label + note + '</div>'
+      + '<input id="intentGoal_' + id + '" type="number" min="0" step="10" placeholder="e.g. 500"'
+      + ' value="' + (val != null ? val : '') + '"'
+      + ' style="' + inpStyle + extra + '"'
+      + (derived ? ' title="Derived from your other goal — you can override it"' : '')
+      + '>'
+      + '</div>';
+  }
+
+  var dailyDerived   = !!g.daily_derived;
+  var weeklyDerived  = !!g.weekly_derived;
+  var monthlyDerived = !!g.monthly_derived;
+  var conflictNote   = g.conflict ? '<div id="intentConflictNote" style="margin-top:8px;padding:8px 10px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.25);border-radius:5px;font-size:11px;color:rgba(201,168,76,.9);">' + g.conflict + '</div>' : '';
+
+  var mktChips = _VALID_MARKETS.map(function(m) {
+    var sel = mkts.indexOf(m) >= 0;
+    return '<button type="button" id="intentMkt_' + m + '"'
+      + ' onclick="_intentToggleMarket(\'' + m + '\')"'
+      + ' style="padding:5px 12px;border-radius:5px;font-family:var(--mono);font-size:11px;cursor:pointer;transition:all .15s;border:1px solid;'
+      + (sel ? 'background:rgba(93,232,160,.12);color:#5de8a0;border-color:rgba(93,232,160,.35);'
+             : 'background:transparent;color:var(--t3);border-color:rgba(237,232,216,.15);')
+      + '">' + _MKT_LABELS[m] + '</button>';
+  }).join('');
+
+  var hoursBlock = (function(){
+    var h = intent.hours || {};
+    return '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;">'
+      + '<div style="flex:1;min-width:100px;"><div style="' + labelStyle + '">Market open (HH:MM)</div>'
+      + '<input id="intentHrsStart" type="text" maxlength="5" placeholder="09:30" value="' + (h.start || '') + '" style="' + inpStyle + '"></div>'
+      + '<div style="flex:1;min-width:100px;"><div style="' + labelStyle + '">Market close (HH:MM)</div>'
+      + '<input id="intentHrsEnd" type="text" maxlength="5" placeholder="16:00" value="' + (h.end || '') + '" style="' + inpStyle + '"></div>'
+      + '<div style="flex:1;min-width:120px;"><div style="' + labelStyle + '">Timezone</div>'
+      + '<input id="intentHrsTz" type="text" maxlength="64" placeholder="UTC" value="' + (h.tz || '') + '" style="' + inpStyle + '"></div>'
+      + '</div>';
+  })();
+
+  return '<div id="intentSettPanel">'
+    + '<div class="sett-sect">'
+    + '<div class="sett-sect-title">Your goals &amp; limits</div>'
+    + '<div class="sett-sect-sub">Set profit targets and risk limits. DotVerse uses these to personalise coaching, position sizing hints, and goal-tracking in the Today tab.</div>'
+
+    + '<div style="margin-top:14px;"><div style="' + labelStyle + 'margin-bottom:4px;">Profit goals</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
+    + _goalField('daily',   'Daily',   g.daily,   dailyDerived)
+    + _goalField('weekly',  'Weekly',  g.weekly,  weeklyDerived)
+    + _goalField('monthly', 'Monthly', g.monthly, monthlyDerived)
+    + '</div>'
+    + conflictNote
+    + '<div style="font-size:10.5px;color:var(--t3);margin-top:6px;">Set one horizon — the others are derived automatically. Currency: USD.</div>'
+    + '</div>'
+
+    + '<div style="margin-top:16px;"><div style="' + labelStyle + 'margin-bottom:4px;">Risk limits</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
+    + '<div style="flex:1;min-width:130px;"><div style="' + labelStyle + '">Max risk / trade (%)</div>'
+    + '<input id="intentRiskPerTrade" type="number" min="0.1" max="10" step="0.1" placeholder="1.0" value="' + (r.max_per_trade_pct != null ? r.max_per_trade_pct : 1.0) + '" style="' + inpStyle + '"></div>'
+    + '<div style="flex:1;min-width:130px;"><div style="' + labelStyle + '">Max open risk (%)</div>'
+    + '<input id="intentRiskOpen" type="number" min="0.1" max="10" step="0.1" placeholder="3.0" value="' + (r.max_open_risk_pct != null ? r.max_open_risk_pct : 3.0) + '" style="' + inpStyle + '"></div>'
+    + '<div style="flex:1;min-width:130px;"><div style="' + labelStyle + '">Daily loss stop (%)</div>'
+    + '<input id="intentRiskDailyStop" type="number" min="0.1" max="10" step="0.1" placeholder="none" value="' + (r.daily_loss_stop_pct != null ? r.daily_loss_stop_pct : '') + '" style="' + inpStyle + '"></div>'
+    + '</div></div>'
+
+    + '<div style="margin-top:16px;"><div style="' + labelStyle + 'margin-bottom:8px;">Focus markets</div>'
+    + '<div id="intentMktsRow" style="display:flex;gap:8px;flex-wrap:wrap;">' + mktChips + '</div>'
+    + '</div>'
+
+    + '<div style="margin-top:16px;"><div style="' + labelStyle + 'margin-bottom:4px;">Trading hours (optional)</div>'
+    + hoursBlock
+    + '</div>'
+
+    + '<div style="margin-top:18px;">'
+    + '<button onclick="_intentSavePanel()" id="intentSaveBtn"'
+    + ' style="background:rgba(93,232,160,.1);border:1px solid rgba(93,232,160,.3);border-radius:6px;color:#5de8a0;font-family:var(--mono);font-size:12px;font-weight:700;padding:9px 22px;cursor:pointer;letter-spacing:.04em;transition:all .2s;"'
+    + ' onmouseover="this.style.background=\'rgba(93,232,160,.22)\'" onmouseout="this.style.background=\'rgba(93,232,160,.1)\'">'
+    + 'Save Goals &amp; Limits</button>'
+    + '<span id="intentSaveMsg" style="margin-left:12px;font-size:11px;font-family:var(--mono);color:var(--t3);"></span>'
+    + '</div>'
+
+    + '</div>'  // sett-sect
+    + '</div>';  // intentSettPanel
+}
+
+function _intentToggleMarket(m) {
+  /* Toggle a market chip on/off and re-render the chips row. */
+  var intent = _dvIntentGet();
+  var mkts = Array.isArray(intent.markets) ? intent.markets.slice() : [];
+  var idx = mkts.indexOf(m);
+  if (idx >= 0) mkts.splice(idx, 1); else mkts.push(m);
+  try { localStorage.setItem(_DV_INTENT_KEY, JSON.stringify(Object.assign({}, intent, {markets: mkts}))); } catch(e) {}
+  // Re-render just the chips row without a full panel re-render
+  var _VALID_MARKETS = ['crypto','forex','stock','index','commodity'];
+  var _MKT_LABELS    = {crypto:'Crypto',forex:'Forex',stock:'Stocks',index:'Indices',commodity:'Commodities'};
+  var row = document.getElementById('intentMktsRow');
+  if (!row) return;
+  row.innerHTML = _VALID_MARKETS.map(function(mk) {
+    var sel = mkts.indexOf(mk) >= 0;
+    return '<button type="button" id="intentMkt_' + mk + '"'
+      + ' onclick="_intentToggleMarket(\'' + mk + '\')"'
+      + ' style="padding:5px 12px;border-radius:5px;font-family:var(--mono);font-size:11px;cursor:pointer;transition:all .15s;border:1px solid;'
+      + (sel ? 'background:rgba(93,232,160,.12);color:#5de8a0;border-color:rgba(93,232,160,.35);'
+             : 'background:transparent;color:var(--t3);border-color:rgba(237,232,216,.15);')
+      + '">' + _MKT_LABELS[mk] + '</button>';
+  }).join('');
+}
+
+async function _intentSavePanel() {
+  /* Read all inputs, build intent object, call _dvIntentSave, show feedback. */
+  var btn = document.getElementById('intentSaveBtn');
+  var msg = document.getElementById('intentSaveMsg');
+  if (btn) btn.disabled = true;
+  if (msg) msg.textContent = 'Saving…';
+
+  function _numOrNull(id) {
+    var el = document.getElementById(id);
+    if (!el || el.value === '' || el.value == null) return null;
+    var v = parseFloat(el.value);
+    return isFinite(v) ? v : null;
+  }
+  function _strOrNull(id) {
+    var el = document.getElementById(id);
+    if (!el || !el.value.trim()) return null;
+    return el.value.trim();
+  }
+
+  var intent = _dvIntentGet();
+  var mkts = Array.isArray(intent.markets) ? intent.markets : [];
+
+  var hrsStart = _strOrNull('intentHrsStart');
+  var hrsEnd   = _strOrNull('intentHrsEnd');
+  var hrsTz    = _strOrNull('intentHrsTz');
+  var hours = (hrsStart || hrsEnd || hrsTz)
+    ? { start: hrsStart, end: hrsEnd, tz: hrsTz || 'UTC' }
+    : null;
+
+  var payload = {
+    goals:   {
+      daily:   _numOrNull('intentGoal_daily'),
+      weekly:  _numOrNull('intentGoal_weekly'),
+      monthly: _numOrNull('intentGoal_monthly'),
+      currency: 'USD'
+    },
+    risk: {
+      max_per_trade_pct:  _numOrNull('intentRiskPerTrade'),
+      max_open_risk_pct:  _numOrNull('intentRiskOpen'),
+      daily_loss_stop_pct: _numOrNull('intentRiskDailyStop')
+    },
+    markets: mkts,
+    hours:   hours
+  };
+
+  var saved = await _dvIntentSave(payload);
+  if (btn) btn.disabled = false;
+  if (saved) {
+    if (msg) { msg.textContent = 'Saved!'; msg.style.color = '#5de8a0'; }
+    // Re-render to show derived values
+    setTimeout(function(){ showSettings('intent'); }, 600);
+  } else {
+    if (msg) { msg.textContent = 'Save failed — check connection'; msg.style.color = 'rgba(232,112,110,.9)'; }
+  }
+}
+// ── end P1 Intent editor ───────────────────────────────────────────────────
 
 // ── SIGNAL FEED ────────────────────────────────────────────────
 let _sfFilter={asset:'all',dir:'all',status:'all',conf:'all',sort:'confidence',verified:false};
@@ -11142,7 +11572,11 @@ function _todaySettingsClasses(){
   return null;
 }
 window._todayCfg = window._todayCfg || (function(){
-  var def={ acct:0, riskPct:3, profitGoal:500, maxPerClass:99, maxTrades:6, ladderMode:'beginner', autoPlace:false,
+  // P1: read max_open_risk_pct from dvIntent (fallback 3 — old hardcoded default)
+  var _intentRisk = (function(){ try{ var iv=_dvIntentGet(); return (iv&&iv.risk&&iv.risk.max_open_risk_pct!=null)?iv.risk.max_open_risk_pct:3; }catch(e){ return 3; } })();
+  // P1: read weekly goal from dvIntent (fallback 500 — old hardcoded default)
+  var _intentWeekly = (function(){ try{ var iv=_dvIntentGet(); return (iv&&iv.goals&&iv.goals.weekly!=null)?iv.goals.weekly:500; }catch(e){ return 500; } })();
+  var def={ acct:0, riskPct:_intentRisk, profitGoal:_intentWeekly, maxPerClass:99, maxTrades:6, ladderMode:'beginner', autoPlace:false,
             classes:(_todaySettingsClasses()||['crypto','stock','forex','commodity','index']) };
   try{
     var saved=JSON.parse(_dvRead('dv_todayCfg')||'null');
@@ -11839,8 +12273,50 @@ function _todayLadderLegs(o){
   }
   return legs;
 }
+// ── _dvBasketTotals: canonical pure function for combined multi-leg basket totals ──
+// Works with both Today-tab leg objects {margin, notional, risk, profit}
+// and Size-tab leg objects from _szBuildExecutionLegs {moneyAtRisk, notional, margin, profit}.
+// Returns { totalCashIn, totalRisk, totalProfitTarget, totalPositionValue, orderCount }.
+function _dvBasketTotals(legs){
+  if(!legs||!legs.length) return {totalCashIn:0,totalRisk:0,totalProfitTarget:0,totalPositionValue:0,orderCount:0};
+  return legs.reduce(function(a,l){
+    a.totalCashIn        += parseFloat(l.margin)||0;
+    a.totalRisk          += parseFloat(l.risk||l.moneyAtRisk)||0;
+    a.totalProfitTarget  += parseFloat(l.profit)||0;
+    a.totalPositionValue += parseFloat(l.notional)||0;
+    a.orderCount++;
+    return a;
+  },{totalCashIn:0,totalRisk:0,totalProfitTarget:0,totalPositionValue:0,orderCount:0});
+}
+// ── _dvLadderOutcome: pure function — summarises a per-leg results array ──────
+// Input:  results  Array of legResult objects {ok, symbol, legIndex, target, …}
+//                  (same shape produced by _szSendOneLeg and _todaySendOrders legs).
+// Output: { placed, failed, total, failedLegs:[…], summaryText }
+//   placed      — count of legs with ok===true
+//   failed      — count of legs with ok===false
+//   total       — results.length
+//   failedLegs  — subset where ok===false (full objects for retry use)
+//   summaryText — human-readable: "3 of 4 orders placed" | "All 4 orders placed"
+//                 | "All 4 orders failed"
+// Pure: no DOM access, no side-effects, unit-testable via node subprocess.
+function _dvLadderOutcome(results){
+  if(!results||!results.length) return {placed:0,failed:0,total:0,failedLegs:[],summaryText:'0 orders submitted'};
+  var placed=0, failed=0, failedLegs=[];
+  for(var i=0;i<results.length;i++){
+    if(results[i].ok){ placed++; } else { failed++; failedLegs.push(results[i]); }
+  }
+  var total=results.length;
+  var summaryText = failed===0
+    ? ('All ' + placed + ' order' + (placed>1?'s':'') + ' placed')
+    : placed===0
+      ? ('All ' + failed + ' order' + (failed>1?'s':'') + ' failed')
+      : (placed + ' of ' + total + ' orders placed');
+  return {placed:placed, failed:failed, total:total, failedLegs:failedLegs, summaryText:summaryText};
+}
 function _todayLadderTotals(o){
-  return _todayLadderLegs(o).reduce(function(a,l){ a.margin+=l.margin||0; a.notional+=l.notional||0; a.risk+=l.risk||0; a.profit+=l.profit||0; a.orders++; return a; },{margin:0,notional:0,risk:0,profit:0,orders:0});
+  var t=_dvBasketTotals(_todayLadderLegs(o));
+  // back-compat shape used by Today-tab callers: {margin, notional, risk, profit, orders}
+  return {margin:t.totalCashIn, notional:t.totalPositionValue, risk:t.totalRisk, profit:t.totalProfitTarget, orders:t.orderCount};
 }
 function _todaySetTradeLadder(idx, mode){
   var o=(window._todayPlan||[])[idx]; if(!o) return;
@@ -13167,11 +13643,73 @@ function _todayAllocate(plan, acct, basketRisk){
   window._todayBudgetFlex = false;
 }
 
+// P3 — goal-aware pace helper.
+// Returns {ahead: bool, pct: number, horizon: string} from intent + briefing cache.
+// No intent set → returns {ahead: false, pct: 0, horizon: null} — back-compat.
+function _todayGoalPace(){
+  try{
+    var iv = _dvIntentGet();
+    var g  = (iv && iv.goals) || {};
+    // Pick smallest set horizon: daily → weekly → monthly
+    var horizon = null, goalVal = 0, pnlVal = 0;
+    var briefing = window._dvBriefing || {};
+    var pnl = briefing.pnl || {};
+    if(g.daily > 0){
+      horizon = 'daily'; goalVal = g.daily;
+      pnlVal  = parseFloat(pnl.today || 0);
+    } else if(g.weekly > 0){
+      horizon = 'weekly'; goalVal = g.weekly;
+      pnlVal  = parseFloat(pnl.week || 0);
+    } else if(g.monthly > 0){
+      horizon = 'monthly'; goalVal = g.monthly;
+      pnlVal  = parseFloat(pnl.month || 0);
+    }
+    if(!horizon) return {ahead: false, pct: 0, horizon: null};
+    var pct = goalVal > 0 ? (pnlVal / goalVal * 100) : 0;
+    return {ahead: pct >= 100, pct: pct, horizon: horizon};
+  }catch(e){
+    return {ahead: false, pct: 0, horizon: null};
+  }
+}
+
+// P3 — AHEAD tightening constants.
+// When pace >= 100% raise QFLOOR by this amount and cap maxTrades at this value.
+// "A notch" is derived from the existing QFLOOR=45 scale: one notch = +10pts (22%).
+// BEHIND never loosens — the default gates are always the floor (see comment below).
+var _DV_QFLOOR_AHEAD_BUMP   = 10;   // raise quality floor by 10pts when ahead
+var _DV_MAX_TRADES_AHEAD     = 3;    // cap basket at 3 trades when ahead (default=6)
+
 function _todaySelectPlan(ranked, cfg){
-  var plan=[], seen={}, goal=parseFloat(cfg.profitGoal)||0, max=parseInt(cfg.maxTrades)||6;
+  // P3: compute goal pace and tighten when AHEAD (>= 100% of the period goal).
+  // BEHIND never loosens below defaults — we never force junk trades to chase
+  // a missed target. Only tightening is applied; no loosening for any pace state.
+  var pace = _todayGoalPace();
+  var max  = parseInt(cfg.maxTrades) || 6;
+  var effectiveQfloor = typeof QFLOOR !== 'undefined' ? QFLOOR : 45;  // inherit caller's QFLOOR
+
+  var paceMsg = null;
+  if(pace.ahead){
+    // Tighten: raise quality floor by one notch and cap max trades conservatively.
+    effectiveQfloor = effectiveQfloor + _DV_QFLOOR_AHEAD_BUMP;
+    max = Math.min(max, _DV_MAX_TRADES_AHEAD);
+    paceMsg = 'You\'re ahead of your ' + (pace.horizon || 'period') + ' goal — being more selective today.';
+  }
+  // Store the pace message for the Today UI to surface (P3 explanation line).
+  window._todayPaceMsg = paceMsg;
+  window._todayPaceAhead = pace.ahead;
+
+  // Apply the effective QFLOOR: re-partition ranked list with tightened floor.
+  // When ahead, candidates below the higher floor move to the back of the queue.
+  var filtered = ranked;
+  if(pace.ahead){
+    filtered = (ranked||[]).filter(function(o){ return (o.qscore||0) >= effectiveQfloor; })
+               .concat((ranked||[]).filter(function(o){ return (o.qscore||0) < effectiveQfloor; }));
+  }
+
+  var plan=[], seen={}, goal=parseFloat(cfg.profitGoal)||0;
   var newRiskBudget=_todayNewRiskBudget(cfg.acct, cfg);
-  for(var i=0;i<(ranked||[]).length;i++){
-    var o=ranked[i], key=(o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'');
+  for(var i=0;i<(filtered||[]).length;i++){
+    var o=filtered[i], key=(o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'');
     if(seen[key]) continue;
     if(plan.length>=max) break;
     plan.push(o); seen[key]=1;
@@ -13364,9 +13902,15 @@ function _todayRenderTop(){
     : (used>0.01
       ? 'There are clean setups, but open risk is already using part of the weekly budget. DotVerse will prefer fewer trades, stronger R:R, and protected scale-outs.'
       : 'There are clean setups and no open risk is using the weekly budget right now. DotVerse will still stay selective and avoid forcing size just to hit a target.');
+  // P3 — goal-aware pace explanation line (only shown when tightening is active)
+  var paceMsg = window._todayPaceMsg || null;
+  var paceBanner = paceMsg
+    ? '<div id="todayPaceBanner" style="margin-top:8px;padding:7px 10px;background:rgba(93,232,160,.07);border:1px solid rgba(93,232,160,.22);border-radius:5px;font-size:11px;font-family:var(--mono);color:rgba(93,232,160,.85);">' + paceMsg + '</div>'
+    : '';
   host.innerHTML =
     '<div class="today-v2-top">'
       + '<div class="today-v2-verdict"><div class="td-mini">Should I trade today?</div><h2 class="'+(protect?'green':'')+'">'+(protect?'Protect target':'Selective only')+'</h2><div class="today-v2-copy">'+verdictCopy+'</div>'
+        + paceBanner
         + '<div class="today-v2-readiness"><div class="today-v2-mini"><div class="td-mini">Today action</div><b class="'+(protect?'green':'gold')+'">'+(protect?'Protect only':'Selective')+'</b></div><div class="today-v2-mini"><div class="td-mini">Weekly progress</div><b class="'+(protect?'green':'blue')+'">'+progressLabel+'</b></div><div class="today-v2-mini"><div class="td-mini">New entries</div><b class="'+(protect?'red':'green')+'">'+(protect?'Paused':'Allowed')+'</b></div></div>'
       + '</div>'
       + '<div class="td-card"><div class="td-card-head"><h2>Risk budget</h2><span class="td-pill gold">basket-first</span></div><div class="today-v2-risk">'
@@ -16826,6 +17370,27 @@ async function _pfLoad(){
 }
 async function _pfSave(){ /* positions saved via POST /api/positions — no local store needed */ }
 
+// ── #21 — Allocation divergence guidance hint (pure, testable) ─────────────
+// Returns a one-line action hint when actual diverges from target by ≥2×.
+// Rules:
+//   actualPct ≥ 2 × target  (and target > 0)  → "over" hint
+//   actualPct ≤ target / 2  (and target > 0)  → "under" hint
+//   target = 0 or actualPct null              → '' (no hint)
+// label is the human-readable class name (e.g. "Forex", "Crypto").
+function _dvAllocationHint(actualPct, targetPct, label) {
+  if (actualPct == null || targetPct == null) return '';
+  var t = +targetPct, a = +actualPct;
+  if (!(t > 0)) return '';
+  if (a >= 2 * t) {
+    var overPct = Math.round((a / t - 1) * 100);
+    return 'You\'re ' + overPct + '% over your ' + label + ' target — diversify or adjust your target.';
+  }
+  if (a <= t / 2) {
+    return 'You\'re well under your ' + label + ' target — add exposure or lower the target.';
+  }
+  return '';
+}
+
 async function showPortfolio(){
   const el=document.getElementById('dashContent'); if(!el) return;
   el.innerHTML='<div style="color:var(--t3);font-size:13px;padding:32px;text-align:center;font-family:var(--mono);">Loading portfolio…</div>';
@@ -17157,7 +17722,7 @@ async function showPortfolio(){
       </div>
       <div id="pfHealthTs" style="font-size:11px;color:rgba(237,232,216,.5);"></div>
     </div>
-    <div class="pg-hd"><div class="pg-hd-left"><div class="pg-hd-title">Portfolio</div><div class="pg-hd-sub">Track your open positions, P&L, and risk metrics. Positions are saved to your account.</div></div><div class="pg-hd-right" style="display:flex;align-items:center;gap:10px;"><button class="jrnl-toggle" id="jrnlToggleBtn" onclick="toggleJournal()" title="Trading Journal">📓 Journal</button><button id="pfResetBtn" onclick="pfMasterReset()" style="background:transparent;border:1px solid rgba(224,85,85,.2);border-radius:4px;color:rgba(224,85,85,.6);font-size:9.5px;font-family:var(--mono);padding:2px 7px;cursor:pointer;transition:all .25s;letter-spacing:.03em;" onmouseover="this.style.background='rgba(224,85,85,.1)';this.style.color='rgba(224,85,85,.9)'" onmouseout="this.style.background='transparent';this.style.color='rgba(224,85,85,.6)'" title="Delete all positions, signal history, and equity snapshots">Reset All Data</button><span class="pg-tag live">Live</span></div></div>
+    <div class="pg-hd"><div class="pg-hd-left"><div class="pg-hd-title">Portfolio</div><div class="pg-hd-sub">Track your open positions, P&L, and risk metrics. Positions are saved to your account.</div></div><div class="pg-hd-right" style="display:flex;align-items:center;gap:10px;"><button class="jrnl-toggle" id="jrnlToggleBtn" onclick="toggleJournal()" title="Trading Journal">📓 Journal</button><span class="pg-tag live">Live</span></div></div>
     <div style="background:${hBg};border:1px solid ${hBd};border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;margin-bottom:${_corrBanner?'10':'16'}px;" data-guide="portfolio-var">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${hTxt}" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <span style="font-size:12px;color:${hTxt};font-weight:500">${hMsg}</span>
@@ -17225,11 +17790,15 @@ async function showPortfolio(){
         else if(drift > 2){ status = 'within ' + drift.toFixed(1) + '%'; statusCol = '#c9a84c'; }
         else { status = 'on target'; statusCol = '#5de8a0'; }
         var actStr = actualPct == null ? '—' : actualPct.toFixed(1) + '%';
+        // #21 — append action hint when actual diverges ≥2× from target
+        var hint = _dvAllocationHint(actualPct, target, a.label);
+        var hintHtml = hint ? '<div style="grid-column:1/-1;font-size:11px;color:rgba(201,168,76,.7);padding:2px 0 4px 0;line-height:1.4;">'+hint+'</div>' : '';
         return '<div style="display:grid;grid-template-columns:1fr 80px 80px 1fr;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(237,232,216,.06);">' +
           '<span style="font-size:12px;color:rgba(237,232,216,.85);">'+a.label+'</span>' +
           '<span style="font-family:var(--mono);font-size:12px;color:#c9a84c;text-align:right;">'+target+'%</span>' +
           '<span style="font-family:var(--mono);font-size:12px;color:rgba(237,232,216,.85);text-align:right;">'+actStr+'</span>' +
           '<span style="font-size:11px;color:'+statusCol+';">'+status+'</span>' +
+          hintHtml +
           '</div>';
       }).join('');
       var callout = anyDrift
@@ -17342,8 +17911,8 @@ async function showPortfolio(){
   });
 }
 async function pfMasterReset(){
-  if(!confirm('Master Reset \u2014 this will permanently delete ALL your positions, trade history, signal history, and equity snapshots. This action cannot be undone.\n\nClick OK only if you are absolutely sure.')) return;
-  if(!confirm('Final confirmation: erase everything? This cannot be undone.')) return;
+  if(!confirm('RESET ALL DATA\n\nThis will permanently delete:\n  \u2022 All journal entries\n  \u2022 All trade history\n  \u2022 All open positions\n  \u2022 All signal history\n  \u2022 All equity snapshots\n  \u2022 All saved settings\n\nThis action cannot be undone. There is no backup.\n\nClick OK only if you are absolutely sure.')) return;
+  if(!confirm('Final confirmation \u2014 permanently erase ALL journal, trades, positions, and settings? This cannot be undone.')) return;
   var btn=document.getElementById('pfResetBtn');
   if(btn){btn.textContent='Resetting\u2026';btn.disabled=true;btn.style.opacity='0.5';btn.style.cursor='not-allowed';}
   try{
@@ -23945,12 +24514,19 @@ function szLadderRender() {
       </div>
     </div>`;
 	  })() +
-  // ── MAX TOTAL LOSS safety card — multi-leg basket, shown only in multi mode ──
-  // This is the single most important pre-trade safety number: if every leg hits
-  // its stop, how much dollar-loss and what % of account does that represent?
-  // Formula: sum of each leg's moneyAtRisk (acct * riskPct/100); shown only when
-  // there are 2+ rows and we have a valid entry+SL so the numbers are real.
+  // ── MAX TOTAL LOSS safety card + combined basket totals — multi-leg only ──
+  // Extended to show all four basket totals (cash-in, position value, risk, profit)
+  // via _dvBasketTotals, keeping the existing szMaxTotalLossCard IDs intact for
+  // test contracts and the prior safety-card commit.
   (() => {
+    // Build execution legs first — _dvBasketTotals uses these to guarantee the
+    // basket-totals strip numbers match the per-leg rows exactly.
+    const _szRenderLegs = (typeof _szBuildExecutionLegs === 'function') ? _szBuildExecutionLegs() : [];
+    const _bt = _dvBasketTotals(_szRenderLegs.length ? _szRenderLegs : _rowsToRender.map((risk) => {
+      const mar = acct * (risk/100);
+      return {moneyAtRisk: mar, notional: 0, margin: mar / (marginDivisor||1), profit: 0};
+    }));
+    const _money = (v) => (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString();
     if (_isSingle || !acct || totalRisk <= 0 || _rowsToRender.length < 2) return '';
     const pct = totalRisk / acct * 100;
     const n = _rowsToRender.length;
@@ -23966,6 +24542,12 @@ function szLadderRender() {
         <div id="szMaxTotalLossPctBadge" style="font-family:var(--mono);font-size:18px;font-weight:700;color:${pctCol};background:rgba(232,112,110,.07);border:1px solid rgba(232,112,110,.25);border-radius:5px;padding:4px 10px;line-height:1.3;">${pct.toFixed(2)}%<div style="font-size:8px;color:rgba(237,232,216,.45);font-weight:400;margin-top:1px;">of account</div></div>
       </div>
       <div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42);margin-top:7px;line-height:1.5;">= sum of each leg's stop-loss risk · account $${acct.toLocaleString(undefined,{maximumFractionDigits:0})} · ${n} MT5 orders</div>
+      <div id="szBasketTotalsStrip" style="margin-top:9px;padding-top:9px;border-top:1px solid rgba(232,112,110,.22);display:grid;grid-template-columns:1fr 1fr;gap:5px 14px;">
+        <div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.38);letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px;">Total cash in</div><div style="font-family:var(--mono);font-size:11px;font-weight:700;color:rgba(201,168,76,.95);">${_money(_bt.totalCashIn)}</div></div>
+        <div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.38);letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px;">Total position value</div><div style="font-family:var(--mono);font-size:11px;font-weight:700;color:rgba(237,232,216,.85);">${_money(_bt.totalPositionValue)}</div></div>
+        ${_bt.totalProfitTarget>0?`<div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.38);letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px;">Total profit target</div><div style="font-family:var(--mono);font-size:11px;font-weight:700;color:#5de8a0;">+${_money(_bt.totalProfitTarget)}</div></div>`:''}
+        <div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(237,232,216,.38);letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px;">MT5 orders</div><div style="font-family:var(--mono);font-size:11px;font-weight:700;color:rgba(237,232,216,.7);">${_bt.orderCount}</div></div>
+      </div>
     </div>`;
   })();
 	  // Keep the main Trade Amount field honest in ladder mode. The rows are the
@@ -24253,6 +24835,8 @@ function _szConfirmTrade(onConfirm){
   if(!legs.length){ if(typeof _dvToast==='function') _dvToast('Enter entry and stop loss before placing','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
   var totRisk=0, totNotional=0, totMargin=0, totScale=0;
   legs.forEach(function(l){ totRisk+=l.moneyAtRisk||0; totNotional+=l.notional||0; totMargin+=l.margin||0; totScale+=l.profit||0; });
+  // Combined basket totals via canonical pure function (same numbers, consistent field names)
+  var _cfBasket=_dvBasketTotals(legs);
   var dir=(sig.sig||'BUY').toUpperCase();
   var verdict=_szTradeVerdict(); var go=verdict.v;
   var nT=legs.length;
@@ -24316,6 +24900,23 @@ function _szConfirmTrade(onConfirm){
       +'<div style="font-size:9px;color:rgba(237,232,216,.42);letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px;">Orders DotVerse will send to MT5</div>'
       +legRows
     +'</div>':'')
+    // ── Combined basket totals strip — multi-leg only, powered by _dvBasketTotals ──
+    +(nT>1?(function(){
+      var b=_cfBasket;
+      return '<div id="szCfBasketTotals" style="background:rgba(237,232,216,.03);border:1px solid rgba(237,232,216,.14);border-radius:9px;padding:10px 13px;margin-bottom:13px;">'
+        +'<div style="font-family:var(--mono);font-size:8.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;color:rgba(201,168,76,.65);">Basket totals — '+b.orderCount+' MT5 order'+(b.orderCount===1?'':'s')+'</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;">'
+          +'<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.38);letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px;">Total cash in</div>'
+            +'<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(201,168,76,.95);">'+money(b.totalCashIn)+'</div></div>'
+          +'<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.38);letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px;">Total position value</div>'
+            +'<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:rgba(237,232,216,.85);">'+money(b.totalPositionValue)+'</div></div>'
+          +'<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.38);letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px;">Total risk (max loss)</div>'
+            +'<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#e8706e;">'+money(-b.totalRisk)+'</div></div>'
+          +(b.totalProfitTarget>0?'<div><div style="font-family:var(--mono);font-size:8px;color:rgba(237,232,216,.38);letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px;">Total profit target</div>'
+            +'<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#5de8a0;">+'+money(b.totalProfitTarget)+'</div></div>':'')
+        +'</div>'
+      +'</div>';
+    })():'')
     +'<div id="szCfMaxLossCard" data-sz-worst-case="true" style="background:rgba(232,112,110,.09);border:2px solid rgba(232,112,110,.45);border-radius:9px;padding:12px 14px;margin-bottom:13px;">'
       +'<div style="font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px;color:rgba(232,112,110,.65);">'+(nT>1?'Max total loss — if ALL '+nT+' legs stop out':'Planned stop risk')+'</div>'
       +'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">'
@@ -24361,6 +24962,9 @@ function actExecute(){
   }
   _szConfirmTrade(_actExecuteGo);
 }
+// Maximum number of retry batches permitted per ladder submission session.
+// After this many retries, the user is directed back to Size to investigate.
+var _LADDER_RETRY_CAP = 2;
 async function _szLadderSubmitGo() {
   const sig = window._activeSignal;
   if (!sig || !sig.sym || !sig.entry || !sig.sl || !sig.tp) {
@@ -24390,6 +24994,7 @@ async function _szLadderSubmitGo() {
   var _szLegResults = [];
   var _szOkLegs = [];
   var _szFailedLegs = [];
+  var _szRetryCount = 0; // counts retry batches for cap enforcement
   // TP price map — each row sends ONLY its assigned TP to MT5 so it closes at
   // that exact target. SL cascade (breakeven after TP1, lock-TP1 after TP2)
   // is handled automatically by the EA via the /api/mt5/alert endpoint.
@@ -24458,6 +25063,9 @@ async function _szLadderSubmitGo() {
     // Sort by legIndex so display order is stable regardless of result order.
     allResults.sort(function(a,b){ return (a.legIndex||0) - (b.legIndex||0); });
     var esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); };
+    // Use _dvLadderOutcome for summary text — keeps UI copy in sync with the
+    // pure function contract that the test suite validates.
+    var outcome = _dvLadderOutcome(allResults);
     var legRows = allResults.map(function(l){
       var icon = l.ok ? '<span style="color:#5de8a0;">&#10003;</span>' : '<span style="color:#e8706e;">&#10005;</span>';
       var label = esc(l.symbol) + ' L#' + l.legIndex + ' (' + esc(l.target) + ')';
@@ -24476,9 +25084,14 @@ async function _szLadderSubmitGo() {
       : ok > 0
         ? (ok + ' of ' + (ok+fail) + ' legs placed — ' + fail + ' failed')
         : ('All ' + fail + ' leg' + (fail>1?'s':'') + ' failed');
-    var retryHtml = fail > 0
-      ? '<button id="szLadderRetryBtn" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:1px solid rgba(232,112,110,.4);background:rgba(232,112,110,.10);color:#e8706e;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;">Retry ' + fail + ' failed leg' + (fail>1?'s':'') + ' →</button>'
-      : '';
+    // Retry cap: show exhaustion message instead of retry button when cap is reached.
+    var capExhausted = (_szRetryCount >= _LADDER_RETRY_CAP);
+    var retryHtml = '';
+    if (fail > 0) {
+      retryHtml = capExhausted
+        ? '<div id="szLadderRetryCapMsg" style="margin-top:8px;padding:8px;border-radius:6px;border:1px solid rgba(232,112,110,.3);background:rgba(232,112,110,.06);color:rgba(232,112,110,.85);font-family:var(--mono);font-size:10px;">Still failing — check the error and try again from Size.</div>'
+        : '<button id="szLadderRetryBtn" style="margin-top:8px;width:100%;padding:8px;border-radius:6px;border:1px solid rgba(232,112,110,.4);background:rgba(232,112,110,.10);color:#e8706e;font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;">Retry ' + fail + ' failed leg' + (fail>1?'s':'') + ' →</button>';
+    }
     status.innerHTML = '<div style="border:1px solid ' + headerBorder + ';background:' + headerBg + ';border-radius:8px;padding:10px 12px;">'
       + '<div style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + headerColor + ';margin-bottom:6px;">' + headerText + '</div>'
       + '<div>' + legRows + '</div>'
@@ -24488,11 +25101,12 @@ async function _szLadderSubmitGo() {
     // Double-placement prevention: we iterate _szFailedLegs (which excludes all
     // previously successful legs) and use the _legSnapshot / _origIdx stored at
     // first-run time, so re-expanding _szBuildExecutionLegs() is never needed.
-    if (fail > 0) {
+    if (fail > 0 && !capExhausted) {
       var retryBtn = document.getElementById('szLadderRetryBtn');
       if (retryBtn) {
         retryBtn.onclick = async function() {
           var rb = this; rb.disabled = true; rb.textContent = 'Retrying…';
+          _szRetryCount++;
           if (status) status.innerHTML = '<span style="color:rgba(201,168,76,.9);">Retrying ' + _szFailedLegs.length + ' leg' + (_szFailedLegs.length>1?'s':'') + '…</span>';
           var retryResults = [];
           try {
@@ -25214,6 +25828,14 @@ function _actPopulateMt5Summary(data) {
   var profitColor = profit >= 0 ? '#5de8a0' : '#e8706e';
   var modeLabel = _mt5ModeLabel(data);
   var modeColor = _mt5ModeColor(data);
+  // A4: trade-permission banner — shown only when backend computed a specific issue
+  var permBanner = '';
+  if (data.trade_permission_issue) {
+    permBanner = '<div class="dv-trade-alert" style="margin-top:8px;">'
+      + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+      + '<span>' + data.trade_permission_issue + '</span>'
+      + '</div>';
+  }
   el.innerHTML =
     '<span style="color:'+modeColor+';">● '+modeLabel+' connected</span> &nbsp;·&nbsp; ' +
     '<span style="color:var(--t2);">Balance </span><span style="color:var(--t1);font-weight:600;">$' + bal.toFixed(2) + '</span>' +
@@ -25226,7 +25848,8 @@ function _actPopulateMt5Summary(data) {
     ' &nbsp;·&nbsp; ' +
     '<span style="color:var(--t2);">Margin Level </span><span style="color:var(--t1);font-weight:600;">' + marginLvl.toFixed(1) + '%</span>' +
     ' &nbsp;·&nbsp; ' +
-    '<span style="color:var(--t2);">Open P&amp;L </span><span style="color:' + profitColor + ';font-weight:600;">' + profitSign + '$' + Math.abs(profit).toFixed(2) + '</span>';
+    '<span style="color:var(--t2);">Open P&amp;L </span><span style="color:' + profitColor + ';font-weight:600;">' + profitSign + '$' + Math.abs(profit).toFixed(2) + '</span>'
+    + permBanner;
 }
 
 function showAct(){
@@ -26418,7 +27041,7 @@ function _mt5AccountMode(dataOrMode) {
 
 function _mt5ModeLabel(dataOrMode) {
   var mode = _mt5AccountMode(dataOrMode);
-  return mode ? 'MT5 ' + mode : 'MT5 UNKNOWN';
+  return mode ? 'MT5 ' + mode : 'MT5 connected';
 }
 
 function _mt5ModeColor(dataOrMode) {
@@ -26435,7 +27058,7 @@ function _mt5SetStatus(connected, lastSeenStr, accountType) {
   if (lbl) {
     var mode = _mt5AccountMode(accountType);
     lbl.textContent = connected
-      ? _mt5ModeLabel(accountType) + ' connected — ' + (mode === 'LIVE' ? 'live account detected' : mode === 'DEMO' ? 'demo account detected' : 'account mode unknown')
+      ? _mt5ModeLabel(accountType) + ' — ' + (mode === 'LIVE' ? 'live account detected' : mode === 'DEMO' ? 'demo account detected' : 'account details syncing…')
       : (lastSeenStr ? 'EA Offline — last seen ' + lastSeenStr : 'EA Offline — open MT5 and start EA');
     lbl.style.color = connected ? _mt5ModeColor(accountType) : '#e05555';
   }
@@ -26448,7 +27071,7 @@ function _mt5ApplyConnBadge(badge, connected, lastSeenStr, accountType) {
     var mode = _mt5AccountMode(accountType);
     var isLive = mode === 'LIVE';
     var isDemo = mode === 'DEMO';
-    badge.textContent = mode ? _mt5ModeLabel(accountType) + ' CONNECTED' : 'MT5 MODE UNKNOWN';
+    badge.textContent = mode ? _mt5ModeLabel(accountType) + ' CONNECTED' : 'MT5 CONNECTED — SYNCING';
     badge.style.background = isLive ? 'rgba(232,112,110,.12)' : isDemo ? 'rgba(93,232,160,.12)' : 'rgba(201,168,76,.12)';
     badge.style.color = isLive ? 'rgba(232,112,110,.92)' : isDemo ? 'rgba(93,232,160,.9)' : 'rgba(201,168,76,.92)';
   } else {
@@ -26873,7 +27496,7 @@ function _mt5RenderOrders(orders) {
           + '<td style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);padding:9px 8px;text-align:right;">' + (o.volume || '—') + '</td>'
           + '<td style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);padding:9px 8px;text-align:right;">' + (o.fill_price ? _mt5Fmt(o.fill_price) : _mt5Fmt(o.price)) + '</td>'
           + '<td style="padding:9px 8px;"><span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + sc + ';text-transform:uppercase;letter-spacing:.4px;">' + (o.status || '—') + '</span>' + cancelBtn
-            + (o.status === 'failed' && o.comment ? '<div style="font-family:var(--mono);font-size:9px;color:rgba(224,85,85,.7);margin-top:3px;">' + o.comment + '</div>' : '')
+            + (o.status === 'failed' ? '<div style="font-family:var(--mono);font-size:9px;color:rgba(224,85,85,.7);margin-top:3px;">' + (o.status_message ? _esc(o.status_message) : (o.comment ? _dvHumanizeError(o.comment) : '')) + '</div>' : '')
             + staleWarningHtml + placedAgoHtml + '</td>'
           + '<td style="padding:9px 8px;text-align:right;">' + pnlHtml + '</td>'
           + '<td style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.4);padding:9px 14px;">' + (o.filled_at || o.created_at || '—') + '</td>'
