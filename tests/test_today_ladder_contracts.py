@@ -9,7 +9,7 @@ def test_today_ladder_uses_stacked_beginner_order_cards():
     assert ".today-v2-legGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))" in HTML
     assert ".today-v2-legBadge" in HTML
     assert "Each row below is one MT5 order" in HTML
-    assert "Cash in = margin you put up; controls = position value; lots = broker size units." in HTML
+    assert "MT5 volume is lots, units, contracts, or shares; cash in is margin; controls is position value." in HTML
 
 
 def test_today_ladder_removes_forced_horizontal_scroll_rows():
@@ -19,8 +19,9 @@ def test_today_ladder_removes_forced_horizontal_scroll_rows():
 
 
 def test_today_ladder_explains_cash_controls_lots_and_risk():
-    assert "Cash in: margin you put up for this MT5 order." in HTML
-    assert "Controls: position value. Size:" in HTML
+    assert "MT5 volume for this order." in HTML
+    assert "Cash in: margin you put up." in HTML
+    assert "Position value controlled." in HTML
     assert "function legSizeText(l)" in HTML
     assert "esc(legSizeText(l))" in HTML
     assert "Controls: position value. Lots:" not in HTML

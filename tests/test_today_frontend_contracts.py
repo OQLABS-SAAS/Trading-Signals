@@ -42,9 +42,10 @@ def test_today_v2_exposes_multiladder_presets_and_leg_money():
     assert "presetBtn('aggressive','Aggressive'" in source
     assert "Preset controls are inactive" in source
     assert "Each row below is one MT5 order." in source
-    assert "Cash in = margin you put up; controls = position value; lots = broker size units." in source
+    assert "MT5 volume is lots, units, contracts, or shares; cash in is margin; controls is position value." in source
     assert "Every leg below has its own cash in, controlled value" not in source
-    assert "Controls: position value. Size:" in source
+    assert "MT5 volume for this order." in source
+    assert "Position value controlled." in source
     assert "function legSizeText(l)" in source
     assert "esc(legSizeText(l))" in source
 

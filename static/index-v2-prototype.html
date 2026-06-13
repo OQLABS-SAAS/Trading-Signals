@@ -12237,14 +12237,19 @@ async function _todayBuildPlan(){
   _todayRefreshBasketCandidateActions(plan, window._todayDeferredOpps, c);
   // How many quality setups we had to leave out of the plan (caps / diversification).
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=QFLOOR;}).reduce(function(acc,o){ if(!acc.seen[o.sym]){acc.seen[o.sym]=1;acc.n++;} return acc; },{seen:{},n:0}).n - plan.length);
-  // RISK PER TRADE MODEL — the top % is applied to each selected setup. Basket
-  // totals below show the combined portfolio risk after all selected trades.
-  plan.forEach(function(o){ o._autos=_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; o._ladder=_todayDefaultLadder(o._ladderMode); o._multiEnabled=true; });
+  // Start single, then let the entry brain promote only proven, authorized
+  // scale-out. Scale-in stays advisory until its different-entry execution path
+  // is proven by real-kline backtests.
+  plan.forEach(function(o){ o._autos=_todayDefaultAutos(o.tf); o._ladderMode=o._ladderMode||c.ladderMode||'beginner'; o._ladder=_todayDefaultLadder(o._ladderMode); o._multiEnabled=false; });
   window._todayPlan=plan;
-  _todayRenderPlan();   // show immediately with sensible defaults
-  // Upgrade each card to DotVerse's SMART per-trade automations, then re-render.
+  _todayRenderPlan();   // show immediately with safe single-order defaults.
+  // Upgrade each card to DotVerse's SMART per-trade automations and brain-chosen
+  // execution mode, then re-render with the final applied plan.
   try{
-    await Promise.all(plan.map(async function(o){ o._autos = await _todayRecommendAutos(o); }));
+    await Promise.all(plan.map(async function(o){
+      o._autos = await _todayRecommendAutos(o);
+      await _todayV2LoadEntryBrain(o);
+    }));
     if(window._todayPlan===plan) _todayRenderPlan();
   }catch(e){}
   // Auto-place (opt-in): if enabled, fire the valid trades automatically after a
@@ -13106,6 +13111,17 @@ function _todayStartLivePrices(){
   },5000);
 }
 // ── Review & place — single card or the whole basket, one confirmed batch ──
+function _todayExecutionReadiness(o){
+  try{
+    return _todayV2EffectiveReadiness(o, _todayReadiness(o));
+  }catch(e){
+    try{ return _todayReadiness(o); }catch(_e){ return {text:'Wait',cls:'wait'}; }
+  }
+}
+function _todayCanExecuteNow(o){
+  var rd=_todayExecutionReadiness(o);
+  return !(rd&&rd.cls==='wait') && !(rd&&rd.cls==='invalid');
+}
 function _todayPlaceTrade(idx){
   if(!_todayCanPlaceMt5()){
     if(typeof _dvToast==='function') _dvToast('MT5 is offline - Today can review risk, but cannot place live orders yet','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
@@ -13113,6 +13129,11 @@ function _todayPlaceTrade(idx){
   }
   var o=(window._todayPlan||[])[idx];
   if(!o||!o._size||!o._size.tradeable) return;
+  if(!_todayCanExecuteNow(o)){
+    var rd=_todayExecutionReadiness(o);
+    if(typeof _dvToast==='function') _dvToast((rd&&rd.text?rd.text:'This setup is not ready')+' - DotVerse will not place it yet','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+    return;
+  }
   if(o._live&&o._live.invalid){
     if(typeof _dvToast==='function') _dvToast('This setup moved past its valid entry — skip it or rebuild Today','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
     return;
@@ -13127,7 +13148,7 @@ function _todayPlaceAll(){
   var acct=_todaySyncAccountFromDom(), cfg=window._todayCfg||{};
   if(acct>0){ (window._todayPlan||[]).forEach(function(o){ if(o&&o._size) o._size=_todaySizeTrade(o, acct, o._risk||cfg.riskPct||1); }); }
   // Only place trades that are tradeable AND whose live entry is still valid.
-  var plan=(window._todayPlan||[]).filter(function(o){ return o&&o._size&&o._size.tradeable && !(o._live&&o._live.invalid); });
+  var plan=(window._todayPlan||[]).filter(function(o){ return o&&o._size&&o._size.tradeable && !(o._live&&o._live.invalid) && _todayCanExecuteNow(o); });
   if(!plan.length){ if(typeof _dvToast==='function') _dvToast('No trades are currently valid to place — entries have moved','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
   _todayConfirmAndPlace(plan);
 }
@@ -13140,7 +13161,7 @@ function _todayConfirmAndPlace(trades){
   var c=window._todayCfg||{}, acct=c.acct||0;
   acct=_todaySyncAccountFromDom()||acct;
   trades.forEach(function(o){ if(o&&o._size) o._size=_todaySizeTrade(o, acct, o._risk||c.riskPct||1); });
-  trades=trades.filter(function(o){ return o&&o._size&&o._size.tradeable&&!(o._live&&o._live.invalid); });
+  trades=trades.filter(function(o){ return o&&o._size&&o._size.tradeable&&!(o._live&&o._live.invalid)&&_todayCanExecuteNow(o); });
   if(!trades.length){ if(typeof _dvToast==='function') _dvToast('No valid trade remains after recalculating account and risk','rgba(232,112,110,.15)','rgba(232,112,110,.4)'); return; }
   var money=function(v){ return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString(); };
   var totLoss=0, totCap=0, totMargin=0, totProfit=0, totOrders=0;
@@ -13559,12 +13580,12 @@ function _todayV2RefreshAutos(o){
 
 function _todayV2ScaleState(o, legs){
   legs=legs||_todayLadderLegs(o);
-  var requested=o&&o._multiEnabled!==false, collapsed=!!(requested&&legs.length===1&&legs[0]&&legs[0].tooSmallSplit);
+  var requested=o&&o._multiEnabled!==false, collapsed=!!(requested&&legs.length===1), active=!!(requested&&!collapsed&&legs.length>1);
   return {
     requested: requested,
     collapsed: collapsed,
-    active: requested&&!collapsed,
-    orders: requested&&!collapsed?legs.length:1
+    active: active,
+    orders: active?legs.length:1
   };
 }
 
@@ -13575,11 +13596,28 @@ function _todayEntryBrainModeLabel(mode){
   if(mode==='wait') return 'Wait';
   return 'Single';
 }
+function _todayV2ApplyEntryBrainDecision(o, data){
+  if(!o || !data) return;
+  if(o._entryBrainUserOverride) return;
+  if(data.execution_authority===true){
+    if(data.recommended_mode==='scale_out'){
+      o._multiEnabled=true;
+      o._ladderMode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
+      o._ladder=o._ladder||_todayDefaultLadder(o._ladderMode);
+    }else if(data.recommended_mode==='single'){
+      o._multiEnabled=false;
+    }
+  }else if(data.recommended_mode==='scale_in' || data.recommended_mode==='wait'){
+    o._multiEnabled=false;
+  }
+}
 function _todayV2LoadEntryBrain(o, idx){
-  if(!o || o._entryBrain || o._entryBrainLoading || o._entryBrainError) return;
-  if(!(o.sym&&o.sig&&o.entry&&o.sl&&o.tp)) return;
+  if(!o) return Promise.resolve(null);
+  if(o._entryBrain || o._entryBrainError) return Promise.resolve(o._entryBrain||null);
+  if(o._entryBrainLoading && o._entryBrainPromise) return o._entryBrainPromise;
+  if(!(o.sym&&o.sig&&o.entry&&o.sl&&o.tp)) return Promise.resolve(null);
   o._entryBrainLoading=true;
-  dvFetch('/api/entry-plan/advisory',{
+  o._entryBrainPromise = dvFetch('/api/entry-plan/advisory',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
@@ -13600,23 +13638,20 @@ function _todayV2LoadEntryBrain(o, idx){
     })
   }).then(function(data){
     o._entryBrainLoading=false;
-    if(!data){ o._entryBrainError='Entry brain unavailable'; return; }
+    if(!data){ o._entryBrainError='Entry brain unavailable'; o._entryBrainPromise=null; return null; }
     o._entryBrain=data;
-    if(data.execution_authority===true && !o._entryBrainUserOverride){
-      if(data.recommended_mode==='scale_out'){
-        o._multiEnabled=true;
-        o._ladderMode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
-        o._ladder=o._ladder||_todayDefaultLadder(o._ladderMode);
-      }else if(data.recommended_mode==='single'){
-        o._multiEnabled=false;
-      }
-    }
+    _todayV2ApplyEntryBrainDecision(o, data);
+    o._entryBrainPromise=null;
     if((window._todayPlan||[]).indexOf(o)>=0) _todayRenderPlan();
+    return data;
   }).catch(function(e){
     o._entryBrainLoading=false;
     o._entryBrainError=(e&&e.message)||'Entry brain unavailable';
+    o._entryBrainPromise=null;
     if((window._todayPlan||[]).indexOf(o)>=0) _todayRenderPlan();
+    return null;
   });
+  return o._entryBrainPromise;
 }
 function _todayV2EntryBrainCard(o){
   var esc=function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
@@ -13637,6 +13672,13 @@ function _todayV2EntryBrainCard(o){
     + (ev?'<div class="today-v2-copy" style="margin-top:8px">'+ev+'</div>':'')
     + (ruleText?'<div class="today-v2-copy" style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42)">'+esc(ruleText)+'</div>':'')
     + '</div>';
+}
+function _todayV2EffectiveReadiness(o, rd){
+  rd=rd||{text:'Enter now',cls:''};
+  var b=o&&o._entryBrain, mode=String((b&&b.recommended_mode)||'').toLowerCase();
+  if(mode==='wait') return {text:'Brain says wait', cls:'wait'};
+  if(mode==='scale_in' && !(b&&b.execution_authority===true)) return {text:'Scale-in advisory', cls:'wait'};
+  return rd;
 }
 
 function _todayV2Duration(tf){
@@ -14311,7 +14353,7 @@ function _todayRenderPlan(){
   var usable=[], totExp=0, totMargin=0, totRisk=0, totProfit=0, totOrders=0, readyNow=0, waitCount=0, invalidCount=0;
   plan.forEach(function(o,idx){
     if(!o||!o._size||!o._size.tradeable) return;
-    var rd=_todayReadiness(o), lt=_todayLadderTotals(o);
+    var rd=_todayV2EffectiveReadiness(o, _todayReadiness(o)), lt=_todayLadderTotals(o);
     if(rd.cls==='invalid'){ invalidCount++; return; }
     if(rd.cls==='wait') waitCount++; else readyNow++;
     usable.push({o:o,idx:idx,rd:rd});
@@ -14336,6 +14378,16 @@ function _todayRenderPlan(){
   var bottomPlaceLabel=protect?'Protect mode':_todayV2PlaceCtaText(targetNeedsScout, true);
   var bottomOrderNote=protect?'new entries paused':(!mt5CanPlace?'MT5 offline':(targetNeedsScout?'review only':usable.length+' setup'+(usable.length===1?'':'s')+' selected'));
   window._todayLastTargetPath=targetPath;
+  var priorityTotals =
+    '<div class="today-v2-bottom today-v2-priorityTotals" style="position:static;margin:0 0 14px;">'
+      + '<div class="bitem"><div class="td-mini">New basket risk</div><b class="red">'+money2(-displayRisk)+' / '+displayRiskPct.toFixed(2)+'%</b><div class="today-v2-footNote">max '+capPct.toFixed(1)+'%</div></div>'
+      + '<div class="bitem"><div class="td-mini">Total after placing</div><b class="'+totalAfterTone+'">'+totalAfterPct.toFixed(2)+'% / '+capPct.toFixed(1)+'%</b><div class="today-v2-footNote">open + new basket</div></div>'
+      + '<div class="bitem"><div class="td-mini">Remaining buffer</div><b class="'+(remainingPct<=0?'red':remainingPct<0.15?'gold':'green')+'">'+remainingPct.toFixed(2)+'%</b></div>'
+      + '<div class="bitem"><div class="td-mini">Planned profit</div><b class="green">'+(protect?'Active':'+'+money2(displayProfit))+'</b>'+(!protect&&targetNeedsScout&&(targetPath.shortfall||0)>0?'<span class="today-v2-footNote gold" style="display:block;margin-top:2px;">shortfall '+money2(targetPath.shortfall||0)+'</span>':'')+'</div>'
+      + '<div class="bitem"><div class="td-mini">Orders</div><b>'+displayOrders+' MT5 order'+(displayOrders===1?'':'s')+'</b><div class="today-v2-footNote">'+bottomOrderNote+'</div></div>'
+      + '<div class="bitem"><div class="td-mini">Cash in total</div><b class="gold">'+money2(displayMargin)+'</b></div>'
+      + '<div class="bitem"><div class="td-mini">Position value</div><b>'+money(displayExp)+'</b><div class="today-v2-footNote">not cash put in</div></div>'
+    + '</div>';
   function row(item){
     var o=item.o, idx=item.idx, s=o._size, rd=item.rd, dir=o.sig==='SELL'?'sell':'buy', lt=_todayLadderTotals(o), reason=_todayTradeReason(o, rd.text);
     var exec=_todayV2ScaleState(o, _todayLadderLegs(o)), modeLabel=exec.active?'Scale-out':(exec.collapsed?'Single*':'Single');
@@ -14344,7 +14396,7 @@ function _todayRenderPlan(){
     return '<tr class="today-v2-row '+(idx===selected.idx?'on':'')+'" onclick="_todayV2Select('+idx+')">'
       + '<td><div class="today-v2-sym">'+o.sym+' <span class="today-v2-dir '+dir+'">'+o.sig+'</span></div><div class="today-v2-meta">'+o.asset+' · '+o.tf+'</div></td>'
       + '<td><div id="today-lp-'+idx+'" class="today-v2-status '+rd.cls+'"><span class="today-v2-liveDot"></span>'+rd.text+'</div></td>'
-      + '<td>'+dur.hold+'<br><span class="today-v2-meta">'+dur.eta+'</span></td><td><div class="today-v2-money"><b>'+money2(s.marginReq||0)+' cash in</b><span>controls '+money(s.notional||0)+'</span><small>'+esc(s.unitLabel||'')+'</small></div></td><td><span class="red">'+money2(-s.netLoss)+'<br>'+riskPct.toFixed(2)+'% account</span>'+(capPct>0?'<div class="today-v2-riskNote">'+basketShare.toFixed(0)+'% of '+capPct.toFixed(1)+'% cap</div>':'')+'</td><td>1:'+(s.rr||0).toFixed(1)+'</td><td><span class="green">+'+money2(lt.profit||s.netTP1)+'</span></td>'
+      + '<td>'+dur.hold+'<br><span class="today-v2-meta">'+dur.eta+'</span></td><td><div class="today-v2-money"><b>'+esc(s.unitLabel||'--')+'</b><span>cash in '+money2(s.marginReq||0)+'</span><span>controls '+money(s.notional||0)+'</span><small>MT5 volume / position value</small></div></td><td><span class="red">'+money2(-s.netLoss)+'<br>'+riskPct.toFixed(2)+'% account</span>'+(capPct>0?'<div class="today-v2-riskNote">'+basketShare.toFixed(0)+'% of '+capPct.toFixed(1)+'% cap</div>':'')+'</td><td>1:'+(s.rr||0).toFixed(1)+'</td><td><span class="green">+'+money2(lt.profit||s.netTP1)+'</span></td>'
       + '<td><span class="today-v2-tag '+(exec.active?'scale':'single')+'">'+modeLabel+'</span></td><td>'+reason+'</td></tr>';
   }
   function detail(item){
@@ -14358,7 +14410,7 @@ function _todayRenderPlan(){
     var orderText=!scale
       ? 'DotVerse will send 1 MT5 order for this setup.'
       : (exec.collapsed
-        ? 'Scale-out is requested, but this trade size is too small to split safely. DotVerse will send 1 MT5 order unless you raise basket risk or account size.'
+      ? 'Scale-out is requested, but this trade size only supports one broker-safe order. DotVerse will send 1 MT5 order unless you raise basket risk/account size or choose a larger setup.'
         : 'DotVerse will send '+exec.orders+' MT5 order'+(exec.orders===1?'':'s')+' for this setup.'+(compressedScale?' The ladder was compressed so every leg clears broker minimum lot size.':''));
     function legLabel(l){
       if(l.idx===1) return {name:'Anchor', sub:'First profit take. This is the main piece DotVerse exits early.'};
@@ -14382,15 +14434,16 @@ function _todayRenderPlan(){
         + '<div class="today-v2-legTop"><div><div class="today-v2-legName">'+lbl.name+'</div><div class="today-v2-legSub">'+lbl.sub+'</div></div><span class="today-v2-legBadge">Order '+(l.idx||1)+'</span></div>'
         + '<div class="today-v2-legGrid">'
           + '<div class="today-v2-legCell"><b>'+tgt.name+'</b><span>'+tgt.sub+'</span></div>'
-          + '<div class="today-v2-legCell"><b class="gold">'+money2(l.margin||0)+'</b><span>Cash in: margin you put up for this MT5 order.</span></div>'
-          + '<div class="today-v2-legCell"><b>'+money(l.notional||0)+'</b><span>Controls: position value. Size: '+esc(legSizeText(l))+'.</span></div>'
+          + '<div class="today-v2-legCell"><b>'+esc(legSizeText(l))+'</b><span>MT5 volume for this order.</span></div>'
+          + '<div class="today-v2-legCell"><b class="gold">'+money2(l.margin||0)+'</b><span>Cash in: margin you put up.</span></div>'
+          + '<div class="today-v2-legCell"><b>'+money(l.notional||0)+'</b><span>Position value controlled.</span></div>'
           + '<div class="today-v2-legCell"><b class="red">'+money2(-(l.risk||0))+'</b><span>Risk if stop-loss hits: '+_todayPctOfAcct(l.risk,acct).toFixed(2)+'% of account.</span></div>'
           + '<div class="today-v2-legCell"><b class="green">+'+money2(l.profit||0)+'</b><span>Can make if this order reaches its target.</span></div>'
           + '<div class="today-v2-legCell"><b>'+Math.round((l.share||0)*100)+'%</b><span>Share of this setup assigned to this order.</span></div>'
         + '</div></div>';
     }
     var ladder=actualScale
-      ? '<div class="panelTitle" style="margin:14px 0 8px">Scale-out plan</div><div class="today-v2-copy" style="margin-bottom:10px">Each row below is one MT5 order. Scale-out means DotVerse sends smaller orders instead of one large order. Cash in = margin you put up; controls = position value; lots = broker size units.'+(compressedScale?' DotVerse compressed the preset so every order clears broker minimum lot size.':'')+'</div><div class="today-v2-ladder">'+legs.map(legHtml).join('')+'</div>'
+      ? '<div class="panelTitle" style="margin:14px 0 8px">Scale-out plan</div><div class="today-v2-copy" style="margin-bottom:10px">Each row below is one MT5 order. Scale-out means DotVerse sends smaller orders from the same entry instead of one large order. MT5 volume is lots, units, contracts, or shares; cash in is margin; controls is position value.'+(compressedScale?' DotVerse compressed the preset so every order clears broker minimum lot size.':'')+'</div><div class="today-v2-ladder">'+legs.map(legHtml).join('')+'</div>'
       : '<div class="today-v2-single"><div class="td-mini">'+(exec.collapsed?'Scale-out unavailable':'Single order preview')+'</div><b>'+o.sym+' '+o.sig+' · 1 MT5 order · '+money2(-s.netLoss)+' risk · +'+money2(s.netTP1)+' planned profit</b><div class="today-v2-copy" style="margin-top:7px">'+(exec.collapsed?'The selected risk creates parts below broker minimum lot size, so DotVerse keeps the trade as one order instead of pretending it can split it.':'Simple execution with live monitor, spread guard, news guard, and breakeven still available.')+'</div></div>';
     var preset=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
     var presetDisabled=!scale || exec.collapsed;
@@ -14407,7 +14460,7 @@ function _todayRenderPlan(){
     return '<div class="today-v2-detail">'
       + '<div class="today-v2-selectedTop"><div><div class="today-v2-bigSym">'+o.sym+'</div><div class="today-v2-meta">'+o.asset+' · '+o.tf+' · '+o.sig+'</div></div><span class="td-pill '+(rd.cls==='wait'?'gold':rd.cls==='open'?'blue':'green')+'">'+rd.text+'</span></div>'
       + '<div class="today-v2-liveBox"><div class="td-mini">'+(rd.cls==='open'?'Live trade monitor':'Per-trade live monitor')+'</div><div class="today-v2-priceLine"><span class="today-v2-tick"></span><span class="today-v2-marker"></span></div><div class="today-v2-copy" id="today-livebox-'+idx+'">'+(rd.cls==='open'?'Open trade is monitored here: PnL, current R, stop state, target distance, and automations fired.':'Live price is checked against entry, stop, and target. DotVerse tells you enter now, wait, missed, or invalid. Targets: '+tps.map(function(t,i){return 'TP'+(i+1)+' '+pxFmt(t);}).join(' · '))+'</div></div>'
-      + '<div class="today-v2-three"><div class="today-v2-mini"><div class="td-mini">Cash in</div><b class="gold">'+money2(s.marginReq||0)+'</b><div class="today-v2-copy" style="font-size:10px;margin-top:3px">controls '+money(s.notional||0)+' · '+esc(s.unitLabel||'')+'</div></div><div class="today-v2-mini"><div class="td-mini">Risk</div><b class="red">'+money2(-s.netLoss)+' / '+riskPct.toFixed(2)+'% account</b><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+(riskFitNote||'')+(capPct>0?' · '+basketShare.toFixed(0)+'% of '+capPct.toFixed(1)+'% basket cap':'')+'</div></div><div class="today-v2-mini"><div class="td-mini">Can make</div><b class="green">+'+money2(lt.profit||s.netTP1)+'</b></div><div class="today-v2-mini"><div class="td-mini">Duration</div><b class="blue">'+dur.hold+'</b></div></div>'
+      + '<div class="today-v2-three"><div class="today-v2-mini"><div class="td-mini">MT5 volume</div><b>'+esc(s.unitLabel||'--')+'</b><div class="today-v2-copy" style="font-size:10px;margin-top:3px">cash in '+money2(s.marginReq||0)+' · controls '+money(s.notional||0)+'</div></div><div class="today-v2-mini"><div class="td-mini">Risk</div><b class="red">'+money2(-s.netLoss)+' / '+riskPct.toFixed(2)+'% account</b><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+(riskFitNote||'')+(capPct>0?' · '+basketShare.toFixed(0)+'% of '+capPct.toFixed(1)+'% basket cap':'')+'</div></div><div class="today-v2-mini"><div class="td-mini">Can make</div><b class="green">+'+money2(lt.profit||s.netTP1)+'</b></div><div class="today-v2-mini"><div class="td-mini">Duration</div><b class="blue">'+dur.hold+'</b></div></div>'
       + '<div class="today-v2-path"><div class="td-mini">'+(protect?'Protection path':(targetPath.paceCopy||'today pace'))+'</div><b>'+(protect?_horizonLbl+' target already protected':targetPath.title)+'</b><div class="today-v2-copy" style="margin-top:7px">'+(protect?'DotVerse is not adding new Today risk. Keep monitoring TP, SL, break-even, trailing, invalidation, Telegram, and in-app alerts while open trades resolve.':targetPath.text)+'</div></div>'
       + '<div class="panelTitle" style="margin:14px 0 8px">Why DotVerse picked it</div><div class="today-v2-copy">'+_todayTradeReason(o, rd.text)+' Pattern check: '+((o.winRateN||0)>=30?'recent price-pattern history found '+o.winRateN+' comparable bars/trades for this ticker and timeframe':'not enough personal closed trades yet, so DotVerse is showing indicator agreement and recent-pattern evidence, not a calibrated win probability')+'.</div>'
       + _todayV2EntryBrainCard(o)
@@ -14427,7 +14480,8 @@ function _todayRenderPlan(){
       + '<div class="today-v2-metric"><div class="td-mini">Open trade monitor</div><b class="blue">'+(protect?'Active now':'Live after place')+'</b><p>'+(protect?'Open trades stay under protection logic; no review/place action is shown for new orders.':'Rows become PnL, current R, stop state, and automation history.')+'</p></div>'
     + '</div>'
     + _todayV2ScoutPanel(targetPath,c,money2)
-    + (protect?'<div class="td-card"><div class="td-card-head"><h2>Protection watchlist</h2><span class="td-pill green">no new orders</span></div><div class="td-pad" style="padding:16px;"><div class="today-v2-autos"><div class="today-v2-auto"><b>Open trades monitored</b>DotVerse keeps watching current R, stop state, and target distance.</div><div class="today-v2-auto"><b>Stops protected</b>Break-even, trailing, and invalidation checks stay active where eligible.</div><div class="today-v2-auto"><b>TP/SL alerts live</b>Target, stop-loss, and protection-state changes can still alert.</div><div class="today-v2-auto optional"><b>Telegram + in-app</b>Protect-mode notifications stay available without adding exposure.</div></div></div></div>':'<div class="today-v2-main"><div class="td-card"><div class="td-card-head"><h2>Review trades</h2><span class="td-pill green">cash in · controls · risk</span></div><div class="today-v2-tableWrap"><table class="today-v2-table"><thead><tr><th>Trade</th><th>Readiness</th><th>Duration</th><th>Cash in / controls</th><th>Risk</th><th>R:R</th><th>Profit</th><th>Mode</th><th>Why selected</th></tr></thead><tbody>'+usable.map(row).join('')+'</tbody></table></div></div><div class="td-card">'+detail(selected)+'</div></div>'+_todayV2TimeframeAuditPanel(plan, usableIdx, esc))
+    + priorityTotals
+    + (protect?'<div class="td-card"><div class="td-card-head"><h2>Protection watchlist</h2><span class="td-pill green">no new orders</span></div><div class="td-pad" style="padding:16px;"><div class="today-v2-autos"><div class="today-v2-auto"><b>Open trades monitored</b>DotVerse keeps watching current R, stop state, and target distance.</div><div class="today-v2-auto"><b>Stops protected</b>Break-even, trailing, and invalidation checks stay active where eligible.</div><div class="today-v2-auto"><b>TP/SL alerts live</b>Target, stop-loss, and protection-state changes can still alert.</div><div class="today-v2-auto optional"><b>Telegram + in-app</b>Protect-mode notifications stay available without adding exposure.</div></div></div></div>':_todayV2TimeframeAuditPanel(plan, usableIdx, esc)+'<div class="today-v2-main"><div class="td-card"><div class="td-card-head"><h2>Review trades</h2><span class="td-pill green">volume · cash · controls · risk</span></div><div class="today-v2-tableWrap"><table class="today-v2-table"><thead><tr><th>Trade</th><th>Readiness</th><th>Duration</th><th>MT5 volume / cash / controls</th><th>Risk</th><th>R:R</th><th>Profit</th><th>Mode</th><th>Why selected</th></tr></thead><tbody>'+usable.map(row).join('')+'</tbody></table></div></div><div class="td-card">'+detail(selected)+'</div></div>')
     + '<div class="today-v2-bottom"><div class="bitem"><div class="td-mini">Cash put in total</div><b class="gold">'+money2(displayMargin)+'</b><div class="today-v2-footNote">sum of margin/cash per trade</div></div><div class="bitem"><div class="td-mini">Position value</div><b>'+money(displayExp)+'</b><div class="today-v2-footNote">not cash put in</div></div><div class="bitem"><div class="td-mini">New basket risk</div><b class="red">'+money2(-displayRisk)+' / '+displayRiskPct.toFixed(2)+'%</b><div class="today-v2-footNote">'+(protect?'paused by protect mode':(targetNeedsScout?'target not covered':'selected setups only'))+'</div></div><div class="bitem"><div class="td-mini">Already open risk</div><b class="gold">'+openRiskPct.toFixed(2)+'%</b><div class="today-v2-footNote">before this basket</div></div><div class="bitem"><div class="td-mini">Total after placing</div><b class="'+totalAfterTone+'">'+totalAfterPct.toFixed(2)+'% / '+capPct.toFixed(1)+'%</b><div class="today-v2-footNote">'+(protect?'open risk only':(targetNeedsScout?'optional review':'open + new basket'))+'</div></div><div class="bitem"><div class="td-mini">Remaining buffer</div><b class="'+(remainingPct<=0?'red':remainingPct<0.15?'gold':'green')+'">'+remainingPct.toFixed(2)+'%</b></div><div class="bitem"><div class="td-mini">'+(protect?'Protection state':'Planned profit')+'</div><b class="green">'+(protect?'Active':'+'+money2(displayProfit))+'</b>'+(!protect&&targetNeedsScout&&(targetPath.shortfall||0)>0?'<span class="today-v2-footNote gold" style="display:block;margin-top:2px;">shortfall '+money2(targetPath.shortfall||0)+'</span>':'')+'</div><div class="bitem"><div class="td-mini">Orders</div><b>'+displayOrders+' new MT5 order'+(displayOrders===1?'':'s')+'</b><div class="today-v2-footNote">'+bottomOrderNote+'</div></div><button class="today-v2-review" '+(bottomDisabled?'disabled ':'')+'onclick="'+(protect?'_todayV2ProtectSummary()':'_todayPlaceAll()')+'">'+bottomPlaceLabel+'</button></div>';
   _todayV2ScoutSchedule();
   _todayV2MaybeScoutAlert(targetPath, usable, {risk:totRisk, profit:totProfit});

@@ -159,6 +159,32 @@ def test_today_v2_explains_hidden_multi_timeframe_candidates():
     assert "_todayReadiness(o)" in audit
     assert "o._size.skipReason" in audit
     assert "_todayV2TimeframeAuditPanel(plan, usableIdx, esc)" in render
+    assert render.index("today-v2-priorityTotals") < render.index("_todayV2TimeframeAuditPanel(plan, usableIdx, esc)")
+    assert render.index("_todayV2TimeframeAuditPanel(plan, usableIdx, esc)") < render.index("today-v2-main")
+
+
+def test_today_v2_surfaces_basket_totals_before_review_table():
+    render = _extract_function("_todayRenderPlan")
+    priority_idx = render.index("today-v2-priorityTotals")
+    table_idx = render.index("Review trades")
+    assert priority_idx < table_idx
+    assert "New basket risk" in render[priority_idx:table_idx]
+    assert "Total after placing" in render[priority_idx:table_idx]
+    assert "Remaining buffer" in render[priority_idx:table_idx]
+    assert "Cash in total" in render[priority_idx:table_idx]
+    assert "Position value" in render[priority_idx:table_idx]
+
+
+def test_today_v2_shows_lot_cash_and_position_value_per_trade_and_leg():
+    render = _extract_function("_todayRenderPlan")
+    assert "MT5 volume / cash / controls" in render
+    assert "esc(s.unitLabel||'--')" in render
+    assert "cash in '+money2(s.marginReq||0)" in render
+    assert "controls '+money(s.notional||0)" in render
+    assert "MT5 volume for this order" in render
+    assert "Cash in: margin you put up" in render
+    assert "Position value controlled" in render
+    assert "Scale-out means DotVerse sends smaller orders from the same entry" in render
 
 
 def test_shared_signal_mapper_carries_automatic_backtest_evidence():
@@ -195,15 +221,41 @@ def test_market_opportunity_scan_auto_backtests_before_cache():
 
 def test_today_entry_brain_recommends_without_unproven_live_scale_in_authority():
     load = _extract_function("_todayV2LoadEntryBrain")
+    apply = _extract_function("_todayV2ApplyEntryBrainDecision")
+    build = _extract_function("_todayBuildPlan")
+    readiness = _extract_function("_todayV2EffectiveReadiness")
+    scale_state = _extract_function("_todayV2ScaleState")
+    place_one = _extract_function("_todayPlaceTrade")
+    place_all = _extract_function("_todayPlaceAll")
+    confirm = _extract_function("_todayConfirmAndPlace")
+    can_execute = _extract_function("_todayCanExecuteNow")
     card = _extract_function("_todayV2EntryBrainCard")
     set_scale = _extract_function("_todayV2SetScale")
     set_mode = _extract_function("_todayV2SetLadderMode")
     assert "dvFetch('/api/entry-plan/advisory'" in load
     assert "_btVerified:o._btVerified===true" in load
-    assert "data.execution_authority===true" in load
-    assert "data.recommended_mode==='scale_out'" in load
-    assert "data.recommended_mode==='single'" in load
-    assert "data.recommended_mode==='scale_in'" not in load[load.index("if(data.execution_authority===true"):]
+    assert "_todayV2ApplyEntryBrainDecision(o, data)" in load
+    assert "return o._entryBrainPromise" in load
+    assert "data.execution_authority===true" in apply
+    assert "data.recommended_mode==='scale_out'" in apply
+    assert "data.recommended_mode==='single'" in apply
+    authorized_block = apply[
+        apply.index("if(data.execution_authority===true") : apply.index("}else if")
+    ]
+    assert "data.recommended_mode==='scale_in'" not in authorized_block
+    assert "data.recommended_mode==='scale_in' || data.recommended_mode==='wait'" in apply
+    assert "o._multiEnabled=false" in apply
+    assert "o._multiEnabled=false" in build
+    assert "await _todayV2LoadEntryBrain(o)" in build
+    assert "Brain says wait" in readiness
+    assert "Scale-in advisory" in readiness
+    assert "legs.length>1" in scale_state
+    assert "orders: active?legs.length:1" in scale_state
+    assert "_todayExecutionReadiness(o)" in can_execute
+    assert "rd.cls==='wait'" in can_execute
+    assert "_todayCanExecuteNow(o)" in place_one
+    assert "_todayCanExecuteNow(o)" in place_all
+    assert "_todayCanExecuteNow(o)" in confirm
     assert "o._entryBrainUserOverride=true" in set_scale
     assert "o._entryBrainUserOverride=true" in set_mode
     assert "Advisory only - live execution authority is locked" in card
