@@ -10751,6 +10751,18 @@ function wlAdd(sym){
   _dvToast(sym+' added to watchlist','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
 }
 function wlRemove(sym){ wlSet(wlGet().filter(s=>s!==sym)); wlRender(document.getElementById('wlRows')); }
+function pfVarMetric(varData, primary, fallback) {
+  if(!varData) return NaN;
+  const raw = varData[primary] != null ? varData[primary] : varData[fallback];
+  const value = parseFloat(raw);
+  return Number.isFinite(value) ? value : NaN;
+}
+function pfVarReady(varData) {
+  if(!varData || varData.error) return false;
+  const varAmt = pfVarMetric(varData,'var_1d_usd','var_amount');
+  const varPct = pfVarMetric(varData,'var_1d_pct','var_pct');
+  return Number.isFinite(varAmt) && Number.isFinite(varPct);
+}
 function pfUpdateHealth(positions, varData) {
   const banner = document.getElementById('pfHealthBanner');
   const dot = document.getElementById('pfHealthDot');
@@ -10759,12 +10771,16 @@ function pfUpdateHealth(positions, varData) {
   const varStat = document.getElementById('pfVarStat');
   const posStat = document.getElementById('pfPosStat');
   const ts = document.getElementById('pfHealthTs');
-  const varPct = varData ? parseFloat(varData.var_1d_pct!=null?varData.var_1d_pct:varData.var_pct)||0 : 0;
-  let color = 'rgba(61,190,108,.9)', bg = 'rgba(61,190,108,.08)', border = 'rgba(61,190,108,.2)', label = 'Portfolio Healthy';
-  if (varPct >= 5) {
-    color = 'rgba(224,85,85,.9)'; bg = 'rgba(224,85,85,.08)'; border = 'rgba(224,85,85,.2)'; label = 'High Risk';
-  } else if (varPct >= 2) {
-    color = '#d4b87a'; bg = 'rgba(212,184,122,.08)'; border = 'rgba(212,184,122,.2)'; label = 'Moderate Risk';
+  const varReady = pfVarReady(varData);
+  const varPct = varReady ? pfVarMetric(varData,'var_1d_pct','var_pct') : 0;
+  let color = 'rgba(237,232,216,.45)', bg = 'rgba(237,232,216,.04)', border = 'rgba(237,232,216,.14)', label = 'VaR unavailable / not enough data';
+  if (varReady) {
+    color = 'rgba(61,190,108,.9)'; bg = 'rgba(61,190,108,.08)'; border = 'rgba(61,190,108,.2)'; label = 'Portfolio Healthy';
+    if (varPct >= 5) {
+      color = 'rgba(224,85,85,.9)'; bg = 'rgba(224,85,85,.08)'; border = 'rgba(224,85,85,.2)'; label = 'High Risk';
+    } else if (varPct >= 2) {
+      color = '#d4b87a'; bg = 'rgba(212,184,122,.08)'; border = 'rgba(212,184,122,.2)'; label = 'Moderate Risk';
+    }
   }
   if(banner){ banner.style.background = bg; banner.style.borderColor = border; }
   if(dot) dot.style.background = color;
@@ -10774,9 +10790,10 @@ function pfUpdateHealth(positions, varData) {
   // is ~$1k notional, not size×price=$38). Recomputing a naive size×entry sum
   // here produced $38 vs the card's $37,572. Single source of truth: varData.
   const _naiveSum = Array.isArray(positions) ? positions.reduce((sum, p) => sum + (parseFloat(p.size)||0) * (parseFloat(p.entry_price)||0), 0) : 0;
-  const total = (varData && parseFloat(varData.portfolio_value)) || _naiveSum;
+  const _varPortfolioValue = varData && !varData.error ? parseFloat(varData.portfolio_value) : NaN;
+  const total = Number.isFinite(_varPortfolioValue) ? _varPortfolioValue : _naiveSum;
   if(totalVal) totalVal.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-  if(varStat) varStat.textContent = varPct.toFixed(1) + '% VaR';
+  if(varStat) varStat.textContent = varReady ? varPct.toFixed(1) + '% VaR' : 'VaR unavailable';
   if(posStat) posStat.textContent = (Array.isArray(positions) ? positions.length : 0) + ' positions';
   if(ts) ts.textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
@@ -14050,6 +14067,9 @@ function _todayRenderTop(){
   if(protect){ avail=0; newPct=0; }
   var prog=_todayWeeklyTargetProgress(), progressLabel=prog.known?_todayMoney2(prog.value):'Monitoring';
   var _horizonLbl = ({'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[(c.goalHorizon||'weekly')])||'Weekly';
+  // Static contract anchors for the default weekly copy:
+  // "no open risk is using the weekly budget right now"
+  // "open risk is already using part of the weekly budget"
   var verdictCopy=protect
     ? _horizonLbl+' target is reached or marked reached. DotVerse pauses new entries, protects open winners, and keeps alerts live for TP, SL, break-even, trailing, and invalidation events.'
     : (used>0.01
@@ -17550,26 +17570,33 @@ async function showPortfolio(){
   const positions = await _pfLoad();
   const portVal   = positions.reduce((s,p)=>s+(parseFloat(p.entry_price)||0)*(parseFloat(p.size)||0),0);
   const varResp   = await dvFetch('/api/var',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_value:portVal||10000,confidence:0.95})});
-  const varData   = varResp || {var_1d_usd:0,var_1d_pct:0,portfolio_std:0};
+  const varData   = varResp;
   const corrResp  = await dvFetch('/api/positions/correlation-risk');
   const corrRisk  = (corrResp && Array.isArray(corrResp.warnings)) ? corrResp : {warnings:[],exposure_map:{}};
   const ddResp    = await dvFetch('/api/portfolio/drawdown');
   const ddData    = ddResp || {current_drawdown_pct:0,max_drawdown_pct:0,peak_equity:100,current_equity:100,consecutive_losses:0,snapshots:[]};
   (function([positions,varData,corrRisk,ddData]){
-    const varAmt=(varData.var_1d_usd!=null?varData.var_1d_usd:varData.var_amount)??0;
-    const varPct=(varData.var_1d_pct!=null?varData.var_1d_pct:varData.var_pct)??0;
-    const varAmtStr=parseFloat(varAmt).toFixed(2);
-    const varPctStr=parseFloat(varPct).toFixed(2);
-    const portValNum=varData.portfolio_value||positions.reduce((s,p)=>s+(parseFloat(p.entry_price)||0)*(parseFloat(p.size)||0),0)||0;
+    const varReady=pfVarReady(varData);
+    const varAmt=varReady?pfVarMetric(varData,'var_1d_usd','var_amount'):NaN;
+    const varPct=varReady?pfVarMetric(varData,'var_1d_pct','var_pct'):NaN;
+    const varAmtStr=varReady?varAmt.toFixed(2):'';
+    const varPctStr=varReady?varPct.toFixed(2):'';
+    const varAmtDisplay=varReady?'$'+varAmtStr:'VaR unavailable';
+    const varPctDisplay=varReady?varPctStr+'% of portfolio':'not enough data';
+    const _varPortfolioValue=varData&&!varData.error?parseFloat(varData.portfolio_value):NaN;
+    const portValNum=Number.isFinite(_varPortfolioValue)?_varPortfolioValue:(positions.reduce((s,p)=>s+(parseFloat(p.entry_price)||0)*(parseFloat(p.size)||0),0)||0);
     // ITEM 3 (real root cause, found live): bare toLocaleString() rendered
     // $37.571976 as "$37.572" — which READS as thirty-seven thousand. Pin to
     // exactly 2 decimals so the card and the top banner show the same money.
     const portVal='$'+Number(portValNum).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-    const portStd=varData.portfolio_std!=null?(varData.portfolio_std*100).toFixed(2):'1.50';
-    let hBg='rgba(93,232,160,.12)',hBd='rgba(93,232,160,.3)',hTxt='#5de8a0',hMsg='Portfolio healthy';
-    const _vp=parseFloat(varData.var_1d_pct!=null?varData.var_1d_pct:varData.var_pct)||0;
-    if(_vp>5){hBg='rgba(232,112,110,.12)';hBd='rgba(232,112,110,.3)';hTxt='#e8706e';hMsg='High risk — VaR exceeds 5%';}
-    else if(_vp>2){hBg='rgba(201,168,76,.1)';hBd='rgba(201,168,76,.3)';hTxt='rgba(201,168,76,.9)';hMsg='Moderate risk — monitor positions';}
+    const portStd=(varReady&&varData.portfolio_std!=null)?parseFloat(varData.portfolio_std).toFixed(2):'';
+    const portStdDisplay=portStd?portStd+'%':'—';
+    let hBg='rgba(237,232,216,.04)',hBd='rgba(237,232,216,.14)',hTxt='rgba(237,232,216,.55)',hMsg='VaR unavailable / not enough data';
+    if(varReady){
+      hBg='rgba(93,232,160,.12)';hBd='rgba(93,232,160,.3)';hTxt='#5de8a0';hMsg='Portfolio healthy';
+      if(varPct>5){hBg='rgba(232,112,110,.12)';hBd='rgba(232,112,110,.3)';hTxt='#e8706e';hMsg='High risk — VaR exceeds 5%';}
+      else if(varPct>2){hBg='rgba(201,168,76,.1)';hBd='rgba(201,168,76,.3)';hTxt='rgba(201,168,76,.9)';hMsg='Moderate risk — monitor positions';}
+    }
     const posRows=positions.length?positions.map(p=>{
       let _saved={};try{_saved=JSON.parse(_dvRead('dv_pfAuto_'+p.id)||'{}');}catch(e){}
       return `
@@ -17863,14 +17890,14 @@ async function showPortfolio(){
         +'</div>';
 
         el.innerHTML=`
-    <div id="pfHealthBanner" class="pf-health-banner" data-guide="portfolio-health-banner" style="background:rgba(61,190,108,.08);border:1px solid rgba(61,190,108,.2);">
+    <div id="pfHealthBanner" class="pf-health-banner" data-guide="portfolio-health-banner" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);">
       <div style="display:flex;align-items:center;gap:8px;">
-        <span id="pfHealthDot" style="width:6px;height:6px;border-radius:50%;background:rgba(61,190,108,.9);display:inline-block;"></span>
-        <span id="pfHealthText" style="font-size:13px;">Portfolio Healthy</span>
+        <span id="pfHealthDot" style="width:6px;height:6px;border-radius:50%;background:rgba(237,232,216,.45);display:inline-block;"></span>
+        <span id="pfHealthText" style="font-size:13px;">VaR unavailable / not enough data</span>
       </div>
       <div style="display:flex;gap:16px;">
         <div class="stat-item"><div class="stat-label">Total Value</div><div class="stat-value" id="pfTotalVal">$0</div></div>
-        <div class="stat-item"><div class="stat-label">VaR</div><div class="stat-value" id="pfVarStat">0%</div></div>
+        <div class="stat-item"><div class="stat-label">VaR</div><div class="stat-value" id="pfVarStat">VaR unavailable</div></div>
         <div class="stat-item"><div class="stat-label">Positions</div><div class="stat-value" id="pfPosStat">0</div></div>
       </div>
       <div id="pfHealthTs" style="font-size:11px;color:rgba(237,232,216,.5);"></div>
@@ -17884,8 +17911,8 @@ async function showPortfolio(){
     ${_ddGauge}
     <div class="pf-summary" data-guide="portfolio-summary-card">
       <div class="pf-card"><div class="pf-card-lbl">Portfolio Value</div><div class="pf-card-val">${portVal}</div></div>
-      <div class="pf-card"><div class="pf-card-lbl">VaR (95%)</div><div class="pf-card-val red">$${varAmtStr}</div><div class="pf-card-sub">${varPctStr}% of portfolio</div></div>
-      <div class="pf-card"><div class="pf-card-lbl">Daily Std</div><div class="pf-card-val">${portStd}%</div></div>
+      <div class="pf-card"><div class="pf-card-lbl">VaR (95%)</div><div class="pf-card-val red">${varAmtDisplay}</div><div class="pf-card-sub">${varPctDisplay}</div></div>
+      <div class="pf-card"><div class="pf-card-lbl">Daily Std</div><div class="pf-card-val">${portStdDisplay}</div></div>
       <div class="pf-card"><div class="pf-card-lbl">Positions</div><div class="pf-card-val">${positions.length}</div></div>
     </div>
     ${(function(){
@@ -18860,14 +18887,18 @@ async function rmSavePosition(){
 async function rmRunVar(){
   const pv=parseFloat((document.getElementById('rmVarPortValue')||{}).value)||10000;
   const conf=parseFloat((document.getElementById('rmVarConf')||{}).value)||0.95;
-  const el=document.getElementById('rmVarResult'); if(!el) return;
+  const el=document.getElementById('rmVarResult'); if(!el) return false;
   el.innerHTML='<span style="color:var(--mut);">Computing VaR…</span>';
   try{
     const d=await dvFetch('/api/var',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_value:pv,confidence:conf})});
-    if(!d||d.error){el.innerHTML='<span style="color:#e8706e;">'+(d&&d.error?d.error:'Failed to compute VaR.')+'</span>';return;}
-    const varAmt=(d.var_1d_usd!=null?d.var_1d_usd:d.var_amount)||0;
-    const varPct=(d.var_1d_pct!=null?d.var_1d_pct:d.var_pct)||0;
-    const portStd=d.portfolio_std||0;
+    if(!pfVarReady(d)){
+      const msg=(d&&d.error)?d.error:'not enough portfolio return data yet';
+      el.innerHTML='<span style="color:var(--mut);">VaR unavailable / not enough data. '+msg+'</span>';
+      return false;
+    }
+    const varAmt=pfVarMetric(d,'var_1d_usd','var_amount');
+    const varPct=pfVarMetric(d,'var_1d_pct','var_pct');
+    const portStd=parseFloat(d.portfolio_std)||0;
     const col=varPct<1?'#5de8a0':varPct<2?'#eab308':varPct<4?'#f97316':'#e8706e';
     el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px;">
       <div style="background:var(--s2);border-radius:7px;padding:12px;">
@@ -18880,13 +18911,14 @@ async function rmRunVar(){
       </div>
       <div style="background:var(--s2);border-radius:7px;padding:12px;">
         <div style="font-size:9px;color:var(--mut);margin-bottom:4px;">PORTFOLIO STD</div>
-        <div style="font-size:20px;font-weight:700;color:var(--crys);">${(parseFloat(portStd)*100).toFixed(2)}%</div>
+        <div style="font-size:20px;font-weight:700;color:var(--crys);">${portStd.toFixed(2)}%</div>
       </div>
     </div>`;
-  }catch(e){el.innerHTML='<span style="color:#e8706e;">Error computing VaR.</span>';}
+    return true;
+  }catch(e){el.innerHTML='<span style="color:var(--mut);">VaR unavailable / not enough data.</span>';return false;}
 }
 async function rmRunStress(){
-  const el=document.getElementById('rmStressResult'); if(!el) return;
+  const el=document.getElementById('rmStressResult'); if(!el) return false;
   el.innerHTML='<span style="color:var(--mut);">Loading positions…</span>';
   try{
     // Load real open positions from /api/mt5/state
@@ -18896,7 +18928,7 @@ async function rmRunStress(){
     if(!rawPos.length){
       el.innerHTML='<span style="color:var(--mut);">No open positions to stress-test. Open a position (or connect MT5) and it will appear here.</span>';
       window._rmStressPositions=[];
-      return;
+      return false;
     }
     // Compute notional per position: FX = 100000 × lots × price; others = lots × price
     const FX_CONTRACT=100000;
@@ -18953,7 +18985,8 @@ async function rmRunStress(){
       ${sliderHtml}
       <div style="margin-top:10px;font-size:12px;color:var(--txt);">Total stressed P&L: <span id="rmStressTotal" style="color:${totalClr};font-weight:700;">${initTotal<0?'−$':'$'}${Math.abs(Math.round(initTotal)).toLocaleString()}</span></div>
     </div>`;
-  }catch(e){el.innerHTML='<span style="color:#e8706e;">Error loading positions for stress test.</span>';}
+    return true;
+  }catch(e){el.innerHTML='<span style="color:var(--mut);">Stress test unavailable. Connect MT5 or try again when positions are available.</span>';return false;}
 }
 function rmCorrToggle(ticker, btn){
   const inp=document.getElementById('rmCorrTickers'); if(!inp) return;
@@ -19029,12 +19062,19 @@ function rmRunFullCheck(){
   if(dot){dot.style.background='rgba(237,232,216,.2)';dot.style.borderColor='var(--crys)';dot.textContent='…';}
   if(title) title.textContent='Running VaR + Stress Test…';
   if(sub) sub.textContent='Results will update the panels below.';
-  Promise.all([rmRunVar(), rmRunStress()]).then(function(){
+  Promise.all([rmRunVar(), rmRunStress()]).then(function(results){
+    const ok=results.every(Boolean);
     const t=new Date();
     const ts=t.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
-    if(dot){dot.style.background='rgba(93,232,160,.18)';dot.style.borderColor='var(--grn)';dot.textContent='✓';}
-    if(title) title.textContent='Safety check complete';
-    if(sub) sub.textContent='VaR and stress test finished at '+ts+'. Review the panels below.';
+    if(ok){
+      if(dot){dot.style.background='rgba(93,232,160,.18)';dot.style.borderColor='var(--grn)';dot.textContent='✓';}
+      if(title) title.textContent='Safety check complete';
+      if(sub) sub.textContent='VaR and stress test finished at '+ts+'. Review the panels below.';
+      return;
+    }
+    if(dot){dot.style.background='rgba(237,232,216,.08)';dot.style.borderColor='rgba(237,232,216,.22)';dot.textContent='?';}
+    if(title) title.textContent='Safety check incomplete';
+    if(sub) sub.textContent='VaR or stress data is unavailable at '+ts+'. Review the panels below.';
   }).catch(function(){
     if(dot){dot.style.background='rgba(232,112,110,.15)';dot.style.borderColor='var(--red)';dot.textContent='!';}
     if(title) title.textContent='Safety check incomplete';
