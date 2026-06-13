@@ -14044,7 +14044,8 @@ async function _todayAutoBacktestCandidates(candidates){
         _btPf:bt?bt.profit_factor:null,
         _btTrades:bt?(bt.sample_size||bt.total_trades):null,
         _btExpectancy:bt?bt.expectancy:null,
-        _btReason:passes?'automatic backtest verified':'automatic backtest did not clear the gate'
+        _btValidityTier:bt?bt.validity_tier:null,
+        _btReason:passes?'automatic backtest verified':(bt&&bt.error?bt.error:'automatic backtest did not clear the gate')
       };
       Object.assign(o,data);
       window._todayBtCache[key]={ts:now,data:data};
@@ -14273,6 +14274,7 @@ function _todayRenderPlan(){
   var area=document.getElementById('todayPlanArea'); if(!area) return;
   _todayRenderTop();
   var plan=window._todayPlan||[], c=window._todayCfg||{}, acct=c.acct||_todaySyncAccountFromDom();
+  var _horizonLbl = ({daily:'Daily',weekly:'Weekly',monthly:'Monthly'}[(c.goalHorizon||'weekly')])||'Weekly';
   if(!plan.length){
     area.innerHTML='<div class="td-card"><div class="td-pad" style="text-align:center;padding:34px 20px;"><div style="font-family:var(--syne);font-size:18px;margin-bottom:8px;">Ready when you are.</div><div class="today-v2-copy" style="max-width:520px;margin:0 auto;">Set account equity, your daily, weekly, or monthly profit target, and max basket risk. DotVerse will scan all supported assets and timeframes, then return a beginner-readable basket.</div></div></div>';
     return;

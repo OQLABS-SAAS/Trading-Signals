@@ -136,6 +136,19 @@ def test_today_auto_backtests_candidates_before_basket_actions():
     assert "automatic backtest has not verified" in classify
 
 
+def test_today_auto_backtest_preserves_insufficient_data_reason():
+    block = _extract_function("_todayAutoBacktestCandidates")
+    assert "_btValidityTier:bt?bt.validity_tier:null" in block
+    assert "_btReason:passes?'automatic backtest verified':(bt&&bt.error?bt.error:'automatic backtest did not clear the gate')" in block
+
+
+def test_today_v2_render_defines_horizon_label_before_target_copy_uses_it():
+    block = _extract_function("_todayRenderPlan")
+    definition = block.index("var _horizonLbl =")
+    target_copy = block.index("_horizonLbl.toLowerCase()")
+    assert definition < target_copy
+
+
 def test_shared_signal_mapper_carries_automatic_backtest_evidence():
     block = _extract_function("_dvSignalFromScanRow")
     assert "_btVerified: r._btVerified === true" in block

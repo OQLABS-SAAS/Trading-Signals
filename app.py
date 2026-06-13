@@ -16045,7 +16045,12 @@ def backtest_route():
     if len(prices_hist) < 50:
         return jsonify({"error": f"Only {len(prices_hist)} bars available for {ticker}. " +
                                  "DotVerse requires 200+ bars for a statistically valid backtest. " +
-                                 "Try a higher timeframe (1H, 4H, 1D) or use TradingView Strategy Tester."}), 503
+                                 "Try a higher timeframe (1H, 4H, 1D) or use TradingView Strategy Tester.",
+                        "ready": False,
+                        "trades_found": 0,
+                        "bars_scanned": 0,
+                        "min_required": 30,
+                        "validity_tier": "insufficient"}), 200
 
     # Pad highs/lows/volumes to match prices length if any source left them short
     if not highs_hist:  highs_hist  = prices_hist[:]
@@ -16454,7 +16459,7 @@ def backtest_route():
         # immediately after this trade closed (matching TradingView's behavior)
         i += exit_bar + 1
 
-    _bars_scanned = len(prices_hist) - scan_start
+    _bars_scanned = max(0, len(prices_hist) - scan_start)
     if len(trades) < 30:
         return jsonify({
             "error": (
@@ -16467,7 +16472,8 @@ def backtest_route():
             "bars_scanned": _bars_scanned,
             "min_required": 30,
             "validity_tier": "insufficient",
-        }), 400
+            "ready": False,
+        }), 200
 
     wins    = [t for t in trades if t["r"] > 0]
     losses  = [t for t in trades if t["r"] < 0]

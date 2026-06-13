@@ -68,6 +68,22 @@ def test_sync_backtest_tries_provider_first_before_direct_stooq_fallbacks():
     assert provider_idx < stooq_idx < fmp_idx
 
 
+def test_sync_backtest_insufficient_data_is_neutral_and_nonnegative():
+    block = _block('def backtest_route():', '# ─── RQ Backtest')
+    assert "_bars_scanned = max(0, len(prices_hist) - scan_start)" in block
+
+    too_few_bars = block[block.index("if len(prices_hist) < 50:") : block.index("# Pad highs/lows/volumes")]
+    assert '"ready": False' in too_few_bars
+    assert '"validity_tier": "insufficient"' in too_few_bars
+    assert "}), 200" in too_few_bars
+
+    too_few_trades = block[block.index("if len(trades) < 30:") : block.index("wins    =")]
+    assert '"ready": False' in too_few_trades
+    assert '"validity_tier": "insufficient"' in too_few_trades
+    assert "}), 200" in too_few_trades
+    assert "}), 400" not in too_few_trades
+
+
 def test_provider_first_download_attaches_actual_fallback_source(monkeypatch):
     df = pd.DataFrame(
         {
