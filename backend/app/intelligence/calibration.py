@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 
-CALIBRATION_GATE = 50
+CALIBRATION_GATE = 100
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:

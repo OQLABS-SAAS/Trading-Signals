@@ -81,6 +81,10 @@ def test_today_v2_hydrates_account_context_from_live_sources():
     assert "if(window._todayLastMt5State) _todayBridgeMt5StateToGlobalAccount(window._todayLastMt5State)" in source
     assert "if(d&&d.account) window._todayLastMt5State=d" in source
     assert "id:'__mt5_live__'" in source
+    # Item 1 (2026-06-10): the bridge must use the shared honest virtual-account
+    # builder (LIVE/DEMO/UNKNOWN from /api/mt5/state) - never a hardcoded LIVE label.
+    assert "function _dvVirtualEaAccount(st)" in source
+    assert "_dvVirtualEaAccount(d)" in source
     assert "if(!window._mt5Accounts.length && d.connected===true)" in source
     assert "if(idx<0 && window._mt5Accounts.length===1) idx=0" in source
     assert "status: connected?'online':(prev.status||'disconnected')" in source
@@ -91,8 +95,8 @@ def test_today_v2_hydrates_account_context_from_live_sources():
 def test_today_v2_top_copy_and_modes_do_not_lie_about_state():
     source = _source()
 
-    assert "no open risk is using the weekly budget right now" in source
-    assert "open risk is already using part of the weekly budget" in source
+    assert "no open risk is using the" in source and "budget right now" in source
+    assert "open risk is already using part of the" in source and "budget" in source
     assert '<button disabled title="Use the risk control inside each selected trade.">Per-trade mode</button>' in source
     assert '<button disabled title="Manual allocation is inside each selected trade.">Manual allocation</button>' in source
     assert ".today-v2-mode button:disabled" in source

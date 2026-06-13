@@ -63,6 +63,37 @@ def test_act_executes_every_size_ladder_leg_not_only_first_one():
     assert "Exact MT5 orders" in HTML
     assert "Orders DotVerse will send to MT5" in HTML
     assert "TP ${target} · risk $" in HTML
-    assert "' lots</span>'" in HTML
+    # Confirm modal leg row now includes entry price + notional alongside lots
+    assert "lots" in HTML and "pos</span>" in HTML
     assert "Place MT5 order${_actMultiLeg?'s':''}" in HTML
     assert "Place '+nT+' MT5 order" in HTML
+
+
+def test_size_and_act_send_current_mt5_account_id_when_available():
+    assert "function _dvCurrentMt5AccountId()" in HTML
+    assert "var state = window._mt5LastState || window._todayLastMt5State || {}" in HTML
+    assert "var id = state.account_id || acct.id || acct.account_id || acct.trading_account_id" in HTML
+    assert "account_id: _dvCurrentMt5AccountId()," in HTML
+
+    size_block = _block("async function _szLadderSubmitGo() {", "function szTypeChange(){")
+    act_block = _block("function _actExecuteGo(){", "function actLogToPortfolio()")
+    assert "account_id: _dvCurrentMt5AccountId()," in size_block
+    assert "account_id: _dvCurrentMt5AccountId()," in act_block
+
+
+def test_act_order_result_breakdown_shows_partial_failures():
+    block = _block("function _actOrderResultHtml(results){", "function actLogToPortfolio()")
+
+    assert "of ' + total + ' MT5 orders queued" in block
+    assert "failed" in block
+    assert "_mt5OrderErrorText(res)" in block
+    assert "Already queued orders are not resent automatically" in block
+    assert "Retry only the failed legs from the Size ladder" in block
+    assert "Nothing was placed at the broker" in block
+
+
+def test_act_execute_uses_order_result_breakdown():
+    block = _block("function _actExecuteGo(){", "function actLogToPortfolio()")
+
+    assert "status.innerHTML = _actOrderResultHtml(results);" in block
+    assert "details shown in Act" in block

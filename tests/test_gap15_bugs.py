@@ -222,9 +222,8 @@ class TestBugE:
 
 
 # ── BUG K ─────────────────────────────────────────────────────────────────────
-# mt5_get_pending must mark TRAILING orders as "filled", not "executing".
-# BEFORE fix: all orders set to "executing" regardless of order_type.
-# AFTER fix:  TRAILING → "filled", all others → "executing".
+# mt5_get_pending must keep TRAILING orders "executing" until EA confirms.
+# Older behavior marked TRAILING as "filled" during poll, before broker truth existed.
 
 class TestBugK:
     def _ea_get(self, client, user_id=None):
@@ -233,17 +232,16 @@ class TestBugK:
             url += f"?user_id={user_id}"
         return client.get(url)
 
-    def test_trailing_order_marked_filled_after_poll(self, client):
-        """TRAILING pending order must become 'filled' after EA polls — not 'executing'."""
+    def test_trailing_order_marked_executing_after_poll_until_confirmed(self, client):
+        """TRAILING pending order must become 'executing' after EA poll, not terminal."""
         oid = _seed_order("default", "TRAILING", "pending")
         try:
-            # BEFORE fix: status would be "executing" after this call
             resp = self._ea_get(client)
             assert resp.status_code == 200
 
             o = _get_order(oid)
-            assert o.status == "filled", \
-                f"BEFORE fix status was 'executing'. After fix expected 'filled', got '{o.status}'"
+            assert o.status == "executing", \
+                f"TRAILING must wait for EA confirmation, got '{o.status}'"
         finally:
             _delete_order(oid)
 
@@ -270,10 +268,10 @@ class TestBugK:
             _delete_order(oid)
 
     def test_trailing_not_returned_in_second_poll(self, client):
-        """After first poll, TRAILING is 'filled' — must NOT appear in second poll."""
+        """After first poll, TRAILING is executing — must NOT appear in second poll."""
         oid = _seed_order("default", "TRAILING", "pending")
         try:
-            self._ea_get(client)                   # first poll → marks filled
+            self._ea_get(client)                   # first poll → marks executing
             resp2 = self._ea_get(client)           # second poll → must not return it
             orders = resp2.get_json().get("orders", [])
             ids = [o["id"] for o in orders]

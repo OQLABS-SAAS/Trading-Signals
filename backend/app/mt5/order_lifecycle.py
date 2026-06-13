@@ -30,8 +30,6 @@ def user_ids_for_pending_poll(ea_user_id: str | None) -> list[str] | None:
 
 
 def status_after_pending_poll(order_type: Any) -> str:
-    if str(order_type or "").upper() == TRAILING_ORDER_TYPE:
-        return FILLED_STATUS
     return EXECUTING_STATUS
 
 

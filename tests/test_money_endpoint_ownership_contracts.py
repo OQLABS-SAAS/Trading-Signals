@@ -36,12 +36,13 @@ def _make_sqlite_session_factory():
     return sessionmaker(bind=engine)
 
 
-def _seed_filled_order(Session, user_id, ticket, order_type="BUY"):
+def _seed_filled_order(Session, user_id, ticket, order_type="BUY", account_id=7):
     """Insert a filled BUY/SELL order with a known mt5_ticket."""
     db = Session()
     try:
         o = dvapp.MT5Order(
             user_id=user_id,
+            account_id=account_id,
             symbol="EURUSD",
             order_type=order_type,
             volume=0.1,
@@ -58,12 +59,13 @@ def _seed_filled_order(Session, user_id, ticket, order_type="BUY"):
         db.close()
 
 
-def _seed_pending_close(Session, user_id, ticket):
+def _seed_pending_close(Session, user_id, ticket, account_id=7):
     """Insert a pending CLOSE order for a given ticket."""
     db = Session()
     try:
         o = dvapp.MT5Order(
             user_id=user_id,
+            account_id=account_id,
             symbol="EURUSD",
             order_type="CLOSE",
             volume=0,
@@ -80,12 +82,13 @@ def _seed_pending_close(Session, user_id, ticket):
         db.close()
 
 
-def _seed_pending_trailing(Session, user_id, ticket):
+def _seed_pending_trailing(Session, user_id, ticket, account_id=7):
     """Insert a pending TRAILING order for a given ticket."""
     db = Session()
     try:
         o = dvapp.MT5Order(
             user_id=user_id,
+            account_id=account_id,
             symbol="AUTO",
             order_type="TRAILING",
             volume=0,
@@ -102,6 +105,52 @@ def _seed_pending_trailing(Session, user_id, ticket):
         db.close()
 
 
+def _seed_pending_modify_sl(Session, user_id, ticket, account_id=7):
+    """Insert a pending MODIFY / modify_sl order for a given ticket."""
+    db = Session()
+    try:
+        o = dvapp.MT5Order(
+            user_id=user_id,
+            account_id=account_id,
+            symbol="EURUSD",
+            order_type="MODIFY",
+            volume=0,
+            price=0,
+            sl=1.081,
+            status="pending",
+            action="modify_sl",
+            close_ticket=ticket,
+        )
+        db.add(o)
+        db.commit()
+        db.refresh(o)
+        return o.id
+    finally:
+        db.close()
+
+
+def _seed_unfilled_open_order(Session, user_id, ticket, status="executing", account_id=8):
+    db = Session()
+    try:
+        o = dvapp.MT5Order(
+            user_id=user_id,
+            account_id=account_id,
+            symbol="WRONG",
+            order_type="BUY",
+            volume=0.1,
+            price=1.1,
+            status=status,
+            action="open",
+            mt5_ticket=ticket,
+        )
+        db.add(o)
+        db.commit()
+        db.refresh(o)
+        return o.id
+    finally:
+        db.close()
+
+
 def _count_orders(Session, order_type=None):
     db = Session()
     try:
@@ -109,6 +158,40 @@ def _count_orders(Session, order_type=None):
         if order_type:
             q = q.filter(dvapp.MT5Order.order_type == order_type)
         return q.count()
+    finally:
+        db.close()
+
+
+def _latest_order(Session, order_type):
+    db = Session()
+    try:
+        return (
+            db.query(dvapp.MT5Order)
+            .filter(dvapp.MT5Order.order_type == order_type)
+            .order_by(dvapp.MT5Order.id.desc())
+            .first()
+        )
+    finally:
+        db.close()
+
+
+def _seed_account(Session, user_id="testuser", account_id=7, account_number="123456", account_type="LIVE"):
+    db = Session()
+    try:
+        acct = dvapp.TradingAccount(
+            id=account_id,
+            user_id=user_id,
+            name="Primary",
+            broker="TestBroker",
+            account_number=account_number,
+            account_type=account_type,
+            currency="USD",
+            platform="MT5",
+            is_active=True,
+        )
+        db.add(acct)
+        db.commit()
+        return acct.id
     finally:
         db.close()
 
@@ -160,6 +243,26 @@ def test_close_allows_owner_to_close_their_ticket(monkeypatch):
     data = resp.get_json()
     assert data["status"] == "ok"
     assert _count_orders(Session, "CLOSE") == before + 1
+    queued = _latest_order(Session, "CLOSE")
+    assert queued.account_id == 7
+    assert queued.symbol == "EURUSD"
+
+
+def test_close_ignores_unfilled_same_ticket_when_selecting_owned_position(monkeypatch):
+    """Close must derive account/symbol from a filled parent order, not stale executing rows."""
+    Session = _make_sqlite_session_factory()
+    _seed_unfilled_open_order(Session, "testuser", ticket=12347, account_id=8)
+    _seed_filled_order(Session, "testuser", ticket=12347, account_id=7)
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+
+    client = _authed_pro_client("testuser")
+    resp = client.post("/api/mt5/close", json={"ticket": 12347, "symbol": "EURUSD", "account_id": 7})
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    queued = _latest_order(Session, "CLOSE")
+    assert queued.account_id == 7
+    assert queued.symbol == "EURUSD"
 
 
 def test_close_allows_default_user_to_close_their_ticket(monkeypatch):
@@ -225,6 +328,121 @@ def test_trailing_allows_owner_to_set_trailing(monkeypatch):
     data = resp.get_json()
     assert data["status"] == "ok"
     assert _count_orders(Session, "TRAILING") == before + 1
+    queued = _latest_order(Session, "TRAILING")
+    assert queued.account_id == 7
+    assert queued.symbol == "EURUSD"
+    assert queued.price == 20.0
+
+
+def test_trailing_ignores_unfilled_same_ticket_when_selecting_owned_position(monkeypatch):
+    """Trailing must derive account/symbol from a filled parent order."""
+    Session = _make_sqlite_session_factory()
+    _seed_unfilled_open_order(Session, "testuser", ticket=77780, account_id=8)
+    _seed_filled_order(Session, "testuser", ticket=77780, account_id=7)
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+
+    client = _authed_pro_client("testuser")
+    resp = client.post("/api/mt5/trailing", json={"ticket": 77780, "pips": 20, "account_id": 7})
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    queued = _latest_order(Session, "TRAILING")
+    assert queued.account_id == 7
+    assert queued.symbol == "EURUSD"
+
+
+def test_trailing_rejects_invalid_pip_distance(monkeypatch):
+    """Trailing distance must be positive before a broker-facing row is queued."""
+    Session = _make_sqlite_session_factory()
+    _seed_filled_order(Session, "testuser", ticket=77779)
+    before = _count_orders(Session, "TRAILING")
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+
+    client = _authed_pro_client("testuser")
+    resp = client.post("/api/mt5/trailing", json={"ticket": 77779, "pips": -5})
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert "valid trailing stop distance required" in resp.get_json()["error"]
+    assert _count_orders(Session, "TRAILING") == before
+
+
+# ─── S-9: /api/mt5/breakeven ownership ───────────────────────────────────────
+
+def test_breakeven_rejects_ticket_owned_by_other_user(monkeypatch):
+    """Attacker cannot move stop to entry on a victim's position."""
+    Session = _make_sqlite_session_factory()
+    _seed_filled_order(Session, "victim_user", ticket=44444)
+    before = _count_orders(Session, "MODIFY")
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+
+    client = _authed_pro_client("attacker_user")
+    resp = client.post("/api/mt5/breakeven", json={"ticket": 44444, "be_price": 1.081, "account_id": 7})
+
+    assert resp.status_code == 403, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert "not yours" in data["error"] or "not found" in data["error"]
+    assert _count_orders(Session, "MODIFY") == before
+
+
+def test_breakeven_allows_owner_to_queue_modify_sl(monkeypatch):
+    """The legitimate owner can queue a modify_sl row for their filled ticket."""
+    Session = _make_sqlite_session_factory()
+    _seed_filled_order(Session, "testuser", ticket=44445, account_id=7)
+    before = _count_orders(Session, "MODIFY")
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+
+    client = _authed_pro_client("testuser")
+    resp = client.post("/api/mt5/breakeven", json={"ticket": 44445, "be_price": 1.081, "account_id": 7})
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["status"] == "ok"
+    assert _count_orders(Session, "MODIFY") == before + 1
+    queued = _latest_order(Session, "MODIFY")
+    assert queued.account_id == 7
+    assert queued.symbol == "EURUSD"
+    assert queued.action == "modify_sl"
+    assert queued.close_ticket == 44445
+    assert queued.sl == 1.081
+
+
+def test_breakeven_ignores_unfilled_same_ticket_when_selecting_owned_position(monkeypatch):
+    """Break-even must derive account/symbol from a filled parent order."""
+    Session = _make_sqlite_session_factory()
+    _seed_unfilled_open_order(Session, "testuser", ticket=44446, account_id=8)
+    _seed_filled_order(Session, "testuser", ticket=44446, account_id=7)
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+
+    client = _authed_pro_client("testuser")
+    resp = client.post("/api/mt5/breakeven", json={"ticket": 44446, "be_price": 1.081, "account_id": 7})
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    queued = _latest_order(Session, "MODIFY")
+    assert queued.account_id == 7
+    assert queued.symbol == "EURUSD"
+    assert queued.action == "modify_sl"
+
+
+def test_breakeven_dedup_returns_existing_pending_modify_not_new_row(monkeypatch):
+    """Double-tap breakeven: second call returns existing pending MODIFY, no new row."""
+    Session = _make_sqlite_session_factory()
+    _seed_filled_order(Session, "testuser", ticket=44447, account_id=7)
+    existing_id = _seed_pending_modify_sl(Session, "testuser", ticket=44447, account_id=7)
+    before = _count_orders(Session, "MODIFY")
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+
+    client = _authed_pro_client("testuser")
+    resp = client.post("/api/mt5/breakeven", json={"ticket": 44447, "be_price": 1.081, "account_id": 7})
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["status"] == "duplicate"
+    assert data["id"] == existing_id
+    assert _count_orders(Session, "MODIFY") == before, "Must NOT add a new MODIFY row on dedup"
 
 
 def test_trailing_allows_default_user_to_set_trailing(monkeypatch):
@@ -282,6 +500,24 @@ def test_trailing_dedup_returns_existing_pending_trailing_not_new_row(monkeypatc
     assert data["status"] == "duplicate"
     assert data["order_id"] == existing_id
     assert _count_orders(Session, "TRAILING") == before, "Must NOT add a new TRAILING row on dedup"
+
+
+def test_mt5_orders_return_account_metadata_for_history_badges(monkeypatch):
+    """Order history must expose account context so Act rows are not ambiguous."""
+    Session = _make_sqlite_session_factory()
+    _seed_account(Session, account_id=7, account_number="123456", account_type="LIVE")
+    _seed_filled_order(Session, "testuser", ticket=33333, account_id=7)
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+
+    client = _authed_pro_client("testuser")
+    resp = client.get("/api/mt5/orders")
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    order = resp.get_json()["orders"][0]
+    assert order["account_id"] == 7
+    assert order["account_number"] == "123456"
+    assert order["account_type"] == "LIVE"
 
 
 # ─── S-1: _binance_signed_request requires user_id ───────────────────────────

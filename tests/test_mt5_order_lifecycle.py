@@ -20,9 +20,9 @@ def test_user_ids_for_pending_poll_scopes_when_ea_identifies_user():
     assert user_ids_for_pending_poll(None) is None
 
 
-def test_status_after_pending_poll_marks_trailing_filled_and_others_executing():
-    assert status_after_pending_poll("TRAILING") == "filled"
-    assert status_after_pending_poll("trailing") == "filled"
+def test_status_after_pending_poll_marks_all_polled_orders_executing_until_confirmed():
+    assert status_after_pending_poll("TRAILING") == "executing"
+    assert status_after_pending_poll("trailing") == "executing"
     assert status_after_pending_poll("BUY") == "executing"
     assert status_after_pending_poll("SELL") == "executing"
 

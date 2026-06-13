@@ -369,7 +369,8 @@ class _FakeRedis:
     def __init__(self):
         self.get_keys = []
         self.values = {
-            "verdict:EURUSD:1h": b'{"verdict":"1H verdict text","ticker":"EURUSD","timeframe":"1h"}',
+            "verdict:EURUSD:1h:BUY:2026-06-13": b'{"verdict":"1H BUY verdict text","ticker":"EURUSD","timeframe":"1h","direction":"BUY","date":"2026-06-13"}',
+            "signal_ctx:testuser:EURUSD:1h:BUY:2026-06-13": b'{"signal":"BUY","tf":"1H","entry":1.1,"sl":1.09,"tp":1.12}',
         }
 
     def get(self, key):
@@ -399,11 +400,14 @@ def test_verdict_chat_uses_requested_timeframe_cache(monkeypatch):
 
     resp = _authed_pro_client().post(
         "/api/verdict/chat",
-        json={"ticker": "EURUSD", "timeframe": "1h", "question": "What should I do?"},
+        json={"ticker": "EURUSD", "timeframe": "1h", "direction": "BUY", "date": "2026-06-13", "question": "What should I do?"},
     )
 
     assert resp.status_code == 200, resp.get_data(as_text=True)
     assert resp.get_json()["answer"] == "Use the 1H verdict."
-    assert fake_redis.get_keys[0] == "verdict:EURUSD:1h"
+    assert fake_redis.get_keys[0] == "verdict:EURUSD:1h:BUY:2026-06-13"
+    assert "verdict:EURUSD:1h" not in fake_redis.get_keys
     assert "verdict:EURUSD:4h" not in fake_redis.get_keys
-    assert "1H verdict text" in captured["messages"][1]["content"]
+    assert "1H BUY verdict text" in captured["messages"][1]["content"]
+    assert "DOTVERSE SIGNAL" in captured["messages"][1]["content"]
+    assert "Entry: 1.1" in captured["messages"][1]["content"]

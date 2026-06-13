@@ -15,6 +15,17 @@ import app as dvapp
 APP = Path("app.py").read_text()
 
 
+def _authed_pro_client():
+    dvapp.app.config["TESTING"] = True
+    dvapp.app.config["SECRET_KEY"] = "test-secret-key-not-for-prod"
+    client = dvapp.app.test_client()
+    with client.session_transaction() as sess:
+        sess["user_id"] = "testuser"
+        sess["email"] = "test@example.com"
+        sess["user_tier"] = "pro"
+    return client
+
+
 def test_mt5_submit_routes_stamp_selected_account_context():
     assert "def _resolve_selected_mt5_account" in APP
     assert "account = _resolve_selected_mt5_account(db, user_id, body)" in APP
@@ -30,6 +41,13 @@ def test_mt5_pending_poll_uses_authenticated_ea_identity_and_projects_account():
     assert '"is_live": account_type == "LIVE"' in APP
 
 
+def test_mt5_money_mutations_select_filled_parent_order_and_account_hint():
+    assert "def _selected_mt5_account_id_from_body(body)" in APP
+    assert 'MT5Order.status == "filled"' in APP
+    assert "selected_account_id = _selected_mt5_account_id_from_body(body)" in APP
+    assert "owned_query = owned_query.filter(MT5Order.account_id == selected_account_id)" in APP
+
+
 class _FakeQuery:
     def __init__(self, accounts):
         self.accounts = list(accounts)
@@ -43,6 +61,9 @@ class _FakeQuery:
             for item in self.accounts
             if all(getattr(item, key, None) == value for key, value in kwargs.items())
         ]
+        return self
+
+    def order_by(self, *args, **kwargs):
         return self
 
     def first(self):
@@ -130,6 +151,36 @@ class _FakeConfirmDB:
 
     def rollback(self):
         self.rolled_back = True
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeSequenceOrderDB:
+    def __init__(self, query_results):
+        self.query_results = [list(items) for items in query_results]
+        self.added = []
+        self.committed = False
+        self.closed = False
+        self.rolled_back = False
+
+    def query(self, model):
+        if model is dvapp.MT5Order and self.query_results:
+            return _FakeQuery(self.query_results.pop(0))
+        return _FakeQuery([])
+
+    def add(self, obj):
+        obj.id = 202
+        self.added.append(obj)
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def refresh(self, obj):
+        return None
 
     def close(self):
         self.closed = True
@@ -746,6 +797,100 @@ def test_mt5_confirm_scopes_to_ea_user_and_preserves_existing_comment(monkeypatc
     assert settings_users == ["testuser"]
     assert fake_db.committed is True
     assert fake_db.closed is True
+
+
+def test_mt5_cancel_rejects_executing_order_without_marking_cancelled(monkeypatch):
+    order = _mt5_order(status="executing")
+    fake_db = _FakeOrderDB([], [order])
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    resp = _authed_pro_client().post("/api/mt5/cancel/101")
+
+    assert resp.status_code == 409, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["status"] == "executing"
+    assert "cannot cancel it safely" in data["error"]
+    assert order.status == "executing"
+    assert fake_db.committed is False
+    assert fake_db.closed is True
+
+
+def test_mt5_cancel_pending_order_marks_cancelled(monkeypatch):
+    order = _mt5_order(status="pending")
+    fake_db = _FakeOrderDB([], [order])
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    resp = _authed_pro_client().post("/api/mt5/cancel/101")
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["status"] == "cancelled"
+    assert order.status == "cancelled"
+    assert fake_db.committed is True
+    assert fake_db.closed is True
+
+
+def test_mt5_breakeven_queues_modify_sl_without_closing(monkeypatch):
+    owned = _mt5_order(
+        status="filled",
+        mt5_ticket=555,
+        fill_price=1.081,
+        price=1.08,
+    )
+    fake_db = _FakeSequenceOrderDB([[owned], []])
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    resp = _authed_pro_client().post("/api/mt5/breakeven", json={"ticket": 555, "be_price": 1.081})
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["status"] == "ok"
+    queued = fake_db.added[0]
+    assert queued.order_type == "MODIFY"
+    assert queued.account_id == 7
+    assert queued.action == "modify_sl"
+    assert queued.close_ticket == 555
+    assert queued.sl == 1.081
+    assert queued.status == "pending"
+    assert queued.symbol == "EURUSD"
+    assert queued.order_type != "CLOSE"
+    assert fake_db.committed is True
+    assert fake_db.closed is True
+
+
+def test_mt5_breakeven_dedupes_pending_modify_sl(monkeypatch):
+    owned = _mt5_order(status="filled", mt5_ticket=555)
+    existing = _mt5_order(id=303, order_type="MODIFY", action="modify_sl", close_ticket=555, status="pending")
+    fake_db = _FakeSequenceOrderDB([[owned], [existing]])
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    resp = _authed_pro_client().post("/api/mt5/breakeven", json={"ticket": 555, "be_price": 1.081})
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json() == {"id": 303, "status": "duplicate"}
+    assert fake_db.added == []
+    assert fake_db.committed is False
+    assert fake_db.closed is True
+
+
+def test_mt5_state_route_exposes_current_account_id_for_frontend_payload():
+    previous_state = dict(dvapp.mt5_state)
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state["testuser"] = {
+            "account_id": 7,
+            "account": {"login": "123456", "trade_mode": 2, "server": "Broker-Live"},
+            "positions": [],
+            "last_seen": dvapp.datetime.utcnow().isoformat(),
+            "level_hits": {},
+        }
+    try:
+        resp = _authed_pro_client().get("/api/mt5/state")
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["account_id"] == 7
+    assert data["account"]["account_id"] == 7
 
 
 def test_mt5_confirm_rejects_unknown_or_invalid_results(monkeypatch):
