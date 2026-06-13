@@ -7651,7 +7651,7 @@ def _job_auto_scan():
             _profit_usd = _money["profit_usd"]
             if _risk_usd is not None and _profit_usd is not None:
                 _lot_line = (
-                    f"Lot size: {lot:.2f} lots\n"
+                    f"Lot size: {lot:.2f} lots  (${_risk_usd:,.0f} at risk)\n"
                     f"💵 Risks ≈ ${_risk_usd:,.0f} if stop hit · Targets ≈ ${_profit_usd:,.0f} at TP1\n"
                     f"({conf_label} — {conf_pct_str} allocation)"
                 )
