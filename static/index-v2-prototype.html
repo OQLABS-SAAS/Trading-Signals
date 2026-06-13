@@ -14270,6 +14270,32 @@ function _todayRenderTop(){
     + '</div>';
 }
 
+function _todayV2TimeframeAuditPanel(plan, usableIdx, esc){
+  var hidden=(plan||[]).map(function(o,idx){ return {o:o,idx:idx}; }).filter(function(x){
+    return x.o && usableIdx.indexOf(x.idx)<0;
+  });
+  if(!hidden.length) return '';
+  var tfCounts={};
+  (plan||[]).forEach(function(o){ var tf=String((o&&o.tf)||'--').toUpperCase(); tfCounts[tf]=(tfCounts[tf]||0)+1; });
+  var tfLine=Object.keys(tfCounts).sort().map(function(tf){ return tf+' x'+tfCounts[tf]; }).join(' · ');
+  var reason=function(o){
+    var rd={};
+    try{ rd=(typeof _todayReadiness==='function')?_todayReadiness(o):{}; }catch(e){}
+    if(rd&&rd.cls==='invalid') return 'live-entry rule says skip now';
+    if(o&&o._size&&o._size.skipReason) return o._size.skipReason;
+    if(o&&o._size&&o._size.sizeReason) return o._size.sizeReason;
+    if(o&&o._size&&o._size.tradeable===false) return 'basket risk was reallocated to executable setups';
+    if(o&&o._btVerified!==true&&o._btReason) return 'backtest not confirmed';
+    return 'lower-ranked after basket risk and quality filters';
+  };
+  var rows=hidden.slice(0,8).map(function(x){
+    var o=x.o||{}, why=reason(o), rd={};
+    try{ rd=(typeof _todayReadiness==='function')?_todayReadiness(o):{}; }catch(e){}
+    return '<tr><td><b>'+esc(o.sym||'--')+'</b><span>'+esc((o.asset||'asset')+' · '+((o.tf||'--')+'').toUpperCase()+' · '+(o.sig||''))+'</span></td><td>'+esc((rd&&rd.text)||'Not selected')+'</td><td>'+esc(why)+'</td></tr>';
+  }).join('');
+  return '<div class="td-card today-v2-tfAudit"><div class="td-card-head"><h2>Other timeframes checked</h2><span class="td-pill gold">multi-timeframe scan</span></div><div class="td-pad" style="padding:12px 14px;"><div class="today-v2-copy" style="margin-bottom:10px">DotVerse scanned across timeframes before selecting the visible basket. The table only shows setups that are valid now and fit the basket risk cap.</div><div class="today-v2-copy blue" style="margin-bottom:10px;font-family:var(--mono);font-size:10px;">Checked: '+esc(tfLine)+'</div><div class="today-v2-tableWrap"><table class="today-v2-table"><thead><tr><th>Candidate</th><th>Status</th><th>Why it is not in the visible basket</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></div>';
+}
+
 function _todayRenderPlan(){
   var area=document.getElementById('todayPlanArea'); if(!area) return;
   _todayRenderTop();
@@ -14297,6 +14323,7 @@ function _todayRenderPlan(){
   }
   if(window._todaySelectedIdx==null || !plan[window._todaySelectedIdx] || !(plan[window._todaySelectedIdx]._size||{}).tradeable) window._todaySelectedIdx=usable[0].idx;
   var selected=usable.filter(function(x){ return x.idx===window._todaySelectedIdx; })[0]||usable[0];
+  var usableIdx=usable.map(function(x){ return x.idx; });
   var riskPct=acct>0?(totRisk/acct*100):0, avgRR=usable.length?usable.reduce(function(a,x){return a+((x.o._size&&x.o._size.rr)||0);},0)/usable.length:0;
   var capPct=parseFloat(c.riskPct)||3, openRiskPct=Math.min(capPct,_todayCurrentRiskUsed(acct)), displayRiskPct=protect?0:riskPct, totalAfterPct=openRiskPct+displayRiskPct, remainingPct=Math.max(0,capPct-totalAfterPct);
   var displayExp=protect?0:totExp, displayMargin=protect?0:totMargin, displayRisk=protect?0:totRisk, displayProfit=protect?0:totProfit, displayOrders=protect?0:totOrders;
@@ -14400,7 +14427,7 @@ function _todayRenderPlan(){
       + '<div class="today-v2-metric"><div class="td-mini">Open trade monitor</div><b class="blue">'+(protect?'Active now':'Live after place')+'</b><p>'+(protect?'Open trades stay under protection logic; no review/place action is shown for new orders.':'Rows become PnL, current R, stop state, and automation history.')+'</p></div>'
     + '</div>'
     + _todayV2ScoutPanel(targetPath,c,money2)
-    + (protect?'<div class="td-card"><div class="td-card-head"><h2>Protection watchlist</h2><span class="td-pill green">no new orders</span></div><div class="td-pad" style="padding:16px;"><div class="today-v2-autos"><div class="today-v2-auto"><b>Open trades monitored</b>DotVerse keeps watching current R, stop state, and target distance.</div><div class="today-v2-auto"><b>Stops protected</b>Break-even, trailing, and invalidation checks stay active where eligible.</div><div class="today-v2-auto"><b>TP/SL alerts live</b>Target, stop-loss, and protection-state changes can still alert.</div><div class="today-v2-auto optional"><b>Telegram + in-app</b>Protect-mode notifications stay available without adding exposure.</div></div></div></div>':'<div class="today-v2-main"><div class="td-card"><div class="td-card-head"><h2>Review trades</h2><span class="td-pill green">cash in · controls · risk</span></div><div class="today-v2-tableWrap"><table class="today-v2-table"><thead><tr><th>Trade</th><th>Readiness</th><th>Duration</th><th>Cash in / controls</th><th>Risk</th><th>R:R</th><th>Profit</th><th>Mode</th><th>Why selected</th></tr></thead><tbody>'+usable.map(row).join('')+'</tbody></table></div></div><div class="td-card">'+detail(selected)+'</div></div>')
+    + (protect?'<div class="td-card"><div class="td-card-head"><h2>Protection watchlist</h2><span class="td-pill green">no new orders</span></div><div class="td-pad" style="padding:16px;"><div class="today-v2-autos"><div class="today-v2-auto"><b>Open trades monitored</b>DotVerse keeps watching current R, stop state, and target distance.</div><div class="today-v2-auto"><b>Stops protected</b>Break-even, trailing, and invalidation checks stay active where eligible.</div><div class="today-v2-auto"><b>TP/SL alerts live</b>Target, stop-loss, and protection-state changes can still alert.</div><div class="today-v2-auto optional"><b>Telegram + in-app</b>Protect-mode notifications stay available without adding exposure.</div></div></div></div>':'<div class="today-v2-main"><div class="td-card"><div class="td-card-head"><h2>Review trades</h2><span class="td-pill green">cash in · controls · risk</span></div><div class="today-v2-tableWrap"><table class="today-v2-table"><thead><tr><th>Trade</th><th>Readiness</th><th>Duration</th><th>Cash in / controls</th><th>Risk</th><th>R:R</th><th>Profit</th><th>Mode</th><th>Why selected</th></tr></thead><tbody>'+usable.map(row).join('')+'</tbody></table></div></div><div class="td-card">'+detail(selected)+'</div></div>'+_todayV2TimeframeAuditPanel(plan, usableIdx, esc))
     + '<div class="today-v2-bottom"><div class="bitem"><div class="td-mini">Cash put in total</div><b class="gold">'+money2(displayMargin)+'</b><div class="today-v2-footNote">sum of margin/cash per trade</div></div><div class="bitem"><div class="td-mini">Position value</div><b>'+money(displayExp)+'</b><div class="today-v2-footNote">not cash put in</div></div><div class="bitem"><div class="td-mini">New basket risk</div><b class="red">'+money2(-displayRisk)+' / '+displayRiskPct.toFixed(2)+'%</b><div class="today-v2-footNote">'+(protect?'paused by protect mode':(targetNeedsScout?'target not covered':'selected setups only'))+'</div></div><div class="bitem"><div class="td-mini">Already open risk</div><b class="gold">'+openRiskPct.toFixed(2)+'%</b><div class="today-v2-footNote">before this basket</div></div><div class="bitem"><div class="td-mini">Total after placing</div><b class="'+totalAfterTone+'">'+totalAfterPct.toFixed(2)+'% / '+capPct.toFixed(1)+'%</b><div class="today-v2-footNote">'+(protect?'open risk only':(targetNeedsScout?'optional review':'open + new basket'))+'</div></div><div class="bitem"><div class="td-mini">Remaining buffer</div><b class="'+(remainingPct<=0?'red':remainingPct<0.15?'gold':'green')+'">'+remainingPct.toFixed(2)+'%</b></div><div class="bitem"><div class="td-mini">'+(protect?'Protection state':'Planned profit')+'</div><b class="green">'+(protect?'Active':'+'+money2(displayProfit))+'</b>'+(!protect&&targetNeedsScout&&(targetPath.shortfall||0)>0?'<span class="today-v2-footNote gold" style="display:block;margin-top:2px;">shortfall '+money2(targetPath.shortfall||0)+'</span>':'')+'</div><div class="bitem"><div class="td-mini">Orders</div><b>'+displayOrders+' new MT5 order'+(displayOrders===1?'':'s')+'</b><div class="today-v2-footNote">'+bottomOrderNote+'</div></div><button class="today-v2-review" '+(bottomDisabled?'disabled ':'')+'onclick="'+(protect?'_todayV2ProtectSummary()':'_todayPlaceAll()')+'">'+bottomPlaceLabel+'</button></div>';
   _todayV2ScoutSchedule();
   _todayV2MaybeScoutAlert(targetPath, usable, {risk:totRisk, profit:totProfit});

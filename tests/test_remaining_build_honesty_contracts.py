@@ -149,6 +149,18 @@ def test_today_v2_render_defines_horizon_label_before_target_copy_uses_it():
     assert definition < target_copy
 
 
+def test_today_v2_explains_hidden_multi_timeframe_candidates():
+    audit = _extract_function("_todayV2TimeframeAuditPanel")
+    render = _extract_function("_todayRenderPlan")
+    assert "Other timeframes checked" in audit
+    assert "multi-timeframe scan" in audit
+    assert "live-entry rule says skip now" in audit
+    assert "basket risk was reallocated" in audit
+    assert "_todayReadiness(o)" in audit
+    assert "o._size.skipReason" in audit
+    assert "_todayV2TimeframeAuditPanel(plan, usableIdx, esc)" in render
+
+
 def test_shared_signal_mapper_carries_automatic_backtest_evidence():
     block = _extract_function("_dvSignalFromScanRow")
     assert "_btVerified: r._btVerified === true" in block
