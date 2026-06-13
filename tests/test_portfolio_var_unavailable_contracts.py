@@ -1,28 +1,27 @@
-"""Portfolio VaR unavailable-state frontend contracts."""
+"""Portfolio VaR unavailable-state frontend contracts.
 
+These are static contracts because the Portfolio tab is still rendered from the
+single HTML bundle. They protect against the dangerous false-safety state where
+/api/var errors were converted into $0.00 / 0.00% "healthy" risk.
+"""
 from pathlib import Path
-
 
 HTML = Path("static/index-v2-prototype.html").read_text(encoding="utf-8")
 
 
-def _extract_function(name: str) -> str:
-    function_prefix = f"function {name}("
-    async_prefix = f"async function {name}("
-    if function_prefix in HTML:
-        start = HTML.index(function_prefix)
-    else:
-        start = HTML.index(async_prefix)
-
+def _extract_function(name):
+    start = HTML.index(f"function {name}(") if f"function {name}(" in HTML else HTML.index(f"async function {name}(")
     depth = 0
-    for index in range(start, len(HTML)):
-        char = HTML[index]
-        if char == "{":
+    i = start
+    while i < len(HTML):
+        c = HTML[i]
+        if c == "{":
             depth += 1
-        elif char == "}":
+        elif c == "}":
             depth -= 1
             if depth == 0:
-                return HTML[start : index + 1]
+                return HTML[start : i + 1]
+        i += 1
     raise ValueError(f"Could not extract {name}")
 
 

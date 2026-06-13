@@ -156,6 +156,61 @@ def test_scale_out_banner_only_in_multi_mode():
     assert "!_isSingle" in block
 
 
+def test_size_entry_brain_advisory_card_is_present():
+    """Size must show the same entry-brain decision surface as Today."""
+    assert 'id="szEntryBrainCard"' in HTML
+    assert "function _szLoadEntryBrain(" in HTML
+    assert "function _szRenderEntryBrainCard(" in HTML
+
+
+def test_size_entry_brain_sends_backtest_evidence():
+    """Size advisory must include proven backtest fields before any auto-authority."""
+    start = HTML.index("function _szEntryBrainPayload(")
+    end = HTML.index("\nfunction ", start + 1)
+    block = HTML[start:end]
+    assert "_btVerified:sig._btVerified===true" in block
+    assert "_btPf:sig._btPf" in block
+    assert "_btExpectancy:sig._btExpectancy" in block
+    assert "_btTrades:sig._btTrades" in block
+
+
+def test_size_entry_brain_can_auto_select_only_existing_execution_modes():
+    """The brain may switch Size between single and existing scale-out, not live scale-in."""
+    start = HTML.index("function _szLoadEntryBrain(")
+    end = HTML.index("\nfunction ", start + 1)
+    block = HTML[start:end]
+    assert "dvFetch('/api/entry-plan/advisory'" in block
+    assert "data.execution_authority===true" in block
+    assert "data.recommended_mode==='scale_out'" in block
+    assert "szSetMode('multi','brain')" in block
+    assert "data.recommended_mode==='single'" in block
+    assert "szSetMode('single','brain')" in block
+    assert "data.recommended_mode==='scale_in'" not in block[block.index("if(data && data.execution_authority===true"):]
+
+
+def test_size_entry_brain_protects_manual_override():
+    """Manual Size mode changes must stop the advisory brain from flipping the user's mode."""
+    start = HTML.index("function szSetMode(")
+    end = HTML.index("\nfunction ", start + 1)
+    block = HTML[start:end]
+    assert "function szSetMode(mode, source)" in block
+    assert "if(source!=='brain') window._szEntryBrainUserOverride=true" in block
+
+
+def test_size_entry_brain_explains_scale_in_vs_scale_out_truthfully():
+    """Size UI must distinguish shared-entry scale-out from different-entry scale-in."""
+    card_start = HTML.index("function _szRenderEntryBrainCard(")
+    card_end = HTML.index("\nfunction ", card_start + 1)
+    card = HTML[card_start:card_end]
+    render_start = HTML.index("function szLadderRender(")
+    render_end = HTML.index("\nfunction ", render_start + 1)
+    render = HTML[render_start:render_end]
+    assert "Advisory only - live execution authority is locked" in card
+    assert "different entries" in card
+    assert "Scale-out plan" in render
+    assert "shared entry" in render
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # P2-10  Bottom bar — planned profit always shown; shortfall additional
 # ─────────────────────────────────────────────────────────────────────────────

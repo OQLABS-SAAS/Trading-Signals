@@ -2997,6 +2997,16 @@ hr, .divider, [class*="-sep"], [class*="-divider"] {
 .tier-opt-icon{margin-bottom:10px;display:flex;justify-content:center;}
 .tier-opt-name{font-size:11px;font-weight:700;color:var(--t1);letter-spacing:.07em;margin-bottom:5px;}
 .tier-opt-desc{font-size:10px;color:var(--t3);line-height:1.55;}
+@media(max-width:520px){
+  .tier-modal-box{padding:28px 28px;max-width:350px;width:calc(100% - 40px);}
+  .tier-modal-title{font-size:19px;}
+  .tier-modal-sub{font-size:12px;margin-bottom:20px;}
+  .tier-opts{grid-template-columns:1fr;gap:10px;margin-bottom:22px;}
+  .tier-opt{display:grid;grid-template-columns:28px 1fr;grid-template-areas:"icon name" "icon desc";column-gap:10px;align-items:center;text-align:left;padding:13px 14px;min-height:74px;}
+  .tier-opt-icon{grid-area:icon;margin:0;align-self:center;justify-content:center;}
+  .tier-opt-name{grid-area:name;margin:0 0 3px;font-size:11px;line-height:1.2;}
+  .tier-opt-desc{grid-area:desc;font-size:10px;line-height:1.35;}
+}
 .tier-confirm-btn{width:100%;padding:12px;border-radius:8px;border:none;background:rgba(237,232,216,.12);color:rgba(237,232,216,.9);font-size:11px;font-weight:700;letter-spacing:.08em;cursor:pointer;transition:all .18s;}
 .tier-confirm-btn:hover{background:rgba(237,232,216,.22);box-shadow:0 0 16px rgba(237,232,216,.18);}
 body.tier-beginner [data-tier="trader"]{display:none!important;}
@@ -3069,6 +3079,8 @@ body.tier-trader [data-tier="pro"]{display:none!important;}
 .sc-pill.buy{background:rgba(93,232,160,.09);border:1px solid rgba(93,232,160,.25);color:#5de8a0;}
 .sc-pill.sell{background:rgba(232,112,110,.09);border:1px solid rgba(232,112,110,.25);color:#e8706e;}
 .sc-pill.hold{background:rgba(237,232,216,.05);border:1px solid rgba(237,232,216,.16);color:rgba(237,232,216,.55);}
+.sc-tf-cell-btn{border:0;background:transparent;padding:0;min-width:0;min-height:0;display:inline-flex;align-items:center;justify-content:flex-start;cursor:pointer;font:inherit;color:inherit;}
+.sc-tf-cell-btn:focus-visible{outline:1px solid rgba(93,232,160,.65);outline-offset:2px;border-radius:4px;}
 .sc-bull-wrap{display:flex;align-items:center;gap:7px;}
 .sc-bull-track{flex:1;height:3px;background:rgba(237,232,216,.08);border-radius:2px;min-width:50px;}
 .sc-bull-fill{height:100%;background:rgba(93,232,160,.7);border-radius:2px;box-shadow:0 0 5px rgba(93,232,160,.3);}
@@ -10166,6 +10178,13 @@ function _mt5OrderErrorText(res){
   if(raw) return _dvHumanizeError(raw);
   return 'Order failed — check MT5 connection';
 }
+function _dvCurrentMt5AccountId(){
+  var state = window._mt5LastState || window._todayLastMt5State || {};
+  var acct = state.account || {};
+  var id = state.account_id || acct.id || acct.account_id || acct.trading_account_id;
+  var n = parseInt(id, 10);
+  return isFinite(n) && n > 0 ? n : null;
+}
 // ─── ERROR HYGIENE (2026-06-10, Omar saw a raw psycopg2 dump) ─────────
 // A trader must NEVER read SQL, stack traces, or driver internals. Map any
 // technical error to a short human sentence; keep the technical detail in
@@ -10356,53 +10375,19 @@ async function qpAnalyse(presetTicker, presetTf) {
       const allTfs = ['15m','30m','1h','4h','1d','1w','1mo'];
       const assetType = window._dvAsset || 'crypto';
       const tickerList = [sym];
-      const scanResults = [];
-      const scanErrors = [];
-
-      for (let i = 0; i < allTfs.length; i++) {
-        const tf = allTfs[i];
-        try {
-          const r = await dvFetch('/api/scan-list', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({ tickers: tickerList, asset_type: assetType, timeframe: tf })
-          });
-          if (r && r.results) {
-            r.results.forEach(function(res){ if (res) { res._tf = tf; scanResults.push(res); } });
-          } else {
-            if (r && r.error) scanErrors.push(r.error);
-          }
-        } catch(e) {
-          scanErrors.push(e?.message || 'fetch error for ' + tf);
-        }
-      }
+      var scan = await _runScanBase([{tickers:tickerList, asset_type:assetType, tfs:allTfs}], null, function(done,total,found){
+        if(statusEl) statusEl.textContent = 'Scanning ' + sym + ' across ' + done + ' of ' + total + ' timeframes… ' + found + ' hits';
+      });
+      const scanResults = (scan && scan.results) || [];
+      const scanErrors = (scan && scan.errors) || [];
 
       const rawOpps = scanResults
         .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
-        .map(function(r){
-          return {
-            sym:     sym,
-            tf:      (r._tf || '1d').toUpperCase(),
-            sig:     r.signal,
-            id:      sym + ':' + (r._tf || '1d').toUpperCase() + ':' + r.signal + ':' + Date.now(),
-            entry:   r.entry     || null,
-            sl:      r.stop_loss  || null,
-            tp:      r.tp1        || null,
-            tp2:     r.tp2        || null,
-            tp3:     r.tp3        || null,
-            rr:      r.rr1 || r.rr || '--',
-            conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
-            confLbl: r.confidence_label || r.confidence || 'LIKELY',
-            asset:   assetType,
-            reason:  r.reason || r.summary || 'Live DotVerse signal',
-            bullCount:   r.bull_score   || 0,
-            bearCount:   r.bear_score   || 0,
-            volRatio:    r.vol_ratio    || 1.0,
-            quality:     r.quality || null,
-            smc_structures: r.smc_structures || null,
-            regime_context: r.regime_context || ''
-          };
-        });
+        .map(function(r){ return _dvSignalFromScanRow(r, r.timeframe || r.tf || '1d', assetType); });
+      await _todayAutoBacktestCandidates(rawOpps);
+      rawOpps.sort(function(a,b){
+        return ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
+      });
 
       if (rawOpps.length === 0) {
         statusEl.textContent = 'No signals found for ' + sym + '.' + (scanErrors.length ? ' (' + scanErrors.length + ' scan(s) failed)' : '');
@@ -10511,33 +10496,14 @@ async function qpScanAll() {
     const result = await _runScanBase(ALL_SCAN_GROUPS, _qpScanAbortCtrl.signal);
     if (_qpScanAbort) { _qpScanBusy = false; return; }
 
-    // Map raw results to uniform opp objects
+    // Map raw results through the shared signal contract used by Today, Signals, and Scanner.
     const rawOpps = (result.results || [])
       .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
-      .map(function(r){
-        return {
-          sym:     r.ticker || r.symbol || '',
-          tf:      (r.timeframe || '1d').toUpperCase(),
-          sig:     r.signal,
-          id:      (r.id) || (r.ticker||r.symbol)+':'+(r.timeframe||'1d').toUpperCase()+':'+r.signal+':'+Date.now(),
-          entry:   r.entry     || null,
-          sl:      r.stop_loss  || null,
-          tp:      r.tp1        || null,
-          tp2:     r.tp2        || null,
-          tp3:     r.tp3        || null,
-          rr:      r.rr1 || r.rr || '--',
-          conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
-          confLbl: r.confidence_label || r.confidence || 'LIKELY',
-          asset:   r.asset_type || 'equity',
-          reason:  r.reason || r.summary || 'Live DotVerse signal',
-          bullCount:   r.bull_score   || 0,
-          bearCount:   r.bear_score   || 0,
-          volRatio:    r.vol_ratio    || 1.0,
-          quality:     r.quality || null,
-          smc_structures: r.smc_structures || null,
-          regime_context: r.regime_context || ''
-        };
-      });
+      .map(function(r){ return _dvSignalFromScanRow(r, r.timeframe || r.tf || '1d', r.asset_type || 'stock'); });
+    await _todayAutoBacktestCandidates(rawOpps);
+    rawOpps.sort(function(a,b){
+      return ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
+    });
 
     if (rawOpps.length === 0) {
       statusEl.textContent = 'No signals found. ' + (result.errors.length || 0) + ' error(s).';
@@ -10553,7 +10519,7 @@ async function qpScanAll() {
     statusEl.textContent = _dvSignalCountLabel(rawOpps) + ' across all markets' + (result.errors.length ? ' (' + result.errors.length + ' scan(s) failed)' : '');
     clearBtn.style.display = '';
 
-    // Render compact signal cards (no backtesting — pure scan results inline)
+    // Render compact signal cards after automatic backtest enrichment.
     var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
     const cards = rawOpps.map(function(o, i){
       var cc = _confColor(o.sig);
@@ -12092,6 +12058,7 @@ function _todayRiskPresetBar(){
 function _todaySetRiskPreset(mode){
   var c=window._todayCfg||{}; var p=_todayPreset(mode);
   c.ladderMode=p.id; c.riskPct=p.riskPct;
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   var r=document.getElementById('todayRisk'); if(r) r.value=p.riskPct;
   var lm=document.getElementById('todayLadderMode'); if(lm) lm.value=p.id;
   var acct=_todaySyncAccountFromDom();
@@ -12197,72 +12164,51 @@ async function _todayBuildPlan(){
   // Multi-timeframe scan: use the same full universe as the shared scanner so Today
   // can choose from the same broad opportunity pool, then narrow it to an account-fit plan.
   var baseGroups=(typeof ALL_SCAN_GROUPS!=='undefined'?ALL_SCAN_GROUPS:[]).map(function(g){
-    return {asset:g.asset_type, tickers:g.tickers, tfs:g.daily_only?['1d']:['15m','30m','1h','4h','1d','1w']};
+    return {asset:g.asset_type, asset_type:g.asset_type, tickers:g.tickers, daily_only:!!g.daily_only, tfs:g.daily_only?['1d']:['15m','30m','1h','4h','1d','1w']};
   });
   var groups=(baseGroups.length?baseGroups:[
-    {asset:'crypto', tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','LINKUSD','ADAUSD','AVAXUSD','DOGEUSD','DOTUSD'], tfs:['15m','30m','1h','4h','1d','1w']},
-    {asset:'stock',  tickers:['NVDA','AAPL','TSLA','AMZN','MSFT','META','AMD','GOOGL','NFLX','AVGO'], tfs:['15m','30m','1h','4h','1d','1w']},
-    {asset:'forex',  tickers:['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','EURJPY','GBPJPY'], tfs:['15m','30m','1h','4h','1d','1w']},
-    {asset:'commodity', tickers:['XAUUSD','XAGUSD','WTI','NATGAS'], tfs:['1d']},
-    {asset:'index',  tickers:['SPX','NDX','DJI','RUT'], tfs:['1d']}
+    {asset:'crypto', asset_type:'crypto', tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD','XRPUSD','LINKUSD','ADAUSD','AVAXUSD','DOGEUSD','DOTUSD'], tfs:['15m','30m','1h','4h','1d','1w']},
+    {asset:'stock', asset_type:'stock',  tickers:['NVDA','AAPL','TSLA','AMZN','MSFT','META','AMD','GOOGL','NFLX','AVGO'], tfs:['15m','30m','1h','4h','1d','1w']},
+    {asset:'forex', asset_type:'forex',  tickers:['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','EURJPY','GBPJPY'], tfs:['15m','30m','1h','4h','1d','1w']},
+    {asset:'commodity', asset_type:'commodity', tickers:['XAUUSD','XAGUSD','WTI','NATGAS'], tfs:['1d']},
+    {asset:'index', asset_type:'index',  tickers:['SPX','NDX','DJI','RUT'], tfs:['1d']}
   ]).filter(function(g){ return c.classes.indexOf(g.asset)>=0; });
-  // Build all (class × timeframe) scan jobs, then run them with LIMITED CONCURRENCY —
-  // a broader universe stays fast, but we cap parallel calls so we don't trip Yahoo's
-  // rate limit on cloud IPs (which would silently drop signals).
-  var jobs=[];
-  groups.forEach(function(g){ g.tfs.forEach(function(gtf){ jobs.push({asset:g.asset, tickers:g.tickers, tf:gtf}); }); });
   var opps=[];
   function _ingest(rows, gtf, gasset){
     (rows||[]).forEach(function(row){
       if(!row.signal||row.error||(row.signal!=='BUY'&&row.signal!=='SELL'))return;
       if(!row.entry||!(row.stop_loss||row.sl)||!(row.tp1||row.tp))return;
-      opps.push({
-        sym: row.ticker||row.symbol||'', tf:(row.timeframe||gtf).toUpperCase(), sig:row.signal,
-        entry:row.entry, sl:row.stop_loss||row.sl, tp:row.tp1||row.tp, tp2:row.tp2||null, tp3:row.tp3||null,
-        asset:gasset, conf: row.confidence_pct!=null?row.confidence_pct:(row.bull_score!=null&&((row.bull_score+row.bear_score)>0)?Math.round(row.bull_score/((row.bull_score||0)+(row.bear_score||0))*100):0),
-        confLbl: row.confidence_label||row.confidence||'LIKELY',
-        qscore: (row.quality&&(row.quality.score!=null?row.quality.score:row.quality))||row.confidence_pct||0,
-        rr1Raw: row.rr1_raw!=null?row.rr1_raw:null, spreadCost:row.spread_cost!=null?row.spread_cost:null, spreadQuality:row.spread_quality||'fair',
-        bullCount:row.bull_score||0, bearCount:row.bear_score||0, volRatio:row.vol_ratio||1.0, reason:row.reason||row.summary||'Live DotVerse signal',
-        atr: row.atr!=null?row.atr:(row.atr_value!=null?row.atr_value:null), rsi: row.rsi!=null?row.rsi:50,
-        quality: row.quality||null, smc_structures: row.smc_structures||null, regime_context: row.regime_context||'',
-        winRate: (row.win_rate!=null?row.win_rate:null), winRateN: (row.win_rate_n!=null?row.win_rate_n:0)
-      });
+      opps.push(_dvSignalFromScanRow(row, gtf, gasset));
     });
   }
-  var _ji=0, _jDone=0;
+  var _jDone=0, _jTotal=groups.reduce(function(n,g){ return n + ((g.tfs||[]).length || 1); },0), _jFail=0;
   // ITEM 4: live progress for the Today basket scan — same pattern as the
   // Signal tab scanner. Updates the spinner caption AND the "Scanning forex
   // crypto…" strip so the scan never looks frozen.
   function _todayScanProgress(){
     var uniq=(typeof _dvUniqueSignalCount==='function')?_dvUniqueSignalCount(opps):opps.length;
-    var msg='Scanning '+_jDone+' of '+jobs.length+' market scans… '+uniq+' setup'+(uniq===1?'':'s')+' found';
+    var msg='Scanning '+_jDone+' of '+_jTotal+' market·timeframes… '+uniq+' setup'+(uniq===1?'':'s')+' found';
     var cap=document.getElementById('todayScanProgress');
     if(cap) cap.textContent=msg;
     var strip=document.querySelector('.today-v2-scan');
     if(strip && !strip._dvStatic) strip.innerHTML='<span>'+msg+'</span>';
   }
-  async function _scanWorker(){
-    while(_ji<jobs.length){
-      var job=jobs[_ji++];
-      try{
-        var r=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tickers:job.tickers, asset_type:job.asset, timeframe:job.tf})});
-        _ingest((r&&r.results)||[], job.tf, job.asset);
-      }catch(e){}
-      _jDone++; _todayScanProgress();
-    }
-  }
   try{
-    var _pool=[]; for(var _k=0;_k<Math.min(4,jobs.length);_k++) _pool.push(_scanWorker());
-    await Promise.all(_pool);
-  }catch(e){}
+    var res=await _runScanBase(groups, null, function(done,total,found){
+      _jDone=done; _jTotal=total||_jTotal; _todayScanProgress();
+    });
+    _ingest((res&&res.results)||[], null, null);
+    _jFail=(res&&res.errors&&res.errors.length)||0;
+  }catch(e){ _jFail++; }
   // ITEM 4: close out the progress strip honestly once the scan finishes.
   (function(){
     var _uniq=(typeof _dvUniqueSignalCount==='function')?_dvUniqueSignalCount(opps):opps.length;
     var _strip=document.querySelector('.today-v2-scan');
-    if(_strip) _strip.innerHTML='<span>Scan complete</span><span>'+_uniq+' setup'+(_uniq===1?'':'s')+' found</span>';
+    var _label=_jFail?'Partial scan - '+_jFail+' market scan'+(_jFail===1?'':'s')+' failed':'Scan complete';
+    if(_strip) _strip.innerHTML='<span>'+_label+'</span><span>'+_uniq+' setup'+(_uniq===1?'':'s')+' found</span>';
     var _cap=document.getElementById('todayScanProgress');
-    if(_cap) _cap.textContent='Scan complete — '+_uniq+' setup'+(_uniq===1?'':'s')+' found';
+    if(_cap) _cap.textContent=_label+' — '+_uniq+' setup'+(_uniq===1?'':'s')+' found';
+    if(_jFail && typeof _dvToast==='function') _dvToast('Today scan degraded — some markets did not answer','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
   })();
   // Quality-FIRST ranking: composite quality score, then confidence.
   opps.sort(function(a,b){ return (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0); });
@@ -12271,6 +12217,10 @@ async function _todayBuildPlan(){
   var QFLOOR=45;
   var ranked = opps.filter(function(o){ return (o.qscore||0)>=QFLOOR; })
                .concat(opps.filter(function(o){ return (o.qscore||0)<QFLOOR; }));
+  await _todayAutoBacktestCandidates(ranked);
+  ranked.sort(function(a,b){
+    return ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
+  });
   var plan=_todaySelectPlan(ranked, c);
   // Total qualifying setups found — counted as UNIQUE SYMBOLS, not symbol×timeframe.
   // We scan each symbol on 3 timeframes, so opps.length triple-counts (e.g. ETHUSD 1h/4h/1d
@@ -12279,6 +12229,12 @@ async function _todayBuildPlan(){
   // Cache the full ranked candidate pool so changing Max-per-class / Max-trades can
   // re-select INSTANTLY without a fresh scan.
   window._todayOpps = ranked;
+  var _planKeys={};
+  plan.forEach(function(o){ _planKeys[((o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'')).toUpperCase()]=1; });
+  window._todayDeferredOpps = ranked.filter(function(o){
+    return !_planKeys[((o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'')).toUpperCase()];
+  });
+  _todayRefreshBasketCandidateActions(plan, window._todayDeferredOpps, c);
   // How many quality setups we had to leave out of the plan (caps / diversification).
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=QFLOOR;}).reduce(function(acc,o){ if(!acc.seen[o.sym]){acc.seen[o.sym]=1;acc.n++;} return acc; },{seen:{},n:0}).n - plan.length);
   // RISK PER TRADE MODEL — the top % is applied to each selected setup. Basket
@@ -12870,6 +12826,7 @@ function _todaySetMaxPerClass(v){ var n=parseInt(v); if(!(n>0))return; window._t
 function _todaySetMaxTrades(v){ var n=parseInt(v); if(!(n>0))return; window._todayCfg.maxTrades=n; if((window._todayOpps||[]).length) _todayReselect(); }
 function _todaySetProfitGoal(v){
   var n=parseFloat(v)||0; window._todayCfg.profitGoal=n;
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   if((window._todayPlan||[]).length && typeof _todayRenderPlan==='function') _todayRenderPlan();
   else if((window._todayOpps||[]).length) _todayReselect();
   else if(typeof _todayRenderTop==='function') _todayRenderTop();
@@ -12918,6 +12875,7 @@ function _todaySetGlobalRisk(val){
     if(typeof _dvToast==='function') _dvToast('Capped at '+_TODAY_PER_CAP+'% per trade — Today will not build unsafe oversized trades','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
   }
   c.riskPct=r;
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   var acct=_todaySyncAccountFromDom();
   if(!(acct>0)){
     if(typeof _dvToast==='function') _dvToast('Enter account size first so risk % can calculate trade size','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
@@ -13547,13 +13505,25 @@ function _todayWeeklyTargetProgress(){
   }catch(e){}
   return {known:seen, value:total};
 }
+function _todayGoalProgressValue(horizon){
+  horizon=String(horizon||'weekly').toLowerCase();
+  var briefing=window._dvBriefing||{}, pnl=briefing.pnl||{};
+  var keys={daily:['today','daily'],weekly:['week','weekly'],monthly:['month','monthly']}[horizon]||['week','weekly'];
+  for(var i=0;i<keys.length;i++){
+    var v=parseFloat(pnl[keys[i]]);
+    if(isFinite(v)) return {known:true,value:v};
+  }
+  if(horizon==='weekly') return _todayWeeklyTargetProgress();
+  return {known:false,value:0};
+}
 function _todayProtectMode(){
-  var c=window._todayCfg||{}, goal=parseFloat(c.profitGoal)||0, prog=_todayWeeklyTargetProgress();
+  var c=window._todayCfg||{}, goal=parseFloat(c.profitGoal)||0, prog=_todayGoalProgressValue(c.goalHorizon||'weekly');
   return !!window._todayTargetReached || !!c.targetReached || (prog.known && goal>0 && prog.value>=goal);
 }
 function _todayV2Select(idx){ window._todaySelectedIdx=idx; window._todayExpandedIdx=idx; _todayRenderPlan(); }
 function _todayV2SetScale(idx,on){
   var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._entryBrainUserOverride=true;
   o._multiEnabled=!!on;
   if(o._multiEnabled){
     o._ladderMode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
@@ -13567,6 +13537,7 @@ function _todayV2SetScale(idx,on){
 
 function _todayV2SetLadderMode(idx, mode){
   var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._entryBrainUserOverride=true;
   o._multiEnabled=true;
   o._ladderMode=mode||'beginner';
   o._ladder=_todayDefaultLadder(o._ladderMode);
@@ -13597,6 +13568,77 @@ function _todayV2ScaleState(o, legs){
   };
 }
 
+function _todayEntryBrainModeLabel(mode){
+  mode=String(mode||'single').toLowerCase();
+  if(mode==='scale_in') return 'Scale-in';
+  if(mode==='scale_out') return 'Scale-out';
+  if(mode==='wait') return 'Wait';
+  return 'Single';
+}
+function _todayV2LoadEntryBrain(o, idx){
+  if(!o || o._entryBrain || o._entryBrainLoading || o._entryBrainError) return;
+  if(!(o.sym&&o.sig&&o.entry&&o.sl&&o.tp)) return;
+  o._entryBrainLoading=true;
+  dvFetch('/api/entry-plan/advisory',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      ticker:o.sym,
+      asset_type:o.asset||o.asset_type||'stock',
+      timeframe:o.tf||'4h',
+      signal:o.sig,
+      entry:o.entry,
+      stop_loss:o.sl,
+      tp1:o.tp,
+      tp2:o.tp2||null,
+      tp3:o.tp3||null,
+      account_risk_amount:o._size&&o._size.netLoss?Math.abs(o._size.netLoss):100,
+      _btVerified:o._btVerified===true,
+      _btPf:o._btPf,
+      _btExpectancy:o._btExpectancy,
+      _btTrades:o._btTrades
+    })
+  }).then(function(data){
+    o._entryBrainLoading=false;
+    if(!data){ o._entryBrainError='Entry brain unavailable'; return; }
+    o._entryBrain=data;
+    if(data.execution_authority===true && !o._entryBrainUserOverride){
+      if(data.recommended_mode==='scale_out'){
+        o._multiEnabled=true;
+        o._ladderMode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
+        o._ladder=o._ladder||_todayDefaultLadder(o._ladderMode);
+      }else if(data.recommended_mode==='single'){
+        o._multiEnabled=false;
+      }
+    }
+    if((window._todayPlan||[]).indexOf(o)>=0) _todayRenderPlan();
+  }).catch(function(e){
+    o._entryBrainLoading=false;
+    o._entryBrainError=(e&&e.message)||'Entry brain unavailable';
+    if((window._todayPlan||[]).indexOf(o)>=0) _todayRenderPlan();
+  });
+}
+function _todayV2EntryBrainCard(o){
+  var esc=function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  var b=o&&o._entryBrain;
+  if(o&&o._entryBrainLoading){
+    return '<div class="today-v2-path"><div class="td-mini">Entry brain</div><b>Checking single vs scale-out vs scale-in...</b><div class="today-v2-copy" style="margin-top:7px">DotVerse is reading structure and backtest evidence. Live orders are not changed while this is loading.</div></div>';
+  }
+  if(!b){
+    return '<div class="today-v2-path"><div class="td-mini">Entry brain</div><b>Advisory pending</b><div class="today-v2-copy" style="margin-top:7px">'+esc((o&&o._entryBrainError)||'DotVerse will choose an execution style once chart evidence is available.')+'</div></div>';
+  }
+  var mode=_todayEntryBrainModeLabel(b.recommended_mode);
+  var cls=b.execution_authority?'green':(b.recommended_mode==='scale_in'||b.recommended_mode==='wait'?'gold':'blue');
+  var ruleText=b.rule_statuses?Object.keys(b.rule_statuses).map(function(k){return k+': '+b.rule_statuses[k];}).join(' | '):'';
+  var ev=(b.evidence||[]).slice(0,3).map(function(x){return '<div>- '+esc(x)+'</div>';}).join('');
+  var authority=b.execution_authority?'DotVerse may apply this mode automatically.':'Advisory only - live execution authority is locked.';
+  return '<div class="today-v2-path"><div class="td-mini">Entry brain | '+esc(mode)+'</div><b class="'+cls+'">'+esc(mode)+' recommended</b><div class="today-v2-copy" style="margin-top:7px">'+esc(b.authority_reason||authority)+'</div>'
+    + '<div class="today-v2-copy" style="margin-top:8px">'+esc(b.reason||'No detailed reason returned.')+'</div>'
+    + (ev?'<div class="today-v2-copy" style="margin-top:8px">'+ev+'</div>':'')
+    + (ruleText?'<div class="today-v2-copy" style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42)">'+esc(ruleText)+'</div>':'')
+    + '</div>';
+}
+
 function _todayV2Duration(tf){
   var t=String(tf||'').toLowerCase().replace(/\s+/g,'');
   if(t.indexOf('15m')>=0) return {hold:'30m-2h', eta:'TP1 ~30-90m', mins:90};
@@ -13620,23 +13662,26 @@ function _todayV2EtaText(mins){
 function _todayV2TargetPath(usable, goal, money2){
   goal=parseFloat(goal)||0;
   var _c=window._todayCfg||{};
+  var _pace=(typeof _todayGoalPace==='function')?_todayGoalPace():{todayTarget:goal,periodGoal:goal,horizon:(_c.goalHorizon||'weekly'),daysLeft:1};
+  var _paceGoal=parseFloat(_pace.todayTarget)||goal;
   var _tpHorizonLbl=({'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[(_c.goalHorizon||'weekly')])||'Weekly';
   var _tpHorizonLow=_tpHorizonLbl.toLowerCase();
+  var _paceCopy=_pace.horizon==='daily'?'today target':'today pace toward the '+_tpHorizonLow+' target';
   var items=(usable||[]).map(function(item){
     var o=item.o, lt=_todayLadderTotals(o), d=_todayV2Duration(o.tf);
     return {sym:o.sym, tf:o.tf, profit:lt.profit||(o._size&&o._size.netTP1)||0, mins:d.mins, hold:d.hold};
   }).sort(function(a,b){ return a.mins-b.mins; });
   var total=items.reduce(function(a,x){ return a+(x.profit||0); },0);
-  if(!(goal>0)) return {title:'No '+_tpHorizonLow+' target set', text:'Set a '+_tpHorizonLow+' target so DotVerse can show the path and timing.', eta:'--', covered:false, shortfall:0, total:total};
+  if(!(goal>0)) return {title:'No '+_tpHorizonLow+' target set', text:'Set a '+_tpHorizonLow+' target so DotVerse can show the path and timing.', eta:'--', covered:false, shortfall:0, total:total, paceGoal:_paceGoal, periodGoal:goal};
   var acc=0, hit=null;
   for(var i=0;i<items.length;i++){
     acc+=items[i].profit||0;
-    if(acc>=goal){ hit={idx:i+1, mins:items[i].mins, sym:items[i].sym}; break; }
+    if(acc>=_paceGoal){ hit={idx:i+1, mins:items[i].mins, sym:items[i].sym}; break; }
   }
   if(hit){
-    return {title:'Target path covered', text:'If targets resolve in order, the '+_tpHorizonLow+' target can be reached around '+_todayV2EtaText(hit.mins)+' after '+hit.idx+' trade'+(hit.idx===1?'':'s')+'. After that, pause new entries and protect runners.', eta:_todayV2EtaText(hit.mins), covered:true, shortfall:0, total:total};
+    return {title:'Today pace covered', text:'If targets resolve in order, today can cover '+money2(_paceGoal)+' of pace toward the '+_tpHorizonLow+' target around '+_todayV2EtaText(hit.mins)+' after '+hit.idx+' trade'+(hit.idx===1?'':'s')+'. The rest of the '+_tpHorizonLow+' plan stays in Scout instead of being forced now.', eta:_todayV2EtaText(hit.mins), covered:true, shortfall:0, total:total, paceGoal:_paceGoal, periodGoal:goal, paceCopy:_paceCopy};
   }
-  return {title:'Target not covered', text:'This basket covers '+(goal>0?Math.min(100,total/goal*100).toFixed(0):0)+'% of the '+_tpHorizonLow+' target and still needs '+money2(goal-total)+'. DotVerse should keep scouting instead of forcing size.', eta:'scout mode', covered:false, shortfall:Math.max(0,goal-total), total:total};
+  return {title:'Today pace not covered', text:'This basket covers '+(_paceGoal>0?Math.min(100,total/_paceGoal*100).toFixed(0):0)+'% of today\'s pace and still needs '+money2(_paceGoal-total)+'. DotVerse should keep scouting instead of forcing the whole '+_tpHorizonLow+' goal into today.', eta:'scout mode', covered:false, shortfall:Math.max(0,_paceGoal-total), total:total, paceGoal:_paceGoal, periodGoal:goal, paceCopy:_paceCopy};
 }
 
 function _todayV2ToggleAuto(idx, key){
@@ -13696,10 +13741,14 @@ function _todayV2ScoutPanel(targetPath, cfg, money2){
   var shortfall=targetPath.shortfall||0;
   return '<div class="today-v2-scout '+(on?'on':'')+'"><div><div class="td-mini">'+(on?'Scout mode armed':'Scout mode available')+'</div><b>'+(targetPath.covered?'Target path found':'Keep hunting for the missing '+money2(shortfall))+'</b><div class="today-v2-copy" style="margin-top:6px">'+(on?'DotVerse will keep using the 15-minute server scanner for Telegram/in-app alerts, and this open app will rebuild Today and play an alarm when a basket covers the '+_spHorizonLow+' target.':'Arm Scout so DotVerse does not stop at needs rebuild. It keeps scanning for better setups and alerts you instead of forcing oversize risk.')+'</div></div><button onclick="_todayV2ArmScout('+(!on)+')">'+(on?'Scout ON':'Alert me')+'</button></div>';
 }
-function _todayV2ProtectSummary(){
-  var c=window._todayCfg||{}, prog=_todayWeeklyTargetProgress();
-  try{ dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'protect',goal:parseFloat(c.profitGoal)||0,profit:prog.known?prog.value:0,risk:0,eta:'protect mode',trades:(window._todayPlan||[]).length})}); }catch(e){}
-  if(typeof _dvToast==='function') _dvToast('Protect mode active - new entries paused, open trades stay monitored','rgba(93,232,160,.15)','rgba(93,232,160,.4)');
+async function _todayV2ProtectSummary(){
+  var c=window._todayCfg||{}, prog=_todayGoalProgressValue(c.goalHorizon||'weekly');
+  var ok=false;
+  try{
+    var resp=await dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'protect',goal:parseFloat(c.profitGoal)||0,goal_horizon:(c.goalHorizon||'weekly'),profit:prog.known?prog.value:0,risk:0,eta:'protect mode',trades:(window._todayPlan||[]).length})});
+    ok=!!(resp && (resp.status==='ok'||resp.status==='deduped'));
+  }catch(e){}
+  if(typeof _dvToast==='function') _dvToast(ok?'Protect mode active - new entries paused, open trades stay monitored':'Protect mode is local only - server alert was not confirmed',ok?'rgba(93,232,160,.15)':'rgba(232,112,110,.15)',ok?'rgba(93,232,160,.4)':'rgba(232,112,110,.4)');
 }
 function _todayV2PlayAlarm(quiet){
   try{
@@ -13719,17 +13768,34 @@ function _todayV2PlayAlarm(quiet){
     });
   }catch(e){}
 }
-function _todayV2ArmScout(on){
+async function _todayV2ArmScout(on){
   var c=window._todayCfg||{}, path=window._todayLastTargetPath||{};
   var s=_todayV2ScoutState(); s.on=!!on; s.goal=parseFloat(c.profitGoal)||0; s.armedAt=Date.now();
-  _todayV2SaveScout(s);
   if(on){
     _todayV2PlayAlarm(true);
     try{ if('Notification' in window && Notification.permission==='default') Notification.requestPermission(); }catch(e){}
-    try{ dvFetch('/api/automation/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scan_enabled:true,market_alerts_on:true,min_confidence:75})}); }catch(e){}
-    try{ dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'armed',goal:s.goal,profit:path.total||0,risk:0,eta:path.eta||'15 min scan',trades:(window._todayPlan||[]).length})}); }catch(e){}
+    var settingsOk=false, alertOk=false;
+    try{
+      var settingsResp=await dvFetch('/api/automation/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scan_enabled:true,market_alerts_on:true,min_confidence:75})});
+      settingsOk=!!settingsResp;
+    }catch(e){}
+    try{
+      var alertResp=await dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'armed',goal:s.goal,goal_horizon:(c.goalHorizon||'weekly'),profit:path.total||0,risk:0,eta:path.eta||'15 min scan',trades:(window._todayPlan||[]).length})});
+      alertOk=!!(alertResp && (alertResp.status==='ok'||alertResp.status==='deduped'));
+    }catch(e){}
+    if(!(settingsOk&&alertOk)){
+      s.on=false;
+      _todayV2SaveScout(s);
+      if(typeof _dvToast==='function') _dvToast('Today Scout not armed — server alert was not confirmed','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+      _todayRenderPlan();
+      return;
+    }
+    _todayV2SaveScout(s);
     if(typeof _dvToast==='function') _dvToast('Today Scout armed — Telegram/in-app scan alerts are on','rgba(93,232,160,.15)','rgba(93,232,160,.4)');
-  } else if(typeof _dvToast==='function') _dvToast('Today Scout paused','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+  } else {
+    s.on=false; _todayV2SaveScout(s);
+    if(typeof _dvToast==='function') _dvToast('Today Scout paused','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+  }
   _todayV2ScoutSchedule();
   _todayRenderPlan();
 }
@@ -13740,17 +13806,27 @@ function _todayV2ScoutSchedule(){
     try{ if(document.getElementById('todayPlanArea')) _todayBuildPlan(); }catch(e){}
   }, 15*60*1000);
 }
-function _todayV2MaybeScoutAlert(targetPath, usable, totals){
+async function _todayV2MaybeScoutAlert(targetPath, usable, totals){
   var s=_todayV2ScoutState(); if(!s.on||!targetPath||!targetPath.covered) return;
   var key=[Math.round(targetPath.total||0),targetPath.eta,(usable||[]).map(function(x){return x.o&&x.o.sym;}).join(',')].join('|');
   if(s.lastKey===key) return;
   s.lastKey=key; _todayV2SaveScout(s);
   var title='Today Scout found a target path';
-  var body=(usable||[]).length+' trade(s) can cover the weekly target around '+targetPath.eta+'. Review before placing.';
+  var c=window._todayCfg||{};
+  var horizonLbl=({'daily':'daily','weekly':'weekly','monthly':'monthly'}[(c.goalHorizon||'weekly')])||'weekly';
+  var body=(usable||[]).length+' trade(s) can cover today\'s pace toward the '+horizonLbl+' target around '+targetPath.eta+'. Review before placing.';
   _todayV2PlayAlarm(false);
-  try{ if('Notification' in window && Notification.permission==='granted') new Notification(title,{body:body}); }catch(e){}
-  if(typeof _dvToast==='function') _dvToast(title, 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
-  try{ dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'covered',goal:(window._todayCfg||{}).profitGoal||0,profit:targetPath.total||0,risk:Math.abs((totals&&totals.risk)||0),eta:targetPath.eta,trades:(usable||[]).length})}); }catch(e){}
+  var ok=false;
+  try{
+    var resp=await dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'covered',goal:(targetPath.paceGoal||c.profitGoal||0),period_goal:c.profitGoal||0,goal_horizon:(c.goalHorizon||'weekly'),profit:targetPath.total||0,risk:Math.abs((totals&&totals.risk)||0),eta:targetPath.eta,trades:(usable||[]).length})});
+    ok=!!(resp && (resp.status==='ok'||resp.status==='deduped'));
+  }catch(e){}
+  if(ok){
+    try{ if('Notification' in window && Notification.permission==='granted') new Notification(title,{body:body}); }catch(e){}
+    if(typeof _dvToast==='function') _dvToast(title, 'rgba(93,232,160,.15)', 'rgba(93,232,160,.4)');
+  } else if(typeof _dvToast==='function') {
+    _dvToast('Today Scout found a path, but server alert was not confirmed','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+  }
 }
 
 function _todayAllocate(plan, acct, basketRisk){
@@ -13800,44 +13876,48 @@ function _todayAllocate(plan, acct, basketRisk){
 // Returns {ahead: bool, pct: number, horizon: string} from intent + briefing cache.
 // No intent set → returns {ahead: false, pct: 0, horizon: null} — back-compat.
 function _todayGoalPace(){
-  // No intent / no goals → back-compat: {ahead: false, pct:0, horizon:null}
   try{
-    var iv = _dvIntentGet();
-    var g  = (iv && iv.goals) || {};
-    var briefing = window._dvBriefing || {};
-    var pnl = briefing.pnl || {};
-    // Use the CHOSEN horizon from _todayCfg if set; fall back to smallest intent horizon
-    var chosenH = (window._todayCfg && window._todayCfg.goalHorizon) || null;
-    var horizon = null, goalVal = 0, pnlVal = 0;
-    // Map chosen horizon → pnl key
-    var _pnlKey = {daily:'today', weekly:'week', monthly:'month'};
-    if(chosenH && (chosenH==='daily'||chosenH==='weekly'||chosenH==='monthly')){
-      horizon = chosenH;
-      // Use intent goal for this horizon; derive if missing
-      if(chosenH==='daily') goalVal=parseFloat(g.daily)||0;
-      else if(chosenH==='weekly') goalVal=parseFloat(g.weekly)||0;
-      else if(chosenH==='monthly') goalVal=parseFloat(g.monthly)||0;
-      // Fall back to cfg.profitGoal if intent doesn't have it
-      if(!(goalVal>0)) goalVal=parseFloat((window._todayCfg||{}).profitGoal)||0;
-      pnlVal = parseFloat(pnl[_pnlKey[chosenH]] || 0);
-    } else {
-      // Fall back: pick smallest set horizon from intent
-      if(g.daily > 0){
-        horizon = 'daily'; goalVal = g.daily;
-        pnlVal  = parseFloat(pnl.today || 0);
-      } else if(g.weekly > 0){
-        horizon = 'weekly'; goalVal = g.weekly;
-        pnlVal  = parseFloat(pnl.week || 0);
-      } else if(g.monthly > 0){
-        horizon = 'monthly'; goalVal = g.monthly;
-        pnlVal  = parseFloat(pnl.month || 0);
-      }
+    var cfg=window._todayCfg||{}, iv=_dvIntentGet()||{}, g=iv.goals||{};
+    var briefing=window._dvBriefing||{};
+    var hasIntentGoal=(parseFloat(g.daily)||0)>0||(parseFloat(g.weekly)||0)>0||(parseFloat(g.monthly)||0)>0;
+    if(!hasIntentGoal && !(parseFloat(cfg.profitGoal)>0)){
+      return {ahead:false,pct:0,horizon:null,periodGoal:0,progress:0,remaining:0,daysLeft:1,todayTarget:0,label:'today target'};
     }
-    if(!horizon) return {ahead: false, pct: 0, horizon: null};
-    var pct = goalVal > 0 ? (pnlVal / goalVal * 100) : 0;
-    return {ahead: pct >= 100, pct: pct, horizon: horizon};
+    var horizon=cfg.goalHorizon||_todayDefaultHorizon().horizon||'weekly';
+    if(['daily','weekly','monthly'].indexOf(horizon)<0) horizon='weekly';
+    var goalVal=horizon==='daily'?parseFloat(g.daily)||0:horizon==='weekly'?parseFloat(g.weekly)||0:parseFloat(g.monthly)||0;
+    if(!(goalVal>0)) goalVal=parseFloat(cfg.profitGoal)||0;
+    var prog=_todayGoalProgressValue(horizon), pnlVal=prog.value||0;
+    if(!prog.known && briefing && briefing.pnl){
+      var _bk={daily:'today',weekly:'week',monthly:'month'}[horizon]||'week';
+      var _bv=parseFloat(briefing.pnl[_bk]);
+      if(isFinite(_bv)) pnlVal=_bv;
+    }
+    var now=new Date(), daysLeft=1;
+    if(horizon==='weekly'){
+      var day=now.getDay(); if(day===0) day=7;
+      daysLeft=Math.max(1,6-day); // Mon-Fri trading days left including today; weekend still gives 1.
+    } else if(horizon==='monthly'){
+      var last=new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+      daysLeft=Math.max(1,last-now.getDate()+1);
+    }
+    var remaining=Math.max(0,goalVal-pnlVal);
+    var todayTarget=horizon==='daily'?remaining:Math.max(0,remaining/daysLeft);
+    var pct=goalVal>0?(pnlVal/goalVal*100):0;
+    return {
+      ahead:pct>=100,
+      pct:pct,
+      horizon:horizon,
+      periodGoal:goalVal,
+      progress:pnlVal,
+      remaining:remaining,
+      daysLeft:daysLeft,
+      todayTarget:todayTarget,
+      label:horizon==='daily'?'today target':'today pace toward '+horizon+' target'
+    };
   }catch(e){
-    return {ahead: false, pct: 0, horizon: null};
+    var fallback=parseFloat((window._todayCfg||{}).profitGoal)||0;
+    return {ahead:false,pct:0,horizon:null,periodGoal:fallback,progress:0,remaining:fallback,daysLeft:1,todayTarget:fallback,label:'today target'};
   }
 }
 
@@ -13875,7 +13955,7 @@ function _todaySelectPlan(ranked, cfg){
                .concat((ranked||[]).filter(function(o){ return (o.qscore||0) < effectiveQfloor; }));
   }
 
-  var plan=[], seen={}, goal=parseFloat(cfg.profitGoal)||0;
+  var plan=[], seen={}, goal=parseFloat(pace.todayTarget)||parseFloat(cfg.profitGoal)||0;
   var newRiskBudget=_todayNewRiskBudget(cfg.acct, cfg);
   for(var i=0;i<(filtered||[]).length;i++){
     var o=filtered[i], key=(o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'');
@@ -13888,10 +13968,98 @@ function _todaySelectPlan(ranked, cfg){
   _todayAllocate(plan, cfg.acct, newRiskBudget||0.05);
   return plan;
 }
+function _todayClassifyBasketCandidate(candidate, plan, cfg){
+  candidate=candidate||{}; plan=plan||[]; cfg=cfg||window._todayCfg||{};
+  var key=((candidate.sym||'')+':'+(candidate.tf||'')+':'+(candidate.sig||'')).toUpperCase();
+  if(!candidate.sym||candidate.sig==='HOLD') return {action:'ignore',reason:'not actionable'};
+  for(var i=0;i<plan.length;i++){
+    var p=plan[i]||{}, pkey=((p.sym||'')+':'+(p.tf||'')+':'+(p.sig||'')).toUpperCase();
+    if(pkey===key) return {action:'ignore',reason:'already in basket'};
+    if(p.sym===candidate.sym && p.sig!==candidate.sig) return {action:'watch',reason:'same symbol has opposite basket direction'};
+  }
+  if(candidate._btVerified!==true) return {action:'watch',reason:candidate._btReason||'automatic backtest has not verified this setup yet'};
+  var max=parseInt(cfg.maxTrades)||6, q=_todayQualityScore(candidate)||candidate.qscore||candidate.conf||0;
+  if(plan.length<max) return {action:'add',reason:'open basket slot and candidate is actionable'};
+  var weakestIdx=-1, weakestScore=999;
+  plan.forEach(function(p,idx){
+    var pq=_todayQualityScore(p)||p.qscore||p.conf||0;
+    if(pq<weakestScore){ weakestScore=pq; weakestIdx=idx; }
+  });
+  if(weakestIdx>=0 && q>=weakestScore+10){
+    return {action:'replace',replaceIndex:weakestIdx,reason:'candidate quality is at least one notch stronger than the weakest basket trade'};
+  }
+  return {action:'watch',reason:'good signal, but basket caps or quality ranking keep it on watch'};
+}
+function _todayRefreshBasketCandidateActions(plan, deferred, cfg){
+  var counts={add:0,replace:0,watch:0,ignore:0};
+  var actions=(deferred||[]).map(function(o){
+    var d=_todayClassifyBasketCandidate(o, plan, cfg);
+    counts[d.action]=(counts[d.action]||0)+1;
+    return Object.assign({}, o, {_basketAction:d.action, _basketReason:d.reason, _replaceIndex:d.replaceIndex});
+  });
+  window._todayCandidateActions=actions;
+  window._todayCandidateActionCounts=counts;
+  return actions;
+}
+async function _todayAutoBacktestCandidates(candidates){
+  candidates=candidates||[];
+  window._todayBtCache=window._todayBtCache||{};
+  var top=candidates.filter(function(o){ return o&&(o.sig==='BUY'||o.sig==='SELL')&&o.entry&&o.sl&&o.tp; }).slice(0,12);
+  var now=Date.now(), ttl=15*60*1000;
+  var gate={win_rate:50, profit_factor:1.0, min_trades:30, min_expectancy:0.10};
+  await Promise.all(top.map(async function(o){
+    var key=(o.sym+':'+o.tf+':'+o.sig).toUpperCase();
+    var cached=window._todayBtCache[key];
+    if(cached && (now-cached.ts)<ttl){
+      Object.assign(o,cached.data);
+      return;
+    }
+    try{
+      var e=parseFloat(String(o.entry).replace(/,/g,'')), s=parseFloat(String(o.sl).replace(/,/g,'')), t=parseFloat(String(o.tp).replace(/,/g,''));
+      if(!isFinite(e)||!isFinite(s)||!isFinite(t)||e<=0||s<=0||t<=0){
+        o._btVerified=false; o._btReason='invalid levels for automatic backtest'; return;
+      }
+      var bt=await Promise.race([
+        dvFetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          ticker:String(o.sym||'').replace('/','').replace('-',''),
+          asset_type:o.asset==='equity'?'stock':(o.asset||'stock'),
+          timeframe:String(o.tf||'4h').toLowerCase(),
+          signal:o.sig,
+          entry:e,
+          stop_loss:s,
+          tp1:t,
+          tp2:o.tp2?parseFloat(String(o.tp2).replace(/,/g,'')):null,
+          tp3:o.tp3?parseFloat(String(o.tp3).replace(/,/g,'')):null
+        })}),
+        new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 9000); })
+      ]);
+      var passes=!!(bt && !bt.error && bt.win_rate!=null &&
+        bt.win_rate>=gate.win_rate &&
+        bt.profit_factor>=gate.profit_factor &&
+        (bt.sample_size||bt.total_trades||0)>=gate.min_trades &&
+        (bt.expectancy||0)>=gate.min_expectancy);
+      var data={
+        _btVerified:passes,
+        _btWr:bt?bt.win_rate:null,
+        _btPf:bt?bt.profit_factor:null,
+        _btTrades:bt?(bt.sample_size||bt.total_trades):null,
+        _btExpectancy:bt?bt.expectancy:null,
+        _btReason:passes?'automatic backtest verified':'automatic backtest did not clear the gate'
+      };
+      Object.assign(o,data);
+      window._todayBtCache[key]={ts:now,data:data};
+    }catch(e){
+      o._btVerified=false;
+      o._btReason='automatic backtest unavailable';
+    }
+  }));
+  return candidates;
+}
 
 function _todaySetGlobalRisk(val){
   var c=window._todayCfg; var r=parseFloat(val); if(!(r>0)) return;
   r=Math.min(12, r); c.riskPct=r;
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   var acct=_todaySyncAccountFromDom();
   if(!(acct>0)){ if(typeof _todayRenderTop==='function') _todayRenderTop(); if(typeof _dvToast==='function') _dvToast('Enter account size first so DotVerse can split basket risk','rgba(201,168,76,.15)','rgba(201,168,76,.4)'); return; }
   var plan=window._todayPlan||[];
@@ -14065,8 +14233,14 @@ function _todayRenderTop(){
   var c=window._todayCfg||{}, acct=parseFloat(c.acct)||0, cap=parseFloat(c.riskPct)||3, used=Math.min(cap,_todayCurrentRiskUsed(acct)), avail=Math.max(0,cap-used), usedPct=cap>0?used/cap*100:0, newPct=cap>0?avail/cap*100:0;
   var protect=_todayProtectMode();
   if(protect){ avail=0; newPct=0; }
-  var prog=_todayWeeklyTargetProgress(), progressLabel=prog.known?_todayMoney2(prog.value):'Monitoring';
   var _horizonLbl = ({'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[(c.goalHorizon||'weekly')])||'Weekly';
+  var prog=_todayGoalProgressValue(c.goalHorizon||'weekly'), progressLabel=prog.known?_todayMoney2(prog.value):'Monitoring';
+  var _pace=(typeof _todayGoalPace==='function')?_todayGoalPace():{todayTarget:parseFloat(c.profitGoal)||0,periodGoal:parseFloat(c.profitGoal)||0,daysLeft:1};
+  var _targetMini=_horizonLbl+' target';
+  var _targetValue=c.profitGoal||500;
+  var _targetSub=_horizonLbl.toLowerCase()==='daily'
+    ? 'Today target'
+    : ('Today pace: +'+_todayMoney2(_pace.todayTarget||0)+' · '+(_pace.daysLeft||1)+' day'+((_pace.daysLeft||1)===1?'':'s')+' left');
   // Static contract anchors for the default weekly copy:
   // "no open risk is using the weekly budget right now"
   // "open risk is already using part of the weekly budget"
@@ -14084,10 +14258,10 @@ function _todayRenderTop(){
     '<div class="today-v2-top">'
       + '<div class="today-v2-verdict"><div class="td-mini">Should I trade today?</div><h2 class="'+(protect?'green':'')+'">'+(protect?'Protect target':'Selective only')+'</h2><div class="today-v2-copy">'+verdictCopy+'</div>'
         + paceBanner
-        + '<div class="today-v2-readiness"><div class="today-v2-mini"><div class="td-mini">Today action</div><b class="'+(protect?'green':'gold')+'">'+(protect?'Protect only':'Selective')+'</b></div><div class="today-v2-mini"><div class="td-mini">'+_horizonLbl+' progress</div><b class="'+(protect?'green':'blue')+'">'+progressLabel+'</b></div><div class="today-v2-mini"><div class="td-mini">New entries</div><b class="'+(protect?'red':'green')+'">'+(protect?'Paused':'Allowed')+'</b></div></div>'
+        + '<div class="today-v2-readiness"><div class="today-v2-mini"><div class="td-mini">Today action</div><b class="'+(protect?'green':'gold')+'">'+(protect?'Protect only':'Selective')+'</b></div><div class="today-v2-mini"><div class="td-mini">'+_horizonLbl+' progress</div><b class="'+(protect?'green':'blue')+'">'+progressLabel+'</b></div><div class="today-v2-mini"><div class="td-mini">Today pace</div><b class="green">+'+_todayMoney2(_pace.todayTarget||0)+'</b></div><div class="today-v2-mini"><div class="td-mini">New entries</div><b class="'+(protect?'red':'green')+'">'+(protect?'Paused':'Allowed')+'</b></div></div>'
       + '</div>'
       + '<div class="td-card"><div class="td-card-head"><h2>Risk budget</h2><span class="td-pill gold">basket-first</span></div><div class="today-v2-risk">'
-        + '<div class="today-v2-riskTop"><div class="today-v2-field"><div class="td-mini">Account equity</div><div class="today-v2-value">'+(acct?_todayMoney(acct):'--')+'</div><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+_todayAccountSourceLabel()+'</div></div><div class="today-v2-field"><div class="td-mini">'+_horizonLbl+' target</div><div class="today-v2-value green">+'+_todayMoney2(c.profitGoal||500)+'</div></div><div class="today-v2-field"><div class="td-mini">Open risk used</div><div class="today-v2-value gold">'+used.toFixed(1)+'%</div></div><div class="today-v2-field"><div class="td-mini">'+(protect?'New risk status':'New risk available')+'</div><div class="today-v2-value '+(protect?'red':'green')+'">'+(protect?'Paused':avail.toFixed(1)+'%')+'</div></div></div>'
+        + '<div class="today-v2-riskTop"><div class="today-v2-field"><div class="td-mini">Account equity</div><div class="today-v2-value">'+(acct?_todayMoney(acct):'--')+'</div><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+_todayAccountSourceLabel()+'</div></div><div class="today-v2-field"><div class="td-mini">'+_targetMini+'</div><div class="today-v2-value green">+'+_todayMoney2(_targetValue)+'</div><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+_targetSub+'</div></div><div class="today-v2-field"><div class="td-mini">Open risk used</div><div class="today-v2-value gold">'+used.toFixed(1)+'%</div></div><div class="today-v2-field"><div class="td-mini">'+(protect?'New risk status':'New risk available')+'</div><div class="today-v2-value '+(protect?'red':'green')+'">'+(protect?'Paused':avail.toFixed(1)+'%')+'</div></div></div>'
         + '<div class="today-v2-rail"><span class="today-v2-used" style="width:'+usedPct+'%"></span><span class="today-v2-new" style="width:'+newPct+'%"></span></div>'
         + '<div class="today-v2-legend"><span class="today-v2-key"><span class="today-v2-sq gold"></span>'+used.toFixed(1)+'% already open</span><span class="today-v2-key"><span class="today-v2-sq"></span>'+(protect?'new entries paused':avail.toFixed(1)+'% available for Today')+'</span><span>Max combined risk: <strong class="red">'+cap.toFixed(1)+'%</strong></span></div>'
         + '<div class="today-v2-copy" style="margin-top:12px">This is not daily risk and not trade size. It is the combined planned stop-loss risk for the selected basket while those trades are open.</div>'
@@ -14126,7 +14300,8 @@ function _todayRenderPlan(){
   var displayExp=protect?0:totExp, displayMargin=protect?0:totMargin, displayRisk=protect?0:totRisk, displayProfit=protect?0:totProfit, displayOrders=protect?0:totOrders;
   var totalAfterTone=totalAfterPct>capPct?'red':(remainingPct<0.15?'gold':'green');
   var targetPath=_todayV2TargetPath(usable, c.profitGoal||0, money2);
-  var targetNeedsScout=!protect && targetPath && !targetPath.covered && (parseFloat(c.profitGoal)||0)>0;
+  var targetGoal=parseFloat((targetPath&&targetPath.paceGoal)||c.profitGoal)||0;
+  var targetNeedsScout=!protect && targetPath && !targetPath.covered && targetGoal>0;
   var mt5CanPlace=_todayCanPlaceMt5();
   var bottomDisabled=!protect && !mt5CanPlace;
   var bottomPlaceLabel=protect?'Protect mode':_todayV2PlaceCtaText(targetNeedsScout, true);
@@ -14145,6 +14320,7 @@ function _todayRenderPlan(){
   }
   function detail(item){
     var o=item.o, idx=item.idx, s=o._size, rd=item.rd, legs=_todayLadderLegs(o), lt=_todayLadderTotals(o), tps=[o.tp,o.tp2,o.tp3].filter(Boolean), scale=o._multiEnabled!==false;
+    _todayV2LoadEntryBrain(o, idx);
     var exec=_todayV2ScaleState(o, legs), actualScale=exec.active;
     var compressedScale=actualScale&&legs.some(function(l){ return l&&l.compressedSplit; });
     var dur=_todayV2Duration(o.tf);
@@ -14203,8 +14379,9 @@ function _todayRenderPlan(){
       + '<div class="today-v2-selectedTop"><div><div class="today-v2-bigSym">'+o.sym+'</div><div class="today-v2-meta">'+o.asset+' · '+o.tf+' · '+o.sig+'</div></div><span class="td-pill '+(rd.cls==='wait'?'gold':rd.cls==='open'?'blue':'green')+'">'+rd.text+'</span></div>'
       + '<div class="today-v2-liveBox"><div class="td-mini">'+(rd.cls==='open'?'Live trade monitor':'Per-trade live monitor')+'</div><div class="today-v2-priceLine"><span class="today-v2-tick"></span><span class="today-v2-marker"></span></div><div class="today-v2-copy" id="today-livebox-'+idx+'">'+(rd.cls==='open'?'Open trade is monitored here: PnL, current R, stop state, target distance, and automations fired.':'Live price is checked against entry, stop, and target. DotVerse tells you enter now, wait, missed, or invalid. Targets: '+tps.map(function(t,i){return 'TP'+(i+1)+' '+pxFmt(t);}).join(' · '))+'</div></div>'
       + '<div class="today-v2-three"><div class="today-v2-mini"><div class="td-mini">Cash in</div><b class="gold">'+money2(s.marginReq||0)+'</b><div class="today-v2-copy" style="font-size:10px;margin-top:3px">controls '+money(s.notional||0)+' · '+esc(s.unitLabel||'')+'</div></div><div class="today-v2-mini"><div class="td-mini">Risk</div><b class="red">'+money2(-s.netLoss)+' / '+riskPct.toFixed(2)+'% account</b><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+(riskFitNote||'')+(capPct>0?' · '+basketShare.toFixed(0)+'% of '+capPct.toFixed(1)+'% basket cap':'')+'</div></div><div class="today-v2-mini"><div class="td-mini">Can make</div><b class="green">+'+money2(lt.profit||s.netTP1)+'</b></div><div class="today-v2-mini"><div class="td-mini">Duration</div><b class="blue">'+dur.hold+'</b></div></div>'
-      + '<div class="today-v2-path"><div class="td-mini">'+(protect?'Protection path':_horizonLbl+' target path')+'</div><b>'+(protect?_horizonLbl+' target already protected':targetPath.title)+'</b><div class="today-v2-copy" style="margin-top:7px">'+(protect?'DotVerse is not adding new Today risk. Keep monitoring TP, SL, break-even, trailing, invalidation, Telegram, and in-app alerts while open trades resolve.':targetPath.text)+'</div></div>'
-      + '<div class="panelTitle" style="margin:14px 0 8px">Why DotVerse picked it</div><div class="today-v2-copy">'+_todayTradeReason(o, rd.text)+' Calibration: '+((o.winRateN||0)>=30?'based on '+o.winRateN+' similar historical trades':'limited personal history, using global model until enough outcomes are labeled')+'.</div>'
+      + '<div class="today-v2-path"><div class="td-mini">'+(protect?'Protection path':(targetPath.paceCopy||'today pace'))+'</div><b>'+(protect?_horizonLbl+' target already protected':targetPath.title)+'</b><div class="today-v2-copy" style="margin-top:7px">'+(protect?'DotVerse is not adding new Today risk. Keep monitoring TP, SL, break-even, trailing, invalidation, Telegram, and in-app alerts while open trades resolve.':targetPath.text)+'</div></div>'
+      + '<div class="panelTitle" style="margin:14px 0 8px">Why DotVerse picked it</div><div class="today-v2-copy">'+_todayTradeReason(o, rd.text)+' Pattern check: '+((o.winRateN||0)>=30?'recent price-pattern history found '+o.winRateN+' comparable bars/trades for this ticker and timeframe':'not enough personal closed trades yet, so DotVerse is showing indicator agreement and recent-pattern evidence, not a calibrated win probability')+'.</div>'
+      + _todayV2EntryBrainCard(o)
       + '<div class="panelTitle" style="margin:14px 0 8px">'+(protect?'Protection mode':'Execution mode')+'</div><div class="today-v2-copy">'+(protect?'New MT5 orders are paused because the '+_horizonLbl.toLowerCase()+' target is reached. This panel stays useful for monitoring alerts and protection rules, not for adding exposure.':'Choose how this setup is sent to MT5. Same trade idea, different exit style.')+'</div>'
       + (protect?'':presetControls)
       + (protect?'':'<div class="today-v2-exec"><button class="today-v2-choice '+(!scale||exec.collapsed?'on':'')+'" onclick="_todayV2SetScale('+idx+',false)"><b>Single order</b><span>One entry, one stop, one main target. Best for fast/simple trades.</span></button><button class="today-v2-choice '+(actualScale?'on':(exec.collapsed?'disabled':''))+'" '+(exec.collapsed?'disabled ':'onclick="_todayV2SetScale('+idx+',true)"')+'><b>'+(exec.collapsed?'Scale-out unavailable':'Scale-out plan')+'</b><span>'+(exec.collapsed?'Current size falls below broker minimum if split.':'Open smaller parts, take profit early, leave a smaller runner.')+'</span></button></div>')
@@ -14215,7 +14392,7 @@ function _todayRenderPlan(){
   }
   area.innerHTML =
     '<div class="today-v2-summary">'
-      + '<div class="today-v2-metric"><div class="td-mini">'+(protect?'Protection answer':(targetNeedsScout?'Scout answer':'Basket answer'))+'</div><b class="green">'+(protect?'New entries paused':(targetNeedsScout?'Scout first':usable.length+' setups selected'))+'</b><p>'+(protect?_horizonLbl+' target is reached. DotVerse adds $0 new basket risk and keeps protection alerts live while open trades resolve.':(targetNeedsScout?usable.length+' valid setup'+(usable.length===1?'':'s')+' found, but they only cover '+(targetPath.total/((parseFloat(c.profitGoal)||1))*100).toFixed(0)+'% of target. Do not force size just to hit the goal.':'Target covered with '+money2(-totRisk)+' new basket risk and +'+money2(totProfit)+' planned upside.'))+'</p></div>'
+      + '<div class="today-v2-metric"><div class="td-mini">'+(protect?'Protection answer':(targetNeedsScout?'Scout answer':'Basket answer'))+'</div><b class="green">'+(protect?'New entries paused':(targetNeedsScout?'Scout first':usable.length+' setups selected'))+'</b><p>'+(protect?_horizonLbl+' target is reached. DotVerse adds $0 new basket risk and keeps protection alerts live while open trades resolve.':(targetNeedsScout?usable.length+' valid setup'+(usable.length===1?'':'s')+' found, covering '+(targetPath.total/(targetGoal||1)*100).toFixed(0)+'% of today\'s pace. Do not force size just to hit the whole '+_horizonLbl.toLowerCase()+' goal.':'Today pace covered with '+money2(-totRisk)+' new basket risk and +'+money2(totProfit)+' planned upside.'))+'</p></div>'
       + '<div class="today-v2-metric"><div class="td-mini">Live readiness</div><b><span class="today-v2-pulse"></span>'+(protect?'Alerts live':(targetNeedsScout?readyNow+' valid now':readyNow+' enter now'))+'</b><p>'+(protect?'TP, SL, break-even, trailing, invalidation, Telegram, and in-app alerts remain active.':(targetNeedsScout?'These setups are technically entry-ready, but the target path is not covered. Scout remains the primary action.':waitCount+' setup'+(waitCount===1?'':'s')+' should wait for price instead of chasing.'))+'</p></div>'
       + '<div class="today-v2-metric"><div class="td-mini">'+(protect?'Target state':'Target timing')+'</div><b class="gold">'+(protect?'Target reached':targetPath.eta)+'</b><p>'+(protect?'Protect mode stays on until the '+_horizonLbl.toLowerCase()+' target state resets or you explicitly lower the target/progress.':targetPath.text)+'</p></div>'
       + '<div class="today-v2-metric"><div class="td-mini">Open trade monitor</div><b class="blue">'+(protect?'Active now':'Live after place')+'</b><p>'+(protect?'Open trades stay under protection logic; no review/place action is shown for new orders.':'Rows become PnL, current R, stop state, and automation history.')+'</p></div>'
@@ -14469,6 +14646,48 @@ async function _runScanBase(groups, signal, onProgress) {
   return { results: _results, errors: _scanErrors, total: _scanTotal };
 }
 
+function _dvSignalFromScanRow(r, fallbackTf, fallbackAsset){
+  r = r || {};
+  return {
+    sym:     r.ticker || r.symbol || r.sym || '',
+    tf:      String(r.timeframe || r.tf || fallbackTf || '4H').toUpperCase(),
+    sig:     String(r.signal || r.sig || 'HOLD').toUpperCase(),
+    id:      (r.id) || (r.candidate_id) || ((r.ticker||r.symbol||'')+':'+(r.timeframe||fallbackTf||'4H')+':'+(r.signal||'HOLD')+':'+Date.now()),
+    entry:   r.entry     || null,
+    sl:      r.stop_loss  || r.sl || null,
+    tp:      r.tp1        || r.tp || null,
+    tp2:     r.tp2        || null,
+    tp3:     r.tp3        || null,
+    rr:      r.rr1 || r.rr || '--',
+    conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(((r.bull_score||0)+(r.bear_score||0))>0)?Math.round((r.signal==='SELL'?r.bear_score:r.bull_score)/((r.bull_score||0)+(r.bear_score||0))*100):0),
+    confLbl: r.confidence_label || r.confidence || 'LIKELY',
+    asset:   r.asset_type || r.asset || fallbackAsset || 'stock',
+    reason:  r.reason || r.summary || 'Live DotVerse signal',
+    bullCount:   r.bull_score   || r.bullCount || 0,
+    bearCount:   r.bear_score   || r.bearCount || 0,
+    volRatio:    r.vol_ratio    || r.volRatio || 1.0,
+    spreadCost:  r.spread_cost  != null ? r.spread_cost  : null,
+    spreadPips:  r.spread_pips  != null ? r.spread_pips  : null,
+    spreadSrc:     r.spread_source  || null,
+    spreadQuality: r.spread_quality || 'fair',
+    rr1Raw:        r.rr1_raw      != null ? r.rr1_raw      : null,
+    smc_structures: r.smc_structures || null,
+    quality: r.quality || null,
+    qscore: (r.quality&&(r.quality.score!=null?r.quality.score:r.quality))||r.confidence_pct||0,
+    regime_context: r.regime_context || '',
+    atr: r.atr!=null?r.atr:(r.atr_value!=null?r.atr_value:null),
+    rsi: r.rsi!=null?r.rsi:50,
+    winRate: (r.win_rate!=null?r.win_rate:null),
+    winRateN: (r.win_rate_n!=null?r.win_rate_n:0),
+    _btVerified: r._btVerified === true,
+    _btWr: r._btWr != null ? r._btWr : null,
+    _btPf: r._btPf != null ? r._btPf : null,
+    _btTrades: r._btTrades != null ? r._btTrades : null,
+    _btExpectancy: r._btExpectancy != null ? r._btExpectancy : null,
+    _btReason: r._btReason || null
+  };
+}
+
 async function _sfFetchSignals(){
   const list  = document.getElementById('sfOppsList');
   if(!list) return;
@@ -14574,41 +14793,7 @@ async function _sfFetchSignals(){
     if(res && res.results && res.results.length > 0){
       rawOpps = res.results
         .filter(function(r){ return r.signal && !r.error && r.signal !== ''; })
-        .map(function(r){
-          return {
-            sym:     r.ticker || r.symbol || '',
-            tf:      (r.timeframe || _activeTf).toUpperCase(),
-            sig:     r.signal,
-            id:      (r.id) || (r.ticker||r.symbol)+':'+(r.timeframe||_activeTf).toUpperCase()+':'+r.signal+':'+Date.now(),
-            entry:   r.entry     || null,
-            sl:      r.stop_loss  || null,
-            tp:      r.tp1        || null,
-            tp2:     r.tp2        || null,
-            tp3:     r.tp3        || null,
-            rr:      r.rr1 || r.rr || '--',
-            conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
-            confLbl: r.confidence_label || r.confidence || 'LIKELY',
-            asset:   r.asset_type || 'stock',
-            reason:  r.reason || r.summary || 'Live DotVerse signal',
-            // Per-signal confluence + volume — feeds Flow-Scaled Sizing so the
-            // multiplier varies per signal instead of falling back to 65%/1.0×.
-            bullCount:   r.bull_score   || 0,
-            bearCount:   r.bear_score   || 0,
-            volRatio:    r.vol_ratio    || 1.0,
-            spreadCost:  r.spread_cost  != null ? r.spread_cost  : null,
-            spreadPips:  r.spread_pips  != null ? r.spread_pips  : null,
-            spreadSrc:     r.spread_source  || null,
-            spreadQuality: r.spread_quality || 'fair',
-            rr1Raw:        r.rr1_raw      != null ? r.rr1_raw      : null,
-            // SMC-FE root fix: backend already computed smc_structures in _scan_one —
-            // forward it here so loadSignalContext gets real data, not undefined.
-            smc_structures: r.smc_structures || null,
-            // Phase 2.2: Signal Quality Score
-            quality: r.quality || null,
-            // Phase 2.3: Regime Context
-            regime_context: r.regime_context || ''
-          };
-        });
+        .map(function(r){ return _dvSignalFromScanRow(r, _activeTf, r.asset_type || 'stock'); });
       // Multi-TF scan — keep all timeframes so users can compare, but rank
       // the cards by actual setup quality before showing the top 10.
       rawOpps.sort(function(a,b){
@@ -14943,8 +15128,10 @@ async function _sfFetchSignals(){
       + (o.sig !== 'HOLD' && o.entry ? '<div id="lp-' + o.sym.replace(/[^a-zA-Z0-9]/g,'') + '-' + i + '" style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.3);">'
         + '<span style="width:5px;height:5px;border-radius:50%;background:rgba(237,232,216,.2);flex-shrink:0;"></span>loading live price…</div>' : '')
       + (o.sig!=='HOLD'
-          ? ((o.conf||0)>=65 && !_isWeakened
+          ? ((o.conf||0)>=65 && !_isWeakened && o._btVerified === true
               ? '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:#5de8a0;background:rgba(93,232,160,.08);border:1px solid rgba(93,232,160,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">DOTVERSE RECOMMENDS THIS TRADE</span></div>'
+              : (o.conf||0)>=65 && !_isWeakened
+              ? '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.9);background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.25);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">HIGH AGREEMENT — BACKTEST NOT VERIFIED</span></div>'
               : (o.conf||0)>=65 && _isWeakened
               ? '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.9);background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.25);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">WEAKENED SIGNAL — TRADE WITH CAUTION</span></div>'
               : '<div style="padding:3px 14px 6px;"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:rgba(201,168,76,.85);background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.2);border-radius:4px;padding:3px 9px;letter-spacing:.04em;">LOW CONFIDENCE — WAIT FOR BETTER SETUP</span></div>')
@@ -15697,33 +15884,29 @@ async function scRunScan(){
   const ICON='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
   if(btn){btn.disabled=true;btn.innerHTML=SPIN+' Scanning…';}
   const af=window._scAssetFilter||'all';
-  const tickers=SC_PRESETS[['buy','sell'].includes(af)?'all':af]||SC_PRESETS.all;
-  const tf=_scTFFilter==='all'?'4h':_scTFFilter;
-  const atMap={all:'auto',crypto:'crypto',equity:'stock',forex:'forex',commodity:'commodity',buy:'auto',sell:'auto'};
+  const selectedTypes = ['buy','sell','all'].includes(af) ? ['crypto','equity','forex','commodity'] : [af];
+  const tfList = _scTFFilter === 'all' ? ['15m','1h','4h','1d'] : [_scTFFilter];
+  const atMap={crypto:'crypto',equity:'stock',forex:'forex',commodity:'commodity'};
 
   // Show computing backtest progress inside the table
-  _scShowBtProgress(tickers.length);
+  _scShowBtProgress(selectedTypes.reduce(function(n,type){ return n + ((SC_PRESETS[type]||[]).length * tfList.length); }, 0));
 
   var data;
   try {
-    if(['all','buy','sell'].includes(af)){
-      // Grouped dispatch: send each asset class separately so normalise_ticker works correctly
-      var _grps=[
-        {tickers:['BTCUSD','ETHUSD','SOLUSD','BNBUSD'],asset_type:'crypto'},
-        {tickers:['AAPL','NVDA','TSLA','SPY'],         asset_type:'stock'},
-        {tickers:['EURUSD','GBPUSD'],                  asset_type:'forex'},
-        {tickers:['XAUUSD','USOIL'],                   asset_type:'commodity'}
-      ];
-      var _grpRes=await Promise.all(_grps.map(function(g){
-        return dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({tickers:g.tickers,asset_type:g.asset_type,timeframe:tf})});
-      }));
-      var _merged=_grpRes.flatMap(function(d){return(d&&d.results)||[];});
-      data={results:_merged};
-    } else {
-      data=await dvFetch('/api/scan-list',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({tickers,asset_type:atMap[af]||'crypto',timeframe:tf})});
-    }
+    var groups = selectedTypes.map(function(type){
+      var assetType = atMap[type] || 'crypto';
+      var tfs = type === 'commodity' ? ['1d'] : tfList;
+      return {tickers:SC_PRESETS[type]||[], asset_type:assetType, daily_only:type==='commodity', tfs:tfs};
+    }).filter(function(g){ return g.tickers.length; });
+    data = await _runScanBase(groups, null, function(done,total,found){
+      var lbl=document.getElementById('btProgLabel');
+      var pctEl=document.getElementById('btProgPct');
+      var bar=document.getElementById('btProgBar');
+      var pct=total>0?Math.round((done/total)*100):0;
+      if(lbl) lbl.textContent='Scanning '+done+' of '+total+' real timeframes · '+found+' candidates';
+      if(pctEl) pctEl.textContent=pct+'%';
+      if(bar) bar.style.width=pct+'%';
+    });
 
     // Complete progress bar then render results after brief pause so user sees 100%
     _scCompleteBtProgress();
@@ -15731,9 +15914,18 @@ async function scRunScan(){
 
     const sub=document.querySelector('#sfSection-scanner .opp-section-sub');
     if(data&&Array.isArray(data.results)&&data.results.length){
+      var scOpps=data.results.map(function(r){ return _dvSignalFromScanRow(r, r.timeframe || r.tf || '1d', r.asset_type || 'stock'); });
+      await _todayAutoBacktestCandidates(scOpps);
+      var btByKey={};
+      scOpps.forEach(function(o){ btByKey[((o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'')).toUpperCase()]=o; });
+      data.results.forEach(function(r){
+        var k=((r.ticker||r.symbol||'')+':'+String(r.timeframe||r.tf||'1d').toUpperCase()+':'+String(r.signal||'HOLD').toUpperCase()).toUpperCase();
+        var o=btByKey[k];
+        if(o) Object.assign(r,{_btVerified:o._btVerified,_btWr:o._btWr,_btPf:o._btPf,_btTrades:o._btTrades,_btExpectancy:o._btExpectancy,_btReason:o._btReason});
+      });
       window._scLiveData=data.results;
-      _scRenderLive(data.results,tf);
-      if(sub){const t=new Date();sub.textContent='Scanned: '+t.toLocaleTimeString()+' · '+data.results.length+' instruments · DotVerse 65% gate';}
+      _scRenderLive(data.results,_scTFFilter);
+      if(sub){const t=new Date();sub.textContent='Scanned: '+t.toLocaleTimeString()+' · '+data.results.length+' real timeframe candidates · DotVerse 65% gate';}
     } else {
       _scApplyFilters();
       if(sub) sub.textContent='Live scan unavailable · showing cached data';
@@ -15750,38 +15942,59 @@ async function scRunScan(){
 }
 function _scRenderLive(results,tf){
   const body=document.getElementById('scTableBody');if(!body)return;
-  const tfl=(tf||'4h').toUpperCase();
+  const selectedTf=String(tf||'all').toLowerCase();
   const sp=s=>{const c=s==='BUY'?'buy':s==='SELL'?'sell':'hold';return `<span class="sc-pill ${c}">${s||'HOLD'}</span>`;};
   const dash='<span style="color:var(--t3);font-size:10px;">–</span>';
   if(!results.length){body.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--t3);padding:20px;font-size:12px;">No results</td></tr>';return;}
-  body.innerHTML=results.map(r=>{
-    const sig=r.signal||'HOLD';
-    const bs=r.bull_score||0,be=r.bear_score||0,tot=bs+be||1,bp=Math.round(bs/tot*100);
-    const rr=r.rr1||r.rr||'–';
+  const tfKeys=['15m','1h','4h','1d'];
+  const grouped={};
+  results.forEach(function(r){
+    if(!r || r.error) return;
+    var sym=r.ticker||r.symbol||r.sym||'';
+    if(!sym) return;
+    var asset=r.asset_type||r.asset||'';
+    var key=(asset+':'+sym).toUpperCase();
+    var tfk=String(r.timeframe||r.tf||'4h').toLowerCase();
+    grouped[key]=grouped[key]||{sym:sym,asset_type:asset,tfs:{}};
+    grouped[key].tfs[tfk]=r;
+  });
+  var rows=Object.keys(grouped).map(function(key){
+    var g=grouped[key];
+    var preferred=(selectedTf!=='all'&&g.tfs[selectedTf])?g.tfs[selectedTf]:null;
+    var candidates=tfKeys.map(function(k){return g.tfs[k];}).filter(Boolean);
+    var primary=preferred || candidates.sort(function(a,b){
+      var asig=(a.signal==='BUY'||a.signal==='SELL')?1:0, bsig=(b.signal==='BUY'||b.signal==='SELL')?1:0;
+      var aq=(a.quality&&(a.quality.score!=null?a.quality.score:a.quality))||a.confidence_pct||0;
+      var bq=(b.quality&&(b.quality.score!=null?b.quality.score:b.quality))||b.confidence_pct||0;
+      return (bsig-asig)||(bq-aq);
+    })[0] || {};
+    const sig=primary.signal||'HOLD';
+    const bs=primary.bull_score||0,be=primary.bear_score||0,tot=bs+be||1,bp=Math.round(bs/tot*100);
+    const rr=primary.rr1||primary.rr||'–';
     const fmt=v=>v!=null?Number(v).toLocaleString(undefined,{maximumSignificantDigits:6}):'–';
-    const cc=r.confidence==='HIGH'?'rgba(93,232,160,.85)':r.confidence==='MEDIUM'?'rgba(201,168,76,.8)':'rgba(237,232,216,.5)';
-    const pl=JSON.stringify({sym:r.ticker,cls:r.asset_type||'auto',sig,s4h:sig,
-      entry:r.entry,sl:r.stop_loss,tp:r.tp1,tp2:r.tp2,tp3:r.tp3,
-      rr,bull:bp,reason:r.reason||'',rsi:r.rsi,emaTrend:r.ema_trend,
-      conf:bp,confLbl:r.confidence_label||'HYPOTHESIS',
-      winRate:r.win_rate,price:r.price,volRatio:r.vol_ratio,atr:r.atr,
-      bullCount:bs,bearCount:be,
-      trade_type:r.trade_type||'day',htf_bias:r.htf_bias||'NEUTRAL',
-      regime:r.regime||'NORMAL',regime_warning:r.regime_warning||'',
-      regime_context:r.regime_context||'',
-      session_context:r.session_context||null}).replace(/"/g,'&quot;');
-    return `<tr class="sc-row" data-rr="${rr}" data-conf="${bp}" data-s15="${sig}" data-s1h="${sig}" data-s4h="${sig}" data-s1d="${sig}" onclick="loadScannerSignal(JSON.parse(this.dataset.payload))" data-payload="${pl}">
-      <td class="sc-sym-cell"><span class="sc-sym">${r.ticker}</span><span class="sc-cls">${r.asset_type||''}</span></td>
-      <td data-guide="scanner-tf-cell">${tfl==='15M'?sp(sig):dash}</td>
-      <td data-guide="scanner-tf-cell">${tfl==='1H'?sp(sig):dash}</td>
-      <td data-guide="scanner-tf-cell">${sp(sig)}</td>
-      <td data-guide="scanner-tf-cell">${tfl==='1D'?sp(sig):dash}</td>
+    const cc=primary.confidence==='HIGH'?'rgba(93,232,160,.85)':primary.confidence==='MEDIUM'?'rgba(201,168,76,.8)':'rgba(237,232,216,.5)';
+    const pl=JSON.stringify(_dvSignalFromScanRow(primary, primary.timeframe||'4h', primary.asset_type||g.asset_type||'auto')).replace(/"/g,'&quot;');
+    function tfCell(k){
+      var r=g.tfs[k], label=k==='15m'?'s15':k==='1h'?'s1h':k==='4h'?'s4h':'s1d';
+      var cellSig=r&&r.signal?r.signal:'HOLD';
+      if(!r) return {html:dash,data:'HOLD'};
+      var payload=JSON.stringify(_dvSignalFromScanRow(r,k,r.asset_type||g.asset_type||'auto')).replace(/"/g,'&quot;');
+      return {data:cellSig,html:`<button class="sc-tf-cell-btn" data-payload="${payload}" onclick="event.stopPropagation();loadScannerSignal(JSON.parse(this.dataset.payload))">${sp(cellSig)}</button>`};
+    }
+    var c15=tfCell('15m'), c1h=tfCell('1h'), c4h=tfCell('4h'), c1d=tfCell('1d');
+    return `<tr class="sc-row" data-rr="${rr}" data-conf="${bp}" data-s15="${c15.data}" data-s1h="${c1h.data}" data-s4h="${c4h.data}" data-s1d="${c1d.data}" onclick="loadScannerSignal(JSON.parse(this.dataset.payload))" data-payload="${pl}">
+      <td class="sc-sym-cell"><span class="sc-sym">${g.sym}</span><span class="sc-cls">${g.asset_type||''}</span></td>
+      <td data-guide="scanner-tf-cell">${c15.html}</td>
+      <td data-guide="scanner-tf-cell">${c1h.html}</td>
+      <td data-guide="scanner-tf-cell">${c4h.html}</td>
+      <td data-guide="scanner-tf-cell">${c1d.html}</td>
       <td><div class="sc-bull-wrap"><div class="sc-bull-track"><div class="sc-bull-fill" style="width:${bp}%"></div></div><span class="sc-bull-pct">${bp}%</span></div></td>
-      <td class="sc-entry-cell"><div class="sc-price">${fmt(r.entry)}</div><div class="sc-sltp"><span class="red">SL ${fmt(r.stop_loss)}</span> · <span class="grn">TP ${fmt(r.tp1)}</span></div></td>
+      <td class="sc-entry-cell"><div class="sc-price">${fmt(primary.entry)}</div><div class="sc-sltp"><span class="red">SL ${fmt(primary.stop_loss)}</span> · <span class="grn">TP ${fmt(primary.tp1)}</span></div></td>
       <td class="sc-rr-cell">${rr!=='–'?`<span class="sc-rr-badge">1:${rr}</span>`:dash}</td>
-      <td><div style="display:flex;gap:5px;align-items:center;"><span style="font-size:9px;padding:2px 5px;border-radius:4px;color:${cc};border:1px solid ${cc.replace('.85','.3').replace('.8','.3').replace('.5','.2')}">${r.confidence_label||r.confidence||'–'}</span><button class="sc-act-btn" onclick="event.stopPropagation();loadScannerSignal(JSON.parse(this.closest('tr').dataset.payload));setNav('understand');showUnderstand();">Analyse →</button></div></td>
+      <td><div style="display:flex;gap:5px;align-items:center;"><span style="font-size:9px;padding:2px 5px;border-radius:4px;color:${cc};border:1px solid ${cc.replace('.85','.3').replace('.8','.3').replace('.5','.2')}">${primary.confidence_label||primary.confidence||'–'}</span><button class="sc-act-btn" onclick="event.stopPropagation();loadScannerSignal(JSON.parse(this.closest('tr').dataset.payload));setNav('understand');showUnderstand();">Analyse →</button></div></td>
     </tr>`;
-  }).join('');
+  });
+  body.innerHTML=rows.join('');
   // Bug O fix 2026-04-29: re-apply current filter state to freshly rendered rows.
   // Previously, when user clicked "Run Scan" with BUY-only or SELL-only already
   // active, the new rows rendered with filter ignored — table showed all signals
@@ -15826,7 +16039,7 @@ function scFilter(type, btn){
     if(type==='buy')  filtered=filtered.filter(r=>(r.signal||'HOLD')==='BUY');
     else if(type==='sell') filtered=filtered.filter(r=>(r.signal||'HOLD')==='SELL');
     else if(type!=='all') filtered=filtered.filter(r=>(r.asset_type||'')===(type==='equity'?'stock':type));
-    _scRenderLive(filtered, _scTFFilter!=='all'?_scTFFilter:'4h');
+    _scRenderLive(filtered, _scTFFilter);
   } else {
     _scApplyFilters();
   }
@@ -15897,6 +16110,35 @@ function _normalizeSignalContext(o, overrides){
     tp1: src.tp1 != null ? src.tp1 : tp,
     rr: src.rr || src.risk_reward || src.riskReward || '',
     conf: src.conf != null ? src.conf : (src.confidence != null ? src.confidence : src.bull_score)
+  });
+}
+
+function _dvSyncAnalyzeControls(signal){
+  var s = _normalizeSignalContext(signal || {});
+  var asset = _dvNormalizeAssetType(s.asset || s.asset_type || 'auto');
+  var tf = String(s.tf || s.timeframe || '4H').toLowerCase();
+  var sym = s.sym || s.ticker || s.symbol || '';
+  window._dvAsset = asset;
+  window._dvTF = tf;
+  var dvInp = document.getElementById('dvTickerInput');
+  var qpInp = document.getElementById('qpTickerInput');
+  if(dvInp && sym) dvInp.value = sym;
+  if(qpInp && sym) qpInp.value = sym;
+  document.querySelectorAll('.dv-at-pill').forEach(function(btn){
+    var txt = (btn.textContent || '').trim().toLowerCase();
+    var on = (txt === asset) || (txt === 'stocks' && asset === 'stock') || (txt === 'commodities' && asset === 'commodity') || (txt === 'all' && asset === 'auto');
+    btn.classList.toggle('active', on);
+  });
+  document.querySelectorAll('.dv-tf-pill').forEach(function(btn){
+    btn.classList.toggle('active', (btn.textContent || '').trim().toLowerCase() === tf);
+  });
+  var assetSel = document.getElementById('qpAssetSel');
+  if(assetSel && assetSel.value !== asset && ['crypto','stock','forex','commodity','index'].indexOf(asset) >= 0){
+    assetSel.value = asset;
+    if(typeof qpAssetChanged === 'function') qpAssetChanged();
+  }
+  document.querySelectorAll('.qp-tf').forEach(function(btn){
+    if(btn.dataset && btn.dataset.tf === tf && typeof qpSetTF === 'function') qpSetTF(tf, btn);
   });
 }
 
@@ -16016,6 +16258,7 @@ function loadSignalContext(o, opts){
   }
   _rememberSignalHandoff(signal, opts || {});
   window._activeSignal = Object.assign({}, signal);
+  _dvSyncAnalyzeControls(signal);
   // Inject computed context fields missing from signal-feed payload.
   // Signal feed objects are pre-rendered and don't carry session/regime data.
   if (window._activeSignal.smcStructures === undefined) {
@@ -16040,7 +16283,7 @@ function loadSignalContext(o, opts){
   window._szTargetsUserModified = false; // new signal — let DotVerse re-apply its recommendation
   setTimeout(function(){ undRunBacktest(true); }, 300);
   // Auto-navigate to CONTEXT pre-trade gate
-  setNav('understand');showUnderstand();
+  setNav('understand');showUnderstand();_dvSyncAnalyzeControls(window._activeSignal);
 }
 
 // Load a signal from the "All TF" scan inline cards — navigates to Understand with the specific TF
@@ -16129,8 +16372,8 @@ function _dvDeriveTradeType(tf){
 }
 
 function loadScannerSignal(a){
-  window._activeSignal=_normalizeSignalContext({
-    sym:a.sym, tf:(_scTFFilter!=='all'?_scTFFilter.toUpperCase():'4H'),
+  var scannerSignal=_normalizeSignalContext({
+    sym:a.sym, tf:(a.tf || (_scTFFilter!=='all'?_scTFFilter.toUpperCase():'4H')),
     asset:a.cls||a.asset_type||'auto',
     sig:a.sig||a.s4h||'HOLD', entry:a.entry, sl:a.sl||a.stop_loss,
     tp:a.tp||a.tp1, tp2:a.tp2, tp3:a.tp3,
@@ -16153,10 +16396,12 @@ function loadScannerSignal(a){
     // SMC-FE: scanner path includes smc_structures from full get_analysis()
     smcStructures: a.smc_structures || null,
   });
+  window._activeSignal=scannerSignal;
+  _dvSyncAnalyzeControls(scannerSignal);
   window._calcPrefill={entry:window._activeSignal.entry,sl:window._activeSignal.sl,tp:window._activeSignal.tp,tp2:window._activeSignal.tp2,tp3:window._activeSignal.tp3,sym:window._activeSignal.sym};
   window._lastBt = null;   // reset stale backtest from previous signal
   setTimeout(function(){ undRunBacktest(true); }, 300);
-  setNav('understand');showUnderstand();
+  setNav('understand');showUnderstand();_dvSyncAnalyzeControls(window._activeSignal);
 }
 
 
@@ -16440,8 +16685,12 @@ function _mktStatusForSignal(o, condState){
   var conf=_mktConfNum(o);
   var lbl=String((o&&o.confLbl)||(o&&o.confidence_label)||'').toUpperCase();
   var riskOff=condState&&condState.cls==='risk-off';
+  if(riskOff){
+    if(lbl==='CONFIRMED') return {cls:'green',text:'confirmed',copy:'Signal itself is confirmed, but risk-off conditions still require slower sizing and review.'};
+    if(conf>=75) return {cls:'gold',text:'watch only',copy:'Risk-off regime means this stays on watch unless Signal confirms it.'};
+    return {cls:'blue',text:'idea',copy:'Risk-off regime means this is context only until Signal gives full confirmation.'};
+  }
   if(lbl==='CONFIRMED'||conf>=80) return {cls:'green',text:'confirmed',copy:'Strong enough to open in Signal and continue the normal flow.'};
-  if(riskOff && conf>=75) return {cls:'gold',text:'watch entry',copy:'Tradable idea, but risk-off regime means reduced size and stricter entry.'};
   if(conf>=72) return {cls:'gold',text:'near filter',copy:'Close to the Market filter. Watch for one more confirmation before sizing.'};
   return {cls:'blue',text:'idea',copy:'Visible for awareness, not yet strong enough for confirmed-only trading.'};
 }
@@ -16598,12 +16847,12 @@ function _mktRenderOpportunityDesk(opps, condState, sourceLabel){
   var copy=document.getElementById('mktOppCopy');
   if(!desk) return;
   opps=(opps||[]).filter(function(o){return o&&o.sig&&o.sig!=='HOLD';});
-  opps.sort(function(a,b){return _mktConfNum(b)-_mktConfNum(a);});
+  opps.sort(function(a,b){return ((b._btVerified?1:0)-(a._btVerified?1:0)) || _mktConfNum(b)-_mktConfNum(a);});
   var shown=opps.slice(0,4);
   var avg=opps.length?Math.round(opps.reduce(function(a,o){return a+_mktConfNum(o);},0)/opps.length):0;
   if(countEl) countEl.textContent=opps.length?opps.length+' live':'scanning';
   if(confEl) confEl.textContent=avg?avg+'%':'—';
-  if(filterEl) filterEl.textContent=(condState&&condState.cls==='risk-off')?'75%+':'65%+';
+  if(filterEl) filterEl.textContent=(condState&&condState.cls==='risk-off')?'CONFIRMED only':'65%+';
   if(routeEl) routeEl.textContent='Market → Signal';
   if(badge) badge.textContent=sourceLabel||'live';
   if(head) head.textContent=opps.length?opps.length+' trades available now.':'Finding available trades…';
@@ -16630,7 +16879,7 @@ function _mktRenderCompactSignals(opps){
   var list=document.getElementById('mktSigList');
   var badge=document.getElementById('mktSigBadge');
   if(!list) return;
-  opps=(opps||[]).filter(function(o){return o&&o.sig&&o.sig!=='HOLD';}).sort(function(a,b){return _mktConfNum(b)-_mktConfNum(a);});
+  opps=(opps||[]).filter(function(o){return o&&o.sig&&o.sig!=='HOLD';}).sort(function(a,b){return ((b._btVerified?1:0)-(a._btVerified?1:0)) || _mktConfNum(b)-_mktConfNum(a);});
   if(badge){ badge.textContent=opps.length?opps.length+' active':'—'; badge.style.background=opps.length?'rgba(93,232,160,.12)':'rgba(237,232,216,.06)'; badge.style.color=opps.length?'#5de8a0':'rgba(237,232,216,.4)'; badge.style.borderColor=opps.length?'rgba(93,232,160,.3)':'rgba(237,232,216,.15)'; }
   if(!opps.length){
     list.innerHTML='<div style="font-size:11px;color:rgba(237,232,216,.4);padding:12px 4px;">No opportunities passed the Market filter yet.</div>';
@@ -16669,24 +16918,13 @@ async function _mktRunOpportunityScan(){
     if(fill) fill.style.width='38%';
     var res=await _runScanBase(groups);
     if(fill) fill.style.width='78%';
-    var opps=(res&&res.results||[]).filter(function(r){return r&&r.signal&&r.signal!=='HOLD'&&!r.error;}).map(function(r){
-      return {
-        sym:r.ticker||r.symbol||'',
-        tf:String(r.timeframe||'4H').toUpperCase(),
-        sig:r.signal,
-        asset:r.asset_type||r.asset||'stock',
-        entry:r.entry||null,
-        sl:r.stop_loss||r.sl||null,
-        tp:r.tp1||r.tp||null,
-        tp2:r.tp2||null,
-        tp3:r.tp3||null,
-        rr:r.rr1||r.rr||'--',
-        conf:r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(r.bull_score+r.bear_score)>0?Math.round(r.bull_score/((r.bull_score||0)+(r.bear_score||0))*100):0),
-        confLbl:r.confidence_label||r.confidence||'LIKELY',
-        reason:r.reason||r.summary||'DotVerse scanner found this setup in the Market universe.',
-        quality:r.quality||null,
-        smc_structures:r.smc_structures||null
-      };
+    var opps=(res&&res.results||[])
+      .filter(function(r){return r&&r.signal&&r.signal!=='HOLD'&&!r.error;})
+      .map(function(r){ return _dvSignalFromScanRow(r, r.timeframe || r.tf || '4H', r.asset_type || r.asset || 'stock'); });
+    if(fill) fill.style.width='88%';
+    await _todayAutoBacktestCandidates(opps);
+    opps.sort(function(a,b){
+      return ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || _mktConfNum(b)-_mktConfNum(a);
     });
     window._mktOpportunityCache={opps:opps,ts:Date.now()};
     var state=_mktLiveCondition(window._mktLastLiveData||{}, _mktTickerMap());
@@ -17577,21 +17815,21 @@ async function showPortfolio(){
   const ddData    = ddResp || {current_drawdown_pct:0,max_drawdown_pct:0,peak_equity:100,current_equity:100,consecutive_losses:0,snapshots:[]};
   (function([positions,varData,corrRisk,ddData]){
     const varReady=pfVarReady(varData);
-    const varAmt=varReady?pfVarMetric(varData,'var_1d_usd','var_amount'):NaN;
-    const varPct=varReady?pfVarMetric(varData,'var_1d_pct','var_pct'):NaN;
-    const varAmtStr=varReady?varAmt.toFixed(2):'';
-    const varPctStr=varReady?varPct.toFixed(2):'';
-    const varAmtDisplay=varReady?'$'+varAmtStr:'VaR unavailable';
-    const varPctDisplay=varReady?varPctStr+'% of portfolio':'not enough data';
-    const _varPortfolioValue=varData&&!varData.error?parseFloat(varData.portfolio_value):NaN;
+    const varAmt=varReady ? pfVarMetric(varData,'var_1d_usd','var_amount') : NaN;
+    const varPct=varReady ? pfVarMetric(varData,'var_1d_pct','var_pct') : NaN;
+    const varAmtStr=varReady ? varAmt.toFixed(2) : '';
+    const varPctStr=varReady ? varPct.toFixed(2) : '';
+    const varAmtDisplay=varReady ? '$'+varAmtStr : 'VaR unavailable';
+    const varPctDisplay=varReady ? varPctStr+'% of portfolio' : 'not enough data';
+    const _varPortfolioValue = varData && !varData.error ? parseFloat(varData.portfolio_value) : NaN;
     const portValNum=Number.isFinite(_varPortfolioValue)?_varPortfolioValue:(positions.reduce((s,p)=>s+(parseFloat(p.entry_price)||0)*(parseFloat(p.size)||0),0)||0);
     // ITEM 3 (real root cause, found live): bare toLocaleString() rendered
     // $37.571976 as "$37.572" — which READS as thirty-seven thousand. Pin to
     // exactly 2 decimals so the card and the top banner show the same money.
     const portVal='$'+Number(portValNum).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-    const portStd=(varReady&&varData.portfolio_std!=null)?parseFloat(varData.portfolio_std).toFixed(2):'';
-    const portStdDisplay=portStd?portStd+'%':'—';
-    let hBg='rgba(237,232,216,.04)',hBd='rgba(237,232,216,.14)',hTxt='rgba(237,232,216,.55)',hMsg='VaR unavailable / not enough data';
+    const portStd=(varReady && varData.portfolio_std!=null)?parseFloat(varData.portfolio_std).toFixed(2):'';
+    const portStdDisplay=portStd ? portStd+'%' : '—';
+    let hBg='rgba(237,232,216,.04)',hBd='rgba(237,232,216,.14)',hTxt='rgba(237,232,216,.58)',hMsg='VaR unavailable / not enough data';
     if(varReady){
       hBg='rgba(93,232,160,.12)';hBd='rgba(93,232,160,.3)';hTxt='#5de8a0';hMsg='Portfolio healthy';
       if(varPct>5){hBg='rgba(232,112,110,.12)';hBd='rgba(232,112,110,.3)';hTxt='#e8706e';hMsg='High risk — VaR exceeds 5%';}
@@ -17890,10 +18128,10 @@ async function showPortfolio(){
         +'</div>';
 
         el.innerHTML=`
-    <div id="pfHealthBanner" class="pf-health-banner" data-guide="portfolio-health-banner" style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.14);">
+    <div id="pfHealthBanner" class="pf-health-banner" data-guide="portfolio-health-banner" style="background:rgba(61,190,108,.08);border:1px solid rgba(61,190,108,.2);">
       <div style="display:flex;align-items:center;gap:8px;">
-        <span id="pfHealthDot" style="width:6px;height:6px;border-radius:50%;background:rgba(237,232,216,.45);display:inline-block;"></span>
-        <span id="pfHealthText" style="font-size:13px;">VaR unavailable / not enough data</span>
+        <span id="pfHealthDot" style="width:6px;height:6px;border-radius:50%;background:rgba(61,190,108,.9);display:inline-block;"></span>
+        <span id="pfHealthText" style="font-size:13px;">Portfolio Healthy</span>
       </div>
       <div style="display:flex;gap:16px;">
         <div class="stat-item"><div class="stat-label">Total Value</div><div class="stat-value" id="pfTotalVal">$0</div></div>
@@ -17911,7 +18149,7 @@ async function showPortfolio(){
     ${_ddGauge}
     <div class="pf-summary" data-guide="portfolio-summary-card">
       <div class="pf-card"><div class="pf-card-lbl">Portfolio Value</div><div class="pf-card-val">${portVal}</div></div>
-      <div class="pf-card"><div class="pf-card-lbl">VaR (95%)</div><div class="pf-card-val red">${varAmtDisplay}</div><div class="pf-card-sub">${varPctDisplay}</div></div>
+      <div class="pf-card"><div class="pf-card-lbl">VaR (95%)</div><div class="pf-card-val ${varReady?'red':''}">${varAmtDisplay}</div><div class="pf-card-sub">${varPctDisplay}</div></div>
       <div class="pf-card"><div class="pf-card-lbl">Daily Std</div><div class="pf-card-val">${portStdDisplay}</div></div>
       <div class="pf-card"><div class="pf-card-lbl">Positions</div><div class="pf-card-val">${positions.length}</div></div>
     </div>
@@ -18849,9 +19087,9 @@ async function rmSavePosition(){
   const signal=(document.getElementById('rmfSignal')||{}).value||'BUY';
   const tf=(document.getElementById('rmfTf')||{}).value||'1D';
   if(!ticker||!entry){alert('Ticker and entry price are required.');return;}
-  // Persist to backend
+  let saved=null;
   try{
-    await dvFetch('/api/positions',{method:'POST',headers:{'Content-Type':'application/json'},
+    saved = await dvFetch('/api/positions',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         ticker:ticker.toUpperCase().trim(),
         entry_price:parseFloat(entry),
@@ -18862,8 +19100,15 @@ async function rmSavePosition(){
         tp1_price:tp1?parseFloat(tp1):null,
         timeframe:tf
       })});
-  }catch(e){}
-  // Update DOM
+  }catch(e){
+    if(typeof _dvToast==='function') _dvToast('Position not saved — connection problem','rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    return;
+  }
+  if(!saved || saved.error || (saved.status && saved.status !== 'added')){
+    const msg=(saved&&saved.error)||'Position not saved';
+    if(typeof _dvToast==='function') _dvToast(msg,'rgba(232,112,110,.15)','rgba(232,112,110,.4)');
+    return;
+  }
   const tbody=document.getElementById('rmTableBody');
   if(!tbody) return;
   const dir=signal==='BUY';
@@ -18887,13 +19132,12 @@ async function rmSavePosition(){
 async function rmRunVar(){
   const pv=parseFloat((document.getElementById('rmVarPortValue')||{}).value)||10000;
   const conf=parseFloat((document.getElementById('rmVarConf')||{}).value)||0.95;
-  const el=document.getElementById('rmVarResult'); if(!el) return false;
+  const el=document.getElementById('rmVarResult'); if(!el) return;
   el.innerHTML='<span style="color:var(--mut);">Computing VaR…</span>';
   try{
     const d=await dvFetch('/api/var',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_value:pv,confidence:conf})});
     if(!pfVarReady(d)){
-      const msg=(d&&d.error)?d.error:'not enough portfolio return data yet';
-      el.innerHTML='<span style="color:var(--mut);">VaR unavailable / not enough data. '+msg+'</span>';
+      el.innerHTML='<span style="color:var(--mut);">VaR unavailable / not enough data. '+((d&&d.error)?d.error:'Add positions with price history, then compute again.')+'</span>';
       return false;
     }
     const varAmt=pfVarMetric(d,'var_1d_usd','var_amount');
@@ -18911,42 +19155,58 @@ async function rmRunVar(){
       </div>
       <div style="background:var(--s2);border-radius:7px;padding:12px;">
         <div style="font-size:9px;color:var(--mut);margin-bottom:4px;">PORTFOLIO STD</div>
-        <div style="font-size:20px;font-weight:700;color:var(--crys);">${portStd.toFixed(2)}%</div>
+        <div style="font-size:20px;font-weight:700;color:var(--crys);">${parseFloat(portStd).toFixed(2)}%</div>
       </div>
     </div>`;
     return true;
-  }catch(e){el.innerHTML='<span style="color:var(--mut);">VaR unavailable / not enough data.</span>';return false;}
+  }catch(e){el.innerHTML='<span style="color:var(--mut);">VaR unavailable / not enough data. Connection problem.</span>';return false;}
+}
+function _rmAssetTypeFromSymbol(sym, fallback){
+  const s=(sym||'').toUpperCase();
+  const f=(fallback||'').toLowerCase();
+  if(f) return f;
+  if(/^[A-Z]{6}$/.test(s)||s.includes('USD')||s.includes('EUR')||s.includes('GBP')||s.includes('JPY')) return 'forex';
+  if(s.includes('BTC')||s.includes('ETH')||s.includes('XRP')||s.includes('LTC')) return 'crypto';
+  return 'stock';
+}
+function _rmMt5PositionToStress(p){
+  const sym=(p.symbol||'').toUpperCase();
+  const vol=parseFloat(p.volume||p.lots||0);
+  const price=parseFloat(p.open_price||p.price_open||p.entry||0);
+  const at=_rmAssetTypeFromSymbol(sym,p.asset_type);
+  const cs=at==='forex'?100000:1;
+  const notional=vol*cs*price||0;
+  return {symbol:sym,notional:Math.round(notional),asset_type:at,volume:vol,price:price,source:'MT5'};
+}
+function _rmLoggedPositionToStress(p, portfolioValue){
+  const sym=(p.ticker||p.symbol||'').toUpperCase();
+  const size=parseFloat(p.size||0);
+  const entry=parseFloat(p.entry_price||p.entry||0);
+  const at=_rmAssetTypeFromSymbol(sym,p.asset_type);
+  const notional=(portfolioValue||10000)*(size/100);
+  return {symbol:sym,notional:Math.round(notional),asset_type:at,volume:size,price:entry,source:'Logged'};
 }
 async function rmRunStress(){
-  const el=document.getElementById('rmStressResult'); if(!el) return false;
+  const el=document.getElementById('rmStressResult'); if(!el) return;
   el.innerHTML='<span style="color:var(--mut);">Loading positions…</span>';
   try{
-    // Load real open positions from /api/mt5/state
-    const state=await dvFetch('/api/mt5/state');
+    const portfolioValue=parseFloat((document.getElementById('rmStressPortValue')||{}).value)||10000;
+    // Load real MT5 positions and manually logged portfolio positions.
+    const [state, loggedResp]=await Promise.all([
+      dvFetch('/api/mt5/state'),
+      dvFetch('/api/positions')
+    ]);
     const rawPos=(state&&Array.isArray(state.positions))?state.positions:[];
+    const loggedPos=Array.isArray(loggedResp)?loggedResp.filter(function(p){return !p.closed_at;}):[];
+    const mapped=rawPos.map(_rmMt5PositionToStress)
+      .concat(loggedPos.map(function(p){return _rmLoggedPositionToStress(p,portfolioValue);}))
+      .filter(function(p){return p.symbol && p.notional>0;});
     // STRESS-TEST-NO-POSITIONS-EMPTY-STATE
-    if(!rawPos.length){
+    if(!mapped.length){
       el.innerHTML='<span style="color:var(--mut);">No open positions to stress-test. Open a position (or connect MT5) and it will appear here.</span>';
       window._rmStressPositions=[];
       return false;
     }
-    // Compute notional per position: FX = 100000 × lots × price; others = lots × price
-    const FX_CONTRACT=100000;
-    const mapped=rawPos.map(function(p){
-      const sym=(p.symbol||'').toUpperCase();
-      const vol=parseFloat(p.volume||p.lots||0);
-      const price=parseFloat(p.open_price||p.price_open||p.entry||0);
-      // Infer asset_type from symbol if not present
-      let at=(p.asset_type||'').toLowerCase();
-      if(!at){
-        if(/^[A-Z]{6}$/.test(sym)||sym.includes('USD')||sym.includes('EUR')||sym.includes('GBP')||sym.includes('JPY')) at='forex';
-        else if(sym.includes('BTC')||sym.includes('ETH')||sym.includes('XRP')||sym.includes('LTC')) at='crypto';
-        else at='stock';
-      }
-      const cs=at==='forex'?FX_CONTRACT:1;
-      const notional=vol*cs*price||0;
-      return {symbol:sym,notional:Math.round(notional),asset_type:at,volume:vol,price:price};
-    });
     window._rmStressPositions=mapped;
     // Default shocks per asset class
     const defaultShocks={crypto:-30,forex:-10,stock:-20,index:-15,commodity:-20,default:-20};
@@ -18959,6 +19219,7 @@ async function rmRunStress(){
       sliderHtml+=`<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(237,232,216,.07);flex-wrap:wrap;">
         <span style="font-family:var(--mono);font-size:11px;width:80px;flex-shrink:0;">${p.symbol}</span>
         <span style="font-size:9px;color:var(--mut);font-family:var(--mono);width:52px;flex-shrink:0;">${p.asset_type}</span>
+        <span style="font-size:8px;color:var(--mut);font-family:var(--mono);width:42px;flex-shrink:0;">${p.source}</span>
         <span style="font-family:var(--mono);font-size:10px;color:var(--mut);width:72px;flex-shrink:0;">$${p.notional.toLocaleString()}</span>
         <input id="stress_slider_${i}" type="range" min="-80" max="20" value="${shock}" step="1"
           oninput="rmStressCalc(${i},parseInt(this.value),${p.notional})"
@@ -18980,13 +19241,13 @@ async function rmRunStress(){
         <button onclick="rmPresetShock('crash')" style="font-size:10px;padding:4px 10px;background:rgba(232,112,110,.08);color:#e8706e;border:1px solid rgba(232,112,110,.25);border-radius:5px;cursor:pointer;font-family:var(--mono);">Crash −50%</button>
       </div>
       <div style="display:flex;gap:10px;font-size:9px;color:var(--mut);font-family:var(--mono);padding:0 0 6px 0;border-bottom:1px solid rgba(237,232,216,.1);">
-        <span style="width:80px;">SYMBOL</span><span style="width:52px;">TYPE</span><span style="width:72px;">NOTIONAL</span><span style="flex:1;">SHOCK</span><span style="width:38px;text-align:right;">%</span><span style="width:80px;text-align:right;">P&L</span>
+        <span style="width:80px;">SYMBOL</span><span style="width:52px;">TYPE</span><span style="width:42px;">SOURCE</span><span style="width:72px;">NOTIONAL</span><span style="flex:1;">SHOCK</span><span style="width:38px;text-align:right;">%</span><span style="width:80px;text-align:right;">P&L</span>
       </div>
       ${sliderHtml}
       <div style="margin-top:10px;font-size:12px;color:var(--txt);">Total stressed P&L: <span id="rmStressTotal" style="color:${totalClr};font-weight:700;">${initTotal<0?'−$':'$'}${Math.abs(Math.round(initTotal)).toLocaleString()}</span></div>
     </div>`;
     return true;
-  }catch(e){el.innerHTML='<span style="color:var(--mut);">Stress test unavailable. Connect MT5 or try again when positions are available.</span>';return false;}
+  }catch(e){el.innerHTML='<span style="color:var(--mut);">Stress test unavailable. Could not load open positions.</span>';return false;}
 }
 function rmCorrToggle(ticker, btn){
   const inp=document.getElementById('rmCorrTickers'); if(!inp) return;
@@ -19070,11 +19331,11 @@ function rmRunFullCheck(){
       if(dot){dot.style.background='rgba(93,232,160,.18)';dot.style.borderColor='var(--grn)';dot.textContent='✓';}
       if(title) title.textContent='Safety check complete';
       if(sub) sub.textContent='VaR and stress test finished at '+ts+'. Review the panels below.';
-      return;
+    }else{
+      if(dot){dot.style.background='rgba(237,232,216,.08)';dot.style.borderColor='rgba(237,232,216,.25)';dot.textContent='!';}
+      if(title) title.textContent='Safety check incomplete';
+      if(sub) sub.textContent='One or more checks need positions or market data. Review the panel messages below.';
     }
-    if(dot){dot.style.background='rgba(237,232,216,.08)';dot.style.borderColor='rgba(237,232,216,.22)';dot.textContent='?';}
-    if(title) title.textContent='Safety check incomplete';
-    if(sub) sub.textContent='VaR or stress data is unavailable at '+ts+'. Review the panels below.';
   }).catch(function(){
     if(dot){dot.style.background='rgba(232,112,110,.15)';dot.style.borderColor='var(--red)';dot.textContent='!';}
     if(title) title.textContent='Safety check incomplete';
@@ -19602,9 +19863,9 @@ async function showPerformance(){
       +'<strong>No calibration data available.</strong>'
     +'</div>'
     +'<div>'
-      +'Calibration corrects your confidence scores so that "80% confident" '
-      +'really means 80% of those signals win. It needs 50+ labeled trade '
-      +'outcomes to produce reliable corrections.'
+      +'Calibration is locked until you have at least 100 closed WIN/LOSS '
+      +'outcomes. Before that, DotVerse shows indicator agreement and trade history, '
+      +'not a calibrated win probability.'
     +'</div>'
     +'<div style="margin-top:10px;">'
       +'<strong style="color:rgba(93,232,160,.6);">How to fix this:</strong> '
@@ -19616,20 +19877,20 @@ async function showPerformance(){
   +'</div>'
 +'</div>'; }
     if(!calibData.ready){
-      const pct = Math.min(100, Math.round((calibData.sample_size||0)/50*100));
+      const pct = Math.min(100, Math.round((calibData.sample_size||0)/100*100));
       return '<div class="perf-card" style="margin-top:14px;" data-guide="perf-calibration">'
         +'<div class="perf-card-head">'
           +'<span class="perf-card-title">\u{1F4CA} Confidence Calibration</span>'
           +'<span class="perf-card-sub">Isotonic regression &middot; calibrates raw confidence to actual win rate</span>'
         +'</div>'
         +'<div style="padding:14px 0;">'
-          +'<div style="font-family:var(--mono);font-size:14px;color:rgba(237,232,216,.4);">'+(calibData.sample_size||0)+'/50 labeled trades</div>'
+          +'<div style="font-family:var(--mono);font-size:14px;color:rgba(237,232,216,.4);">'+(calibData.sample_size||0)+'/100 labeled trades</div>'
           +'<div style="height:4px;background:rgba(237,232,216,.1);border-radius:2px;margin-top:8px;overflow:hidden;">'
             +'<div style="height:4px;background:#c9a84c;border-radius:2px;width:'+pct+'%;transition:width .4s;"></div>'
           +'</div>'
           +'<div style="font-size:11px;color:rgba(237,232,216,.4);margin-top:10px;line-height:1.7;">'
             +'<button onclick="calibSyncLabels()" style="font-family:var(--mono);font-size:11px;padding:4px 12px;border:1px solid rgba(201,168,76,.3);background:rgba(201,168,76,.1);color:#c9a84c;border-radius:4px;cursor:pointer;margin-right:8px;">Sync Labels</button>'
-            +'Log <strong style="color:rgba(201,168,76,.8);">'+(50-(calibData.sample_size||0))+' more trade outcomes</strong> and click Sync Labels. Calibration corrects overconfident/underconfident signals so your confidence scores match real win rates.'
+            +'Log <strong style="color:rgba(201,168,76,.8);">'+Math.max(0,100-(calibData.sample_size||0))+' more closed WIN/LOSS outcomes</strong> and click Sync Labels. Until then, this panel is observational only and does not change live signal confidence, ranking, sizing, or execution.'
           +'</div>'
         +'</div>'
       +'</div>';
@@ -19658,9 +19919,9 @@ async function showPerformance(){
       +'</div>'
       +'<div style="display:grid;grid-template-columns:1fr 2fr;gap:14px;padding:6px 0;">'
         +'<div style="grid-column:1/-1;padding:0 0 8px;font-size:11px;color:rgba(237,232,216,.4);line-height:1.6;">'
-          +'<strong style="color:rgba(237,232,216,.55);">Calibration answers: "When DotVerse says 80% confident, does it really win 80% of the time?"</strong> '
-          +'If your signals say 80% but only win 55% of the time, they are overconfident — calibration fixes that. '
-          +'The green bars show actual win rates per confidence bin. The gold line is what they SHOULD be after correction.'
+          +'<strong style="color:rgba(237,232,216,.55);">Calibration checks whether raw confidence matched your real closed-trade outcomes.</strong> '
+          +'This panel is a performance audit. It does not yet feed back into live signal ranking, sizing, or execution. '
+          +'The green bars show actual win rates per confidence bin. The gold line shows the fitted calibration curve for review.'
         +'</div>'
         // ── Left: ECE + summary stats ──
         +'<div style="background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:14px;">'
@@ -19718,7 +19979,7 @@ async function showPerformance(){
         return '<div style="margin-top:12px;background:rgba(237,232,216,.04);border:1px solid rgba(237,232,216,.08);border-radius:8px;padding:12px;">'
           +'<div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:rgba(237,232,216,.5);margin-bottom:8px;">CALIBRATED CONFIDENCE LOOKUP</div>'
           +'<table style="border-collapse:collapse;">'+rows+'</table>'
-          +'<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:6px;">Raw \u2192 calibrated win probability. Green = signal was underconfident (actual WR higher). Red = overconfident.</div>'
+          +'<div style="font-size:9px;color:rgba(237,232,216,.3);margin-top:6px;">Raw \u2192 fitted calibration estimate for review only. Green = historical outcomes were higher than raw confidence. Red = historical outcomes were lower.</div>'
         +'</div>';
       })()
     +'</div>';
@@ -21309,10 +21570,13 @@ function showUnderstand(){
         ${(function(){
           var _conf = (sig.conf||0) >= 65;
           var _notHold = sig.sig !== 'HOLD';
-          var _bg    = _notHold&&_conf?'background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.2);':_notHold?'background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);':'background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);';
-          var _col   = _notHold&&_conf?'color:#5de8a0;':_notHold?'color:rgba(201,168,76,.85);':'color:rgba(201,168,76,.7);';
-          var _title = _notHold&&_conf?'DOTVERSE RECOMMENDS THIS TRADE':_notHold?'LOW INDICATOR AGREEMENT — WAIT FOR BETTER SETUP':'HOLD — CONDITIONS NOT CLEAR ENOUGH TO TRADE';
-          var _body  = _notHold&&_conf?'Indicator agreement is above the minimum threshold. The indicators are in agreement. Size this trade and execute when ready.':_notHold?'Indicator agreement is below 65% — DotVerse indicators do not fully agree. Consider waiting for a stronger setup or use a smaller position.':'The market is not showing a clear enough setup to trade right now. Wait for conditions to improve before committing money.';
+          var _btOk = sig._btVerified === true || sig.btVerified === true;
+          var _hard = _notHold&&_conf&&_btOk;
+          var _soft = _notHold&&_conf&&!_btOk;
+          var _bg    = _hard?'background:rgba(93,232,160,.06);border:1px solid rgba(93,232,160,.2);':(_soft||_notHold)?'background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);':'background:rgba(201,168,76,.05);border:1px solid rgba(201,168,76,.15);';
+          var _col   = _hard?'color:#5de8a0;':(_soft||_notHold)?'color:rgba(201,168,76,.85);':'color:rgba(201,168,76,.7);';
+          var _title = _hard?'DOTVERSE RECOMMENDS THIS TRADE':_soft?'HIGH AGREEMENT — BACKTEST NOT VERIFIED':_notHold?'LOW INDICATOR AGREEMENT — WAIT FOR BETTER SETUP':'HOLD — CONDITIONS NOT CLEAR ENOUGH TO TRADE';
+          var _body  = _hard?'Indicator agreement is above the minimum threshold and this setup passed the backtest gate. Size this trade and execute only after your normal review.':_soft?'Indicator agreement is above the minimum threshold, but this setup is not backtest-verified yet. Review the trade and run/check backtest evidence before sizing or placing it.':_notHold?'Indicator agreement is below 65% — DotVerse indicators do not fully agree. Consider waiting for a stronger setup or use a smaller position.':'The market is not showing a clear enough setup to trade right now. Wait for conditions to improve before committing money.';
           return '<div style="margin-bottom:12px;padding:10px 14px;border-radius:7px;'+_bg+'"><div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.05em;'+_col+'">'+_title+'</div><div style="font-size:11px;color:var(--t3);margin-top:4px;line-height:1.5;">'+_body+'</div></div>';
         })()}
         <div style="margin-top:14px;border-top:1px solid rgba(237,232,216,.08);padding-top:14px;">
@@ -23141,6 +23405,7 @@ function _vAutoReviewAI(s) {
   }
   var ticker = (sig.sym || '').replace('/', '').replace('-', '');
   var action = ((s && s.action) || sig.sig || 'HOLD').toUpperCase();
+  var verdictDate = (s && (s.date || s.trade_date)) || '';
   var _pt0c = (window._szLadderAuto && window._szLadderAuto[0]) || {};
   var tpCount = [_pt0c.tp1, _pt0c.tp2].filter(Boolean).length;
   var settingsSummary = [
@@ -23169,7 +23434,7 @@ function _vAutoReviewAI(s) {
   dvFetch('/api/verdict/chat', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ job_id: window._verdictChatJobId || '', question: question, ticker: ticker })
+    body: JSON.stringify({ job_id: window._verdictChatJobId || '', question: question, ticker: ticker, timeframe: sig.tf || '4h', direction: action, date: verdictDate })
   }).then(function(r) {
     var el2 = document.getElementById('verdictAutoReviewContent');
     if (!el2) return;
@@ -23927,6 +24192,9 @@ function showSize(){
   <!-- Agent Sizing Assessment card — populated by szRenderAgentSizingCard() after flow badge updates -->
   <div id="szAgentSizingCard" data-guide="agent-sizing-card" style="margin-top:12px;display:none;"></div>
 
+  <!-- Entry Brain — advisory single vs scale-out vs scale-in decision -->
+  <div id="szEntryBrainCard" style="margin-top:12px;"></div>
+
   ${(function(){
     // Verdict agent cards section — show if a verdict has been run for this signal.
     // The Size tab is the final checkpoint before trade execution, so the agents'
@@ -24400,10 +24668,89 @@ function _szDefaultLegRisk(target, base){
   var mult = ({ tp1:1.0, tp2:0.7, tp3:0.5, trail:0.5 })[target] || 0.7;
   return Math.max(0.1, Math.round(base * mult * 10) / 10);
 }
+function _szEntryBrainPayload(){
+  var sig=window._activeSignal||{};
+  var num=function(id, fallback){ return parseFloat(String((document.getElementById(id)?.value)||fallback||'').replace(/,/g,''))||0; };
+  var entry=num('szEntry', sig.entry), sl=num('szSL', sig.sl), tp1=num('szTP1', sig.tp||sig.tp1);
+  if(!(sig.sym&&sig.sig&&entry&&sl&&tp1)) return null;
+  return {
+    ticker:sig.sym,
+    asset_type:document.getElementById('szType')?.value||sig.asset||sig.asset_type||'stock',
+    timeframe:sig.tf||'4h',
+    signal:sig.sig,
+    entry:entry,
+    stop_loss:sl,
+    tp1:tp1,
+    tp2:num('szTP2', sig.tp2)||null,
+    tp3:num('szTP3', sig.tp3)||null,
+    account_risk_amount:parseFloat((window._szLastCalc||{}).moneyAtRisk)||100,
+    _btVerified:sig._btVerified===true,
+    _btPf:sig._btPf,
+    _btExpectancy:sig._btExpectancy,
+    _btTrades:sig._btTrades
+  };
+}
+function _szEntryBrainKey(p){
+  if(!p) return '';
+  return [p.ticker,p.asset_type,p.timeframe,p.signal,p.entry,p.stop_loss,p.tp1,p.tp2||'',p.tp3||'',p._btVerified?'bt':'raw'].join('|');
+}
+function _szRenderEntryBrainCard(){
+  var el=document.getElementById('szEntryBrainCard'); if(!el) return;
+  var esc=function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  var b=window._szEntryBrain;
+  if(window._szEntryBrainLoading){
+    el.innerHTML='<div style="border:1px solid rgba(126,183,255,.22);background:rgba(126,183,255,.045);border-radius:8px;padding:12px;"><div style="font-family:var(--mono);font-size:9px;color:#78a6ff;text-transform:uppercase;font-weight:700;">Entry brain</div><div style="font-family:var(--syne);font-size:16px;color:#ede8d8;margin-top:4px;">Choosing single vs scale-out vs scale-in...</div><div style="font-size:11px;color:rgba(237,232,216,.52);margin-top:6px;line-height:1.5;">DotVerse is checking structure and backtest evidence. Live Size orders are not changed while this loads.</div></div>';
+    return;
+  }
+  if(!b){
+    el.innerHTML='<div style="border:1px solid rgba(237,232,216,.10);background:rgba(237,232,216,.025);border-radius:8px;padding:12px;"><div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42);text-transform:uppercase;font-weight:700;">Entry brain</div><div style="font-size:11px;color:rgba(237,232,216,.48);margin-top:5px;">Load a BUY/SELL setup with entry, stop, and TP1 so DotVerse can choose the execution style.</div></div>';
+    return;
+  }
+  var mode=(typeof _todayEntryBrainModeLabel==='function')?_todayEntryBrainModeLabel(b.recommended_mode):String(b.recommended_mode||'single');
+  var col=b.execution_authority?'#5de8a0':(b.recommended_mode==='scale_in'||b.recommended_mode==='wait'?'#c9a84c':'#78a6ff');
+  var ev=(b.evidence||[]).slice(0,3).map(function(x){return '<div>- '+esc(x)+'</div>';}).join('');
+  var lock=b.execution_authority?'Size may follow this automatically.':'Advisory only - live execution authority is locked.';
+  var modeTruth=b.recommended_mode==='scale_in'
+    ? 'Scale-in means DotVerse would plan different entries, not just split one entry. It stays advisory here until different-entry execution is proven.'
+    : (b.recommended_mode==='scale_out'
+      ? 'Scale-out uses the existing Size ladder: one shared entry with multiple exits.'
+      : 'Single keeps one entry and one execution plan.');
+  el.innerHTML='<div style="border:1px solid '+(b.execution_authority?'rgba(93,232,160,.28)':'rgba(201,168,76,.28)')+';background:'+(b.execution_authority?'rgba(93,232,160,.055)':'rgba(201,168,76,.055)')+';border-radius:8px;padding:12px;">'
+    + '<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;"><div><div style="font-family:var(--mono);font-size:9px;color:'+col+';text-transform:uppercase;font-weight:700;">Entry brain</div><div style="font-family:var(--syne);font-size:16px;color:#ede8d8;margin-top:4px;">'+esc(mode)+' recommended</div></div><span style="font-family:var(--mono);font-size:9px;color:'+col+';border:1px solid '+col+'66;border-radius:4px;padding:3px 8px;">'+(b.execution_authority?'AUTO-OK':'LOCKED')+'</span></div>'
+    + '<div style="font-size:11px;color:rgba(237,232,216,.62);margin-top:8px;line-height:1.5;">'+esc(b.authority_reason||lock)+'</div>'
+    + '<div style="font-size:11px;color:rgba(237,232,216,.58);margin-top:7px;line-height:1.5;">'+esc(modeTruth)+'</div>'
+    + '<div style="font-size:11px;color:rgba(237,232,216,.50);margin-top:7px;line-height:1.5;">'+esc(b.reason||'No detailed reason returned.')+'</div>'
+    + (ev?'<div style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42);margin-top:8px;line-height:1.5;">'+ev+'</div>':'')
+    + '</div>';
+}
+function _szLoadEntryBrain(){
+  var payload=_szEntryBrainPayload();
+  var key=_szEntryBrainKey(payload);
+  if(!payload){ window._szEntryBrain=null; window._szEntryBrainKey=''; _szRenderEntryBrainCard(); return; }
+  if(window._szEntryBrainKey===key && (window._szEntryBrain || window._szEntryBrainLoading)) return;
+  window._szEntryBrainKey=key;
+  window._szEntryBrain=null;
+  window._szEntryBrainLoading=true;
+  _szRenderEntryBrainCard();
+  dvFetch('/api/entry-plan/advisory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(data){
+    window._szEntryBrainLoading=false;
+    window._szEntryBrain=data||null;
+    if(data && data.execution_authority===true && !window._szEntryBrainUserOverride){
+      if(data.recommended_mode==='scale_out' && window._szMode!=='multi') szSetMode('multi','brain');
+      else if(data.recommended_mode==='single' && window._szMode!=='single') szSetMode('single','brain');
+    }
+    _szRenderEntryBrainCard();
+  }).catch(function(){
+    window._szEntryBrainLoading=false;
+    window._szEntryBrain={recommended_mode:'single',execution_authority:false,authority_reason:'Entry brain unavailable. Advisory only.',reason:'Size keeps the existing manual execution controls.'};
+    _szRenderEntryBrainCard();
+  });
+}
 // Switch between Single Trade and Scale-Out Ladder modes.
 // Single: renders only row 0 and hides the Add/Preset/Submit buttons bar.
 // Multi:  renders all rows and shows the full buttons bar.
-function szSetMode(mode) {
+function szSetMode(mode, source) {
+  if(source!=='brain') window._szEntryBrainUserOverride=true;
   window._szMode = mode;
   // Update toggle button styles
   var btnS = document.getElementById('szModeBtnSingle');
@@ -24471,6 +24818,7 @@ function _szLegGuidance(i, riskPct, riskDollars, target){
 function szLadderRender() {
   const wrap = document.getElementById('szLadderRows');
   if (!wrap) return;
+  try{ _szLoadEntryBrain(); }catch(e){}
   // Read account size, entry, SL, TP1/2/3 from the szCalc inputs.
   const acct  = parseFloat(document.getElementById('szAcct')?.value) || 10000;
 	  const entry = parseFloat((document.getElementById('szEntry')?.value||'').replace(/,/g,'')) || 0;
@@ -24545,7 +24893,7 @@ function szLadderRender() {
   if (_ladderBtnsBar) _ladderBtnsBar.style.display = _isSingle ? 'none' : 'flex';
 
   const _entryFmtBadge = entry >= 1000 ? entry.toLocaleString('en-US', {maximumFractionDigits: 2}) : entry >= 1 ? String(+entry.toPrecision(5)) : entry > 0 ? String(+entry.toPrecision(5)) : '—';
-  const _scaleOutBanner = !_isSingle && entry > 0 ? `<div style="margin-bottom:8px;padding:7px 12px;background:rgba(93,232,160,.04);border:1px solid rgba(93,232,160,.18);border-radius:5px;font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.75);line-height:1.5;"><span style="font-weight:700;letter-spacing:.04em;">Scale-out plan</span> — all rows open at <strong style="color:rgba(237,232,216,.75);">${_entryFmtBadge}</strong>; each row exits at a different target.</div>` : '';
+  const _scaleOutBanner = !_isSingle && entry > 0 ? `<div style="margin-bottom:8px;padding:7px 12px;background:rgba(93,232,160,.04);border:1px solid rgba(93,232,160,.18);border-radius:5px;font-family:var(--mono);font-size:9px;color:rgba(93,232,160,.75);line-height:1.5;"><span style="font-weight:700;letter-spacing:.04em;">Scale-out plan</span> — shared entry at <strong style="color:rgba(237,232,216,.75);">${_entryFmtBadge}</strong>; each row exits at a different target.</div>` : '';
 	  wrap.innerHTML = _recBanner + _autoRecSection + _scaleOutBanner + _rowsToRender.map((risk, i) => {
 		    const moneyAtRisk = acct * (risk/100);
 		    const units       = moneyAtRisk / (slDist * (quoteUsd || 1));
@@ -25272,6 +25620,7 @@ async function _szLadderSubmitGo() {
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           ticker: sig.sym, order_type: orderType, lots: lots, direction: direction,
+          account_id: _dvCurrentMt5AccountId(),
           asset_type: assetType,
           entry: entry, sl: sl,
           // Only the assigned TP — not all three — so position closes precisely at target
@@ -26838,6 +27187,7 @@ function _actExecuteGo(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         ticker: sig.sym,
+        account_id: _dvCurrentMt5AccountId(),
         asset_type: leg.assetType || (window._szLastCalc&&window._szLastCalc.assetType) || _normalizeAssetType(sig.asset || 'crypto'),
         direction: (sig.sig||'BUY').toUpperCase(),
         lots: parseFloat(leg.lots)||0,
@@ -26863,15 +27213,17 @@ function _actExecuteGo(){
     Promise.all(orderRequests).then(function(results){
       var ok = results.filter(function(r){ return r.res && r.res.order_id; });
       var failed = results.filter(function(r){ return !(r.res && r.res.order_id); });
+      if(status) status.innerHTML = _actOrderResultHtml(results);
       if(ok.length){
         var ids = ok.map(function(r){ return '#'+r.res.order_id; }).join(', ');
-        if(status) status.innerHTML='<span style="color:rgba(61,190,108,.9);">'+ok.length+' MT5 order'+(ok.length===1?'':'s')+' sent &middot; '+ids+(failed.length?' · '+failed.length+' failed':'')+'</span>';
-        _dvToast(ok.length+' MT5 order'+(ok.length===1?'':'s')+' submitted','rgba(61,190,108,.15)','rgba(61,190,108,.4)');
-        actRefreshOrderFeed();
+        var toastText = failed.length
+          ? ok.length+' MT5 order'+(ok.length===1?'':'s')+' queued, '+failed.length+' failed — details shown in Act'
+          : ok.length+' MT5 order'+(ok.length===1?'':'s')+' submitted';
+        _dvToast(toastText,'rgba(61,190,108,.15)','rgba(61,190,108,.4)');
+        mt5RefreshOrderHistory();
         mt5Poll();
       }else{
         var err=_mt5OrderErrorText((failed[0]||{}).res);
-        if(status) status.innerHTML='<span style="color:rgba(224,85,85,.9);">'+_mt5OrderErrorHtml((failed[0]||{}).res)+'</span>';
         _dvToast(err,'rgba(224,85,85,.15)','rgba(224,85,85,.4)');
       }
     }).catch(function(err){
@@ -26896,6 +27248,50 @@ function _actExecuteGo(){
         +'</div>';
     }
   }
+}
+
+function _actOrderResultHtml(results){
+  results = Array.isArray(results) ? results : [];
+  var esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); };
+  var ok = results.filter(function(r){ return r && r.res && r.res.order_id; });
+  var failed = results.filter(function(r){ return !(r && r.res && r.res.order_id); });
+  var total = results.length;
+  if(!total) return '<span style="color:rgba(224,85,85,.9);">No MT5 order response received — nothing can be confirmed.</span>';
+  var partial = ok.length > 0 && failed.length > 0;
+  var allFailed = failed.length === total;
+  var col = allFailed ? '#e8706e' : partial ? '#c9a84c' : '#5de8a0';
+  var bg = allFailed ? 'rgba(232,112,110,.08)' : partial ? 'rgba(201,168,76,.08)' : 'rgba(93,232,160,.08)';
+  var border = allFailed ? 'rgba(232,112,110,.3)' : partial ? 'rgba(201,168,76,.3)' : 'rgba(93,232,160,.3)';
+  var title = allFailed
+    ? 'No MT5 orders were queued'
+    : partial
+      ? ok.length + ' of ' + total + ' MT5 orders queued — ' + failed.length + ' failed'
+      : 'All ' + ok.length + ' MT5 order' + (ok.length===1?'':'s') + ' queued';
+  var rows = results.map(function(r, i){
+    var leg = (r && r.leg) || {};
+    var res = (r && r.res) || {};
+    var legNo = leg.idx || (i + 1);
+    var target = leg.trailing ? 'trailing' : (leg.assignedTp != null ? leg.assignedTp : 'target');
+    var okRow = !!res.order_id;
+    var detail = okRow
+      ? 'queued as order #' + esc(res.order_id)
+      : _mt5OrderErrorText(res);
+    return '<div style="display:flex;align-items:flex-start;gap:7px;padding:4px 0;border-top:1px solid rgba(237,232,216,.06);font-family:var(--mono);font-size:10px;line-height:1.45;">'
+      + '<span style="color:'+(okRow?'#5de8a0':'#e8706e')+';font-weight:900;">'+(okRow?'&#10003;':'&#10005;')+'</span>'
+      + '<span style="color:rgba(237,232,216,.76);">Leg '+esc(legNo)+' · TP '+esc(target)+'</span>'
+      + '<span style="margin-left:auto;text-align:right;color:'+(okRow?'rgba(93,232,160,.78)':'rgba(232,112,110,.86)')+';">'+esc(detail)+'</span>'
+      + '</div>';
+  }).join('');
+  var next = partial
+    ? 'Already queued orders are not resent automatically. Retry only the failed legs from the Size ladder after checking the error.'
+    : allFailed
+      ? 'Nothing was placed at the broker. Check the message above, MT5 connection, and account permission before trying again.'
+      : 'Open the order list below and MT5 to confirm the EA picked up each queued order.';
+  return '<div style="text-align:left;border:1px solid '+border+';background:'+bg+';border-radius:8px;padding:10px 12px;">'
+    + '<div style="font-family:var(--mono);font-size:10px;font-weight:800;color:'+col+';margin-bottom:7px;">'+title+'</div>'
+    + rows
+    + '<div style="margin-top:8px;font-size:10px;color:rgba(237,232,216,.55);line-height:1.5;">'+next+'</div>'
+    + '</div>';
 }
 function actLogToPortfolio(){
   const sig = window._activeSignal;
@@ -27216,6 +27612,19 @@ function _closePaperTrade(ticket, sym, level) {
   _mt5RenderPositions(window._demoPosCache || []);
 }
 
+function _mt5ActionAccountLabel() {
+  var state = window._mt5LastState || window._todayLastMt5State || {};
+  var acct = state.account || {};
+  var mode = _mt5AccountMode(state) || _mt5AccountMode(acct) || 'MT5';
+  var login = acct.login || acct.account_number || state.account_number || state.account_id || acct.account_id || '';
+  return login ? mode + ' account ' + login : mode + ' account';
+}
+
+function _mt5ConfirmMoneyAction(action, detail) {
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true;
+  return window.confirm(action + '\n' + _mt5ActionAccountLabel() + '\n' + detail + '\n\nThis queues a broker-facing MT5 action. Check the details before continuing.');
+}
+
 function mt5ClosePosition(ticket, sym, level) {
   if (!ticket) return;
   // Guard: demo/prototype trades use non-integer ticket IDs (e.g. 'T001')
@@ -27228,24 +27637,31 @@ function mt5ClosePosition(ticket, sym, level) {
   var isExit = level === 'SL' || level === 'MARKET';
   var bg = isExit ? 'rgba(224,85,85,.12)' : 'rgba(93,232,160,.12)';
   var bd = isExit ? 'rgba(224,85,85,.4)'  : 'rgba(93,232,160,.4)';
+  var actionLabel = isExit ? 'Queue close order for ' + (sym || ticket) : 'Queue take profit ' + level + ' for ' + (sym || ticket);
+  if (!_mt5ConfirmMoneyAction(actionLabel, 'Ticket ' + ticket)) {
+    return Promise.resolve({cancelled:true});
+  }
 
-  // dvFetch is async and returns parsed JSON directly (or null on error) — do not call .json() again
-  dvFetch('/api/mt5/close', {
+  // Money-path mutations use dvOrderFetch so non-2xx JSON errors stay visible.
+  return dvOrderFetch('/api/mt5/close', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticket: ticket, symbol: sym, level: level })
+    body: JSON.stringify({ ticket: ticket, symbol: sym, level: level, account_id: _dvCurrentMt5AccountId() })
   }).then(function(data){
-    if (data && data.status === 'ok') {
+    if (data && data._ok && (data.status === 'ok' || data.status === 'duplicate')) {
       var msg = isExit
         ? 'Close order queued for ' + sym + ' · EA will execute'
         : 'Take profit ' + level + ' queued for ' + sym + ' · EA will execute';
+      if(data.status === 'duplicate') msg = isExit ? 'Close order already queued for ' + sym : 'Take profit ' + level + ' already queued for ' + sym;
       if (typeof _dvToast === 'function') _dvToast(msg, bg, bd);
-    } else if (data === null) {
-      if (typeof _dvToast === 'function') _dvToast('Server unreachable — check connection', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+      mt5RefreshOrderHistory();
     } else {
-      var err = (data && data.error) ? data.error : 'Unknown error';
-      if (typeof _dvToast === 'function') _dvToast('Close failed: ' + err, 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+      if (typeof _dvToast === 'function') _dvToast(_mt5OrderErrorText(data), 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+      mt5RefreshOrderHistory();
     }
+  }).catch(function(){
+    if (typeof _dvToast === 'function') _dvToast('Close not confirmed — check MT5 before taking action', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+    mt5RefreshOrderHistory();
   });
 }
 
@@ -27599,7 +28015,7 @@ function _mt5RenderPositions(positions) {
         +'</div>'
         // Action buttons row 2
         +'<div style="display:flex;gap:8px;">'
-        +  '<button onclick="event.stopPropagation();" style="'+btnMove+'">Move stop to entry</button>'
+        +  '<button onclick="event.stopPropagation();actMoveToBreakevenReal(\''+ticket+'\',\''+openPrice+'\')" style="'+btnMove+'">Move stop to entry</button>'
         +  '<button onclick="event.stopPropagation();mt5ClosePosition(\''+ticket+'\',\''+(p.symbol||'')+'\',\'SL\')" style="'+btnExit+'">'+btnExitTxt+'</button>'
         +'</div>'
 
@@ -27675,6 +28091,17 @@ function _mt5FmtAge(secs) {
   return s > 0 ? m + 'm ' + s + 's' : m + 'm';
 }
 
+function _mt5FailedOrderText(o) {
+  if (!o) return 'Order failed — check MT5 before trying again.';
+  if (o.status_message) return _esc(o.status_message);
+  var c = String(o.comment || '');
+  if (/DotVerse|acct=|LIVE|DEMO/.test(c)) {
+    return 'Order failed before broker confirmation. Check MT5 journal for the exact broker message before trying again.';
+  }
+  if (c) return _esc(_dvHumanizeError(c));
+  return 'Order failed — check MT5 before trying again.';
+}
+
 function _mt5RenderOrders(orders) {
   var el = document.getElementById('actOrdersList');
   var countEl = document.getElementById('actOrderCount');
@@ -27689,6 +28116,7 @@ function _mt5RenderOrders(orders) {
   el.innerHTML = '<table style="width:100%;border-collapse:collapse;">'
     + '<thead><tr style="border-bottom:1px solid rgba(237,232,216,.1);">'
       + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:left;padding:8px 14px;letter-spacing:.6px;">SYMBOL</th>'
+      + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:left;padding:8px 8px;letter-spacing:.6px;">ACCOUNT</th>'
       + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:left;padding:8px 8px;letter-spacing:.6px;">DIR</th>'
       + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:right;padding:8px 8px;letter-spacing:.6px;">LOTS</th>'
       + '<th style="font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.45);font-weight:600;text-align:right;padding:8px 8px;letter-spacing:.6px;">PRICE</th>'
@@ -27699,6 +28127,9 @@ function _mt5RenderOrders(orders) {
     + orders.map(function(o) {
         var sc      = statusColor[o.status] || 'rgba(237,232,216,.6)';
         var typeCol = o.order_type === 'BUY' ? 'rgba(93,232,160,.85)' : 'rgba(224,85,85,.85)';
+        var acctType = String(o.account_type || '').toUpperCase();
+        var acctCol = acctType === 'LIVE' ? 'rgba(232,112,110,.86)' : acctType === 'DEMO' ? 'rgba(93,232,160,.82)' : 'rgba(201,168,76,.78)';
+        var acctLabel = o.account_number ? (acctType ? acctType + ' ' : '') + String(o.account_number) : (o.account_id ? 'acct ' + o.account_id : 'account —');
         var cancelBtn = (o.status === 'pending' || o.status === 'executing')
           ? ' <button onclick="mt5CancelOrder(' + o.id + ')" style="margin-left:6px;background:none;border:1px solid rgba(237,232,216,.15);border-radius:2px;color:rgba(237,232,216,.5);font-family:var(--mono);font-size:9px;padding:1px 5px;cursor:pointer;">cancel</button>'
           : '';
@@ -27733,11 +28164,12 @@ function _mt5RenderOrders(orders) {
 
         return '<tr style="border-bottom:1px solid rgba(237,232,216,.06);">'
           + '<td style="font-family:var(--mono);font-size:12px;color:rgba(255,255,255,.85);padding:9px 14px;">' + (o.symbol || '—') + '</td>'
+          + '<td style="font-family:var(--mono);font-size:10px;color:'+acctCol+';padding:9px 8px;white-space:nowrap;">' + _esc(acctLabel) + '</td>'
           + '<td style="font-family:var(--mono);font-size:11px;font-weight:700;color:' + typeCol + ';padding:9px 8px;">' + (o.order_type || '—') + '</td>'
           + '<td style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);padding:9px 8px;text-align:right;">' + (o.volume || '—') + '</td>'
           + '<td style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.7);padding:9px 8px;text-align:right;">' + (o.fill_price ? _mt5Fmt(o.fill_price) : _mt5Fmt(o.price)) + '</td>'
           + '<td style="padding:9px 8px;"><span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' + sc + ';text-transform:uppercase;letter-spacing:.4px;">' + (o.status || '—') + '</span>' + cancelBtn
-            + (o.status === 'failed' ? '<div style="font-family:var(--mono);font-size:9px;color:rgba(224,85,85,.7);margin-top:3px;">' + (o.status_message ? _esc(o.status_message) : (o.comment ? _dvHumanizeError(o.comment) : '')) + '</div>' : '')
+            + (o.status === 'failed' ? '<div style="font-family:var(--mono);font-size:9px;color:rgba(224,85,85,.7);margin-top:3px;">' + _mt5FailedOrderText(o) + '</div>' : '')
             + staleWarningHtml + placedAgoHtml + '</td>'
           + '<td style="padding:9px 8px;text-align:right;">' + pnlHtml + '</td>'
           + '<td style="font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.4);padding:9px 14px;">' + (o.filled_at || o.created_at || '—') + '</td>'
@@ -27746,9 +28178,16 @@ function _mt5RenderOrders(orders) {
     + '</tbody></table>';
 }
 
+function mt5RefreshOrderHistory() {
+  return dvFetch('/api/mt5/orders').then(function(d) {
+    if (d) _mt5RenderOrders(d.orders || []);
+  }).catch(function(){});
+}
+
 function mt5Poll() {
   dvFetch('/api/mt5/state').then(function(d) {
     if (!d) return;
+    window._mt5LastState = d;
     var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
       ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago / 60) + 'm ago')
       : null;
@@ -27761,6 +28200,7 @@ function mt5Poll() {
     _mt5RenderPositions(d.connected ? (d.positions || []) : []);
     _actPopulateMt5Summary(d);
   }).catch(function(){});
+  mt5RefreshOrderHistory();
 }
 
 function mt5LoadTab() {
@@ -27770,6 +28210,7 @@ function mt5LoadTab() {
   // Immediate first fetch
   dvFetch('/api/mt5/state').then(function(d) {
     if (!d) { _mt5SetStatus(false, null); _mt5RenderPositions([]); return; }
+    window._mt5LastState = d;
     var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
       ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago / 60) + 'm ago')
       : null;
@@ -27790,31 +28231,62 @@ function mt5LoadTab() {
     }
   }).catch(function(){ _mt5SetStatus(false, null); });
 
-  dvFetch('/api/mt5/orders').then(function(d) {
-    if (d) _mt5RenderOrders(d.orders || []);
-  }).catch(function(){});
+  mt5RefreshOrderHistory();
 }
 
 function mt5CancelOrder(orderId) {
-  dvFetch('/api/mt5/cancel/' + orderId, { method: 'POST' }).then(function(){
-    dvFetch('/api/mt5/orders').then(function(d){ if(d) _mt5RenderOrders(d.orders || []); }).catch(function(){});
-    _dvToast('Order cancelled', 'rgba(237,232,216,.12)', 'rgba(237,232,216,.35)');
-  }).catch(function(){});
+  dvOrderFetch('/api/mt5/cancel/' + orderId, { method: 'POST' }).then(function(d){
+    if(d && d._ok && d.status === 'cancelled'){
+      mt5RefreshOrderHistory();
+      _dvToast('Order cancelled before MT5 picked it up', 'rgba(237,232,216,.12)', 'rgba(237,232,216,.35)');
+      return;
+    }
+    var msg=_mt5OrderErrorText(d);
+    _dvToast(msg, 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+    mt5RefreshOrderHistory();
+  }).catch(function(){
+    _dvToast('Cancel not confirmed — check MT5 before taking action', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+    mt5RefreshOrderHistory();
+  });
 }
 
 function actSetTrailingReal(ticket) {
   var inp = document.getElementById('pftrail-' + ticket);
   var pips = inp ? parseFloat(inp.value) : 20;
   if (!pips || pips <= 0) { _dvToast('Enter a valid pip distance first', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)'); return; }
-  dvFetch('/api/mt5/trailing', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ticket:ticket, pips:pips }) })
-    .then(function(){ _dvToast('Trailing stop set: ' + pips + ' pips', 'rgba(237,232,216,.15)', 'rgba(237,232,216,.4)'); })
-    .catch(function(){ _dvToast('Trail not sent — EA may be offline', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)'); });
+  if (!_mt5ConfirmMoneyAction('Queue trailing stop for ticket ' + ticket, 'Trailing distance: ' + pips + ' pips')) {
+    return Promise.resolve({cancelled:true});
+  }
+  return dvOrderFetch('/api/mt5/trailing', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ticket:ticket, pips:pips, account_id:_dvCurrentMt5AccountId() }) })
+    .then(function(d){
+      if(d && d._ok && (d.status === 'ok' || d.status === 'duplicate')){
+        _dvToast(d.status === 'duplicate' ? 'Trailing stop already queued' : 'Trailing stop queued: ' + pips + ' pips', 'rgba(237,232,216,.15)', 'rgba(237,232,216,.4)');
+        mt5RefreshOrderHistory();
+        mt5Poll();
+        return;
+      }
+      _dvToast(_mt5OrderErrorText(d), 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+      mt5RefreshOrderHistory();
+    })
+    .catch(function(){ _dvToast('Trail not confirmed — check MT5 before taking action', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)'); mt5RefreshOrderHistory(); });
 }
 
 function actMoveToBreakevenReal(ticket, bePrice) {
-  dvFetch('/api/mt5/close', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ticket:ticket, level:'BE', be_price:bePrice }) })
-    .then(function(){ _dvToast('Move SL to break-even sent', 'rgba(93,232,160,.12)', 'rgba(93,232,160,.4)'); })
-    .catch(function(){ _dvToast('Not sent — EA may be offline', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)'); });
+  if (!_mt5ConfirmMoneyAction('Move stop loss to entry for ticket ' + ticket, 'New stop-loss price: ' + bePrice)) {
+    return Promise.resolve({cancelled:true});
+  }
+  return dvOrderFetch('/api/mt5/breakeven', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ticket:ticket, be_price:bePrice, account_id:_dvCurrentMt5AccountId() }) })
+    .then(function(d){
+      if(d && d._ok && (d.status === 'ok' || d.status === 'duplicate')){
+        _dvToast(d.status === 'duplicate' ? 'Break-even move already queued' : 'Move SL to break-even queued', 'rgba(93,232,160,.12)', 'rgba(93,232,160,.4)');
+        mt5RefreshOrderHistory();
+        mt5Poll();
+        return;
+      }
+      _dvToast(_mt5OrderErrorText(d), 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
+      mt5RefreshOrderHistory();
+    })
+    .catch(function(){ _dvToast('Break-even move not confirmed — check MT5 before taking action', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)'); mt5RefreshOrderHistory(); });
 }
 
 // Visual state restored by _autoRestoreVisuals() called at end of showAct()
@@ -27845,28 +28317,7 @@ function actSetTrailing(id){
 }
 
 function actCloseTrade(ticket, sym, level) {
-  // Optimistic UI — dim the card immediately
-  var card = document.getElementById('atcr-' + ticket);
-  if (card) { card.style.opacity = '0.5'; card.style.pointerEvents = 'none'; }
-  dvFetch('/api/mt5/close', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticket: ticket, symbol: sym, level: level || 'SL' })
-  }).then(function(d){
-    if (d && d.status === 'ok') {
-      _dvToast('Close order sent to MT5', 'rgba(93,232,160,.12)', 'rgba(93,232,160,.4)');
-      // Refresh orders after short delay
-      setTimeout(function(){
-        dvFetch('/api/mt5/orders').then(function(od){ if(od) _mt5RenderOrders(od.orders || []); }).catch(function(){});
-      }, 1200);
-    } else {
-      _dvToast('Close not confirmed — EA may be offline', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
-      if (card) { card.style.opacity = '1'; card.style.pointerEvents = ''; }
-    }
-  }).catch(function(){
-    _dvToast('Close not sent — check EA connection', 'rgba(224,85,85,.12)', 'rgba(224,85,85,.4)');
-    if (card) { card.style.opacity = '1'; card.style.pointerEvents = ''; }
-  });
+  return mt5ClosePosition(ticket, sym, level || 'SL');
 }
 
 
@@ -29237,9 +29688,9 @@ async function showAutomations() {
       level: 'SAFE'
     },
     autoScan: {
-      what: 'When the DotVerse scanner finds a signal matching your indicator agreement and asset rules, it places the trade in MT5 automatically — without you clicking anything.',
-      when_on: 'Only turn ON after you have tested your rules extensively and are confident in the automation. This feature places real trades with real money.',
-      risk_if_off: 'You review every signal before placing a trade. Slower but you stay fully in control of every entry.',
+      what: 'When the DotVerse scanner finds a signal matching your indicator agreement and asset rules, it sends an executable alert. You still confirm the trade before MT5 order placement.',
+      when_on: 'Turn ON when you want DotVerse to watch for qualified setups and notify you quickly. Review the alert and confirm before live execution.',
+      risk_if_off: 'You only see scanner opportunities while actively using DotVerse. Slower, but no alert is sent while you are away.',
       level: 'ADVANCED'
     },
     dailyLossLimit: {
@@ -29435,7 +29886,7 @@ async function showAutomations() {
       'Auto-Entry',
       'Let DotVerse open trades automatically when strong signals appear',
       row('autoScan', 'Auto-open trades from scanner',
-          'When the scanner finds a signal matching your rules, DotVerse places the trade in MT5 without you needing to click.',
+          'When the scanner finds a signal matching your rules, DotVerse sends an executable alert for your confirmation.',
           s.autoScan, false,
           sliderSub('minConfidence', s.minConfidence, 65, 95, '%  minimum indicator agreement', 'Min agreement'))
       + '<div data-guide="auto-max-trades" style="padding:11px 14px;border-bottom:1px solid var(--bd);">'
@@ -29911,43 +30362,43 @@ window._dvGuide = {
   // ── ORDER FLOW (Understand tab) ───────────────────────────────────────────
   'order-flow-cvd': {
     title: 'CVD Trend — Cumulative Volume Delta',
-    body: 'CVD tracks whether more volume is going through at the ask (buyers lifting) versus the bid (sellers hitting). Rising CVD = net buying pressure over time. Falling CVD = net selling pressure. It reveals whether the price move is backed by real institutional order flow.',
-    example: 'Price rising + CVD rising → genuine buyers driving the move. Price rising + CVD falling → price is being pushed up with fewer buyers → potential fake-out.'
+    body: 'CVD tells you whether the move has real pressure behind it. For a BUY, rising CVD means buyers are actually lifting offers; falling CVD means the price may be drifting up without real demand. For a SELL, falling CVD confirms sellers are hitting bids. Use it as a trust check: aligned CVD supports the trade, opposing CVD means reduce size or wait for the next candle.',
+    example: 'BUY setup + price rising + CVD rising → demand confirms the trade. BUY setup + price rising + CVD falling → possible fake-out; wait or size down.'
   },
   'order-flow-buy-pressure': {
     title: 'Buy Pressure %',
-    body: 'The percentage of the last period\'s volume that came from buyers (orders executed at the ask price). Above 55% means buyers dominated. This is estimated from OHLCV data — it approximates real order flow.',
-    example: 'Buy pressure 68% → more than two-thirds of volume was buying → strong upward momentum.'
+    body: 'Shows how much of the recent volume came from aggressive buyers. On a BUY signal, 55%+ buy pressure supports entering because buyers are pushing, not just watching. On a SELL signal, high buy pressure is a warning that sellers may not have control yet. This is estimated from market data, so treat it as confirmation, not a guarantee.',
+    example: 'BUY signal + buy pressure 68% → buyers support the setup. SELL signal + buy pressure 68% → wait for sellers to take control or reduce size.'
   },
   'order-flow-sell-pressure': {
     title: 'Sell Pressure %',
-    body: 'The percentage of the last period\'s volume that came from sellers (orders executed at the bid price). Above 55% means sellers dominated. When sell pressure spikes on a BUY signal, the move may be losing momentum.',
-    example: 'Sell pressure 71% on a rally → sellers are absorbing the buying → caution, momentum is fading.'
+    body: 'Shows how much recent volume came from aggressive sellers. On a SELL signal, 55%+ sell pressure supports the trade because sellers are pressing. On a BUY signal, high sell pressure means the long setup is fighting current flow. If sell pressure is high against your direction, wait for a better entry or trade smaller.',
+    example: 'SELL signal + sell pressure 71% → sellers confirm the move. BUY signal + sell pressure 71% → buyers are being absorbed; wait.'
   },
   'order-flow-real-buyer': {
     title: 'Real Buyer',
-    body: 'Volume confirmed by EMA alignment — price moved up AND the short-term EMA agrees the trend is up. This is buying pressure with technical confirmation. "Real" means the buying is supported by market structure, not just random noise.',
-    example: 'Real buyer 62% → genuine upward pressure confirmed by trend structure.'
+    body: 'Buying pressure that also matches trend structure. This matters because random green candles can fail quickly, but buying that appears while EMAs support an uptrend is more reliable. For BUY trades, more real buyers means the setup has healthier demand and you can continue review. For SELL trades, real buyers are opposition; reduce size or wait.',
+    example: 'BUY setup + real buyers 62% → demand and trend agree. SELL setup + real buyers rising → sellers may lose control.'
   },
   'order-flow-poser-buyer': {
     title: 'Poser Buyer',
-    body: 'Volume that appears bullish but is NOT confirmed by EMA alignment. Price ticked up but the trend structure did not follow through. These are weak buyers who may panic and sell at the first pullback.',
-    example: 'Poser buyer 38% → some buying but without conviction — those buyers will exit quickly on any dip.'
+    body: 'Buying that looks bullish at first, but trend structure does not confirm it. This is weak demand: price ticked up, but the market has not proved buyers are in control. Do not treat poser buyers as a reason to enter long. If a BUY relies mostly on poser buyers, wait for real-buyer confirmation.',
+    example: 'BUY setup + poser buyers high + real buyers low → the rally may fade. Wait for structure to confirm before entering.'
   },
   'order-flow-real-seller': {
     title: 'Real Seller',
-    body: 'Selling pressure confirmed by EMA alignment — price moved down AND the short-term EMA agrees the trend is down. Genuine institutional or professional selling with structural confirmation.',
-    example: 'Real seller 55% → confirmed downward pressure → a SELL signal here has structural backing.'
+    body: 'Selling pressure that also matches downtrend structure. For SELL trades, this is strong supporting evidence because sellers are not only active, they are moving the trend, so you can continue review. For BUY trades, rising real sellers are a warning that the long setup is fighting professional selling; reduce size or wait.',
+    example: 'SELL setup + real sellers 55% → downside flow supports entry. BUY setup + real sellers rising → reduce size or wait.'
   },
   'order-flow-poser-seller': {
     title: 'Poser Seller',
-    body: 'Selling volume that is NOT confirmed by EMA structure. Price dipped but the trend did not break. These sellers are likely to cover (buy back) quickly, potentially causing a sharp bounce.',
-    example: 'Poser seller 45% → selling without structural confirmation → bounce likely as weak sellers cover.'
+    body: 'Selling that looks bearish, but the trend has not actually broken. These sellers can be forced to buy back quickly if price bounces. Do not enter a SELL just because poser sellers are high; wait for real sellers or a broken support level. On a BUY, poser sellers may actually help if they cover into your direction.',
+    example: 'SELL setup + poser sellers high but real sellers low → breakdown not proven. BUY setup + poser sellers trapped → bounce fuel.'
   },
   'candle-footprint': {
     title: 'Candle Footprint — Delta Buy−Sell',
-    body: 'Each bar in this chart shows the net difference between buying and selling volume for that candle (buy volume minus sell volume). Green bars = net buying. Red bars = net selling. The pattern reveals whether the most recent candles were driven by buyers or sellers — giving you a picture of momentum behind the price move.',
-    example: 'Three green bars growing taller → buying pressure is increasing each candle → momentum is building upward.'
+    body: 'Each bar shows whether that candle was controlled by buyers or sellers. Use the last few bars as a momentum check before acting. Green bars growing on a BUY support the setup. Red bars growing against a BUY warn that sellers are taking over. One bar is noise; a sequence is evidence.',
+    example: 'Three taller green bars before a BUY → momentum building. Three taller red bars before a BUY → wait; the entry may be early.'
   },
 
   // ── MTF ALIGNMENT ─────────────────────────────────────────────────────────
@@ -30250,13 +30701,13 @@ window._dvGuide = {
   },
   'auto-sent': {
     title: 'Sentiment Watch',
-    body: 'DotVerse monitors real-time financial news for this asset using Finnhub\'s news feed. It uses AI (DeepSeek) to classify each headline as positive, neutral, or negative. If 3 or more negative headlines appear within 2 hours, it partially closes your position to lock in gains before sentiment drives the price lower.',
-    example: '3 negative headlines: "SEC investigates exchange", "Whale wallet moves $500M to exchange", "Regulatory crackdown" → DotVerse closes 25% of position to protect profit before news impact hits price.'
+    body: 'Watches live headlines after you enter so news does not blindside the trade. If sentiment turns hard against your direction, DotVerse can tighten protection or reduce exposure before price fully reacts. This is most useful for crypto, stocks, and news-sensitive forex trades. It is not a reason to enter; it is a guard after entry.',
+    example: 'Long BTC + several negative exchange/security headlines within 2 hours → Sentiment Watch warns or trims exposure before the move accelerates.'
   },
   'auto-recommended': {
     title: 'DotVerse Recommendation',
-    body: 'Based on this signal\'s trade type, confidence score, volatility, and market conditions, DotVerse has pre-selected the automations most likely to protect this specific trade. These are not random defaults — they are computed from the signal data. You can override any toggle, but the recommendations represent DotVerse\'s best assessment of what this trade needs.',
-    example: 'Swing trade, 82% confidence, high volatility → DotVerse recommends: TRAIL ON (ride the trend), MACRO ON (hold through news), INVAL ON (close if structure breaks). BE skipped (high vol = price may not reach 1 ATR before reversing).'
+    body: 'Explains which protection tools DotVerse thinks this specific trade needs. A fast scalp may need break-even quickly; a swing trade may need trailing stop and news guard; a weak setup may need fewer automations and smaller size. Treat this as the default plan, then override only if you understand the trade-off.',
+    example: 'Swing trade + strong trend + high volatility → TRAIL on to let it run, MACRO on for news risk, BE delayed so normal volatility does not stop you early.'
   },
 
   // ── AGENT SIZING CARD (Size tab) ──────────────────────────────────────────
@@ -30269,44 +30720,44 @@ window._dvGuide = {
   // ── VERDICT AGENT CARDS (Size tab + Verdict tab) ──────────────────────────
   'verdict-agent-card': {
     title: 'Verdict Agent',
-    body: 'One of DotVerse\'s specialised AI agents analysing this trade from a specific perspective: technical analysis, macro environment, risk management, sentiment, or strategy alignment. Each agent casts an independent vote (BUY/SELL/HOLD) with its reasoning. The consensus determines the final Verdict.',
-    example: 'Technical Agent: BUY — "EMA structure bullish, RSI neutral, MACD histogram positive." Macro Agent: HOLD — "VIX elevated, NFP in 3 hours." Consensus: 6 of 8 agents BUY → Verdict BUY with caution note.'
+    body: 'A second-opinion check before you risk money. Each agent looks for a different failure: bad technicals, dangerous news, poor risk:reward, weak sentiment, or position-size danger. If most agents agree with the signal, continue to Size. If several disagree or explain a specific danger, reduce size or skip.',
+    example: 'Technical says BUY, but Risk and Macro say HOLD because news is 1 hour away → do not force the trade; wait or use smaller size.'
   },
 
   // ── MARKET TAB ─────────────────────────────────────────────────────────────
   'fear-greed': {
     title: 'Fear & Greed Index',
-    body: 'A composite score from 0 (Extreme Fear) to 100 (Extreme Greed) that measures the overall emotional state of the crypto/stock market. Extreme Fear = markets are oversold and may bounce (potential BUY opportunity). Extreme Greed = markets are overbought and may correct (potential SELL opportunity). Best used as a contrarian indicator.',
-    example: 'Fear & Greed 18 (Extreme Fear) → historically this has been a good time to look for BUY setups. Fear & Greed 88 (Extreme Greed) → markets are euphoric, consider taking profits.'
+    body: 'A market mood filter, not a trade signal by itself. Extreme fear can create good BUY opportunities, but only if DotVerse also finds structure and risk:reward. Extreme greed means new BUY trades are easier to chase late; protect profits and be selective. Use this to decide aggression: normal size in balanced mood, smaller size when emotion is extreme.',
+    example: 'Fear & Greed 18 + DotVerse BUY with good entry → valid bounce candidate. Fear & Greed 88 + late BUY → do not chase; wait for pullback or take profits.'
   },
   'market-conditions': {
     title: 'Market Conditions',
-    body: 'DotVerse\'s assessment of the overall market environment right now. TRENDING = clear directional movement, technical signals are reliable. MIXED = cross-currents, signals have lower conviction. RISK-OFF = defensive market, most assets falling, avoid new BUY trades.',
-    example: 'TRENDING green → good conditions for following signals. MIXED amber → use smaller sizes, be selective. RISK-OFF red → wait for conditions to improve before entering new trades.'
+    body: 'Tells you whether today is a normal trading day or a protection day. Trending markets reward following clean signals. Mixed markets require smaller size and faster exits. Risk-off markets mean capital preservation comes first; avoid fresh longs unless the setup is exceptional and backtested.',
+    example: 'TRENDING → normal risk. MIXED → half size, TP1 focus. RISK-OFF → protect account, skip weak BUYs, wait for calmer conditions.'
   },
 
   // ── SCANNER ────────────────────────────────────────────────────────────────
   'scanner-table': {
     title: 'Market Scanner',
-    body: 'DotVerse scans multiple assets and timeframes simultaneously using its full indicator engine. Every result shown has already passed through the same 65% confluence gate as the main signal. Click a result to load it onto the Signal tab for full analysis.',
-    example: 'Scanner shows BTC 4H BUY 82% indicator agreement → click to load → view full signal card with entry/SL/TP levels.'
+    body: 'This is where DotVerse looks for trades instead of forcing one asset. It scans many assets and timeframes, then shows only rows with enough indicator agreement to deserve review. A scanner row is not an instruction to enter immediately; click it, read the full Signal/Understand/Verdict path, then size the trade before any order.',
+    example: 'Scanner finds ETH 4H BUY 82% → open it, confirm entry/SL/TP and higher timeframe alignment, then decide in Size.'
   },
   'scanner-tf-cell': {
     title: 'Timeframe Cell',
-    body: 'Each cell shows the DotVerse signal for that asset on that specific timeframe. Click the cell to run a full analysis on that exact combination. The signal shown is a real DotVerse verdict — the same algorithm as the main signal tab, not a simplified pre-screen.',
-    example: 'ETH 1H: SELL · ETH 4H: BUY — conflicting timeframes. Click 4H BUY to see full analysis and decide which timeframe to trade.'
+    body: 'Shows what DotVerse sees on one timeframe for that asset. Different timeframes can disagree, and that matters: a 15m BUY inside a 4h SELL is usually a scalp, not a swing. Click the cell that matches the timeframe you are willing to hold, then verify the full trade plan.',
+    example: 'ETH 15m BUY but 4h SELL → short scalp only, smaller size. ETH 1h/4h/1d all BUY → stronger candidate.'
   },
 
   // ── MARKET TAB — additional ────────────────────────────────────────────────
   'market-top-opportunities': {
     title: 'Top Opportunities',
-    body: 'Assets where DotVerse has detected a high indicator-agreement signal right now across all asset classes it monitors. Sorted by signal strength — highest indicator agreement first. Tap any row to jump straight to that signal on the Signal tab.',
-    example: 'BTC-USD BUY 88% — ETH-USD BUY 79% — EURUSD SELL 71% · click BTC row → Signal tab loads BTC BUY signal instantly.'
+    body: 'A shortlist of the best candidates DotVerse can see now. It is sorted by signal evidence and backtest support when available, but it still needs your execution checks before acting: current price near entry, acceptable R:R, no broker/MT5 blocker, and risk within today\'s budget.',
+    example: 'BTC BUY 88% but price has run far past entry → skip or wait. EURUSD SELL 76% with price near entry and good R:R → review next.'
   },
   'market-latest-news': {
     title: 'Latest News',
-    body: 'Real-time financial headlines fetched from Finnhub\'s news feed. DotVerse uses AI to scan these headlines for sentiment that may move the assets you are watching. A spike in negative headlines for an asset you hold is an early warning sign — the Sentiment automation acts on this data automatically.',
-    example: 'Headline: "Fed signals rate hold" — neutral for equities. Headline: "Exchange hack reported" — negative for crypto. 3 or more negative headlines in 2 hours triggers the Sentiment automation.'
+    body: 'News tells you what can break a technical setup. Good charts can fail when rate decisions, earnings, hacks, war headlines, or regulatory news hit. If news is directly against the asset or a major event is close, wait or reduce size even if the signal looks strong.',
+    example: 'Strong crypto BUY + exchange-hack headlines → wait. Forex setup + Fed decision in 30 minutes → no new trade until the spike passes.'
   },
 
   // ── UNDERSTAND TAB — advanced indicator rows ───────────────────────────────
@@ -30366,8 +30817,8 @@ window._dvGuide = {
   // ── MTF — individual timeframe cell ──────────────────────────────────────
   'mtf-cell': {
     title: 'Timeframe Signal',
-    body: 'The DotVerse signal computed independently for this specific timeframe. Green = BUY · Red = SELL · Grey = HOLD/NEUTRAL. When multiple timeframes show the same direction, the trade has high alignment. One timeframe against the others is a warning — that timeframe\'s trend may pull back against your trade.',
-    example: '15M BUY · 1H BUY · 4H BUY → all aligned → maximum conviction. 15M BUY · 1H HOLD · 4H SELL → only short-term momentum is up, bigger picture is against you → risky trade.'
+    body: 'A single timeframe vote. Use it to match the trade to your holding period. If lower timeframes agree but higher timeframes oppose, the trade is short-lived and should be smaller. If higher timeframes agree with your entry timeframe, continue review because the trade has room to breathe.',
+    example: '15m BUY + 1h BUY + 4h BUY → clean alignment. 15m BUY + 4h SELL → scalp only; do not turn it into a swing.'
   },
 
   // ── WATCHLIST ─────────────────────────────────────────────────────────────
@@ -30385,18 +30836,18 @@ window._dvGuide = {
   // ── JOURNEY STEPS — individual ───────────────────────────────────────────
   'journey-step-discover': {
     title: 'Step 1 — Discover',
-    body: 'Your first step is finding a signal. Use the Market tab to see overall conditions, then use the Scanner to find assets with high indicator-agreement signals right now, or go directly to the Signal tab and analyse a specific asset.',
-    example: 'Open Market tab → Fear & Greed 45 (Neutral) → VIX green FULL TRADE → open Scanner → find ETH 4H BUY 79% → proceed to Step 2 Read Signal.'
+    body: 'Start by letting DotVerse search instead of guessing. Market shows whether conditions are worth trading; Scanner finds assets/timeframes with live evidence. Do not begin with an asset you emotionally want to trade — begin with the cleanest evidence DotVerse finds.',
+    example: 'Market is calm → Scanner finds ETH 4H BUY 79% and EURUSD 1h SELL 76% → open the stronger plan, not your favourite ticker.'
   },
   'journey-step-today': {
     title: 'Step 1 — Today',
-    body: 'Start with the Today tab. It turns your account size, risk preference, and daily target into a small plan before you start clicking signals.',
-    example: 'Account $5,000 · today risk budget $150 → DotVerse builds a basket plan before you choose the final setup.'
+    body: 'Today turns your account, daily/weekly/monthly goal, and risk limit into a trading pace. It should not force trades to meet a goal; it tells DotVerse how much risk can be used today and when to stop. If Today says protect, stop hunting new exposure.',
+    example: 'Weekly goal needs $600, but today\'s safe pace is $120 → DotVerse looks for trades that fit today, not the whole week at once.'
   },
   'journey-step-market': {
     title: 'Step 2 — Market',
-    body: 'Check whether the broader market supports trading now. Market tells you where opportunities exist and whether conditions are supportive, cautious, or too noisy.',
-    example: 'Market shows forex opportunities but warns equities are choppy → focus on the forex shortlist first.'
+    body: 'Market decides whether the environment supports risk. If it is risk-off, DotVerse should protect capital and prefer shorts, hedges, or no trade. If it is clean/trending, you can consider normal risk. This step stops you from taking a good-looking signal in a bad market.',
+    example: 'Equities risk-off, VIX high → skip marginal stock BUYs even if one indicator panel looks green.'
   },
   'journey-step-read': {
     title: 'Step 2 — Read Signal',
@@ -30405,13 +30856,13 @@ window._dvGuide = {
   },
   'journey-step-understand': {
     title: 'Step 4 — Understand (You Are Here)',
-    body: 'This tab explains WHY DotVerse generated this signal. Read the indicator confluence (how many checks agree), the order flow (what buyers and sellers are actually doing), and the multi-timeframe alignment (are higher timeframes confirming the direction?). Do not proceed to sizing until the thesis is clear to you.',
-    example: 'Confluence 82% BUY · Order flow real buyers dominating · 4H and 1D both bullish → thesis confirmed → move to Size tab.'
+    body: 'This is the explanation checkpoint. It should answer: why this direction, what can invalidate it, which timeframes agree, and whether order flow supports entry now. If you cannot explain the trade in one sentence after reading this tab, do not size it yet.',
+    example: '“ETH 4H BUY because 1h/4h align, real buyers lead, R:R is 1:2.1, invalid below 3,050.” Clear thesis → continue.'
   },
   'journey-step-verdict': {
     title: 'Step 5 — Verdict',
-    body: 'Verdict asks the analyst engine to challenge the trade before you size it. Use it to catch missing risks, weak fundamentals, or a bad market backdrop.',
-    example: 'Signal looks strong, but Verdict flags upcoming news and weak upside → reduce size or skip.'
+    body: 'Verdict is the challenge step, not a hype step. It asks independent agents to find reasons the trade could fail before you commit money. If Verdict agrees, continue. If it disagrees, the safest action is smaller size, TP1 only, or no trade.',
+    example: 'Signal says BUY, Verdict flags news risk and poor reward → skip now; let DotVerse find the next cleaner setup.'
   },
   'journey-step-size': {
     title: 'Step 6 — Size Your Trade',
@@ -30519,8 +30970,8 @@ window._dvGuide = {
   },
   'auto-scan-entry': {
     title: 'Auto-Open Trades from Scanner',
-    body: 'When the automatic scanner finds a signal that meets the minimum indicator agreement threshold, DotVerse opens the trade in MT5 without any manual tap needed. This is a fully automated entry engine. Only use this after you have tested DotVerse signals in demo mode and are confident in the results.',
-    example: 'Scanner finds ETH-USD BUY 83% indicator agreement at 3:00 AM while you sleep → auto-entry fires → 0.05 lots placed in MT5 with correct SL and TP levels → BE and TRAIL automations take over.'
+    body: 'When the automatic scanner finds a signal that meets the minimum indicator agreement threshold, DotVerse sends an executable alert. The current verified flow is alert-and-confirm, not unattended MT5 order placement.',
+    example: 'Scanner finds ETH-USD BUY 83% indicator agreement at 3:00 AM → DotVerse sends an alert with entry, stop, and target → you confirm before any MT5 order is queued.'
   },
   'auto-ai-reanalyze': {
     title: 'AI Re-Analysis Timer',
@@ -30745,28 +31196,28 @@ window._dvGuide = {
   // ── Exchange UI tooltips ──
   'act-exchange-section': {
     title: 'Exchange trading section',
-    body: 'Live trading panel for Binance and Coinbase. Connect your API key in Settings, pick your exchange here, and place real orders from DotVerse.',
-    example: 'Select Binance, enter 0.05 BTC market buy — order routes through your Binance API key and executes instantly at the best available price.'
+    body: 'This is a live-order area for connected spot exchanges. It is separate from MT5, and it should only be used after you have checked entry, stop, size, and whether the exchange account is the account you intend to trade. A connected API key means real orders can be sent, so verify the account before acting.',
+    example: 'You intend to buy BTC spot on Coinbase, not place an MT5 CFD trade → confirm exchange, quantity, and account before pressing place.'
   },
   'act-exchange-selector': {
     title: 'Exchange picker dropdown',
-    body: 'Choose Binance Spot or Coinbase Advanced Trade. Only exchanges with saved API keys in Settings → Connections appear as usable options.',
-    example: 'You saved a Binance key in Settings. Dropdown shows Binance with green dot. Pick it, and your balance and order form activate automatically.'
+    body: 'Choose which connected exchange receives the order. This matters because balances, symbols, fees, and order rules differ by exchange. If the wrong exchange is selected, DotVerse could size from one account but submit to another. Confirm this before entering quantity.',
+    example: 'Binance has USDT, Coinbase has USD. Pick the exchange that actually holds the funds for this trade.'
   },
   'act-exchange-place': {
     title: 'Place order button',
-    body: 'Submits your order to the selected exchange. A confirmation dialog appears first — review price, quantity, and side before it goes live.',
-    example: 'Click Place Exchange Order → confirm dialog shows "BUY 0.05 BTC at market on Binance" → click Confirm → order fills within seconds.'
+    body: 'Queues a real exchange order after confirmation. Before clicking, verify side, symbol, quantity, and order type. Market orders can slip in fast moves; limit orders may not fill. Omar clicks the final irreversible confirm, not the app.',
+    example: 'Dialog says BUY 0.05 BTC market, but you meant 0.005 → cancel. Quantity mistakes are the fastest way to damage the account.'
   },
   'act-exchange-orders': {
     title: 'Order status feed',
-    body: 'Live feed showing your recent exchange orders and their status — filled, partially filled, or rejected. Refreshes when you change exchange selection.',
-    example: 'Order #A7F3: BUY 0.01 ETH → status "FILLED" at $3,420. Order #B2D1: SELL 0.5 SOL → status "PARTIALLY FILLED" — 0.3 of 0.5 filled so far.'
+    body: 'Shows what happened after an exchange order was submitted. Filled means the position exists. Partial means only part filled and you may still have an open order. Rejected means no position opened, so do not assume protection orders exist. Always check this feed before placing another order.',
+    example: 'Order partially filled 0.3/0.5 SOL → decide whether to cancel the remaining amount before sending anything else.'
   },
   'act-exchange-confirm': {
     title: 'Confirm order dialog',
-    body: 'Final review before your order hits the exchange. Shows symbol, side, quantity, and order type. This is your last chance to cancel.',
-    example: 'Dialog reads: "BUY 0.05 BTC at market on Binance." Check the quantity — is it 0.05 not 0.5? Once confirmed, the order is live and irreversible.'
+    body: 'The last safety stop before a live exchange order. Read every field out loud: account, exchange, symbol, side, quantity, order type, and estimated cost. If any number surprises you, cancel and return to Size. Once confirmed, the order may fill immediately.',
+    example: 'Confirm shows SELL instead of BUY, or 0.5 instead of 0.05 → cancel. The confirmation exists to catch exactly that mistake.'
   },
 
   // ── One-Click Trading Tooltips ─────────────────────────────────────────────
@@ -30844,8 +31295,8 @@ window._dvGuide = {
   },
   'perf-calibration': {
     title: 'Confidence Calibration',
-    body: 'DotVerse uses isotonic regression to calibrate its raw confidence scores against your actual win rate. If the system says 80% confidence but only 55% of those trades win, calibration adjusts future scores downward so 80% truly means 80%. The Calibration Error (ECE) tells you how far off the raw scores are — below 5% is well calibrated. Requires at least 50 labeled trade outcomes to activate.',
-    example: '50 labeled trades · ECE 3.2% → well calibrated. Before calibration: 80% confidence signals won 62% of the time. After calibration: those same signals now show ~65% confidence — honest and actionable.'
+    body: 'DotVerse uses isotonic regression to compare raw confidence scores with your actual closed WIN/LOSS outcomes. This is a performance audit only right now: it does not change live signal ranking, sizing, or execution. Requires at least 100 labeled trade outcomes to activate.',
+    example: '100 labeled trades · ECE 3.2% → raw confidence has tracked outcomes closely. If ECE is high, treat raw confidence as less reliable until more closed trades are reviewed.'
   },
   'perf-daily-cap': {
     title: 'Daily Trade Cap',
@@ -30999,18 +31450,18 @@ setNav = function(id) {
 
 // ── Tap-to-show tooltips on mobile ──────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('.qual-ring').forEach(function(ring) {
-    ring.addEventListener('click', function(e) {
-      e.stopPropagation();
-      // Close other open tooltips
-      document.querySelectorAll('.qual-ring.tapped').forEach(function(r) {
-        if (r !== ring) r.classList.remove('tapped');
-      });
-      ring.classList.toggle('tapped');
+  document.addEventListener('click', function(e) {
+    var ring = e.target && e.target.closest && e.target.closest('.qual-ring');
+    if (!ring) return;
+    e.stopPropagation();
+    document.querySelectorAll('.qual-ring.tapped').forEach(function(r) {
+      if (r !== ring) r.classList.remove('tapped');
     });
+    ring.classList.toggle('tapped');
   });
   // Close tooltips when tapping elsewhere
-  document.addEventListener('click', function() {
+  document.addEventListener('click', function(e) {
+    if(e.target && e.target.closest && e.target.closest('.qual-ring')) return;
     document.querySelectorAll('.qual-ring.tapped').forEach(function(r) {
       r.classList.remove('tapped');
     });
@@ -31027,14 +31478,13 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   
   // Tap-to-highlight for scanner rows on mobile
-  document.querySelectorAll('.sc-row').forEach(function(row) {
-    row.addEventListener('click', function(e) {
-      // Toggle tapped state for visual feedback
-      document.querySelectorAll('.sc-row.tapped').forEach(function(r) {
-        if (r !== row) r.classList.remove('tapped');
-      });
-      row.classList.toggle('tapped');
+  document.addEventListener('click', function(e) {
+    var row = e.target && e.target.closest && e.target.closest('.sc-row');
+    if (!row) return;
+    document.querySelectorAll('.sc-row.tapped').forEach(function(r) {
+      if (r !== row) r.classList.remove('tapped');
     });
+    row.classList.toggle('tapped');
   });
 });
 

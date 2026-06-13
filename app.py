@@ -67,7 +67,7 @@ from backend.app.accounts.account_contracts import (
     normalize_account_update_payload,
     serialize_trading_account,
 )
-from backend.app.intelligence.calibration import fit_isotonic_calibration
+from backend.app.intelligence.calibration import CALIBRATION_GATE, fit_isotonic_calibration
 from backend.app.llm.providers import (
     is_provider_configured,
     missing_provider_error,
@@ -7650,9 +7650,10 @@ def _job_auto_scan():
             _risk_usd   = _money["risk_usd"]
             _profit_usd = _money["profit_usd"]
             if _risk_usd is not None and _profit_usd is not None:
+                # Dollar value sits INLINE, right next to the lot size — risk on the
+                # same line as "Lot size: X lots", with the TP1 target alongside it.
                 _lot_line = (
-                    f"Lot size: {lot:.2f} lots  (${_risk_usd:,.0f} at risk)\n"
-                    f"💵 Risks ≈ ${_risk_usd:,.0f} if stop hit · Targets ≈ ${_profit_usd:,.0f} at TP1\n"
+                    f"Lot size: {lot:.2f} lots  (≈ ${_risk_usd:,.0f} risk · +${_profit_usd:,.0f} at TP1)\n"
                     f"({conf_label} — {conf_pct_str} allocation)"
                 )
             else:
@@ -9919,7 +9920,10 @@ def mt5_get_state():
     secs_ago  = (datetime.utcnow() - last_seen).total_seconds()
     connected = secs_ago < 45
     positions = list(state["positions"])
-    account = annotate_mt5_account_mode(state.get("account", {}))
+    account = dict(annotate_mt5_account_mode(state.get("account", {})))
+    state_account_id = state.get("account_id")
+    if state_account_id is not None:
+        account["account_id"] = state_account_id
     # Enrich positions with tp2/tp3/timeframe from mt5_orders.
     # Primary match: comment field contains "DotVerse #<order_id>" — reliable because
     # res.deal (stored as mt5_ticket) != PositionGetTicket() in MT5.
@@ -9959,6 +9963,7 @@ def mt5_get_state():
         "connected":   connected,
         "secs_ago":    int(secs_ago),
         "account":     account,
+        "account_id":   state_account_id,
         "account_type": account.get("account_type"),
         "is_demo":     account.get("is_demo"),
         "is_live":     account.get("is_live"),
@@ -10015,6 +10020,17 @@ def _mt5_retcode_message(comment, status):
     return "{} (broker code {})".format(text, code)
 
 
+def _selected_mt5_account_id_from_body(body):
+    value = (body or {}).get("account_id")
+    if value in (None, ""):
+        return None
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 @app.route("/api/mt5/orders", methods=["GET"])
 @require_tier('pro')
 @login_required
@@ -10029,8 +10045,23 @@ def mt5_get_orders():
                        MT5Order.user_id.in_([user_id, "default"]),  # include Telegram-execute + auto-scan orders (saved as "default")
                        MT5Order.order_type != "MODIFY",             # exclude internal modify_sl cascade orders
                    ).order_by(MT5Order.created_at.desc()).limit(50).all()
+        account_ids = [o.account_id for o in orders if o.account_id]
+        account_map = {}
+        if account_ids:
+            account_map = {
+                a.id: a for a in db.query(TradingAccount).filter(
+                    TradingAccount.id.in_(account_ids),
+                    TradingAccount.user_id.in_([user_id, "default"]),
+                ).all()
+            }
         return jsonify({"orders": [{
             "id":         o.id,
+            "account_id": o.account_id,
+            "account_number": getattr(account_map.get(o.account_id), "account_number", None) if o.account_id else None,
+            "account_type": normalize_mt5_account_type(
+                {},
+                fallback=getattr(account_map.get(o.account_id), "account_type", None),
+            ) if o.account_id else None,
             "symbol":     o.symbol,
             "order_type": o.order_type,
             "volume":     o.volume,
@@ -10069,6 +10100,11 @@ def mt5_cancel_order(order_id):
         ).first()
         if not order:
             return jsonify({"error": "Order not found or already processing"}), 404
+        if order.status == "executing":
+            return jsonify({
+                "error": "Order already sent to MT5 — DotVerse cannot cancel it safely from here. Check MT5 before taking action.",
+                "status": "executing",
+            }), 409
         order.status = "cancelled"
         db.commit()
         return jsonify(mt5_cancel_response())
@@ -10102,27 +10138,37 @@ def mt5_close_position():
     try:
         # S-7: verify the ticket belongs to this user (or "default" for single-user installs).
         # A filled BUY/SELL MT5Order with mt5_ticket == ticket must exist for this user.
-        owned = db.query(MT5Order).filter(
+        selected_account_id = _selected_mt5_account_id_from_body(body)
+        owned_query = db.query(MT5Order).filter(
             MT5Order.mt5_ticket == ticket_int,
             MT5Order.order_type.in_(["BUY", "SELL"]),
             MT5Order.user_id.in_([user_id, "default"]),
-        ).first()
+            MT5Order.status == "filled",
+        )
+        if selected_account_id is not None:
+            owned_query = owned_query.filter(MT5Order.account_id == selected_account_id)
+        owned = owned_query.order_by(MT5Order.id.desc()).first()
         if not owned:
             return jsonify({"error": f"Position {ticket_int} not found or not yours"}), 403
 
         # B1: dedup — if a pending/executing CLOSE for this ticket already exists, return it.
-        existing_close = db.query(MT5Order).filter(
+        owned_account_id = getattr(owned, "account_id", None)
+        existing_close_query = db.query(MT5Order).filter(
             MT5Order.close_ticket == ticket_int,
             MT5Order.order_type == "CLOSE",
             MT5Order.user_id.in_([user_id, "default"]),
             MT5Order.status.in_(["pending", "executing"]),
-        ).first()
+        )
+        if owned_account_id is not None:
+            existing_close_query = existing_close_query.filter(MT5Order.account_id == owned_account_id)
+        existing_close = existing_close_query.first()
         if existing_close:
             return jsonify({"status": "duplicate", "id": existing_close.id})
 
         order = MT5Order(
             user_id      = user_id,
-            symbol       = symbol,
+            account_id   = owned_account_id,
+            symbol       = getattr(owned, "symbol", None) or symbol,
             order_type   = "CLOSE",
             volume       = 0,
             price        = 0,
@@ -10141,7 +10187,85 @@ def mt5_close_position():
     finally:
         db.close()
 
+@app.route("/api/mt5/breakeven", methods=["POST"])
+@require_tier('pro')
+@login_required
+def mt5_move_stop_to_breakeven():
+    """Queue a stop-loss modify order so EA moves SL to entry without closing."""
+    if not _DBSession:
+        return jsonify({"error": "Database not available"}), 503
+    body = request.json or {}
+    ticket = body.get("ticket")
+    be_price = body.get("be_price")
+    user_id = str(session.get("user_id"))
+    if not ticket:
+        return jsonify({"error": "ticket required"}), 400
+    try:
+        ticket_int = int(ticket)
+        if ticket_int <= 0:
+            raise ValueError("non-positive ticket")
+    except (TypeError, ValueError):
+        return jsonify({"error": f"Invalid ticket ID '{ticket}'"}), 400
+    try:
+        be_float = float(be_price)
+        if be_float <= 0:
+            raise ValueError("non-positive break-even price")
+    except (TypeError, ValueError):
+        return jsonify({"error": "valid break-even price required"}), 400
+    db = _DBSession()
+    try:
+        selected_account_id = _selected_mt5_account_id_from_body(body)
+        owned_query = db.query(MT5Order).filter(
+            MT5Order.mt5_ticket == ticket_int,
+            MT5Order.order_type.in_(["BUY", "SELL"]),
+            MT5Order.user_id.in_([user_id, "default"]),
+            MT5Order.status == "filled",
+        )
+        if selected_account_id is not None:
+            owned_query = owned_query.filter(MT5Order.account_id == selected_account_id)
+        owned = owned_query.order_by(MT5Order.id.desc()).first()
+        if not owned:
+            return jsonify({"error": f"Position {ticket_int} not found or not yours"}), 403
+
+        owned_account_id = getattr(owned, "account_id", None)
+        existing_modify_query = db.query(MT5Order).filter(
+            MT5Order.close_ticket == ticket_int,
+            MT5Order.order_type == "MODIFY",
+            MT5Order.action == "modify_sl",
+            MT5Order.user_id.in_([user_id, "default"]),
+            MT5Order.status.in_(["pending", "executing"]),
+        )
+        if owned_account_id is not None:
+            existing_modify_query = existing_modify_query.filter(MT5Order.account_id == owned_account_id)
+        existing_modify = existing_modify_query.first()
+        if existing_modify:
+            return jsonify({"status": "duplicate", "id": existing_modify.id})
+
+        order = MT5Order(
+            user_id      = user_id,
+            account_id   = owned_account_id,
+            symbol       = getattr(owned, "symbol", None) or "AUTO",
+            order_type   = "MODIFY",
+            volume       = 0,
+            price        = 0,
+            sl           = be_float,
+            action       = "modify_sl",
+            close_ticket = ticket_int,
+            status       = "pending",
+            comment      = f"Manual BE: move SL to entry {be_float}",
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        return jsonify({"status": "ok", "id": order.id})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
 @app.route("/api/mt5/trailing", methods=["POST"])
+@require_tier('pro')
 @login_required
 def mt5_set_trailing():
     """Set trailing stop on an MT5 position. Saved to DB as pending; EA picks it up on next poll."""
@@ -10158,37 +10282,53 @@ def mt5_set_trailing():
     except (TypeError, ValueError):
         return jsonify({"error": f"Invalid ticket ID '{ticket}'"}), 400
     try:
+        pips_float = float(pips)
+        if pips_float <= 0:
+            raise ValueError("non-positive trailing distance")
+    except (TypeError, ValueError):
+        return jsonify({"error": "valid trailing stop distance required"}), 400
+    try:
         db = _DBSession()
         try:
             # S-8: verify the ticket belongs to this user (or "default" for single-user installs).
-            owned = db.query(MT5Order).filter(
+            selected_account_id = _selected_mt5_account_id_from_body(body)
+            owned_query = db.query(MT5Order).filter(
                 MT5Order.mt5_ticket == ticket_int,
                 MT5Order.order_type.in_(["BUY", "SELL"]),
                 MT5Order.user_id.in_([user_id, "default"]),
-            ).first()
+                MT5Order.status == "filled",
+            )
+            if selected_account_id is not None:
+                owned_query = owned_query.filter(MT5Order.account_id == selected_account_id)
+            owned = owned_query.order_by(MT5Order.id.desc()).first()
             if not owned:
                 return jsonify({"error": f"Position {ticket_int} not found or not yours"}), 403
 
             # B1: dedup — if a pending/executing TRAILING for this ticket already exists, return it.
-            existing_trailing = db.query(MT5Order).filter(
+            owned_account_id = getattr(owned, "account_id", None)
+            existing_trailing_query = db.query(MT5Order).filter(
                 MT5Order.close_ticket == ticket_int,
                 MT5Order.order_type == "TRAILING",
                 MT5Order.user_id.in_([user_id, "default"]),
                 MT5Order.status.in_(["pending", "executing"]),
-            ).first()
+            )
+            if owned_account_id is not None:
+                existing_trailing_query = existing_trailing_query.filter(MT5Order.account_id == owned_account_id)
+            existing_trailing = existing_trailing_query.first()
             if existing_trailing:
                 return jsonify({"status": "duplicate", "ticket": ticket, "order_id": existing_trailing.id})
 
             order = MT5Order(
                 user_id      = user_id,
-                symbol       = "AUTO",
+                account_id   = owned_account_id,
+                symbol       = getattr(owned, "symbol", None) or "AUTO",
                 order_type   = "TRAILING",
                 volume       = 0,
-                price        = float(pips),
+                price        = pips_float,
                 action       = "trailing",
                 close_ticket = ticket_int,
                 status       = "pending",
-                comment      = f"Trailing stop {pips} pips",
+                comment      = f"Trailing stop {pips_float} pips",
             )
             db.add(order)
             db.commit()
@@ -11553,7 +11693,7 @@ def recommend_automations():
 @app.route("/api/today/scout-alert", methods=["POST"])
 @login_required
 def today_scout_alert():
-    """Send a Today scout alert when the weekly target path becomes actionable.
+    """Send a Today scout alert when the selected target path becomes actionable.
 
     The Today UI owns the basket math. This endpoint only validates a short
     alert payload and routes it through the existing Telegram + in-app channels.
@@ -11564,6 +11704,9 @@ def today_scout_alert():
         return jsonify({"error": "invalid alert kind"}), 400
 
     user_id = str(session.get("user_id", "default"))
+    horizon_raw = str(data.get("goal_horizon") or data.get("horizon") or "weekly").lower()
+    horizon = horizon_raw if horizon_raw in {"daily", "weekly", "monthly"} else "weekly"
+    goal_label = horizon + " target"
     goal = float(data.get("goal") or 0)
     profit = float(data.get("profit") or 0)
     risk = float(data.get("risk") or 0)
@@ -11574,14 +11717,14 @@ def today_scout_alert():
     if kind == "covered":
         title = "Today scout found a target path"
         body = (
-            f"{trades} trade(s) can cover the weekly target: "
+            f"{trades} trade(s) can cover the {goal_label}: "
             f"+${profit:,.2f} planned upside vs ${goal:,.2f} goal, "
             f"risk ${risk:,.2f}, ETA {eta}."
         )
     elif kind == "protect":
         title = "Today protect mode active"
         body = (
-            f"Weekly target is reached or marked reached. DotVerse is pausing "
+            f"Your {goal_label} is reached or marked reached. DotVerse is pausing "
             f"new Today entries and monitoring open trades for TP, SL, "
             f"break-even, trailing, and invalidation events."
         )
@@ -11589,7 +11732,7 @@ def today_scout_alert():
         title = "Today scout armed"
         body = (
             f"DotVerse will keep scanning for a basket that can cover your "
-            f"${goal:,.2f} weekly target. Current shortfall: ${shortfall:,.2f}."
+            f"${goal:,.2f} {goal_label}. Current shortfall: ${shortfall:,.2f}."
         )
 
     dedup_raw = f"{user_id}:{kind}:{round(goal, 2)}:{round(profit, 2)}:{eta}"
@@ -11607,7 +11750,7 @@ def today_scout_alert():
 
     _push_notification(user_id, "today_scout", title, body, data={
         "kind": kind, "goal": goal, "profit": profit, "risk": risk,
-        "eta": eta, "trades": trades, "shortfall": shortfall,
+        "eta": eta, "trades": trades, "shortfall": shortfall, "goal_horizon": horizon,
     })
     try:
         if _redis_client:
@@ -14835,6 +14978,179 @@ def scan_list():
         return jsonify({"error": str(e)}), 500
 
 
+def _entry_plan_normalize_timeframe(value):
+    tf = str(value or "1d").strip().lower()
+    aliases = {"4H": "4h", "1H": "1h", "1D": "1d", "1W": "1w", "1M": "1mo", "1mon": "1mo", "1month": "1mo"}
+    tf = aliases.get(str(value or "").strip(), tf)
+    if tf == "1m":
+        tf = "1mo"
+    return tf if tf in TIMEFRAME_CONFIG else "1d"
+
+
+def _entry_plan_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+    return bool(value)
+
+
+@app.route("/api/entry-plan/advisory", methods=["POST"])
+@login_required
+def entry_plan_advisory():
+    """Advisory-only execution-style brain.
+
+    This endpoint lets DotVerse decide whether the setup *looks like* single,
+    scale-out, scale-in, or wait. It deliberately grants live authority only
+    to already-supported execution modes, and never grants live scale-in
+    authority while entry_engine rules are unproven.
+    """
+    body = request.get_json(silent=True) or {}
+    ticker = str(body.get("ticker") or body.get("symbol") or body.get("sym") or "").strip().upper()
+    asset_type = str(body.get("asset_type") or body.get("asset") or "stock").strip().lower()
+    if asset_type == "equity":
+        asset_type = "stock"
+    if asset_type == "fx":
+        asset_type = "forex"
+    timeframe = _entry_plan_normalize_timeframe(body.get("timeframe") or body.get("tf"))
+    direction = str(body.get("signal") or body.get("direction") or body.get("sig") or "HOLD").strip().upper()
+    if direction not in ("BUY", "SELL"):
+        return jsonify({
+            "ready": False,
+            "recommended_mode": "wait",
+            "live_mode_allowed": False,
+            "execution_authority": False,
+            "reason": "Entry brain only evaluates BUY/SELL setups. HOLD means wait.",
+            "authority_reason": "No live authority for HOLD.",
+        })
+
+    try:
+        entry = float(str(body.get("entry") or "").replace(",", ""))
+        stop = float(str(body.get("stop_loss") or body.get("sl") or "").replace(",", ""))
+        target = float(str(body.get("tp1") or body.get("tp") or "").replace(",", ""))
+    except Exception:
+        return jsonify({
+            "ready": False,
+            "recommended_mode": "single",
+            "live_mode_allowed": False,
+            "execution_authority": False,
+            "reason": "Entry, stop-loss, and TP1 are required before DotVerse can choose an execution style.",
+            "authority_reason": "Missing trade levels.",
+        })
+
+    if not ticker or entry <= 0 or stop <= 0 or target <= 0:
+        return jsonify({
+            "ready": False,
+            "recommended_mode": "single",
+            "live_mode_allowed": False,
+            "execution_authority": False,
+            "reason": "Ticker and valid positive trade levels are required.",
+            "authority_reason": "Invalid advisory request.",
+        })
+
+    try:
+        from entry_engine import propose_entry_plan
+
+        raw = normalise_ticker(ticker, asset_type)
+        cfg = TIMEFRAME_CONFIG.get(timeframe, TIMEFRAME_CONFIG["1d"])
+        period_map = {"5m": "60d", "15m": "60d", "30m": "60d", "1h": "180d", "4h": "1y", "1d": "1y", "1w": "5y", "1mo": "10y"}
+        df = provider_first_download(raw, period=period_map.get(timeframe, cfg["period"]), interval=cfg["interval"], asset_type=asset_type)
+        if "resample" in cfg and df is not None and not df.empty:
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index)
+            df = df.resample(cfg["resample"]).agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}).dropna()
+        if df is None or df.empty or len(df) < 20:
+            return jsonify({
+                "ready": False,
+                "recommended_mode": "single",
+                "live_mode_allowed": False,
+                "execution_authority": False,
+                "reason": "Not enough recent bars to evaluate scale-in structure safely.",
+                "authority_reason": "No live authority without enough chart history.",
+            })
+
+        account_risk_amount = float(body.get("account_risk_amount") or body.get("risk_usd") or 100.0)
+        plan = propose_entry_plan(
+            df,
+            entry_price=entry,
+            direction=direction,
+            stop=stop,
+            target=target,
+            account_risk_amount=account_risk_amount,
+            enabled=False,
+        )
+        analysis = plan.get("analysis") or {}
+        hypothetical = analysis.get("hypothetical_mode") or "single"
+        bt_verified = _entry_plan_bool(body.get("_btVerified") if "_btVerified" in body else body.get("backtest_verified"))
+        try:
+            bt_pf = float(body.get("_btPf") if body.get("_btPf") is not None else body.get("profit_factor") or 0)
+        except Exception:
+            bt_pf = 0.0
+        try:
+            bt_exp = float(body.get("_btExpectancy") if body.get("_btExpectancy") is not None else body.get("expectancy") or 0)
+        except Exception:
+            bt_exp = 0.0
+        has_multi_targets = bool(body.get("tp2") or body.get("tp3"))
+        positive_outcome = bool(bt_verified and bt_pf >= 1.0 and bt_exp >= 0)
+
+        recommended_mode = hypothetical
+        if hypothetical == "single" and positive_outcome and has_multi_targets:
+            recommended_mode = "scale_out"
+
+        proven_statuses = [s for s in (plan.get("rule_statuses") or {}).values() if s == "proven"]
+        scale_in_authority = recommended_mode == "scale_in" and bool(proven_statuses)
+        live_mode_allowed = (
+            (recommended_mode in ("single", "scale_out") and positive_outcome)
+            or scale_in_authority
+        )
+        execution_authority = bool(live_mode_allowed and recommended_mode != "wait")
+        if recommended_mode == "scale_in" and not scale_in_authority:
+            authority_reason = "Scale-in evidence detected, but live scale-in is locked until real-kline backtests promote the rule to proven."
+        elif recommended_mode == "scale_out" and live_mode_allowed:
+            authority_reason = "Positive backtest evidence found; DotVerse may use the existing scale-out ladder path."
+        elif recommended_mode == "single" and live_mode_allowed:
+            authority_reason = "Positive backtest evidence found, but no scale-in or scale-out advantage was detected."
+        elif recommended_mode == "wait":
+            authority_reason = "Structure says wait; DotVerse must not add exposure."
+            execution_authority = False
+            live_mode_allowed = False
+        else:
+            authority_reason = "Advisory only until backtest evidence is positive and the mode is proven safe."
+
+        return jsonify({
+            "ready": True,
+            "ticker": ticker,
+            "asset_type": asset_type,
+            "timeframe": timeframe,
+            "recommended_mode": recommended_mode,
+            "hypothetical_mode": hypothetical,
+            "live_mode_allowed": live_mode_allowed,
+            "execution_authority": execution_authority,
+            "authority_reason": authority_reason,
+            "reason": analysis.get("hypothetical_basis") or plan.get("decision_basis"),
+            "decision_basis": plan.get("decision_basis"),
+            "rule_statuses": plan.get("rule_statuses") or {},
+            "evidence": plan.get("evidence") or [],
+            "positive_outcome": positive_outcome,
+            "backtest": {
+                "verified": bt_verified,
+                "profit_factor": bt_pf,
+                "expectancy": bt_exp,
+                "trades": body.get("_btTrades") or body.get("sample_size") or body.get("total_trades"),
+            },
+            "plan": plan,
+        })
+    except Exception as e:
+        return jsonify({
+            "ready": False,
+            "recommended_mode": "single",
+            "live_mode_allowed": False,
+            "execution_authority": False,
+            "reason": f"Entry brain unavailable: {str(e)[:160]}",
+            "authority_reason": "No live authority while advisory engine is unavailable.",
+        })
+
+
 # /api/chat endpoint removed
 
 @app.route("/api/scan-alerts", methods=["GET"])
@@ -17259,7 +17575,13 @@ def positions_get():
         return jsonify({"error": "Database not configured"}), 503
     db = _DBSession()
     try:
-        rows = db.query(Position).order_by(Position.opened_at.desc()).all()
+        uid = str(session.get("user_id", "default"))
+        rows = (
+            db.query(Position)
+            .filter(Position.user_id == uid)
+            .order_by(Position.opened_at.desc())
+            .all()
+        )
         return jsonify([{
             "id":          p.id,
             "ticker":      p.ticker,
@@ -17377,7 +17699,8 @@ def positions_delete(pos_id):
         return jsonify({"error": "Database not configured"}), 503
     db = _DBSession()
     try:
-        pos = db.query(Position).filter(Position.id == pos_id).first()
+        uid = str(session.get("user_id", "default"))
+        pos = db.query(Position).filter(Position.id == pos_id, Position.user_id == uid).first()
         if not pos:
             return jsonify({"error": "Position not found"}), 404
         db.delete(pos)
@@ -17564,7 +17887,8 @@ def positions_correlation_risk():
         return jsonify({"warnings": [], "exposure_map": {}})
     db = _DBSession()
     try:
-        rows = db.query(Position).filter(Position.closed_at == None).all()
+        uid = str(session.get("user_id", "default"))
+        rows = db.query(Position).filter(Position.user_id == uid, Position.closed_at == None).all()
         # Aggregate signed exposure per currency
         exposure_map = {}
         for pos in rows:
@@ -17893,12 +18217,13 @@ def calibration_sync():
 
         db.commit()
         total = db.query(CalibrationLabel).filter(CalibrationLabel.user_id == uid).count()
+        gate = CALIBRATION_GATE
         return jsonify({
             "synced":       inserted,
             "total_labels": total,
-            "ready":        total >= 50,
-            "message":      f"{total}/50 labels ready — calibration meaningful" if total >= 50
-                       else f"{total}/50 labels — need {50-total} more closed trades",
+            "ready":        total >= gate,
+            "message":      f"{total}/{gate} labels ready — calibration can be reviewed" if total >= gate
+                       else f"{total}/{gate} labels — need {gate-total} more closed trades",
         })
     except Exception as e:
         db.rollback()
@@ -17912,12 +18237,12 @@ def calibration_sync():
 def calibration_isotonic():
     """P2.2 — Fit an isotonic regression on the user's CalibrationLabel data.
     Maps raw confidence score → calibrated win probability.
-    Requires >= 50 labeled samples for meaningful calibration.
+    Requires >= 100 labeled samples for meaningful calibration.
     Returns calibration curve, calibration error (ECE), sample size."""
     if not _DBSession:
         return jsonify({"error": "Database not available", "ready": False, "sample_size": 0}), 503
 
-    GATE = 50
+    GATE = CALIBRATION_GATE
     db = _DBSession()
     try:
         uid = str(session.get("user_id", "default"))
@@ -18477,25 +18802,34 @@ def portfolio_var():
         return jsonify({"error": "Database not configured"}), 503
 
     data             = request.get_json(force=True) or {}
+    uid              = str(session.get("user_id", "default"))
     portfolio_value  = float(data.get("portfolio_value", 10000))
     confidence       = float(data.get("confidence", 0.95))
     z_score          = float(_scipy_norm.ppf(confidence))
 
-    # Check Redis cache
-    cache_key = f"var:{confidence}:{portfolio_value}"
-    cached    = _redis_get_ohlcv(cache_key)
-    if cached:
-        return jsonify(cached)
-
     db   = _DBSession()
     rows = []
     try:
-        rows = db.query(Position).all()
+        rows = (
+            db.query(Position)
+            .filter(Position.user_id == uid, Position.closed_at == None)
+            .order_by(Position.id.asc())
+            .all()
+        )
     finally:
         db.close()
 
     if not rows:
         return jsonify({"error": "No open positions found. Add positions first."}), 400
+
+    fingerprint = ",".join(
+        f"{p.id}:{p.ticker}:{p.size}:{p.entry_price}:{p.opened_at.isoformat() if p.opened_at else ''}"
+        for p in rows
+    )
+    cache_key = f"var:{uid}:{confidence}:{portfolio_value}:{fingerprint}"
+    cached    = _redis_get_ohlcv(cache_key)
+    if cached:
+        return jsonify(cached)
 
     # Fetch 252-day returns for each unique ticker
     returns_map = {}
@@ -18572,6 +18906,7 @@ def stress_test():
         return jsonify({"error": "Database not configured"}), 503
 
     data            = request.get_json(force=True) or {}
+    uid             = str(session.get("user_id", "default"))
     portfolio_value = float(data.get("portfolio_value", 10000))
     custom_shocks   = data.get("shocks", {})
     shocks          = {**_STRESS_SHOCKS, **custom_shocks}  # user overrides defaults
@@ -18579,7 +18914,12 @@ def stress_test():
     db   = _DBSession()
     rows = []
     try:
-        rows = db.query(Position).all()
+        rows = (
+            db.query(Position)
+            .filter(Position.user_id == uid, Position.closed_at == None)
+            .order_by(Position.id.asc())
+            .all()
+        )
     finally:
         db.close()
 
@@ -19524,6 +19864,23 @@ def _verdict_cache_key(ticker, tf_key, direction, date_str):
     never served to another user's SELL request, and stale-date verdicts aren't reused."""
     return "verdict:" + str(ticker) + ":" + str(tf_key).lower() + ":" + str(direction) + ":" + str(date_str)
 
+def _verdict_cached_payload(ticker, tf_key, direction=None, date_str=None):
+    """Return cached verdict payload using the V-1 direction/date cache scheme."""
+    if not (ticker and _redis_client and direction and date_str):
+        return None
+    tf = str(tf_key or "4h").lower()
+    key = _verdict_cache_key(ticker, tf, _verdict_dir_token(direction), str(date_str))
+    try:
+        cached = _redis_client.get(key)
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        return None
+    return None
+
+def _signal_ctx_cache_key(user_id, ticker, tf_key, direction, date_str):
+    return "signal_ctx:" + str(user_id) + ":" + str(ticker) + ":" + str(tf_key).lower() + ":" + str(direction) + ":" + str(date_str)
+
 @app.route("/api/verdict", methods=["POST"])
 @login_required
 def verdict_enqueue():
@@ -19535,23 +19892,23 @@ def verdict_enqueue():
     if not ticker:
         return jsonify({"error": "ticker required"}), 400
 
-    # Store DotVerse signal context in Redis so chat endpoint can retrieve it
     signal_ctx = body.get("signal") or None
     tf_key = (body.get("timeframe", "4H")).lower()
-    if signal_ctx and _redis_client:
-        try:
-            _redis_client.setex(
-                f"signal_ctx:{ticker}:{tf_key}",
-                7200,
-                json.dumps(signal_ctx),
-            )
-        except Exception:
-            pass
 
     # Check Redis cache (1-hour TTL). Key includes direction + date (V-1) so a BUY
     # verdict is never served to a SELL request, and stale-date verdicts aren't reused.
     _v_dir  = _verdict_dir_token(signal_ctx)
     _v_date = body.get("date") or datetime.utcnow().strftime("%Y-%m-%d")
+    user_id = str(session.get("user_id", "anonymous"))
+    if signal_ctx and _redis_client:
+        try:
+            _redis_client.setex(
+                _signal_ctx_cache_key(user_id, ticker, tf_key, _v_dir, _v_date),
+                7200,
+                json.dumps(signal_ctx),
+            )
+        except Exception:
+            pass
     cache_key = _verdict_cache_key(ticker, tf_key, _v_dir, _v_date)
     if _redis_client:
         try:
@@ -19565,7 +19922,6 @@ def verdict_enqueue():
     if not TA_AVAILABLE:
         return jsonify({"error": "TradingAgents not available on this server", "status": "unavailable"}), 503
 
-    user_id = str(session.get("user_id", "anonymous"))
     allowed, retry_after = _check_verdict_rate_limit(user_id)
     if not allowed:
         return jsonify({
@@ -19652,10 +20008,13 @@ def verdict_chat():
         return jsonify({"error": "AI not configured on this server"}), 503
 
     body     = request.get_json(force=True) or {}
+    user_id  = str(session.get("user_id", "anonymous"))
     job_id   = body.get("job_id", "").strip()
     question = body.get("question", "").strip()
     ticker   = body.get("ticker", "").strip()
     tf_key   = str(body.get("timeframe") or "4h").lower()
+    direction = body.get("direction") or body.get("signal")
+    date_str = body.get("date")
     if not question:
         return jsonify({"error": "question is required"}), 400
 
@@ -19681,21 +20040,33 @@ def verdict_chat():
 
     if not verdict_text and ticker and _redis_client:
         try:
-            cached = _redis_client.get(f"verdict:{ticker}:{tf_key}")
-            if not cached and tf_key != "4h":
-                cached = _redis_client.get(f"verdict:{ticker}:4h")
-            if cached:
-                r = json.loads(cached)
+            r = _verdict_cached_payload(ticker, tf_key, direction, date_str)
+            if r:
                 verdict_text = str(r.get("verdict", ""))[:3000]
+            else:
+                # Back-compat for older verdict cache entries and chat-only calls
+                # that do not carry direction/date. Keep requested TF first so a
+                # 1H question never silently falls back to a stale 4H verdict.
+                cached = _redis_client.get(f"verdict:{ticker}:{tf_key}")
+                if not cached and tf_key != "4h":
+                    cached = _redis_client.get(f"verdict:{ticker}:4h")
+                if cached:
+                    r = json.loads(cached)
+                    verdict_text = str(r.get("verdict", ""))[:3000]
         except Exception:
             pass
 
     # Retrieve DotVerse signal context stored at enqueue time
     if ticker and _redis_client:
         try:
-            sig_raw = _redis_client.get(f"signal_ctx:{ticker}:{tf_key}")
+            sig_raw = None
+            if direction and date_str:
+                sig_raw = _redis_client.get(
+                    _signal_ctx_cache_key(user_id, ticker, tf_key, _verdict_dir_token(direction), str(date_str))
+                )
             if not sig_raw:
-                # fallback: try common timeframes
+                sig_raw = _redis_client.get(f"signal_ctx:{ticker}:{tf_key}")
+            if not sig_raw:
                 for _tf in ("4h", "1h", "1d", "15m", "1w"):
                     sig_raw = _redis_client.get(f"signal_ctx:{ticker}:{_tf}")
                     if sig_raw:
