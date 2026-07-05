@@ -28267,10 +28267,21 @@ function mt5RefreshOrderHistory() {
   }).catch(function(){});
 }
 
+function _mt5RememberLiveState(d) {
+  window._mt5LastState = d;
+  if (!d) return;
+  if (typeof _todayBridgeMt5StateToGlobalAccount === 'function') {
+    _todayBridgeMt5StateToGlobalAccount(d);
+  } else if (d.account) {
+    window._todayLastMt5State = d;
+  }
+  if (d.connected === true) window._todayMt5Online = true;
+}
+
 function mt5Poll() {
   dvFetch('/api/mt5/state').then(function(d) {
     if (!d) return;
-    window._mt5LastState = d;
+    _mt5RememberLiveState(d);
     var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
       ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago / 60) + 'm ago')
       : null;
@@ -28293,7 +28304,7 @@ function mt5LoadTab() {
   // Immediate first fetch
   dvFetch('/api/mt5/state').then(function(d) {
     if (!d) { _mt5SetStatus(false, null); _mt5RenderPositions([]); return; }
-    window._mt5LastState = d;
+    _mt5RememberLiveState(d);
     var lastSeenStr = (!d.connected && typeof d.secs_ago === 'number')
       ? (d.secs_ago < 120 ? d.secs_ago + 's ago' : Math.round(d.secs_ago / 60) + 'm ago')
       : null;

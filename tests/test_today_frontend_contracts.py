@@ -93,6 +93,24 @@ def test_today_v2_hydrates_account_context_from_live_sources():
     assert "function _todayCanPlaceMt5()" in source
 
 
+def test_mt5_poll_keeps_today_live_state_fresh():
+    source = _source()
+
+    assert "function _mt5RememberLiveState(d)" in source
+    assert "window._mt5LastState = d" in source
+    assert "if (typeof _todayBridgeMt5StateToGlobalAccount === 'function')" in source
+    assert "_todayBridgeMt5StateToGlobalAccount(d)" in source
+    assert "window._todayLastMt5State = d" in source
+    assert "if (d.connected === true) window._todayMt5Online = true" in source
+
+    poll = source[source.index("function mt5Poll()") : source.index("function mt5LoadTab()")]
+    load = source[source.index("function mt5LoadTab()") : source.index("function mt5CancelOrder")]
+    assert "_mt5RememberLiveState(d)" in poll
+    assert "_mt5RememberLiveState(d)" in load
+    assert "window._mt5LastState = d" not in poll
+    assert "window._mt5LastState = d" not in load
+
+
 def test_today_v2_top_copy_and_modes_do_not_lie_about_state():
     source = _source()
 
