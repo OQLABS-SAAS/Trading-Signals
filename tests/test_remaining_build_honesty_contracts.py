@@ -262,6 +262,24 @@ def test_today_entry_brain_recommends_without_unproven_live_scale_in_authority()
     assert "scale-in" in card
 
 
+def test_today_live_price_monitor_cannot_overwrite_brain_wait_gate():
+    live = _extract_function("_todayStartLivePrices")
+    render = _extract_function("_todayRenderPlan")
+
+    assert "var gate=(typeof _todayExecutionReadiness==='function')?_todayExecutionReadiness(o):null" in live
+    assert "var blockedByGate=gate&&(gate.cls==='wait'||gate.cls==='invalid')" in live
+    assert "label=gate.text+(label?' · live: '+label:'')" in live
+    assert "else if(!_todayCanExecuteNow(o))" in live
+    assert "cta.innerHTML=(gate&&gate.text?gate.text:'Not executable yet')" in live
+    assert "cta.disabled=true" in live
+
+    assert "var canExecuteNow=(typeof _todayCanExecuteNow==='function')?_todayCanExecuteNow(o):true" in render
+    assert "var placeDisabled=!_todayCanPlaceMt5() || !canExecuteNow" in render
+    assert "var placeLabel=!canExecuteNow?(rd&&rd.text?rd.text:'Not executable yet'):_todayV2PlaceCtaText(targetNeedsScout,false)" in render
+    assert "readyNow<1?'No executable orders'" in render
+    assert "readyNow<1?'wait for brain/price gate'" in render
+
+
 def test_recommendation_badge_requires_backtest_verified_signal():
     block = _extract_function("showUnderstand")
     assert "&& o._btVerified === true" in HTML

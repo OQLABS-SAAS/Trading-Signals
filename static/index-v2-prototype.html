@@ -13063,6 +13063,13 @@ function _todayStartLivePrices(){
         var col=_st.col, dot=_st.dot, label=_st.label;
         var invalid=_st.invalid;
         o._live.invalid = invalid;
+        var gate=(typeof _todayExecutionReadiness==='function')?_todayExecutionReadiness(o):null;
+        var blockedByGate=gate&&(gate.cls==='wait'||gate.cls==='invalid');
+        if(blockedByGate){
+          col=gate.cls==='invalid'?'#e8706e':'rgba(201,168,76,.95)';
+          dot=gate.cls==='invalid'?'#e8706e':'rgba(201,168,76,.95)';
+          label=gate.text+(label?' · live: '+label:'');
+        }
         var priceStr=live>=1000?live.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):live>=1?live.toFixed(4):live.toPrecision(4);
         el.innerHTML='<span style="width:5px;height:5px;border-radius:50%;background:'+dot+';flex-shrink:0;animation:lpulse 2s ease-in-out infinite;"></span><span style="color:'+col+';font-weight:600;">Now '+priceStr+'</span><span style="color:rgba(237,232,216,.2);margin:0 4px;">·</span><span style="color:'+col+';">'+label+'</span>';
         var _lb=document.getElementById('today-livebox-'+idx); if(_lb){ try{ _lb.innerHTML=_todayLiveBox(o, live); }catch(_e){} }
@@ -13070,6 +13077,13 @@ function _todayStartLivePrices(){
         var cta=document.getElementById('today-cta-'+idx);
         if(cta){
           if(invalid){ cta.innerHTML='⚠ Setup moved — skip (or review)'; cta.style.background='rgba(232,112,110,.12)'; cta.style.border='1px solid rgba(232,112,110,.4)'; cta.style.color='#e8706e'; }
+          else if(!_todayCanExecuteNow(o)){
+            cta.innerHTML=(gate&&gate.text?gate.text:'Not executable yet');
+            cta.disabled=true;
+            cta.style.background='rgba(201,168,76,.12)';
+            cta.style.border='1px solid rgba(201,168,76,.35)';
+            cta.style.color='rgba(201,168,76,.95)';
+          }
           else {
             var _path=window._todayLastTargetPath||{}, _goal=parseFloat((window._todayCfg||{}).profitGoal)||0;
             cta.innerHTML=_todayV2PlaceCtaText(!_path.covered&&_goal>0, false);
@@ -14374,9 +14388,9 @@ function _todayRenderPlan(){
   var targetGoal=parseFloat((targetPath&&targetPath.paceGoal)||c.profitGoal)||0;
   var targetNeedsScout=!protect && targetPath && !targetPath.covered && targetGoal>0;
   var mt5CanPlace=_todayCanPlaceMt5();
-  var bottomDisabled=!protect && !mt5CanPlace;
-  var bottomPlaceLabel=protect?'Protect mode':_todayV2PlaceCtaText(targetNeedsScout, true);
-  var bottomOrderNote=protect?'new entries paused':(!mt5CanPlace?'MT5 offline':(targetNeedsScout?'review only':usable.length+' setup'+(usable.length===1?'':'s')+' selected'));
+  var bottomDisabled=!protect && (!mt5CanPlace || readyNow<1);
+  var bottomPlaceLabel=protect?'Protect mode':(readyNow<1?'No executable orders':_todayV2PlaceCtaText(targetNeedsScout, true));
+  var bottomOrderNote=protect?'new entries paused':(!mt5CanPlace?'MT5 offline':(readyNow<1?'wait for brain/price gate':(targetNeedsScout?'review only':readyNow+' executable setup'+(readyNow===1?'':'s'))));
   window._todayLastTargetPath=targetPath;
   var priorityTotals =
     '<div class="today-v2-bottom today-v2-priorityTotals" style="position:static;margin:0 0 14px;">'
@@ -14455,7 +14469,9 @@ function _todayRenderPlan(){
       + presetBtn('beginner','Beginner','50 / 30 / 20. Balanced default.')
       + presetBtn('aggressive','Aggressive','Includes a trail runner. Higher hold risk.')
       + '</div>';
-    var placeDisabled=!_todayCanPlaceMt5();
+    var canExecuteNow=(typeof _todayCanExecuteNow==='function')?_todayCanExecuteNow(o):true;
+    var placeDisabled=!_todayCanPlaceMt5() || !canExecuteNow;
+    var placeLabel=!canExecuteNow?(rd&&rd.text?rd.text:'Not executable yet'):_todayV2PlaceCtaText(targetNeedsScout,false);
     var placeStyle='width:100%;margin-top:12px;min-height:44px'+(placeDisabled?';opacity:.58;cursor:not-allowed':'');
     return '<div class="today-v2-detail">'
       + '<div class="today-v2-selectedTop"><div><div class="today-v2-bigSym">'+o.sym+'</div><div class="today-v2-meta">'+o.asset+' · '+o.tf+' · '+o.sig+'</div></div><span class="td-pill '+(rd.cls==='wait'?'gold':rd.cls==='open'?'blue':'green')+'">'+rd.text+'</span></div>'
@@ -14470,7 +14486,7 @@ function _todayRenderPlan(){
       + (protect?'':'<div class="today-v2-switch"><div><div class="td-mini">'+(actualScale?'Scale-out enabled':(exec.collapsed?'Scale-out unavailable':'Scale-out disabled'))+'</div><div class="today-v2-copy">'+orderText+'</div></div><button class="today-v2-toggle '+(actualScale?'on':'')+'" '+(exec.collapsed?'disabled ':'onclick="_todayV2SetScale('+idx+','+(!scale)+')"')+' aria-label="Toggle scale-out plan"></button></div>')
       + (protect?'':ladder)
       + '<div class="panelTitle" style="margin:16px 0 8px">Trade automations</div><div class="today-v2-copy">'+(protect?'Protect mode keeps monitoring TP, SL, break-even, trailing, and invalidation alerts. New entries stay paused.':'Tap a card to turn that automation on or off for this trade. These flags are sent with the MT5 order.')+'</div><div class="today-v2-autos">'+_todayV2AutoControls(o, idx)
-      + '</div>'+(o._autoWhy?'<div class="today-v2-copy blue" style="margin-top:8px">'+o._autoWhy+'</div>':'')+(protect?'<button id="today-cta-'+idx+'" class="today-v2-btn" style="width:100%;margin-top:12px;min-height:44px;opacity:.82" onclick="_todayV2ProtectSummary()">Protect mode active</button>':'<button id="today-cta-'+idx+'" class="today-v2-btn" style="'+placeStyle+'" '+(placeDisabled?'disabled ':'')+'onclick="_todayPlaceTrade('+idx+')">'+_todayV2PlaceCtaText(targetNeedsScout,false)+'</button>')+'</div>';
+      + '</div>'+(o._autoWhy?'<div class="today-v2-copy blue" style="margin-top:8px">'+o._autoWhy+'</div>':'')+(protect?'<button id="today-cta-'+idx+'" class="today-v2-btn" style="width:100%;margin-top:12px;min-height:44px;opacity:.82" onclick="_todayV2ProtectSummary()">Protect mode active</button>':'<button id="today-cta-'+idx+'" class="today-v2-btn" style="'+placeStyle+'" '+(placeDisabled?'disabled ':'')+'onclick="_todayPlaceTrade('+idx+')">'+placeLabel+'</button>')+'</div>';
   }
   area.innerHTML =
     '<div class="today-v2-summary">'
