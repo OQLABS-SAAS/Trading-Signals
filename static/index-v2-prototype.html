@@ -9788,13 +9788,14 @@ function dvLoadScanAlerts(){
       var sigCol=isBuy?'rgba(93,232,160,.9)':'rgba(240,120,120,.9)';
       var tagCol=a.trade_type==='scalping'?'rgba(96,165,250,.8)':'rgba(201,168,76,.8)';
       var tag=a.trade_type==='scalping'?'SCALP':'SWING';
+      var lotLabel=_dvSignalCardLotLabel(a);
       var dollarLine='';
       if(a.risk_usd!=null&&a.profit_usd!=null){
         dollarLine='<div style="color:rgba(93,232,160,.7);margin-top:2px;">'+
-          a.lot+' lots &middot; risks $'+Number(a.risk_usd).toLocaleString()+
+          lotLabel+' &middot; risks $'+Number(a.risk_usd).toLocaleString()+
           ' &middot; +$'+Number(a.profit_usd).toLocaleString()+' at TP1</div>';
       } else if(a.lot){
-        dollarLine='<div style="color:rgba(200,190,170,.5);margin-top:2px;">'+a.lot+' lots</div>';
+        dollarLine='<div style="color:rgba(200,190,170,.5);margin-top:2px;">'+lotLabel+'</div>';
       }
       var entry=a.entry?Number(a.entry).toPrecision(5):'—';
       var sl=a.sl?Number(a.sl).toPrecision(5):'—';
@@ -10404,6 +10405,7 @@ async function qpAnalyse(presetTicker, presetTf) {
       var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
       const cards = rawOpps.map(function(o, i){
         var cc = _confColor(o.sig);
+        var lotLabel = _dvSignalCardLotLabel(o);
         var oJson = JSON.stringify(o).replace(/\"/g, '&quot;');
         return '<div onclick="loadAllTfSignal(' + oJson + ')" style="flex-shrink:0;width:240px;padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(237,232,216,.08);cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:4px;" onmouseover="this.style.borderColor=\'rgba(201,168,76,.3)\';this.style.background=\'rgba(201,168,76,.04)\';" onmouseout="this.style.borderColor=\'rgba(237,232,216,.08)\';this.style.background=\'rgba(255,255,255,.02)\';">'
           + '<div style="display:flex;align-items:center;justify-content:space-between;">'
@@ -10419,6 +10421,7 @@ async function qpAnalyse(presetTicker, presetTf) {
           + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">R:' + o.rr + '</span>'
           + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);" title="Entry / SL / TP">' + (o.entry||'--') + ' · ' + (o.sl||'--') + ' · ' + (o.tp||'--') + '</span>'
           + '</div>'
+          + '<div style="font-family:var(--mono);font-size:8.5px;color:rgba(201,168,76,.78);line-height:1.35;" title="Every $1,000 account equity = 0.01 lot">' + lotLabel + '</div>'
           + '<div style="font-size:8.5px;color:var(--t3);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (o.reason||'').substring(0,80) + '</div>'
           + '</div>';
       }).join('');
@@ -10523,6 +10526,7 @@ async function qpScanAll() {
     var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
     const cards = rawOpps.map(function(o, i){
       var cc = _confColor(o.sig);
+      var lotLabel = _dvSignalCardLotLabel(o);
       var oJson = JSON.stringify(o).replace(/\"/g, '&quot;');
       var assetIcon = {crypto:'⟠', stock:'⌂', forex:'$', commodity:'◆', index:'∏', equity:'⌂'}[o.asset] || '○';
       return '<div onclick="loadSignalContext(' + oJson + ')" style="flex-shrink:0;width:240px;padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(237,232,216,.08);cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:4px;" onmouseover="this.style.borderColor=\'rgba(201,168,76,.3)\';this.style.background=\'rgba(201,168,76,.04)\';" onmouseout="this.style.borderColor=\'rgba(237,232,216,.08)\';this.style.background=\'rgba(255,255,255,.02)\';">'
@@ -10540,6 +10544,7 @@ async function qpScanAll() {
         + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">R:' + o.rr + '</span>'
         + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);" title="Entry / SL / TP">' + (o.entry||'--') + ' · ' + (o.sl||'--') + ' · ' + (o.tp||'--') + '</span>'
         + '</div>'
+        + '<div style="font-family:var(--mono);font-size:8.5px;color:rgba(201,168,76,.78);line-height:1.35;" title="Every $1,000 account equity = 0.01 lot">' + lotLabel + '</div>'
         + '<div style="font-size:8.5px;color:var(--t3);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (o.reason||'').substring(0,80) + '</div>'
         + '</div>';
     }).join('');
@@ -14745,8 +14750,41 @@ async function _runScanBase(groups, signal, onProgress) {
   return { results: _results, errors: _scanErrors, total: _scanTotal };
 }
 
+function _dvSignalCardAccountEquity(){
+  var states=[window._todayLastMt5State,window._mt5LastState];
+  for(var i=0;i<states.length;i++){
+    var acct=(states[i]&&states[i].account)||null;
+    if(!acct) continue;
+    var eq=parseFloat(acct.equity);
+    if(eq>0) return eq;
+    var bal=parseFloat(acct.balance);
+    if(bal>0) return bal;
+  }
+  var today=parseFloat((window._todayCfg||{}).acct)||0;
+  if(today>0) return today;
+  var sizeInp=parseFloat(document.getElementById('szAcct')?.value)||0;
+  if(sizeInp>0) return sizeInp;
+  return 0;
+}
+function _dvSignalCardLotSize(account){
+  var acct=parseFloat(account);
+  if(!(acct>0)) acct=_dvSignalCardAccountEquity();
+  var lots=Math.floor(acct/1000)*0.01;
+  lots=Math.max(0,lots);
+  return parseFloat(lots.toFixed(2)); // Every $1,000 account equity = 0.01 lot.
+}
+function _dvSignalCardLotLabel(o){
+  var lots=_dvSignalCardLotSize();
+  if(!(lots>0)){
+    var fallback=parseFloat((o||{}).lot||(o||{}).lots||(o||{}).volume)||0;
+    if(fallback>0) return fallback.toFixed(fallback<0.01?4:2)+' lots';
+    return 'Volume waits for account';
+  }
+  return lots.toFixed(2)+' lot'+(lots===0.01?'':'s')+' · Every $1,000 account equity = 0.01 lot';
+}
 function _dvSignalFromScanRow(r, fallbackTf, fallbackAsset){
   r = r || {};
+  var signalLot = _dvSignalCardLotSize();
   return {
     sym:     r.ticker || r.symbol || r.sym || '',
     tf:      String(r.timeframe || r.tf || fallbackTf || '4H').toUpperCase(),
@@ -14770,6 +14808,9 @@ function _dvSignalFromScanRow(r, fallbackTf, fallbackAsset){
     spreadSrc:     r.spread_source  || null,
     spreadQuality: r.spread_quality || 'fair',
     rr1Raw:        r.rr1_raw      != null ? r.rr1_raw      : null,
+    volume: signalLot>0?signalLot:(r.volume!=null?r.volume:r.lot),
+    lots: signalLot>0?signalLot:(r.lots!=null?r.lots:(r.volume!=null?r.volume:r.lot)),
+    lot: signalLot>0?signalLot:(r.lot!=null?r.lot:r.volume),
     smc_structures: r.smc_structures || null,
     quality: r.quality || null,
     qscore: (r.quality&&(r.quality.score!=null?r.quality.score:r.quality))||r.confidence_pct||0,
@@ -15097,6 +15138,7 @@ async function _sfFetchSignals(){
     const circ = Math.round((o.conf || 0) / 100 * 144.5);
     const cardCls = sig === 'BUY' ? 'buy-card' : sig === 'SELL' ? 'sell-card' : '';
     const oJson = JSON.stringify(o).replace(/"/g, '&quot;');
+    const lotLabel = _dvSignalCardLotLabel(o);
 
     // Backtest badge row
     var btBadge = '';
@@ -15187,6 +15229,7 @@ async function _sfFetchSignals(){
       + '<div class="opp-level-item"><span class="opp-lbl">SL</span><span class="opp-val red">' + (o.sl||'--') + '</span></div>'
       + '<div class="opp-level-item"><span class="opp-lbl">TP</span><span class="opp-val grn">' + (o.tp||'--') + '</span></div>'
       + '</div></div></div>'
+      + '<div style="padding:0 14px 7px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.78);line-height:1.45;" title="Every $1,000 account equity = 0.01 lot">Volume: ' + lotLabel + '</div>'
       + (btBadge ? '<div style="padding:0 14px 4px;">' + btBadge + (tfHint||'') + '</div>' : '')
       + (o.spreadCost && o.spreadCost > 0 ? '<div style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;"><span style="color:rgba(201,168,76,.45);">spread adj</span><span style="padding:1px 6px;border-radius:3px;font-size:8px;letter-spacing:.05em;' + ({'wide':'background:rgba(224,85,85,.12);color:#e05555;','fair':'background:rgba(237,232,216,.07);color:rgba(237,232,216,.4);','tight':'background:rgba(61,190,108,.1);color:#3dbe6c;'}[o.spreadQuality||'fair']||'') + '">' + (o.spreadQuality||'fair').toUpperCase() + '</span>' + (o.spreadSrc === 'live' ? '<span style="display:inline-flex;align-items:center;gap:3px;color:#3dbe6c;font-size:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#3dbe6c;animation:lpulse 1.8s ease-in-out infinite;flex-shrink:0;"></span>LIVE</span>' : '') + '</div>' : '')
       + '<div class="opp-reason">' + o.reason + '</div>'
@@ -16192,6 +16235,7 @@ function _normalizeSignalContext(o, overrides){
   var entry = src.entry != null ? src.entry : src.entry_price;
   var sl = src.sl != null ? src.sl : (src.stop_loss != null ? src.stop_loss : src.stop);
   var tp = src.tp != null ? src.tp : (src.tp1 != null ? src.tp1 : (src.target != null ? src.target : src.target_price));
+  var signalLot = _dvSignalCardLotSize();
   return Object.assign({}, src, {
     sym: sym,
     ticker: src.ticker || sym,
@@ -16207,6 +16251,9 @@ function _normalizeSignalContext(o, overrides){
     stop_loss: src.stop_loss != null ? src.stop_loss : sl,
     tp: tp,
     tp1: src.tp1 != null ? src.tp1 : tp,
+    volume:signalLot>0?signalLot:(src.volume!=null?src.volume:src.lot),
+    lots:signalLot>0?signalLot:(src.lots!=null?src.lots:(src.volume!=null?src.volume:src.lot)),
+    lot:signalLot>0?signalLot:(src.lot!=null?src.lot:src.volume),
     rr: src.rr || src.risk_reward || src.riskReward || '',
     conf: src.conf != null ? src.conf : (src.confidence != null ? src.confidence : src.bull_score)
   });

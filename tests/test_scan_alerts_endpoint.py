@@ -109,6 +109,23 @@ def test_scan_alerts_returns_alerts_key(monkeypatch):
     assert isinstance(data["alerts"], list)
 
 
+def test_fixed_micro_lot_rule_is_one_centilot_per_thousand_usd():
+    assert dvapp._fixed_micro_lot_for_account(999) == 0.0
+    assert dvapp._fixed_micro_lot_for_account(1000) == 0.01
+    assert dvapp._fixed_micro_lot_for_account(1999) == 0.01
+    assert dvapp._fixed_micro_lot_for_account(2500) == 0.02
+    assert dvapp._fixed_micro_lot_for_account(10000) == 0.10
+
+
+def test_auto_scan_telegram_uses_fixed_micro_lot_rule():
+    import inspect
+
+    source = inspect.getsource(dvapp._job_auto_scan)
+    assert "_fixed_micro_lot_for_account(account_balance)" in source
+    assert "Every $1,000 account equity = 0.01 lot" in source
+    assert "_calc_auto_lot(account_balance" not in source
+
+
 def test_scan_alerts_item_has_required_keys(monkeypatch):
     """Each alert item must include risk_usd and profit_usd keys."""
     rows = [_FakeScanAlertRow(
