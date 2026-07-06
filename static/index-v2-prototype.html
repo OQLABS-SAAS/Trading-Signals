@@ -13246,7 +13246,9 @@ function _todayCanExecuteNow(o){
 }
 function _todayPlaceTrade(idx){
   if(!_todayCanPlaceMt5()){
-    if(typeof _dvToast==='function') _dvToast('MT5 is offline - Today can review risk, but cannot place live orders yet','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+    var perm=_todayMt5PermissionStatus();
+    var msg=(window._todayMt5Online!==true)?'MT5 is offline - Today can review risk, but cannot place live orders yet':((perm&&perm.detail)||'MT5 is not ready to place live orders yet');
+    if(typeof _dvToast==='function') _dvToast(msg,'rgba(201,168,76,.15)','rgba(201,168,76,.4)');
     return;
   }
   var o=(window._todayPlan||[])[idx];
@@ -13264,7 +13266,9 @@ function _todayPlaceTrade(idx){
 }
 function _todayPlaceAll(){
   if(!_todayCanPlaceMt5()){
-    if(typeof _dvToast==='function') _dvToast('MT5 is offline - connect the account before placing Today orders','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+    var perm=_todayMt5PermissionStatus();
+    var msg=(window._todayMt5Online!==true)?'MT5 is offline - connect the account before placing Today orders':((perm&&perm.detail)||'MT5 is not ready to place live orders yet');
+    if(typeof _dvToast==='function') _dvToast(msg,'rgba(201,168,76,.15)','rgba(201,168,76,.4)');
     return;
   }
   var acct=_todaySyncAccountFromDom(), cfg=window._todayCfg||{};
@@ -13800,6 +13804,10 @@ function _todayV2EntryBrainCard(o){
 }
 function _todayV2EffectiveReadiness(o, rd){
   rd=rd||{text:'Enter now',cls:''};
+  var perm=_todayMt5PermissionStatus();
+  if(perm&&!perm.ok) return {text:perm.text, cls:'wait'};
+  var sym=_todayMt5SymbolStatus(o);
+  if(sym&&!sym.ok) return {text:sym.text, cls:'wait'};
   var b=o&&o._entryBrain, mode=String((b&&b.recommended_mode)||'').toLowerCase();
   if(mode==='wait') return {text:'Brain says wait', cls:'wait'};
   if(mode==='scale_in' && !(b&&b.execution_authority===true)) return {text:'Scale-in advisory', cls:'wait'};
@@ -14255,8 +14263,94 @@ function _todayAccountSourceLabel(){
   return 'No connected account yet';
 }
 
+function _todayLatestMt5State(){
+  return window._todayLastMt5State || window._mt5LastState || {};
+}
+
+function _todayNormalizeMt5Symbol(value){
+  var s=String(value==null?'':value).trim().toUpperCase();
+  if(!s) return '';
+  if(!/[A-Z]/.test(s)) return '';
+  return s.replace('-USD','USD').replace(/\//g,'').replace('=X','').replace('=F','');
+}
+
+function _todayMt5SymbolForTrade(o){
+  o=o||{};
+  var sym=_todayNormalizeMt5Symbol(o.mt5_symbol||o.broker_symbol||o.symbol||o.sym||o.ticker);
+  if(!sym) return '';
+  var asset=String(o.asset||o.asset_type||'').toLowerCase();
+  if(asset==='crypto' && sym.indexOf('USD')<0) sym=sym+'USD';
+  var map={GC:'XAUUSD',GOLD:'XAUUSD',SI:'XAGUSD',SILVER:'XAGUSD',CL:'USOIL',WTI:'USOIL',BRENT:'UKOIL',NG:'NGAS'};
+  return map[sym]||sym;
+}
+
+function _todayMt5SymbolAdd(set, value){
+  if(!set) return;
+  if(Array.isArray(value)){
+    value.forEach(function(v){ _todayMt5SymbolAdd(set,v); });
+    return;
+  }
+  if(value&&typeof value==='object'){
+    Object.keys(value).forEach(function(k){
+      _todayMt5SymbolAdd(set,k);
+      _todayMt5SymbolAdd(set,value[k]);
+    });
+    return;
+  }
+  var sym=_todayNormalizeMt5Symbol(value);
+  if(sym) set[sym]=true;
+}
+
+function _todayMt5TradableSet(){
+  var st=_todayLatestMt5State(), set={};
+  _todayMt5SymbolAdd(set, st.tradable_symbols);
+  _todayMt5SymbolAdd(set, st.symbols);
+  _todayMt5SymbolAdd(set, st.market_watch);
+  _todayMt5SymbolAdd(set, st.symbol_specs);
+  _todayMt5SymbolAdd(set, st.spreads);
+  _todayMt5SymbolAdd(set, st.spread);
+  _todayMt5SymbolAdd(set, st.positions);
+  return {set:set, ready:Object.keys(set).length>0};
+}
+
+function _todayMt5UsesVtMarketsProfile(){
+  var st=_todayLatestMt5State(), a=(st&&st.account)||{};
+  var txt=[a.company,a.server,a.broker,st.company,st.server].map(function(x){return String(x||'').toLowerCase();}).join(' ');
+  return txt.indexOf('vtmarkets')>=0 || txt.indexOf('vt markets')>=0;
+}
+
+function _todayMt5PermissionStatus(){
+  var st=_todayLatestMt5State();
+  var issue=st&&st.trade_permission_issue;
+  if(!issue) return {ok:true};
+  var text=String(issue).toLowerCase().indexOf('auto')>=0 || String(issue).toLowerCase().indexOf('algo')>=0
+    ? 'MT5 AutoTrading off'
+    : 'MT5 not ready';
+  return {ok:false,text:text,detail:String(issue)};
+}
+
+function _todayMt5SymbolStatus(o){
+  var st=_todayLatestMt5State();
+  if(!st||st.connected!==true) return {ok:true};
+  var sym=_todayMt5SymbolForTrade(o);
+  if(!sym) return {ok:true};
+  var inv=_todayMt5TradableSet();
+  if(inv.ready){
+    return inv.set[sym] ? {ok:true} : {ok:false,text:'Not available on this MT5 account',symbol:sym};
+  }
+  if(_todayMt5UsesVtMarketsProfile()){
+    var asset=String((o&& (o.asset||o.asset_type))||'').toLowerCase();
+    var allowed=/^[A-Z]{6}$/.test(sym) || ['XAUUSD','XAGUSD','USOIL','UKOIL','NGAS'].indexOf(sym)>=0;
+    if(asset==='crypto'||asset==='stock'||asset==='equity'||asset==='index'||sym.charAt(0)==='^'||!allowed){
+      return {ok:false,text:'Not available on this MT5 account',symbol:sym};
+    }
+  }
+  return {ok:true};
+}
+
 function _todayCanPlaceMt5(){
-  return window._todayMt5Online===true;
+  var perm=_todayMt5PermissionStatus();
+  return window._todayMt5Online===true && (!perm||perm.ok);
 }
 
 function _todayAccountIsConnected(a){
@@ -14265,7 +14359,9 @@ function _todayAccountIsConnected(a){
 }
 
 function _todayV2PlaceCtaText(targetNeedsScout, all){
-  if(!_todayCanPlaceMt5()) return 'MT5 offline - review only';
+  var perm=_todayMt5PermissionStatus();
+  if(window._todayMt5Online!==true) return 'MT5 offline - review only';
+  if(perm&&!perm.ok) return perm.text;
   return targetNeedsScout?'Review risk anyway':(all?'Review all orders':'Review &amp; place this trade');
 }
 
@@ -14499,9 +14595,10 @@ function _todayRenderPlan(){
   var targetGoal=parseFloat((targetPath&&targetPath.paceGoal)||c.profitGoal)||0;
   var targetNeedsScout=!protect && targetPath && !targetPath.covered && targetGoal>0;
   var mt5CanPlace=_todayCanPlaceMt5();
+  var mt5Perm=_todayMt5PermissionStatus();
   var bottomDisabled=!protect && (!mt5CanPlace || readyNow<1);
   var bottomPlaceLabel=protect?'Protect mode':(readyNow<1?'No executable orders':_todayV2PlaceCtaText(targetNeedsScout, true));
-  var bottomOrderNote=protect?'new entries paused':(!mt5CanPlace?'MT5 offline':(readyNow<1?'wait for brain/price gate':(targetNeedsScout?'review only':readyNow+' executable setup'+(readyNow===1?'':'s'))));
+  var bottomOrderNote=protect?'new entries paused':(!mt5CanPlace?((window._todayMt5Online!==true)?'MT5 offline':((mt5Perm&&mt5Perm.text)||'MT5 not ready')):(readyNow<1?'wait for brain/price/broker gate':(targetNeedsScout?'review only':readyNow+' executable setup'+(readyNow===1?'':'s'))));
   window._todayLastTargetPath=targetPath;
   var priorityTotals =
     '<div class="today-v2-bottom today-v2-priorityTotals" style="position:static;margin:0 0 14px;">'

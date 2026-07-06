@@ -1060,6 +1060,105 @@ def _mt5_symbol(ticker, asset_type):
     return _map.get(s, s)
 
 
+def _mt5_normalize_symbol_name(value):
+    """Normalise symbol inventory entries pushed by the EA."""
+    if isinstance(value, dict):
+        value = (
+            value.get("symbol")
+            or value.get("name")
+            or value.get("ticker")
+            or value.get("path")
+            or ""
+        )
+    s = str(value or "").strip().upper()
+    if not s:
+        return ""
+    if not re.search(r"[A-Z]", s):
+        return ""
+    return s.replace("-USD", "USD").replace("/", "").replace("=X", "").replace("=F", "")
+
+
+def _mt5_symbol_set_from_value(value):
+    out = set()
+    if not value:
+        return out
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_sym = _mt5_normalize_symbol_name(key)
+            item_sym = _mt5_normalize_symbol_name(item)
+            if key_sym:
+                out.add(key_sym)
+            if item_sym:
+                out.add(item_sym)
+        return out
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            sym = _mt5_normalize_symbol_name(item)
+            if sym:
+                out.add(sym)
+        return out
+    sym = _mt5_normalize_symbol_name(value)
+    if sym:
+        out.add(sym)
+    return out
+
+
+def _mt5_tradable_symbols_from_push(body, spreads, positions):
+    symbols = set()
+    body = body if isinstance(body, dict) else {}
+    for key in ("tradable_symbols", "symbols", "market_watch", "symbol_specs"):
+        symbols.update(_mt5_symbol_set_from_value(body.get(key)))
+    symbols.update(_mt5_symbol_set_from_value(spreads))
+    for pos in positions or []:
+        symbols.update(_mt5_symbol_set_from_value(pos))
+    return sorted(symbols)
+
+
+def _mt5_state_tradable_symbol_set(state):
+    state = state if isinstance(state, dict) else {}
+    symbols = set()
+    for key in ("tradable_symbols", "symbols", "market_watch", "symbol_specs", "spread"):
+        symbols.update(_mt5_symbol_set_from_value(state.get(key)))
+    for pos in state.get("positions") or []:
+        symbols.update(_mt5_symbol_set_from_value(pos))
+    return symbols
+
+
+def _mt5_uses_vtmarkets_profile(state):
+    account = (state or {}).get("account", {}) if isinstance(state, dict) else {}
+    text_value = " ".join(
+        str(account.get(k) or "") for k in ("company", "server", "broker")
+    ).lower()
+    return "vtmarkets" in text_value or "vt markets" in text_value
+
+
+def _mt5_symbol_tradeability_issue(state, symbol, asset_type=None):
+    """Return a human blocker when the connected MT5 account cannot trade symbol."""
+    sym = _mt5_normalize_symbol_name(symbol)
+    if not sym:
+        return None
+    inventory = _mt5_state_tradable_symbol_set(state)
+    if inventory:
+        if sym in inventory:
+            return None
+        return f"Not available on this MT5 account: {sym}"
+
+    # Older EAs do not push a Market Watch inventory yet. For the connected
+    # VTMarkets demo we must be conservative: forex and metals are commonly
+    # present, but crypto/stocks/bare index tickers have been rejecting later
+    # in the EA with "Symbol not found".
+    if _mt5_uses_vtmarkets_profile(state):
+        asset = str(asset_type or "").strip().lower()
+        if asset in {"crypto", "stock", "equity", "index"} or sym.startswith("^"):
+            return f"Not available on this MT5 account: {sym}"
+        allowed = bool(re.fullmatch(r"[A-Z]{6}", sym)) or sym in {
+            "XAUUSD", "XAGUSD", "USOIL", "UKOIL", "NGAS",
+        }
+        if not allowed:
+            return f"Not available on this MT5 account: {sym}"
+    return None
+
+
 # ─── SPREAD TABLE (Tier 2 fallback) ──────────────────────────
 # Values mean different things per asset class — see _get_spread().
 # Forex: pips  |  Crypto/Stock: % of price  |  Index/Commodity: price units
@@ -8755,7 +8854,7 @@ def _mt5_state_age_seconds(state):
         return None
 
 
-def _assert_mt5_account_ready_for_order(user_id, account):
+def _assert_mt5_account_ready_for_order(user_id, account, symbol=None, asset_type=None):
     state = _mt5_state_for_account(user_id, account)
     age = _mt5_state_age_seconds(state)
     if age is None or age >= 45:
@@ -8773,10 +8872,20 @@ def _assert_mt5_account_ready_for_order(user_id, account):
         account.account_type = live_type
         if hasattr(account, "updated_at"):
             account.updated_at = datetime.utcnow()
+    permission_issue = _mt5_trade_permission_issue(state) or _recent_mt5_trade_permission_issue(
+        user_id,
+        getattr(account, "id", None),
+    )
+    if permission_issue:
+        raise OrderValidationError(permission_issue)
+    symbol_issue = _mt5_symbol_tradeability_issue(state, symbol, asset_type)
+    if symbol_issue:
+        raise OrderValidationError(symbol_issue)
     return {
         "connected_account_type": live_type or saved_type,
         "mt5_last_seen_age": age,
         "mt5_login": live_login,
+        "execution_universe_ready": bool(_mt5_state_tradable_symbol_set(state)),
     }
 
 
@@ -9075,7 +9184,12 @@ def mt5_submit_order():
     db = _DBSession()
     try:
         account = _resolve_selected_mt5_account(db, user_id, body)
-        readiness = _assert_mt5_account_ready_for_order(user_id, account)
+        readiness = _assert_mt5_account_ready_for_order(
+            user_id,
+            account,
+            symbol=symbol,
+            asset_type=order_request.asset_type,
+        )
         account_type = normalize_mt5_account_type({}, fallback=account.account_type)
         duplicate = _find_recent_duplicate_mt5_order(
             db,
@@ -9224,7 +9338,12 @@ def orders_submit():
     db = _DBSession()
     try:
         account = _resolve_selected_mt5_account(db, user_id, body)
-        readiness = _assert_mt5_account_ready_for_order(user_id, account)
+        readiness = _assert_mt5_account_ready_for_order(
+            user_id,
+            account,
+            symbol=order_request.symbol,
+            asset_type=body.get("asset_type"),
+        )
         account_type = normalize_mt5_account_type({}, fallback=account.account_type)
         duplicate = _find_recent_duplicate_mt5_order(
             db,
@@ -9891,6 +10010,7 @@ def mt5_push_state():
         pass
     positions = body.get("positions", [])
     spreads   = body.get("spreads", {})     # Phase 1.2: live spread map {symbol: spread_pts}
+    tradable_symbols = _mt5_tradable_symbols_from_push(body, spreads, positions)
     # A4: EA self-diagnosis flags — read fresh each push; absent = None (old EA builds)
     terminal_trade_allowed = body.get("terminal_trade_allowed")   # TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
     mql_trade_allowed      = body.get("mql_trade_allowed")        # MQLInfoInteger(MQL_TRADE_ALLOWED)
@@ -9962,6 +10082,8 @@ def mt5_push_state():
             "level_hits":     prev.get("level_hits", {}),  # preserve — set by mt5_level_alert
             "spread_warning": spread_warning,               # Bug S: high-spread guard flag
             "spread":         spreads,                       # Phase 1.2: live spread map
+            "tradable_symbols": tradable_symbols,
+            "symbol_specs":    body.get("symbol_specs", {}),
             # A4: EA self-diagnosis flags (None = absent/old EA, 0 = OFF, 1 = ON)
             "terminal_trade_allowed": terminal_trade_allowed,
             "mql_trade_allowed":      mql_trade_allowed,
@@ -10039,6 +10161,9 @@ def mt5_get_state():
     state_account_id = state.get("account_id")
     if state_account_id is not None:
         account["account_id"] = state_account_id
+    flag_permission_issue = _mt5_trade_permission_issue(state)
+    recent_permission_issue = _recent_mt5_trade_permission_issue(user_id, state_account_id)
+    trade_permission_issue = flag_permission_issue or recent_permission_issue
     # Enrich positions with tp2/tp3/timeframe from mt5_orders.
     # Primary match: comment field contains "DotVerse #<order_id>" — reliable because
     # res.deal (stored as mt5_ticket) != PositionGetTicket() in MT5.
@@ -10085,12 +10210,18 @@ def mt5_get_state():
         "account_mode_source": account.get("account_mode_source"),
         "positions":   positions,
         "level_hits":  state.get("level_hits", {}),
+        "spread":      state.get("spread", {}),
+        "spreads":     state.get("spread", {}),
+        "tradable_symbols": sorted(_mt5_state_tradable_symbol_set(state)),
+        "symbol_specs": state.get("symbol_specs", {}),
+        "execution_universe_ready": bool(_mt5_state_tradable_symbol_set(state)),
         # A4: EA self-diagnosis flags (None = old EA/unknown, 0 = OFF, 1 = ON)
         "terminal_trade_allowed": state.get("terminal_trade_allowed"),
         "mql_trade_allowed":      state.get("mql_trade_allowed"),
         "account_trade_allowed":  state.get("account_trade_allowed"),
         "account_trade_expert":   state.get("account_trade_expert"),
-        "trade_permission_issue": _mt5_trade_permission_issue(state),
+        "trade_permission_issue": trade_permission_issue,
+        "trade_permission_issue_source": "ea_flags" if flag_permission_issue else ("recent_order_failure" if recent_permission_issue else None),
     })
 
 # ── Broker-error translator (A1) ────────────────────────────────────────────
@@ -10113,6 +10244,8 @@ _MT5_RETCODE_MESSAGES = {
 
 _MT5_RETCODE_RE = re.compile(r'retcode[=:\s]*(\d{5})', re.IGNORECASE)
 _MT5_BARE_CODE_RE = re.compile(r'\b(100\d{2})\b')
+_MT5_TRADE_PERMISSION_RETCODES = {10017, 10027}
+_MT5_RECENT_PERMISSION_WINDOW_SECONDS = 15 * 60
 
 def _mt5_retcode_message(comment, status):
     """Return a plain-English message for a failed order's retcode, or None.
@@ -10133,6 +10266,55 @@ def _mt5_retcode_message(comment, status):
     if not text:
         return None
     return "{} (broker code {})".format(text, code)
+
+
+def _mt5_permission_retcode(comment):
+    if not comment:
+        return None
+    s = str(comment)
+    m = _MT5_RETCODE_RE.search(s) or _MT5_BARE_CODE_RE.search(s)
+    if not m:
+        return None
+    try:
+        code = int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+    return code if code in _MT5_TRADE_PERMISSION_RETCODES else None
+
+
+def _recent_mt5_trade_permission_issue(user_id, account_id=None, within_seconds=_MT5_RECENT_PERMISSION_WINDOW_SECONDS):
+    """Surface a fresh EA permission failure before queuing another doomed order."""
+    if not _DBSession:
+        return None
+    db = None
+    try:
+        db = _DBSession()
+        cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+        query = db.query(MT5Order).filter(
+            MT5Order.user_id.in_([str(user_id), "default"]),
+            MT5Order.status.in_(["failed", "rejected"]),
+            MT5Order.created_at >= cutoff,
+        )
+        if account_id not in (None, ""):
+            try:
+                query = query.filter(MT5Order.account_id == int(account_id))
+            except (TypeError, ValueError):
+                pass
+        rows = query.order_by(MT5Order.created_at.desc()).limit(12).all()
+        for row in rows:
+            status = getattr(row, "status", "failed")
+            comment = getattr(row, "comment", "")
+            if _mt5_permission_retcode(comment):
+                return _mt5_retcode_message(comment, status) or str(comment)
+    except Exception:
+        return None
+    finally:
+        try:
+            if db is not None:
+                db.close()
+        except Exception:
+            pass
+    return None
 
 
 def _selected_mt5_account_id_from_body(body):

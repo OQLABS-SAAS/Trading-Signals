@@ -130,8 +130,24 @@ def test_today_v2_blocks_live_place_actions_when_mt5_is_offline():
     assert "MT5 is offline - Today can review risk, but cannot place live orders yet" in source
     assert "MT5 is offline - connect the account before placing Today orders" in source
     assert "MT5 is offline - no live order was sent" in source
-    assert "var bottomOrderNote=protect?'new entries paused':(!mt5CanPlace?'MT5 offline'" in source
+    assert "var bottomOrderNote=protect?'new entries paused':(!mt5CanPlace?((window._todayMt5Online!==true)?'MT5 offline':((mt5Perm&&mt5Perm.text)||'MT5 not ready'))" in source
     assert ".today-v2-btn:disabled,.today-v2-review:disabled" in source
+
+
+def test_today_v2_blocks_mt5_permission_and_broker_symbol_gates():
+    source = _source()
+
+    assert "function _todayMt5PermissionStatus()" in source
+    assert "trade_permission_issue" in source
+    assert "MT5 AutoTrading off" in source
+    assert "function _todayMt5SymbolStatus(o)" in source
+    assert "function _todayMt5TradableSet()" in source
+    assert "Not available on this MT5 account" in source
+    assert "function _todayMt5UsesVtMarketsProfile()" in source
+    assert "var perm=_todayMt5PermissionStatus();" in source
+    assert "var sym=_todayMt5SymbolStatus(o);" in source
+    assert "if(sym&&!sym.ok) return {text:sym.text, cls:'wait'};" in source
+    assert "return window._todayMt5Online===true && (!perm||perm.ok);" in source
 
 
 def test_today_v2_allocates_basket_risk_only_to_executable_setups():

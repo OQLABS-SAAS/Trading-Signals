@@ -296,7 +296,7 @@ def test_today_live_price_monitor_cannot_overwrite_brain_wait_gate():
     assert "var placeDisabled=!_todayCanPlaceMt5() || !canExecuteNow" in render
     assert "var placeLabel=!canExecuteNow?(rd&&rd.text?rd.text:'Not executable yet'):_todayV2PlaceCtaText(targetNeedsScout,false)" in render
     assert "readyNow<1?'No executable orders'" in render
-    assert "readyNow<1?'wait for brain/price gate'" in render
+    assert "readyNow<1?'wait for brain/price/broker gate'" in render
 
 
 def test_recommendation_badge_requires_backtest_verified_signal():

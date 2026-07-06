@@ -3,6 +3,8 @@ import os
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -50,6 +52,12 @@ class _FakeQuery:
 
     def all(self):
         return self.accounts
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
+        return self
 
 
 class _FakeDB:
@@ -340,6 +348,76 @@ def test_mt5_submit_order_prefers_account_scoped_live_state(monkeypatch):
     assert resp.status_code == 200, resp.get_data(as_text=True)
     assert resp.get_json()["mt5_ready"] is True
     assert fake_db.added[0].account_id == 7
+
+
+def test_mt5_symbol_inventory_is_exposed_from_pushed_market_watch():
+    symbols = dvapp._mt5_tradable_symbols_from_push(
+        {"symbol_specs": {"AUDUSD": {"min_lot": 0.01}, "XAUUSD": {"min_lot": 0.01}}},
+        {"EURUSD": 12, "USOIL": 25},
+        [{"symbol": "GBPUSD", "volume": 0.01}],
+    )
+
+    assert {"AUDUSD", "XAUUSD", "EURUSD", "USOIL", "GBPUSD"}.issubset(set(symbols))
+    assert "12" not in symbols
+    assert "0.01" not in symbols
+
+
+def test_mt5_ready_blocks_vtmarkets_stock_when_no_inventory(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="DEMO",
+        is_active=True,
+        updated_at=None,
+    )
+    fake_db = _FakeOrderDB([account], [])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=0)
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state["testuser"]["account"]["company"] = "VT Markets (Pty) Ltd"
+        dvapp.mt5_state["testuser"]["account"]["server"] = "VTMarkets-Demo"
+
+    try:
+        with pytest.raises(dvapp.OrderValidationError) as exc:
+            dvapp._assert_mt5_account_ready_for_order("testuser", account, symbol="JPM", asset_type="stock")
+        assert "Not available on this MT5 account: JPM" in str(exc.value)
+
+        readiness = dvapp._assert_mt5_account_ready_for_order("testuser", account, symbol="AUDUSD", asset_type="forex")
+        assert readiness["connected_account_type"] == "DEMO"
+    finally:
+        _restore_mt5_state(previous_state)
+
+
+def test_mt5_ready_blocks_after_recent_autotrading_disabled_failure(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="DEMO",
+        is_active=True,
+        updated_at=None,
+    )
+    failed_order = SimpleNamespace(
+        id=101,
+        user_id="testuser",
+        account_id=7,
+        status="failed",
+        comment="retcode=10027 AutoTrading disabled by client",
+        created_at=dvapp.datetime.utcnow(),
+    )
+    fake_db = _FakeOrderDB([account], [failed_order])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=0)
+
+    try:
+        with pytest.raises(dvapp.OrderValidationError) as exc:
+            dvapp._assert_mt5_account_ready_for_order("testuser", account, symbol="AUDUSD", asset_type="forex")
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert "Automated trading is disabled" in str(exc.value)
+    assert "broker code 10027" in str(exc.value)
 
 
 def test_mt5_submit_order_dedupes_recent_pending_duplicate(monkeypatch):
