@@ -131,6 +131,8 @@ def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
     assert "_DV_TODAY_BUILD_TIMEOUT_MS = 65000" in HTML
     assert "window._todayBuildRunSeq=(window._todayBuildRunSeq||0)+1" in block
     assert "window._todayBuildAbortCtrl" in block
+    assert "return window._todayBuildRunSeq===_todayRunSeq;" in block
+    assert "window._todayBuildRunSeq===_todayRunSeq &&" not in block
     assert "function _todayRenderNoPlanDirect" in block
     assert "Try scan again" in block
     assert "var _todayBuildTimedOut=false" in block
