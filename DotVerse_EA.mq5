@@ -312,6 +312,69 @@ string HttpGet(string path)
    return CharArrayToString(resData);
 }
 
+string JsonEscape(string value)
+{
+   StringReplace(value, "\\", "\\\\");
+   StringReplace(value, "\"", "\\\"");
+   StringReplace(value, "\r", "\\r");
+   StringReplace(value, "\n", "\\n");
+   StringReplace(value, "\t", "\\t");
+   return value;
+}
+
+//+------------------------------------------------------------------+
+//| Build live broker symbol inventory from Market Watch              |
+//+------------------------------------------------------------------+
+void BuildMarketWatchJson(string &symbolsJson, string &spreadsJson, string &specsJson)
+{
+   symbolsJson = "[";
+   spreadsJson = "{";
+   specsJson   = "{";
+
+   int count = 0;
+   int total = SymbolsTotal(true);
+   for (int i = 0; i < total; i++) {
+      string sym = SymbolName(i, true);
+      if (StringLen(sym) == 0) continue;
+
+      double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+      int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+      double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+      double spreadPts = (double)SymbolInfoInteger(sym, SYMBOL_SPREAD);
+      if (spreadPts <= 0 && point > 0 && ask > bid) spreadPts = (ask - bid) / point;
+
+      double volMin = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+      double volMax = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+      double volStep = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+      long stopsLevel = SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+      long fillingMode = SymbolInfoInteger(sym, SYMBOL_FILLING_MODE);
+      long tradeMode = SymbolInfoInteger(sym, SYMBOL_TRADE_MODE);
+
+      string key = JsonEscape(sym);
+      if (count > 0) {
+         symbolsJson += ",";
+         spreadsJson += ",";
+         specsJson += ",";
+      }
+
+      symbolsJson += "\"" + key + "\"";
+      spreadsJson += StringFormat("\"%s\":%.2f", key, spreadPts);
+      specsJson += StringFormat(
+         "\"%s\":{\"digits\":%d,\"point\":%.10f,\"bid\":%.10f,\"ask\":%.10f,"
+         "\"spread_points\":%.2f,\"min_lot\":%.4f,\"max_lot\":%.4f,"
+         "\"lot_step\":%.4f,\"stops_level\":%I64d,\"filling_mode\":%I64d,\"trade_mode\":%I64d}",
+         key, digits, point, bid, ask, spreadPts, volMin, volMax, volStep,
+         stopsLevel, fillingMode, tradeMode
+      );
+      count++;
+   }
+
+   symbolsJson += "]";
+   spreadsJson += "}";
+   specsJson += "}";
+}
+
 //+------------------------------------------------------------------+
 //| Push account state and open positions to DotVerse                 |
 //+------------------------------------------------------------------+
@@ -356,10 +419,13 @@ void PushState()
          "{\"ticket\":%I64u,\"symbol\":\"%s\",\"type\":\"%s\","
          "\"volume\":%.2f,\"open_price\":%.5f,\"current_price\":%.5f,"
          "\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f,\"comment\":\"%s\"}",
-         ticket, sym, ptype_s, vol, oprice, curPrice, sl, tp, ppnl, cmt
+         ticket, JsonEscape(sym), ptype_s, vol, oprice, curPrice, sl, tp, ppnl, JsonEscape(cmt)
       );
    }
    posJson += "]";
+
+   string symbolsJson, spreadsJson, specsJson;
+   BuildMarketWatchJson(symbolsJson, spreadsJson, specsJson);
 
    // A4: read trade-permission flags fresh every push (NOT cached — running EA
    // must report current toggle state so DotVerse can surface the exact OFF switch).
@@ -375,10 +441,12 @@ void PushState()
                    "\"trade_mode\":%d,\"login\":%I64d,\"server\":\"%s\",\"company\":\"%s\"},"
       "\"terminal_trade_allowed\":%d,\"mql_trade_allowed\":%d,"
       "\"account_trade_allowed\":%d,\"account_trade_expert\":%d,"
+      "\"symbols\":%s,\"tradable_symbols\":%s,\"spreads\":%s,\"symbol_specs\":%s,"
       "\"positions\":%s}",
-      g_userId, balance, equity, margin, freeMargin, profit, currency, leverage,
-      tradeMode, login, server, company,
+      JsonEscape(g_userId), balance, equity, margin, freeMargin, profit, JsonEscape(currency), leverage,
+      tradeMode, login, JsonEscape(server), JsonEscape(company),
       terminalTradeAllowed, mqlTradeAllowed, accountTradeAllowed, accountTradeExpert,
+      symbolsJson, symbolsJson, spreadsJson, specsJson,
       posJson
    );
 
