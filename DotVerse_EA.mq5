@@ -24,6 +24,8 @@ input string InpBaseUrl   = "https://dot-verse.up.railway.app";  // DotVerse URL
 input string InpEaSecret  = "";                                   // EA Secret (from Railway env)
 input int    InpPollSecs  = 5;                                    // Poll interval (seconds)
 input double InpSlippage  = 3;                                    // Slippage points
+input bool   InpDiscoverAllSymbols = true;                        // Scan broker symbols beyond Market Watch
+input int    InpMaxSymbolSpecs = 300;                              // Payload guard for large broker symbol lists
 
 //--- Globals
 int    g_timerSeconds = 0;
@@ -332,10 +334,20 @@ void BuildMarketWatchJson(string &symbolsJson, string &spreadsJson, string &spec
    specsJson   = "{";
 
    int count = 0;
-   int total = SymbolsTotal(true);
+   bool selectedOnly = !InpDiscoverAllSymbols;
+   int total = SymbolsTotal(selectedOnly);
    for (int i = 0; i < total; i++) {
-      string sym = SymbolName(i, true);
+      if (InpMaxSymbolSpecs > 0 && count >= InpMaxSymbolSpecs) break;
+      string sym = SymbolName(i, selectedOnly);
       if (StringLen(sym) == 0) continue;
+
+      long tradeMode = SymbolInfoInteger(sym, SYMBOL_TRADE_MODE);
+      bool selected = (bool)SymbolInfoInteger(sym, SYMBOL_SELECT);
+      if (InpDiscoverAllSymbols && tradeMode != 0 && !selected) {
+         SymbolSelect(sym, true);
+         selected = true;
+      }
+      if (InpDiscoverAllSymbols && tradeMode == 0 && !selected) continue;
 
       double point = SymbolInfoDouble(sym, SYMBOL_POINT);
       int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
@@ -349,7 +361,6 @@ void BuildMarketWatchJson(string &symbolsJson, string &spreadsJson, string &spec
       double volStep = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
       long stopsLevel = SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
       long fillingMode = SymbolInfoInteger(sym, SYMBOL_FILLING_MODE);
-      long tradeMode = SymbolInfoInteger(sym, SYMBOL_TRADE_MODE);
 
       string key = JsonEscape(sym);
       if (count > 0) {

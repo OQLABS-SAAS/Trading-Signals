@@ -389,6 +389,36 @@ def test_mt5_ready_blocks_vtmarkets_stock_when_no_inventory(monkeypatch):
         _restore_mt5_state(previous_state)
 
 
+def test_mt5_ready_blocks_visible_symbol_when_broker_trade_mode_disabled(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="DEMO",
+        is_active=True,
+        updated_at=None,
+    )
+    fake_db = _FakeOrderDB([account], [])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=0)
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state["testuser"]["tradable_symbols"] = ["AUDUSD", "MSFT"]
+        dvapp.mt5_state["testuser"]["symbol_specs"] = {
+            "AUDUSD": {"trade_mode": 0, "min_lot": 0.01},
+            "MSFT": {"trade_mode": 4, "min_lot": 0.1},
+        }
+
+    try:
+        with pytest.raises(dvapp.OrderValidationError) as exc:
+            dvapp._assert_mt5_account_ready_for_order("testuser", account, symbol="AUDUSD", asset_type="forex")
+        assert "Trading disabled for this MT5 symbol: AUDUSD" in str(exc.value)
+
+        readiness = dvapp._assert_mt5_account_ready_for_order("testuser", account, symbol="MSFT", asset_type="stock")
+        assert readiness["execution_universe_ready"] is True
+    finally:
+        _restore_mt5_state(previous_state)
+
+
 def test_mt5_ready_blocks_after_recent_autotrading_disabled_failure(monkeypatch):
     account = SimpleNamespace(
         id=7,
@@ -418,6 +448,38 @@ def test_mt5_ready_blocks_after_recent_autotrading_disabled_failure(monkeypatch)
 
     assert "Automated trading is disabled" in str(exc.value)
     assert "broker code 10027" in str(exc.value)
+
+
+def test_mt5_recent_trade_disabled_failure_does_not_block_all_symbols(monkeypatch):
+    account = SimpleNamespace(
+        id=7,
+        user_id="testuser",
+        account_number="123456",
+        account_type="DEMO",
+        is_active=True,
+        updated_at=None,
+    )
+    failed_order = SimpleNamespace(
+        id=103,
+        user_id="testuser",
+        account_id=7,
+        status="failed",
+        comment="retcode=10017 Trade disabled",
+        created_at=dvapp.datetime.utcnow(),
+    )
+    fake_db = _FakeOrderDB([account], [failed_order])
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    previous_state = _install_mt5_state(login="123456", trade_mode=0)
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state["testuser"]["tradable_symbols"] = ["MSFT"]
+        dvapp.mt5_state["testuser"]["symbol_specs"] = {"MSFT": {"trade_mode": 4, "min_lot": 0.1}}
+
+    try:
+        readiness = dvapp._assert_mt5_account_ready_for_order("testuser", account, symbol="MSFT", asset_type="stock")
+    finally:
+        _restore_mt5_state(previous_state)
+
+    assert readiness["connected_account_type"] == "DEMO"
 
 
 def test_mt5_submit_order_dedupes_recent_pending_duplicate(monkeypatch):

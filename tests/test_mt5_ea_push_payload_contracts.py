@@ -12,8 +12,12 @@ def test_ea_pushes_market_watch_symbols_and_specs():
     source = _source()
 
     assert "void BuildMarketWatchJson(string &symbolsJson, string &spreadsJson, string &specsJson)" in source
-    assert "SymbolsTotal(true)" in source
-    assert "SymbolName(i, true)" in source
+    assert "InpDiscoverAllSymbols" in source
+    assert "InpMaxSymbolSpecs" in source
+    assert "SymbolsTotal(selectedOnly)" in source
+    assert "SymbolName(i, selectedOnly)" in source
+    assert "SymbolSelect(sym, true)" in source
+    assert "tradeMode != 0" in source
     assert "SYMBOL_SPREAD" in source
     assert "SYMBOL_VOLUME_MIN" in source
     assert "SYMBOL_VOLUME_STEP" in source

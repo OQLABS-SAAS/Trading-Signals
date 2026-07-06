@@ -1137,6 +1137,19 @@ def _mt5_symbol_tradeability_issue(state, symbol, asset_type=None):
     sym = _mt5_normalize_symbol_name(symbol)
     if not sym:
         return None
+    state = state if isinstance(state, dict) else {}
+    specs = state.get("symbol_specs") if isinstance(state.get("symbol_specs"), dict) else {}
+    spec = specs.get(sym)
+    if isinstance(spec, dict):
+        try:
+            trade_mode = int(spec.get("trade_mode"))
+        except (TypeError, ValueError):
+            trade_mode = None
+        # MT5 SYMBOL_TRADE_MODE_DISABLED = 0. The symbol can still be visible
+        # in Market Watch and have a bid/ask, but market orders will return
+        # retcode=10017 until the broker enables trading for that symbol.
+        if trade_mode == 0:
+            return f"Trading disabled for this MT5 symbol: {sym}"
     inventory = _mt5_state_tradable_symbol_set(state)
     if inventory:
         if sym in inventory:
@@ -10244,7 +10257,7 @@ _MT5_RETCODE_MESSAGES = {
 
 _MT5_RETCODE_RE = re.compile(r'retcode[=:\s]*(\d{5})', re.IGNORECASE)
 _MT5_BARE_CODE_RE = re.compile(r'\b(100\d{2})\b')
-_MT5_TRADE_PERMISSION_RETCODES = {10017, 10027}
+_MT5_TRADE_PERMISSION_RETCODES = {10027}
 _MT5_RECENT_PERMISSION_WINDOW_SECONDS = 15 * 60
 
 def _mt5_retcode_message(comment, status):

@@ -143,6 +143,8 @@ def test_today_v2_blocks_mt5_permission_and_broker_symbol_gates():
     assert "function _todayMt5SymbolStatus(o)" in source
     assert "function _todayMt5TradableSet()" in source
     assert "Not available on this MT5 account" in source
+    assert "Trading disabled for this MT5 symbol" in source
+    assert "String(spec.trade_mode)==='0'" in source
     assert "function _todayMt5UsesVtMarketsProfile()" in source
     assert "var perm=_todayMt5PermissionStatus();" in source
     assert "var sym=_todayMt5SymbolStatus(o);" in source
