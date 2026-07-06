@@ -115,11 +115,13 @@ def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
     block = _extract_function("_runScanBase")
     assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS = 12000" in HTML
     assert "_DV_SCAN_BATCH_TIMEOUT_MS = 18000" in HTML
+    assert "function dvFetchAbortableT" in HTML
+    assert "ctrl.abort()" in HTML
     assert "onProgress(0, _expectedTotal, 0)" in block
-    assert "withTimeout(dvFetch('/api/signal-universe/run'" in block
+    assert "dvFetchAbortableT('/api/signal-universe/run'" in block
     assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
     assert "signal universe scan timed out; falling back to batched scanner" in block
-    assert "withTimeout(dvFetch(req.url, req.opts), _DV_SCAN_BATCH_TIMEOUT_MS)" in block
+    assert "dvFetchAbortableT(req.url, req.opts, _DV_SCAN_BATCH_TIMEOUT_MS)" in block
     assert "scan request timed out" in block
 
 
@@ -127,13 +129,19 @@ def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
     block = _extract_function("_todayBuildPlan")
     render = _extract_function("_todayRenderPlan")
     assert "_DV_TODAY_BUILD_TIMEOUT_MS = 65000" in HTML
+    assert "window._todayBuildRunSeq=(window._todayBuildRunSeq||0)+1" in block
+    assert "window._todayBuildAbortCtrl" in block
+    assert "function _todayRenderNoPlanDirect" in block
+    assert "Try scan again" in block
     assert "var _todayBuildTimedOut=false" in block
     assert "var _todayBuildWatchdog=setTimeout(function(){" in block
+    assert "_todayAbortCtrl.abort()" in block
     assert "Today scan timed out before it could finish" in block
     assert "clearTimeout(_todayBuildWatchdog)" in block
     assert "if(!opps.length){" in block
     assert "Today scanned your markets but found no usable BUY/SELL setups" in block
     assert "No executable Today basket" in block
+    assert "_runScanBase(groups, _todayAbortCtrl?_todayAbortCtrl.signal:null" in block
     assert "var noTitle=window._todayNoPlanTitle||''" in render
 
 
