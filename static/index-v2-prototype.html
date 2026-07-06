@@ -15102,6 +15102,8 @@ const ALL_SCAN_GROUPS = [
   { tickers: ['SPX','NDX','DJI','RUT','DAX','FTSE','NIKKEI','HSI','VIX'],                                     asset_type: 'index', daily_only: true }
 ];
 const ALL_SCAN_TFS = ['15m','30m','1h','4h','1d','1w','1mo'];
+const _DV_SIGNAL_UNIVERSE_TIMEOUT_MS = 12000;
+const _DV_SCAN_BATCH_TIMEOUT_MS = 18000;
 
 // Shared scan engine — parallel POSTs to /api/scan-list for each group × timeframe
 // onProgress(done, total, foundSoFar) is called as batches complete so the UI can
@@ -15109,13 +15111,21 @@ const ALL_SCAN_TFS = ['15m','30m','1h','4h','1d','1w','1mo'];
 async function _runScanBase(groups, signal, onProgress) {
   var _scanErrors = [];
   var _scanTotal = 0;
+  var _expectedTotal=(groups||[]).reduce(function(n,g){
+    var tfs=(g&&g.tfs) || (g&&g.daily_only ? ['1d'] : ALL_SCAN_TFS);
+    return n + ((tfs||[]).length || 1);
+  },0);
+  if(typeof onProgress==='function'){ try{ onProgress(0, _expectedTotal, 0); }catch(_e){} }
   try {
-    const universe = await dvFetch('/api/signal-universe/run', {
+    const universe = await withTimeout(dvFetch('/api/signal-universe/run', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ groups: groups }),
       signal: signal
-    });
+    }), _DV_SIGNAL_UNIVERSE_TIMEOUT_MS);
+    if(!universe){
+      _scanErrors.push('signal universe scan timed out; falling back to batched scanner');
+    }
     if(universe && Array.isArray(universe.candidates || universe.results)){
       var _universeResults = universe.candidates || universe.results || [];
       if(universe.ready !== false && _universeResults.length > 0){
@@ -15160,7 +15170,11 @@ async function _runScanBase(groups, signal, onProgress) {
   for (var i = 0; i < _requests.length; i += CONCURRENCY) {
     var batch = _requests.slice(i, i + CONCURRENCY);
     var batchResults = await Promise.allSettled(batch.map(function(req){
-      return dvFetch(req.url, req.opts).then(function(r){
+      return withTimeout(dvFetch(req.url, req.opts), _DV_SCAN_BATCH_TIMEOUT_MS).then(function(r){
+        if(!r){
+          _scanErrors.push('scan request timed out');
+          return {results:[]};
+        }
         if (r && r.results) return r;
         else {
           if (r && r.error) _scanErrors.push(r.error);

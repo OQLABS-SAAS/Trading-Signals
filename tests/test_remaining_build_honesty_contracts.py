@@ -111,6 +111,18 @@ def test_today_build_plan_scans_all_timeframes_before_goal_selection():
     assert "dvFetch('/api/scan-list'" not in block
 
 
+def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
+    block = _extract_function("_runScanBase")
+    assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS = 12000" in HTML
+    assert "_DV_SCAN_BATCH_TIMEOUT_MS = 18000" in HTML
+    assert "onProgress(0, _expectedTotal, 0)" in block
+    assert "withTimeout(dvFetch('/api/signal-universe/run'" in block
+    assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
+    assert "signal universe scan timed out; falling back to batched scanner" in block
+    assert "withTimeout(dvFetch(req.url, req.opts), _DV_SCAN_BATCH_TIMEOUT_MS)" in block
+    assert "scan request timed out" in block
+
+
 def test_today_goal_pace_uses_horizon_as_pacing_not_scan_filter():
     pace = _extract_function("_todayGoalPace")
     select = _extract_function("_todaySelectPlan")
