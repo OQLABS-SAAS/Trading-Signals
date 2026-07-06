@@ -33,6 +33,9 @@ class MT5SubmitOrderRequest:
     timeframe: str | None
     entry_confluence: float | None
     entry_atr: float | None
+    strategy_mode: str | None
+    fib_trigger: float | None
+    fib_move_sl_to: float | None
     trailing: bool
     be: bool
     macro: bool
@@ -114,9 +117,17 @@ def normalize_mt5_submit_order(payload: dict[str, Any] | None) -> MT5SubmitOrder
     tp3 = _optional_float(payload, "tp3")
     entry_confluence = _optional_float(payload, "entry_confluence")
     entry_atr = _optional_float(payload, "entry_atr")
+    strategy_mode = _text(payload.get("strategy_mode")) or None
+    fib_trigger = _optional_float(payload, "fib_trigger")
+    fib_move_sl_to = _optional_float(payload, "fib_move_sl_to")
 
     if not ticker or direction not in VALID_DIRECTIONS or volume <= 0:
         raise OrderValidationError("ticker, direction (BUY/SELL), and volume required")
+    if strategy_mode and strategy_mode not in {"standard", "fixed_micro_lot", "fib_236"}:
+        raise OrderValidationError("strategy_mode must be standard, fixed_micro_lot, or fib_236")
+    if strategy_mode == "fib_236":
+        if not (fib_trigger and fib_trigger > 0 and fib_move_sl_to and fib_move_sl_to > 0):
+            raise OrderValidationError("fib_236 orders require fib_trigger and fib_move_sl_to")
 
     timeframe = _text(payload.get("timeframe")) or None
     return MT5SubmitOrderRequest(
@@ -132,6 +143,9 @@ def normalize_mt5_submit_order(payload: dict[str, Any] | None) -> MT5SubmitOrder
         timeframe=timeframe,
         entry_confluence=entry_confluence,
         entry_atr=entry_atr,
+        strategy_mode=strategy_mode,
+        fib_trigger=fib_trigger,
+        fib_move_sl_to=fib_move_sl_to,
         trailing=bool(payload.get("trailing", False)),
         be=bool(payload.get("be", False)),
         macro=bool(payload.get("macro", False)),

@@ -11662,7 +11662,7 @@ window._todayCfg = window._todayCfg || (function(){
   var _intentRisk = (function(){ try{ var iv=_dvIntentGet(); return (iv&&iv.risk&&iv.risk.max_open_risk_pct!=null)?iv.risk.max_open_risk_pct:3; }catch(e){ return 3; } })();
   // P1: read weekly goal from dvIntent (fallback 500 — old hardcoded default)
   var _intentWeekly = (function(){ try{ var iv=_dvIntentGet(); return (iv&&iv.goals&&iv.goals.weekly!=null)?iv.goals.weekly:500; }catch(e){ return 500; } })();
-  var def={ acct:0, riskPct:_intentRisk, profitGoal:_intentWeekly, maxPerClass:99, maxTrades:6, ladderMode:'beginner', autoPlace:false, goalHorizon:'weekly',
+  var def={ acct:0, riskPct:_intentRisk, profitGoal:_intentWeekly, maxPerClass:99, maxTrades:6, ladderMode:'beginner', strategyMode:'standard', autoPlace:false, goalHorizon:'weekly',
             classes:(_todaySettingsClasses()||['crypto','stock','forex','commodity','index']) };
   try{
     var saved=JSON.parse(_dvRead('dv_todayCfg')||'null');
@@ -11678,7 +11678,7 @@ window._todayCfg = window._todayCfg || (function(){
 function _todaySaveCfg(){
   try{
     var c=window._todayCfg||{};
-    _dvWrite('dv_todayCfg', JSON.stringify({riskPct:c.riskPct,profitGoal:c.profitGoal,maxPerClass:c.maxPerClass,maxTrades:c.maxTrades,ladderMode:c.ladderMode,classes:c.classes,goalHorizon:c.goalHorizon||'weekly'}));
+    _dvWrite('dv_todayCfg', JSON.stringify({riskPct:c.riskPct,profitGoal:c.profitGoal,maxPerClass:c.maxPerClass,maxTrades:c.maxTrades,ladderMode:c.ladderMode,strategyMode:c.strategyMode||'standard',classes:c.classes,goalHorizon:c.goalHorizon||'weekly'}));
   }catch(e){}
 }
 window._todayPlan = window._todayPlan || [];
@@ -11976,6 +11976,106 @@ function _todayDefaultAutos(tf){
   var slow = t.indexOf('1d')>=0 || t.indexOf('1w')>=0 || t.indexOf('4h')>=0 || t.indexOf('1mo')>=0;
   return { be:true, tp1:true, trail:slow, macro:slow, inval:true, sent:false, tp2:slow, weekend:slow };
 }
+function _todayStrategyMode(){
+  var m=String(((window._todayCfg||{}).strategyMode)||'standard').toLowerCase();
+  if(m==='fixed'||m==='micro'||m==='fixed_micro_lot') return 'fixed_micro_lot';
+  if(m==='fib'||m==='fib_236'||m==='fib236') return 'fib_236';
+  return 'standard';
+}
+function _todayStrategyModeLabel(mode){
+  mode=mode||_todayStrategyMode();
+  if(mode==='fixed_micro_lot') return 'Fixed Micro-Lot Signal';
+  if(mode==='fib_236') return 'Fib 23.6 Confirmed Entry';
+  return 'Standard DotVerse';
+}
+function _todaySetStrategyMode(mode){
+  var c=window._todayCfg||{};
+  c.strategyMode=mode||'standard';
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
+  var sel=document.getElementById('todayStrategyMode'); if(sel) sel.value=_todayStrategyMode();
+  window._todayPlan=[]; window._todayOpps=[];
+  _todayStopLivePrices();
+  showToday();
+}
+function _todayRoundPrice(v){
+  v=parseFloat(v);
+  if(!isFinite(v)) return null;
+  if(Math.abs(v)>=1000) return +v.toFixed(2);
+  if(Math.abs(v)>=1) return +v.toFixed(5);
+  return +v.toPrecision(6);
+}
+function _todayApplyFib236Preset(o){
+  if(!o) return o;
+  var entry=parseFloat(String(o.entry||'').replace(/,/g,'')), tp1=parseFloat(String(o.tp||'').replace(/,/g,'')), sl=parseFloat(String(o.sl||'').replace(/,/g,''));
+  var isBuy=String(o.sig||'BUY').toUpperCase()!=='SELL';
+  if(!(entry>0)||!(tp1>0)){
+    o._fib={status:'invalid', reason:'Fib mode needs entry and TP1 levels.'};
+    return o;
+  }
+  var signedStep=(tp1-entry)/(38.2-23.6);
+  if((isBuy&&signedStep<=0)||(!isBuy&&signedStep>=0)){
+    o._fib={status:'invalid', reason:'Fib mode needs TP1 beyond entry in the trade direction.'};
+    return o;
+  }
+  var fib236=entry;
+  var fib382=tp1;
+  var fib12=(sl>0 && ((isBuy&&sl<entry)||(!isBuy&&sl>entry))) ? sl : entry + signedStep*(12-23.6);
+  var fib50=entry + signedStep*(50-23.6);
+  var fib618=entry + signedStep*(61.8-23.6);
+  var close=parseFloat(o.close_price||o.close||o.last_close||o.current_price||o.price||0);
+  var confirmed=close>0 ? (isBuy?close>=fib236:close<=fib236) : true;
+  var beyond50=close>0 ? (isBuy?close>=fib50:close<=fib50) : false;
+  var status=beyond50?'wait_retest':(confirmed?(close>0?'confirmed':'confirmed_by_signal'):'waiting_confirm');
+  o.entry=_todayRoundPrice(fib236);
+  o.sl=_todayRoundPrice(fib12);
+  o.tp=_todayRoundPrice(fib382);
+  o.tp2=_todayRoundPrice(fib618);
+  o.tp3=null;
+  o.strategyMode='fib_236';
+  o._strategyLabel=_todayStrategyModeLabel('fib_236');
+  o._fib={
+    status:status,
+    fib12:_todayRoundPrice(fib12),
+    fib236:_todayRoundPrice(fib236),
+    fib382:_todayRoundPrice(fib382),
+    fib50:_todayRoundPrice(fib50),
+    fib618:_todayRoundPrice(fib618),
+    moveRule:'move_stop_at_price_level',
+    moveStopAt:_todayRoundPrice(fib50),
+    moveStopTo:_todayRoundPrice(fib382),
+    confirmation:close>0?'candle close/live price checked':'signal engine confirmation',
+    reason:beyond50?'Price already reached Fib 50. Wait for a 23.6 retest instead of chasing.':'Enter only after 23.6 confirms; TP1 38.2, TP2 61.8, move SL to 38.2 at Fib 50.'
+  };
+  o.reason=(o.reason||'Live DotVerse signal')+' Fib mode: 23.6 confirmed entry, 12 stop, TP1 38.2, TP2 61.8.';
+  return o;
+}
+function _todayApplyStrategyModeToOpps(opps){
+  var mode=_todayStrategyMode();
+  return (opps||[]).map(function(o){
+    if(mode==='fib_236') return _todayApplyFib236Preset(Object.assign({},o));
+    o.strategyMode=mode;
+    o._strategyLabel=_todayStrategyModeLabel(mode);
+    return o;
+  });
+}
+function _todayFibReadiness(o){
+  var f=o&&o._fib;
+  if(!f) return null;
+  if(f.status==='invalid') return {text:'Fib invalid', cls:'invalid'};
+  if(o&&o._live&&o._live.price){
+    var live=parseFloat(o._live.price)||0, isBuy=String(o.sig||'BUY').toUpperCase()!=='SELL';
+    if(live>0 && ((isBuy&&live>=f.fib50)||(!isBuy&&live<=f.fib50))) return {text:'Wait for 23.6 retest', cls:'wait'};
+    if(live>0 && ((isBuy&&live<o.entry)||(!isBuy&&live>o.entry))) return {text:'Wait 23.6 close', cls:'wait'};
+  }
+  if(f.status==='waiting_confirm') return {text:'Wait 23.6 close', cls:'wait'};
+  if(f.status==='wait_retest') return {text:'Wait for 23.6 retest', cls:'wait'};
+  return null;
+}
+function _todayFibSummaryHtml(o, pxFmt){
+  var f=o&&o._fib; if(!f) return '';
+  pxFmt=pxFmt||function(v){return v;};
+  return '<div class="today-v2-path" style="border-color:rgba(201,168,76,.28);background:rgba(201,168,76,.055);"><div class="td-mini">Fib 23.6 Confirmed Entry</div><b>23.6 entry · 12 stop · 38.2 / 61.8 targets</b><div class="today-v2-copy" style="margin-top:7px">If price reaches Fib 50, DotVerse queues a stop move to Fib 38.2. Current Fib status: '+String(f.status||'confirmed').replace(/_/g,' ')+'.</div><div class="today-v2-copy" style="margin-top:8px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.52)">12 '+pxFmt(f.fib12)+' · 23.6 '+pxFmt(f.fib236)+' · 38.2 '+pxFmt(f.fib382)+' · 50 '+pxFmt(f.fib50)+' · 61.8 '+pxFmt(f.fib618)+'</div></div>';
+}
 // SMART per-trade automations — calls the real DotVerse engine so each trade
 // (BUY vs SELL, scalp vs swing, with-trend vs against) gets its own set.
 function _todayTradeType(tf){ tf=(tf||'').toLowerCase(); if(tf.indexOf('15m')>=0)return'scalp'; if(tf.indexOf('30m')>=0||tf.indexOf('1h')>=0)return'day'; if(tf.indexOf('4h')>=0)return'swing'; return'position'; }
@@ -12150,6 +12250,8 @@ async function _todayBuildPlan(){
   c.maxPerClass = parseInt(document.getElementById('todayMaxPer')?.value)||2;
   c.maxTrades = parseInt(document.getElementById('todayMaxTrades')?.value)||8;
   c.ladderMode = document.getElementById('todayLadderMode')?.value || c.ladderMode || 'beginner';
+  c.strategyMode = document.getElementById('todayStrategyMode')?.value || c.strategyMode || 'standard';
+  if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   var _levSel=parseInt(document.getElementById('todayLev')?.value); if(_levSel>0) window._todayLeverage=_levSel;
   var _ap=document.getElementById('todayAutoPlace'); if(_ap) c.autoPlace=!!_ap.checked;
   // Pull the live broker account: real balance AND real leverage (for accurate margin).
@@ -12222,6 +12324,7 @@ async function _todayBuildPlan(){
   var QFLOOR=45;
   var ranked = opps.filter(function(o){ return (o.qscore||0)>=QFLOOR; })
                .concat(opps.filter(function(o){ return (o.qscore||0)<QFLOOR; }));
+  ranked = _todayApplyStrategyModeToOpps(ranked);
   await _todayAutoBacktestCandidates(ranked);
   ranked.sort(function(a,b){
     return ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
@@ -13390,7 +13493,8 @@ async function _todaySendOrders(trades, onProgress, legSubset){
 	  try{
 	    var res=await dvOrderFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
 	      ticker:o.sym, asset_type:_normalizeAssetType(o.asset), order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
-	      entry:o.entry, sl:o.sl, tp1:leg.tp||o.tp, tp2:null, tp3:null, timeframe:o.tf||'',
+	      entry:o.entry, sl:o.sl, tp1:leg.tp||o.tp, tp2:o.tp2||null, tp3:o.tp3||null, timeframe:o.tf||'',
+	      strategy_mode:o.strategyMode||_todayStrategyMode(), fib_trigger:(o._fib&&o._fib.moveStopAt)||null, fib_move_sl_to:(o._fib&&o._fib.moveStopTo)||null,
 	      trailing:!!(leg.trailing||(o._autos&&o._autos.trail)),
 	      be:!!(o._autos&&o._autos.be), macro:!!(o._autos&&o._autos.macro),
 	      inval:!!(o._autos&&o._autos.inval), sent:!!(o._autos&&o._autos.sent),
@@ -13506,6 +13610,8 @@ function _todayTradeReason(o, liveState){
   return tf+' trend quality, '+spread+' spread, clean R:R 1:'+((rr||0).toFixed?rr.toFixed(1):rr)+'.';
 }
 function _todayReadiness(o){
+  var fibRd=_todayFibReadiness(o);
+  if(fibRd) return fibRd;
   if(o&&o._live&&o._live.invalid) return {text:'Invalid', cls:'invalid'};
   if(o&&o._openMonitor) return {text:o._openMonitor, cls:'open'};
   if(o&&o._live&&Math.abs(parseFloat(o._live.distPct)||0)>.35) return {text:'Wait', cls:'wait'};
@@ -14261,7 +14367,7 @@ function showToday(){
     + '<div id="todayTopArea"></div>'
     + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>'+(protect?'Protect open trades':'Build today\'s basket')+'</h2><span class="td-pill gold">'+(protect?'No new risk after target':'All assets + all feasible timeframes')+'</span></div>'
     + '<div class="today-v2-setup">'
-      + '<div class="today-v2-field"><div class="td-mini">Mode</div><div class="today-v2-value gold">Basket risk</div></div>'
+      + '<div class="today-v2-field"><div class="td-mini">Today Strategy Mode</div><select id="todayStrategyMode" onchange="_todaySetStrategyMode(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(201,168,76,.30);border-radius:4px;outline:0;color:rgba(201,168,76,.95);font-family:var(--mono);font-size:12px;padding:5px 6px;"><option value="standard"'+(_todayStrategyMode()==='standard'?' selected':'')+'>Standard DotVerse</option><option value="fixed_micro_lot"'+(_todayStrategyMode()==='fixed_micro_lot'?' selected':'')+'>Fixed Micro-Lot Signal</option><option value="fib_236"'+(_todayStrategyMode()==='fib_236'?' selected':'')+'>Fib 23.6 Confirmed Entry</option></select><div class="today-v2-copy" style="font-size:10px;margin-top:4px">'+(_todayStrategyMode()==='fib_236'?'Wait for 23.6 confirmation; stop 12, TP 38.2 / 61.8.':'Choose how Today prepares trade levels and execution metadata.')+'</div></div>'
       + '<div class="today-v2-field"><div class="td-mini">Account equity</div><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#ede8d8;font-family:var(--mono);font-size:16px;"><div id="todayAcctSource" class="today-v2-copy" style="font-size:10px;margin-top:4px">'+_todayAccountSourceLabel()+'</div></div>'
       + (function(){ var _dh=_todayDefaultHorizon(); var _h=c.goalHorizon||_dh.horizon||'weekly'; var _lbl={'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[_h]||'Weekly'; var _gv=c.profitGoal||_dh.profitGoal||500; return '<div class="today-v2-field"><div class="td-mini"><span id="todayHorizonLabel">'+_lbl+' profit target</span></div><select id="todayHorizon" onchange="_todaySetHorizon(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(93,232,160,.25);border-radius:4px;outline:0;color:rgba(93,232,160,.8);font-family:var(--mono);font-size:12px;padding:3px 4px;"><option value="daily"'+((_h==="daily")?" selected":"")+'>Daily</option><option value="weekly"'+((_h==="weekly")?" selected":"")+'>Weekly</option><option value="monthly"'+((_h==="monthly")?" selected":"")+'>Monthly</option></select><input id="todayProfitGoal" type="number" step="10" min="0" value="'+_gv+'" oninput="_todaySetProfitGoal(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#5de8a0;font-family:var(--mono);font-size:16px;"></div>'; })()
       + '<div class="today-v2-field"><div class="td-mini">Max combined risk</div><input id="todayRisk" type="number" step="0.1" min="0.1" max="12" value="'+(c.riskPct||3)+'" oninput="_todaySetGlobalRisk(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#e8706e;font-family:var(--mono);font-size:16px;"><div class="today-v2-copy" style="font-size:10px;margin-top:4px">Total planned stop-loss risk across this basket until trades close.</div></div>'
@@ -14409,14 +14515,14 @@ function _todayRenderPlan(){
     + '</div>';
   function row(item){
     var o=item.o, idx=item.idx, s=o._size, rd=item.rd, dir=o.sig==='SELL'?'sell':'buy', lt=_todayLadderTotals(o), reason=_todayTradeReason(o, rd.text);
-    var exec=_todayV2ScaleState(o, _todayLadderLegs(o)), modeLabel=exec.active?'Scale-out':(exec.collapsed?'Single*':'Single');
+    var exec=_todayV2ScaleState(o, _todayLadderLegs(o)), modeLabel=o._fib?'Fib 23.6':(exec.active?'Scale-out':(exec.collapsed?'Single*':'Single'));
     var dur=_todayV2Duration(o.tf);
     var capPct=parseFloat((window._todayCfg||{}).riskPct)||0, riskPct=s.riskPctOfAcct||0, basketShare=capPct>0?(riskPct/capPct*100):0;
     return '<tr class="today-v2-row '+(idx===selected.idx?'on':'')+'" onclick="_todayV2Select('+idx+')">'
       + '<td><div class="today-v2-sym">'+o.sym+' <span class="today-v2-dir '+dir+'">'+o.sig+'</span></div><div class="today-v2-meta">'+o.asset+' · '+o.tf+'</div></td>'
       + '<td><div id="today-lp-'+idx+'" class="today-v2-status '+rd.cls+'"><span class="today-v2-liveDot"></span>'+rd.text+'</div></td>'
       + '<td>'+dur.hold+'<br><span class="today-v2-meta">'+dur.eta+'</span></td><td><div class="today-v2-money"><b>'+esc(s.unitLabel||'--')+'</b><span>cash in '+money2(s.marginReq||0)+'</span><span>controls '+money(s.notional||0)+'</span><small>MT5 volume / position value</small></div></td><td><span class="red">'+money2(-s.netLoss)+'<br>'+riskPct.toFixed(2)+'% account</span>'+(capPct>0?'<div class="today-v2-riskNote">'+basketShare.toFixed(0)+'% of '+capPct.toFixed(1)+'% cap</div>':'')+'</td><td>1:'+(s.rr||0).toFixed(1)+'</td><td><span class="green">+'+money2(lt.profit||s.netTP1)+'</span></td>'
-      + '<td><span class="today-v2-tag '+(exec.active?'scale':'single')+'">'+modeLabel+'</span></td><td>'+reason+'</td></tr>';
+      + '<td><span class="today-v2-tag '+(o._fib?'scale':(exec.active?'scale':'single'))+'">'+modeLabel+'</span></td><td>'+reason+'</td></tr>';
   }
   function detail(item){
     var o=item.o, idx=item.idx, s=o._size, rd=item.rd, legs=_todayLadderLegs(o), lt=_todayLadderTotals(o), tps=[o.tp,o.tp2,o.tp3].filter(Boolean), scale=o._multiEnabled!==false;
@@ -14484,6 +14590,7 @@ function _todayRenderPlan(){
       + '<div class="today-v2-three"><div class="today-v2-mini"><div class="td-mini">MT5 volume</div><b>'+esc(s.unitLabel||'--')+'</b><div class="today-v2-copy" style="font-size:10px;margin-top:3px">cash in '+money2(s.marginReq||0)+' · controls '+money(s.notional||0)+'</div></div><div class="today-v2-mini"><div class="td-mini">Risk</div><b class="red">'+money2(-s.netLoss)+' / '+riskPct.toFixed(2)+'% account</b><div class="today-v2-copy" style="font-size:10px;margin-top:3px">'+(riskFitNote||'')+(capPct>0?' · '+basketShare.toFixed(0)+'% of '+capPct.toFixed(1)+'% basket cap':'')+'</div></div><div class="today-v2-mini"><div class="td-mini">Can make</div><b class="green">+'+money2(lt.profit||s.netTP1)+'</b></div><div class="today-v2-mini"><div class="td-mini">Duration</div><b class="blue">'+dur.hold+'</b></div></div>'
       + '<div class="today-v2-path"><div class="td-mini">'+(protect?'Protection path':(targetPath.paceCopy||'today pace'))+'</div><b>'+(protect?_horizonLbl+' target already protected':targetPath.title)+'</b><div class="today-v2-copy" style="margin-top:7px">'+(protect?'DotVerse is not adding new Today risk. Keep monitoring TP, SL, break-even, trailing, invalidation, Telegram, and in-app alerts while open trades resolve.':targetPath.text)+'</div></div>'
       + '<div class="panelTitle" style="margin:14px 0 8px">Why DotVerse picked it</div><div class="today-v2-copy">'+_todayTradeReason(o, rd.text)+' Pattern check: '+((o.winRateN||0)>=30?'recent price-pattern history found '+o.winRateN+' comparable bars/trades for this ticker and timeframe':'not enough personal closed trades yet, so DotVerse is showing indicator agreement and recent-pattern evidence, not a calibrated win probability')+'.</div>'
+      + _todayFibSummaryHtml(o, pxFmt)
       + _todayV2EntryBrainCard(o)
       + '<div class="panelTitle" style="margin:14px 0 8px">'+(protect?'Protection mode':'Execution mode')+'</div><div class="today-v2-copy">'+(protect?'New MT5 orders are paused because the '+_horizonLbl.toLowerCase()+' target is reached. This panel stays useful for monitoring alerts and protection rules, not for adding exposure.':'Choose how this setup is sent to MT5. Same trade idea, different exit style.')+'</div>'
       + (protect?'':presetControls)
@@ -14795,6 +14902,8 @@ function _dvSignalFromScanRow(r, fallbackTf, fallbackAsset){
     tp:      r.tp1        || r.tp || null,
     tp2:     r.tp2        || null,
     tp3:     r.tp3        || null,
+    close:   r.close || r.close_price || r.last_close || r.current_price || r.price || null,
+    current_price: r.current_price || r.price || null,
     rr:      r.rr1 || r.rr || '--',
     conf:    r.confidence_pct!=null?r.confidence_pct:(r.bull_score!=null&&(((r.bull_score||0)+(r.bear_score||0))>0)?Math.round((r.signal==='SELL'?r.bear_score:r.bull_score)/((r.bull_score||0)+(r.bear_score||0))*100):0),
     confLbl: r.confidence_label || r.confidence || 'LIKELY',

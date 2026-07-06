@@ -6083,6 +6083,104 @@ def run_watch_job():
                 except Exception as _be_outer:
                     print(f"[be] outer error for {ticker}: {_be_outer}")
 
+            # ── Fib 23.6 mode: when price reaches Fib 50, move SL to Fib 38.2 ──
+            # This is separate from break-even/trailing. It locks the first target
+            # only after the Fib trade has moved through the defined continuation level.
+            if w.get("strategy_mode") == "fib_236" and w.get("fib_trigger") and w.get("fib_move_sl_to"):
+                try:
+                    _fib_uid = str(w.get("user_id", "default"))
+                    _fib_sym = _mt5_symbol(ticker, asset_type)
+                    _fib_price = float(ind.get("price") or 0)
+                    _fib_trigger = float(w.get("fib_trigger") or 0)
+                    _fib_move_to = float(w.get("fib_move_sl_to") or 0)
+                    if _fib_price > 0 and _fib_trigger > 0 and _fib_move_to > 0:
+                        with mt5_state_lock:
+                            _fib_state = mt5_state.get(_fib_uid) or mt5_state.get("default", {})
+                        if not _fib_state.get("spread_warning"):
+                            for _fib_pos in _fib_state.get("positions", []):
+                                if (_fib_pos.get("symbol", "") or "").upper() != _fib_sym.upper():
+                                    continue
+                                _fib_ticket = _fib_pos.get("ticket")
+                                if not _fib_ticket or not _DBSession:
+                                    continue
+                                _fib_type = (_fib_pos.get("type") or "buy").lower()
+                                _fib_is_buy = "buy" in _fib_type
+                                _fib_triggered = (
+                                    (_fib_is_buy and _fib_price >= _fib_trigger)
+                                    or
+                                    (not _fib_is_buy and _fib_price <= _fib_trigger)
+                                )
+                                if not _fib_triggered:
+                                    continue
+                                try:
+                                    _fib_curr_sl = float(_fib_pos.get("sl") or _fib_pos.get("stop_loss") or 0)
+                                except (TypeError, ValueError):
+                                    _fib_curr_sl = 0.0
+                                _fib_already_moved = (
+                                    (_fib_is_buy and _fib_curr_sl >= _fib_move_to)
+                                    or
+                                    (not _fib_is_buy and _fib_curr_sl <= _fib_move_to and _fib_curr_sl > 0)
+                                )
+                                if _fib_already_moved:
+                                    continue
+                                _fib_db = _DBSession()
+                                try:
+                                    _fib_owned = _fib_db.query(MT5Order).filter(
+                                        MT5Order.mt5_ticket == int(_fib_ticket),
+                                        MT5Order.order_type.in_(["BUY", "SELL"]),
+                                        MT5Order.user_id.in_([_fib_uid, "default"]),
+                                        MT5Order.status == "filled",
+                                    ).order_by(MT5Order.id.desc()).first()
+                                    if _fib_owned and getattr(_fib_owned, "fib_move_done", False):
+                                        continue
+                                    _fib_existing = _fib_db.query(MT5Order).filter(
+                                        MT5Order.close_ticket == int(_fib_ticket),
+                                        MT5Order.order_type == "MODIFY",
+                                        MT5Order.action == "modify_sl",
+                                        MT5Order.status.in_(["pending", "executing"]),
+                                    ).first()
+                                    if _fib_existing:
+                                        continue
+                                    _fib_account_id = getattr(_fib_owned, "account_id", None) if _fib_owned else None
+                                    _fib_order = MT5Order(
+                                        user_id      = _fib_uid,
+                                        account_id   = _fib_account_id,
+                                        symbol       = _fib_sym,
+                                        order_type   = "MODIFY",
+                                        volume       = 0,
+                                        price        = _fib_move_to,
+                                        action       = "modify_sl",
+                                        sl           = _fib_move_to,
+                                        close_ticket = int(_fib_ticket),
+                                        status       = "pending",
+                                        strategy_mode = "fib_236",
+                                        comment      = f"Fib 50 hit: move SL to 38.2 at {_fib_move_to:.5g}",
+                                    )
+                                    _fib_db.add(_fib_order)
+                                    if _fib_owned:
+                                        _fib_owned.fib_move_done = True
+                                    _fib_db.commit()
+                                    try:
+                                        send_telegram_keyboard(
+                                            f"Fib Protection Activated - {ticker}\n"
+                                            f"Position #{_fib_ticket}\n\n"
+                                            f"Price reached the Fib 50 trigger ({_fib_trigger:.5g}). "
+                                            f"DotVerse queued a stop-loss move to Fib 38.2 ({_fib_move_to:.5g}).",
+                                            [[{"text": "Understood",
+                                               "callback_data": f"ignore|{_fib_ticket}|{_fib_sym}|fib_ack"}]]
+                                        )
+                                    except Exception as _fib_tg_err:
+                                        print(f"[fib] Telegram notify error: {_fib_tg_err}")
+                                    print(f"[fib] {ticker} #{_fib_ticket}: price {_fib_price:.5g} hit "
+                                          f"{_fib_trigger:.5g}; queued SL move to {_fib_move_to:.5g}")
+                                except Exception as _fib_write_err:
+                                    _fib_db.rollback()
+                                    print(f"[fib] MT5Order write error: {_fib_write_err}")
+                                finally:
+                                    _fib_db.close()
+                except Exception as _fib_outer:
+                    print(f"[fib] outer error for {ticker}: {_fib_outer}")
+
             # ── Phase 4c: TP1 / TP2 Target Alerts ────────────────────────────────────
             # Per-trade: gated on watch.tp1_on / watch.tp2_on.
             # Condition: live price reached or passed the TP level computed from
@@ -9001,6 +9099,9 @@ def mt5_submit_order():
                 "tp1_alert": order_request.tp1_alert,
                 "tp2_alert": order_request.tp2_alert,
                 "weekend": order_request.weekend,
+                "strategy_mode": order_request.strategy_mode,
+                "fib_trigger": order_request.fib_trigger,
+                "fib_move_sl_to": order_request.fib_move_sl_to,
             },
         )
         if duplicate:
@@ -9036,6 +9137,9 @@ def mt5_submit_order():
             tp1_alert        = order_request.tp1_alert,
             tp2_alert        = order_request.tp2_alert,
             weekend          = order_request.weekend,
+            strategy_mode    = order_request.strategy_mode,
+            fib_trigger      = order_request.fib_trigger,
+            fib_move_sl_to   = order_request.fib_move_sl_to,
             status           = "pending",
             comment          = f"DotVerse {order_request.ticker} {order_request.direction} | acct={account.id} {account_type}",
         )
@@ -9061,6 +9165,9 @@ def mt5_submit_order():
             entry_price = order_request.price or None,
             entry_atr   = order_request.entry_atr,
             last_signal = order_request.direction,
+            strategy_mode = order_request.strategy_mode,
+            fib_trigger = order_request.fib_trigger,
+            fib_move_sl_to = order_request.fib_move_sl_to,
         )
         return jsonify({
             "status": "pending",
@@ -16974,6 +17081,10 @@ class MT5Order(_Base):
     tp1_alert        = Column(Boolean,    nullable=True, default=False)   # TP1 hit alert
     tp2_alert        = Column(Boolean,    nullable=True, default=False)   # TP2 hit alert
     weekend          = Column(Boolean,    nullable=True, default=False)   # weekend guard
+    strategy_mode    = Column(String(32), nullable=True)
+    fib_trigger      = Column(Float,      nullable=True)
+    fib_move_sl_to   = Column(Float,      nullable=True)
+    fib_move_done    = Column(Boolean,    nullable=True, default=False)
     account_id      = Column(Integer, ForeignKey("trading_accounts.id"), nullable=True, index=True)
     requeue_count   = Column(Integer, nullable=True, default=0)   # double-place guard: max 1 automatic requeue
     created_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
@@ -17025,6 +17136,9 @@ class Watch(_Base):
     weekend_on     = Column(Boolean,     nullable=False, default=False)  # Weekend hold/close prompt (Fri 20:00 UTC)
     entry_price    = Column(Float,       nullable=True)                  # Signal entry at time of watch
     entry_atr      = Column(Float,       nullable=True)                  # ATR at time of watch (for BE compute)
+    strategy_mode  = Column(String(32),  nullable=True)                  # Today strategy preset that created the watch
+    fib_trigger    = Column(Float,       nullable=True)                  # Price level that triggers Fib SL move
+    fib_move_sl_to = Column(Float,       nullable=True)                  # Price level for the protective SL move
     created_at     = Column(DateTime,    nullable=False, default=datetime.utcnow)
 
 class Notification(_Base):
@@ -17167,7 +17281,8 @@ def _ensure_watch_for_order(user_id, ticker, asset_type, timeframe,
                             be_on, trail_on, macro_on, inval_on, sent_on,
                             tp1_on, tp2_on, weekend_on,
                             entry_price=None, entry_atr=None,
-                            last_signal=None):
+                            last_signal=None,
+                            strategy_mode=None, fib_trigger=None, fib_move_sl_to=None):
     """Create or update a watch_registry entry and DB Watch row for an MT5 order
     that has at least one automation flag set.  Called from mt5_submit_order after
     the MT5Order row is committed.
@@ -17182,7 +17297,8 @@ def _ensure_watch_for_order(user_id, ticker, asset_type, timeframe,
       a watch entry for orders without automations.
     - Does NOT touch run_watch_job logic.
     """
-    if not any([be_on, trail_on, macro_on, inval_on, sent_on, tp1_on, tp2_on, weekend_on]):
+    fib_ready = strategy_mode == "fib_236" and fib_trigger is not None and fib_move_sl_to is not None
+    if not any([be_on, trail_on, macro_on, inval_on, sent_on, tp1_on, tp2_on, weekend_on]) and not fib_ready:
         return  # No automations requested — no watch needed from this path
 
     if not timeframe:
@@ -17212,6 +17328,12 @@ def _ensure_watch_for_order(user_id, ticker, asset_type, timeframe,
                 w["entry_atr"] = entry_atr
             if last_signal and not w.get("last_signal"):
                 w["last_signal"] = last_signal
+            if strategy_mode:
+                w["strategy_mode"] = strategy_mode
+            if fib_trigger is not None:
+                w["fib_trigger"] = fib_trigger
+            if fib_move_sl_to is not None:
+                w["fib_move_sl_to"] = fib_move_sl_to
         else:
             watch_registry[key] = {
                 "user_id":        user_id,
@@ -17234,6 +17356,9 @@ def _ensure_watch_for_order(user_id, ticker, asset_type, timeframe,
                 "weekend_on": weekend_on,
                 "entry_price": entry_price,
                 "entry_atr":   entry_atr,
+                "strategy_mode": strategy_mode,
+                "fib_trigger": fib_trigger,
+                "fib_move_sl_to": fib_move_sl_to,
             }
 
     # Persist to DB so watch survives server restart / other workers pick it up
@@ -17241,7 +17366,9 @@ def _ensure_watch_for_order(user_id, ticker, asset_type, timeframe,
                       be_on=be_on, trail_on=trail_on, macro_on=macro_on,
                       inval_on=inval_on, sent_on=sent_on,
                       tp1_on=tp1_on, tp2_on=tp2_on, weekend_on=weekend_on,
-                      entry_price=entry_price, entry_atr=entry_atr)
+                      entry_price=entry_price, entry_atr=entry_atr,
+                      strategy_mode=strategy_mode, fib_trigger=fib_trigger,
+                      fib_move_sl_to=fib_move_sl_to)
     print(f"[watch_wire] {key}: watch ensured "
           f"be={be_on} trail={trail_on} macro={macro_on} inval={inval_on} "
           f"sent={sent_on} tp1={tp1_on} tp2={tp2_on} wknd={weekend_on} "
@@ -17284,7 +17411,8 @@ def _update_watch_fill_price(user_id, ticker, timeframe, fill_price):
 def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="legacy",
                       be_on=False, trail_on=False, macro_on=False, inval_on=False, sent_on=False,
                       tp1_on=False, tp2_on=False, weekend_on=False,
-                      entry_price=None, entry_atr=None):
+                      entry_price=None, entry_atr=None,
+                      strategy_mode=None, fib_trigger=None, fib_move_sl_to=None):
     """Upsert a watch into the database, including per-trade automation flags."""
     if not _DBSession: return
     db = _DBSession()
@@ -17303,13 +17431,18 @@ def _save_watch_to_db(ticker, asset_type, timeframe, alert_channels, user_id="le
             existing.weekend_on  = weekend_on
             if entry_price is not None: existing.entry_price = entry_price
             if entry_atr   is not None: existing.entry_atr   = entry_atr
+            if strategy_mode is not None: existing.strategy_mode = strategy_mode
+            if fib_trigger is not None: existing.fib_trigger = fib_trigger
+            if fib_move_sl_to is not None: existing.fib_move_sl_to = fib_move_sl_to
         else:
             db.add(Watch(user_id=user_id, ticker=ticker, asset_type=asset_type, timeframe=timeframe,
                          alert_channels=json.dumps(alert_channels),
                          be_on=be_on, trail_on=trail_on, macro_on=macro_on,
                          inval_on=inval_on, sent_on=sent_on,
                          tp1_on=tp1_on, tp2_on=tp2_on, weekend_on=weekend_on,
-                         entry_price=entry_price, entry_atr=entry_atr))
+                         entry_price=entry_price, entry_atr=entry_atr,
+                         strategy_mode=strategy_mode, fib_trigger=fib_trigger,
+                         fib_move_sl_to=fib_move_sl_to))
         db.commit()
     except Exception as _e:
         db.rollback()
@@ -17373,6 +17506,9 @@ def _load_watches_from_db():
                         # in run_watch_job.  Persist across restarts by loading from DB.
                         "entry_price": getattr(r, "entry_price", None),
                         "entry_atr":   getattr(r, "entry_atr",   None),
+                        "strategy_mode": getattr(r, "strategy_mode", None),
+                        "fib_trigger": getattr(r, "fib_trigger", None),
+                        "fib_move_sl_to": getattr(r, "fib_move_sl_to", None),
                     }
                     loaded += 1
         print(f"[watch] Loaded {loaded} watches from DB")
@@ -17398,6 +17534,13 @@ def _init_db():
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS action VARCHAR(32) DEFAULT 'open'"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS close_ticket INTEGER"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS strategy_mode VARCHAR(32)"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS fib_trigger FLOAT"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS fib_move_sl_to FLOAT"))
+                _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS fib_move_done BOOLEAN DEFAULT FALSE"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS strategy_mode VARCHAR(32)"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS fib_trigger FLOAT"))
+                _conn.execute(text("ALTER TABLE watches ADD COLUMN IF NOT EXISTS fib_move_sl_to FLOAT"))
                 _conn.execute(text("ALTER TABLE mt5_orders ADD COLUMN IF NOT EXISTS pnl FLOAT"))
                 _conn.execute(text("ALTER TABLE positions ADD COLUMN IF NOT EXISTS timeframe VARCHAR(8)"))
                 # signal_history.account_id is handled by the isolated migration below

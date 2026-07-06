@@ -24,6 +24,9 @@ def test_normalize_mt5_submit_order_accepts_frontend_aliases():
             "timeframe": "1H",
             "entry_confluence": "0.77",
             "entry_atr": "0.004",
+            "strategy_mode": "fib_236",
+            "fib_trigger": "1.1150",
+            "fib_move_sl_to": "1.1080",
             "trailing": True,
         }
     )
@@ -37,6 +40,9 @@ def test_normalize_mt5_submit_order_accepts_frontend_aliases():
     assert order.timeframe == "1H"
     assert order.entry_confluence == 0.77
     assert order.entry_atr == 0.004
+    assert order.strategy_mode == "fib_236"
+    assert order.fib_trigger == 1.1150
+    assert order.fib_move_sl_to == 1.1080
     assert order.trailing is True
 
 

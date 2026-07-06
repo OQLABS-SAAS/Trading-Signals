@@ -42,6 +42,7 @@ def _call_ensure(
     be_on=False, trail_on=False, macro_on=False, inval_on=False,
     sent_on=False, tp1_on=False, tp2_on=False, weekend_on=False,
     entry_price=None, entry_atr=None, last_signal=None,
+    strategy_mode=None, fib_trigger=None, fib_move_sl_to=None,
     stub_db=True,
     monkeypatch=None,
 ):
@@ -53,6 +54,7 @@ def _call_ensure(
         be_on=be_on, trail_on=trail_on, macro_on=macro_on, inval_on=inval_on,
         sent_on=sent_on, tp1_on=tp1_on, tp2_on=tp2_on, weekend_on=weekend_on,
         entry_price=entry_price, entry_atr=entry_atr, last_signal=last_signal,
+        strategy_mode=strategy_mode, fib_trigger=fib_trigger, fib_move_sl_to=fib_move_sl_to,
     )
 
 
@@ -106,6 +108,32 @@ def test_ensure_watch_creates_entry_when_trailing_true(monkeypatch):
     assert w["trail_on"]   is True
     assert w["be_on"]      is False
     assert w["entry_price"] == 68000.0
+
+
+def test_ensure_watch_creates_entry_for_fib_stop_move_without_other_flags(monkeypatch):
+    """Fib mode needs a watch even when BE/trailing/news flags are all off."""
+    key = "u2_XAUUSD_4h"
+    _clear_key(key)
+    monkeypatch.setattr(dvapp, "_DBSession", None)
+    monkeypatch.setattr(dvapp, "_save_watch_to_db", lambda *a, **kw: None)
+
+    dvapp._ensure_watch_for_order(
+        user_id="u2", ticker="XAUUSD", asset_type="commodity", timeframe="4h",
+        be_on=False, trail_on=False, macro_on=False, inval_on=False,
+        sent_on=False, tp1_on=False, tp2_on=False, weekend_on=False,
+        entry_price=2350.0, entry_atr=None, last_signal="BUY",
+        strategy_mode="fib_236", fib_trigger=2385.0, fib_move_sl_to=2370.0,
+    )
+
+    with dvapp.watch_lock:
+        w = dvapp.watch_registry.get(key)
+
+    assert w is not None
+    assert w["strategy_mode"] == "fib_236"
+    assert w["fib_trigger"] == 2385.0
+    assert w["fib_move_sl_to"] == 2370.0
+    assert w["be_on"] is False
+    assert w["trail_on"] is False
 
 
 def test_ensure_watch_creates_entry_all_flags_true(monkeypatch):
@@ -643,6 +671,110 @@ def test_be_self_heals_missing_entry_atr_via_live_atr(monkeypatch):
         f"entry_atr must be > 0 after self-heal, got {w['entry_atr']}"
     )
     _clear_key(key)
+
+
+def test_fib_236_watch_queues_stop_move_at_fib_50(monkeypatch):
+    """Fib mode must queue MODIFY/modify_sl to Fib 38.2 when price reaches Fib 50."""
+    key = "u23_XAUUSD_4h"
+    _clear_key(key)
+
+    monkeypatch.setattr(dvapp, "_redis_client", None)
+    monkeypatch.setattr(dvapp, "_save_watch_to_db", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "send_telegram_keyboard", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "_push_notification", lambda *a, **kw: None)
+    monkeypatch.setattr(dvapp, "_get_automation_settings",
+                        lambda uid: {"market_alerts_on": False, "trailing_atr_mult": 1.0})
+
+    import pandas as pd
+
+    _n = 60
+    _dates = pd.date_range("2025-01-01", periods=_n, freq="4h")
+    _c = [2350.0 + i for i in range(_n)]
+    fake_df = pd.DataFrame({
+        "Open": _c, "High": [c + 4 for c in _c],
+        "Low": [c - 4 for c in _c], "Close": _c,
+        "Volume": [1000] * _n,
+    }, index=_dates)
+
+    monkeypatch.setattr(dvapp, "provider_first_download", lambda *a, **kw: fake_df)
+    monkeypatch.setattr(dvapp, "_fill_date_grid", lambda df, *a, **kw: df)
+    monkeypatch.setattr(dvapp, "pre_screen", lambda ind: {"reason": "stub"})
+    monkeypatch.setattr(dvapp, "calculate_indicators",
+                        lambda df, *a, **kw: {"atr": 4.0, "price": 2391.0})
+
+    with dvapp.mt5_state_lock:
+        dvapp.mt5_state["u23"] = {
+            "positions": [
+                {"ticket": 424242, "symbol": "XAUUSD", "type": "buy", "sl": 2320.0}
+            ]
+        }
+
+    owned = type("OwnedOrder", (), {
+        "account_id": 77,
+        "fib_move_done": False,
+    })()
+    added = []
+
+    class FakeQuery:
+        calls = 0
+
+        def filter(self, *a, **kw): return self
+        def order_by(self, *a, **kw): return self
+        def first(self):
+            FakeQuery.calls += 1
+            return owned if FakeQuery.calls == 1 else None
+
+    class FakeDB:
+        def query(self, model): return FakeQuery()
+        def add(self, obj): added.append(obj)
+        def commit(self): pass
+        def rollback(self): pass
+        def close(self): pass
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: FakeDB())
+
+    with dvapp.watch_lock:
+        dvapp.watch_registry[key] = {
+            "user_id": "u23",
+            "ticker": "XAUUSD",
+            "asset_type": "commodity",
+            "timeframe": "4h",
+            "alert_channels": [],
+            "last_signal": "BUY",
+            "last_check": None,
+            "last_reason": None,
+            "last_price": None,
+            "added_at": "2025-01-01 00:00 UTC",
+            "be_on": False,
+            "trail_on": False,
+            "macro_on": False,
+            "inval_on": False,
+            "sent_on": False,
+            "tp1_on": False,
+            "tp2_on": False,
+            "weekend_on": False,
+            "entry_price": 2350.0,
+            "entry_atr": None,
+            "strategy_mode": "fib_236",
+            "fib_trigger": 2388.0,
+            "fib_move_sl_to": 2372.0,
+        }
+
+    try:
+        dvapp.run_watch_job()
+    finally:
+        _clear_key(key)
+        with dvapp.mt5_state_lock:
+            dvapp.mt5_state.pop("u23", None)
+
+    assert added, "Fib watcher must queue a stop-loss modify order"
+    order = added[0]
+    assert order.order_type == "MODIFY"
+    assert order.action == "modify_sl"
+    assert order.close_ticket == 424242
+    assert order.sl == 2372.0
+    assert order.strategy_mode == "fib_236"
+    assert owned.fib_move_done is True
 
 
 # ── test 8: GAP-2 trail block emits warning when live ATR is 0 ───────────────
