@@ -32071,16 +32071,25 @@ async function adminGrantByEmail(){
 
   // ── SSE Real-Time Event Stream ────────────────────
   function _connectSSE(){
+    if(window._dotverseSSE && window._dotverseSSE.readyState !== EventSource.CLOSED) return;
     var es = new EventSource('/api/events/stream');
-    var reconnectTimer = null;
-    var reconnectDelay = 2000;
+    window._dotverseSSE = es;
+    window._dotverseSSERetry = window._dotverseSSERetry || 2000;
 
     es.addEventListener('open', function(){
+      window._dotverseSSERetry = 2000;
     });
 
     es.addEventListener('connected', function(e){
       try{ var d = JSON.parse(e.data); }
       catch(ex){}
+    });
+
+    es.addEventListener('renew', function(){
+      es.close();
+      if(window._dotverseSSE === es) window._dotverseSSE = null;
+      if(window._dotverseSSETimer) clearTimeout(window._dotverseSSETimer);
+      window._dotverseSSETimer = setTimeout(_connectSSE, 250);
     });
 
     es.addEventListener('message', function(e){
@@ -32109,12 +32118,14 @@ async function adminGrantByEmail(){
     });
 
     es.addEventListener('error', function(e){
-      console.warn('[SSE] Connection error, reconnecting...');
+      if(window.DOTVERSE_DEBUG_SSE) console.warn('[SSE] Connection interrupted, reconnecting...');
       es.close();
-      if(reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(function(){
+      if(window._dotverseSSE === es) window._dotverseSSE = null;
+      if(window._dotverseSSETimer) clearTimeout(window._dotverseSSETimer);
+      var reconnectDelay = window._dotverseSSERetry || 2000;
+      window._dotverseSSETimer = setTimeout(function(){
         _connectSSE();
-        reconnectDelay = Math.min(reconnectDelay * 1.5, 30000);
+        window._dotverseSSERetry = Math.min(reconnectDelay * 1.5, 30000);
       }, reconnectDelay);
     });
   }

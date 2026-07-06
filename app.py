@@ -703,6 +703,9 @@ CORS(app, supports_credentials=True, origins=_CORS_ALLOWED_ORIGINS)
 # _push_notification writes to all queues; the SSE endpoint blocks on get().
 _sse_subscribers       = {}       # {client_id: queue.Queue}
 _sse_subscribers_lock  = threading.Lock()
+_SSE_HEARTBEAT_SECONDS = 25
+_SSE_RENEW_SECONDS     = 12 * 60
+_SSE_RETRY_MS          = 10000
 
 def _sse_broadcast(event_type, data_dict):
     """Push a JSON event to every connected SSE client."""
@@ -13334,12 +13337,18 @@ def sse_stream():
         _sse_subscribers[client_id] = client_q
 
     def generate():
+        started_at = time.monotonic()
         # Send initial connection event
-        yield "id: " + str(int(time.time())) + "\nevent: connected\ndata: {\"client_id\":\"" + client_id + "\"}\n\n"
+        yield "retry: " + str(_SSE_RETRY_MS) + "\nid: " + str(int(time.time())) + "\nevent: connected\ndata: {\"client_id\":\"" + client_id + "\"}\n\n"
         try:
             while True:
+                age = time.monotonic() - started_at
+                if age >= _SSE_RENEW_SECONDS:
+                    yield "id: " + str(int(time.time())) + "\nevent: renew\ndata: {}\n\n"
+                    break
+                wait_seconds = max(1, min(_SSE_HEARTBEAT_SECONDS, _SSE_RENEW_SECONDS - age))
                 try:
-                    msg = client_q.get(timeout=30)  # heartbeat every 30s
+                    msg = client_q.get(timeout=wait_seconds)  # heartbeat while waiting for events
                     yield "id: " + str(int(time.time())) + "\ndata: " + msg + "\n\n"
                 except queue.Empty:
                     # Heartbeat to keep connection alive and detect dead clients
@@ -13352,7 +13361,6 @@ def sse_stream():
 
     resp = Response(generate(), mimetype="text/event-stream")
     resp.headers["Cache-Control"]  = "no-cache"
-    resp.headers["Connection"]     = "keep-alive"
     resp.headers["X-Accel-Buffering"] = "no"  # nginx: don't buffer
     return resp
 
