@@ -316,9 +316,37 @@ def test_signal_universe_run_keeps_group_timeframe_scans_concurrent():
     end = source.index('@app.route("/api/scan-list"', start)
     block = source[start:end]
 
-    assert "ThreadPoolExecutor(max_workers=max_workers)" in block
-    assert "max_workers = min(6, len(scan_requests))" in block
-    assert "as_completed(futures)" in block
+    helper_start = source.index("def _collect_signal_universe_candidates(")
+    helper_end = source.index("def _signal_universe_provider_health", helper_start)
+    helper = source[helper_start:helper_end]
+
+    assert "ThreadPoolExecutor(max_workers=max_workers)" in helper
+    assert "max_workers = min(6, len(scan_requests))" in helper
+    assert "as_completed(futures, timeout=scan_budget_seconds)" in helper
+    assert "pool.shutdown(wait=not timed_out, cancel_futures=timed_out)" in helper
+
+
+def test_today_signal_universe_prioritizes_fast_diverse_requests():
+    requests = dvapp._signal_universe_requests({
+        "scan_mode": "today",
+        "groups": [
+            {"asset_type": "crypto", "tickers": ["BTCUSD"], "tfs": ["15m", "30m", "1h"]},
+            {"asset_type": "stock", "tickers": ["AMD"], "tfs": ["15m", "30m", "1h"]},
+            {"asset_type": "forex", "tickers": ["EURUSD"], "tfs": ["15m", "30m", "1h"]},
+        ],
+    })
+
+    first = [(r.asset_type, r.timeframe) for r in requests[:6]]
+    assert first == [
+        ("forex", "15m"),
+        ("stock", "15m"),
+        ("crypto", "15m"),
+        ("forex", "30m"),
+        ("stock", "30m"),
+        ("crypto", "30m"),
+    ]
+    assert dvapp._signal_universe_scan_budget({"scan_mode": "today"}) == 10.0
+    assert dvapp._signal_universe_scan_budget({"scan_mode": "today", "max_seconds": 90}) == 30.0
 
 
 def test_provider_first_preserves_monthly_interval_for_mtf_trend(monkeypatch):

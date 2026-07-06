@@ -12443,7 +12443,7 @@ async function _todayBuildPlan(){
     var res=await _runScanBase(groups, _todayAbortCtrl?_todayAbortCtrl.signal:null, function(done,total,found){
       if(_todayBuildTimedOut || !_todayIsCurrentRun()) return;
       _jDone=done; _jTotal=total||_jTotal; _todayScanProgress();
-    });
+    }, 'today');
     if(_todayBuildTimedOut || !_todayIsCurrentRun()) return;
     _ingest((res&&res.results)||[], null, null);
     _jFail=(res&&res.errors&&res.errors.length)||0;
@@ -15187,7 +15187,7 @@ const _DV_SCAN_BATCH_TIMEOUT_MS = 18000;
 // Shared scan engine — parallel POSTs to /api/scan-list for each group × timeframe
 // onProgress(done, total, foundSoFar) is called as batches complete so the UI can
 // show live progress instead of a frozen "Scanning…" bar (the #1 user-journey pain).
-async function _runScanBase(groups, signal, onProgress) {
+async function _runScanBase(groups, signal, onProgress, scanMode) {
   var _scanErrors = [];
   var _scanTotal = 0;
   var _expectedTotal=(groups||[]).reduce(function(n,g){
@@ -15199,7 +15199,7 @@ async function _runScanBase(groups, signal, onProgress) {
     const universe = await dvFetchAbortableT('/api/signal-universe/run', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ groups: groups }),
+      body:JSON.stringify({ groups: groups, scan_mode: scanMode || 'standard', max_seconds: scanMode === 'today' ? 10 : undefined }),
       signal: signal
     }, _DV_SIGNAL_UNIVERSE_TIMEOUT_MS);
     if(!universe){

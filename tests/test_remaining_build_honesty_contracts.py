@@ -118,6 +118,8 @@ def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
     assert "function dvFetchAbortableT" in HTML
     assert "ctrl.abort()" in HTML
     assert "onProgress(0, _expectedTotal, 0)" in block
+    assert "scan_mode: scanMode || 'standard'" in block
+    assert "max_seconds: scanMode === 'today' ? 10 : undefined" in block
     assert "dvFetchAbortableT('/api/signal-universe/run'" in block
     assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
     assert "signal universe scan timed out; falling back to batched scanner" in block
@@ -144,6 +146,7 @@ def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
     assert "Today scanned your markets but found no usable BUY/SELL setups" in block
     assert "No executable Today basket" in block
     assert "_runScanBase(groups, _todayAbortCtrl?_todayAbortCtrl.signal:null" in block
+    assert "}, 'today')" in block
     assert "var noTitle=window._todayNoPlanTitle||''" in render
 
 

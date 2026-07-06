@@ -15390,7 +15390,53 @@ def _signal_universe_requests(body):
             )
             if scan_request.tickers:
                 requests_out.append(scan_request)
+    if str(payload.get("scan_mode") or "").lower() == "today":
+        tf_order = {"15m": 0, "30m": 1, "1h": 2, "4h": 3, "1d": 4, "1w": 5, "1mo": 6}
+        asset_order = {"forex": 0, "stock": 1, "crypto": 2, "commodity": 3, "index": 4}
+        requests_out.sort(key=lambda req: (
+            tf_order.get(req.timeframe, 99),
+            asset_order.get(req.asset_type, 99),
+        ))
     return requests_out[:60]
+
+
+def _signal_universe_scan_budget(body):
+    payload = body if isinstance(body, dict) else {}
+    raw_budget = payload.get("max_seconds")
+    try:
+        budget = float(raw_budget)
+    except (TypeError, ValueError):
+        budget = 0.0
+    if budget <= 0 and str(payload.get("scan_mode") or "").lower() == "today":
+        budget = 10.0
+    if budget <= 0:
+        return None
+    return max(1.0, min(30.0, budget))
+
+
+def _collect_signal_universe_candidates(scan_requests, scan_budget_seconds=None):
+    candidates = []
+    errors = []
+    timed_out = False
+    if not scan_requests:
+        return candidates, errors, timed_out
+    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeoutError
+
+    max_workers = min(6, len(scan_requests))
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    futures = [pool.submit(_run_scan_request, scan_request) for scan_request in scan_requests]
+    try:
+        iterator = as_completed(futures, timeout=scan_budget_seconds) if scan_budget_seconds else as_completed(futures)
+        for future in iterator:
+            rows = future.result()
+            candidates.extend(rows)
+            errors.extend([r.get("error") for r in rows if r.get("error")])
+    except FutureTimeoutError:
+        timed_out = True
+        errors.append("signal universe returned partial candidates before the scan budget expired")
+    finally:
+        pool.shutdown(wait=not timed_out, cancel_futures=timed_out)
+    return candidates, errors, timed_out
 
 
 def _signal_universe_provider_health(candidates, errors):
@@ -15429,6 +15475,7 @@ def signal_universe_run():
         body = request.get_json(silent=True) or {}
         run_id = "sigrun_" + uuid.uuid4().hex[:12]
         scan_requests = _signal_universe_requests(body)
+        scan_budget_seconds = _signal_universe_scan_budget(body)
         candidates = []
         errors = []
         scan_scope = []
@@ -15439,14 +15486,9 @@ def signal_universe_run():
                 "tickers": scan_request.tickers,
             })
         if scan_requests:
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            max_workers = min(6, len(scan_requests))
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = [pool.submit(_run_scan_request, scan_request) for scan_request in scan_requests]
-                for future in as_completed(futures):
-                    rows = future.result()
-                    candidates.extend(rows)
-                    errors.extend([r.get("error") for r in rows if r.get("error")])
+            candidates, errors, timed_out = _collect_signal_universe_candidates(scan_requests, scan_budget_seconds)
+        else:
+            timed_out = False
         _sort_scan_candidates(candidates)
         ready = any(not c.get("error") for c in candidates)
         as_of_utc = datetime.utcnow().isoformat() + "Z"
@@ -15465,6 +15507,10 @@ def signal_universe_run():
             "errors": errors,
             "provider_health": provider_health,
             "request_count": len(scan_requests),
+            "scan_mode": body.get("scan_mode") or "standard",
+            "scan_budget_seconds": scan_budget_seconds,
+            "partial": bool(timed_out),
+            "timed_out": bool(timed_out),
         }
         return jsonify(response)
     except Exception as e:
