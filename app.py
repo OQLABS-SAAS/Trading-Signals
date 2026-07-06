@@ -10174,6 +10174,8 @@ def _mt5_dotverse_order_id_from_comment(comment):
 def _mt5_state_account_matches(state, account_id):
     if account_id is None:
         return True
+    if state.get("account_id") in (None, ""):
+        return True
     try:
         return int(state.get("account_id")) == int(account_id)
     except (TypeError, ValueError):

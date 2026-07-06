@@ -36,12 +36,13 @@ def _make_sqlite_session_factory():
     return sessionmaker(bind=engine)
 
 
-def _seed_filled_order(Session, user_id, ticket, order_type="BUY"):
+def _seed_filled_order(Session, user_id, ticket, order_type="BUY", account_id=None):
     """Insert a filled BUY/SELL order with a known mt5_ticket."""
     db = Session()
     try:
         o = dvapp.MT5Order(
             user_id=user_id,
+            account_id=account_id,
             symbol="EURUSD",
             order_type=order_type,
             volume=0.1,
@@ -206,6 +207,42 @@ def test_close_accepts_live_position_ticket_from_mt5_state(monkeypatch):
         close_order = _latest_order(Session, "CLOSE")
         assert close_order.close_ticket == 496397257
         assert close_order.comment == f"User close for DotVerse #{order_id}"
+    finally:
+        with dvapp.mt5_state_lock:
+            dvapp.mt5_state.clear()
+            dvapp.mt5_state.update(old_state)
+
+
+def test_close_accepts_selected_account_when_mt5_state_has_no_account_id(monkeypatch):
+    """Older EA/state snapshots may omit account_id; DB ownership still scopes the selected account."""
+    Session = _make_sqlite_session_factory()
+    order_id = _seed_filled_order(Session, "testuser", ticket=400441944, account_id=1)
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+    with dvapp.mt5_state_lock:
+        old_state = dict(dvapp.mt5_state)
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state["testuser"] = {
+            "positions": [
+                {
+                    "ticket": 496397257,
+                    "symbol": "AMD",
+                    "comment": f"DotVerse #{order_id}",
+                }
+            ],
+        }
+
+    try:
+        client = _authed_pro_client("testuser")
+        resp = client.post(
+            "/api/mt5/close",
+            json={"ticket": 496397257, "symbol": "AMD", "account_id": 1},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        close_order = _latest_order(Session, "CLOSE")
+        assert close_order.account_id == 1
+        assert close_order.close_ticket == 496397257
     finally:
         with dvapp.mt5_state_lock:
             dvapp.mt5_state.clear()
