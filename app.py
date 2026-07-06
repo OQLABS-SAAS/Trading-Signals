@@ -10110,6 +10110,7 @@ def mt5_push_state():
             "spread_warning": spread_warning,               # Bug S: high-spread guard flag
             "spread":         spreads,                       # Phase 1.2: live spread map
             "tradable_symbols": tradable_symbols,
+            "tradeable_symbols": tradable_symbols,           # compatibility spelling for frontend callers
             "symbol_specs":    body.get("symbol_specs", {}),
             # A4: EA self-diagnosis flags (None = absent/old EA, 0 = OFF, 1 = ON)
             "terminal_trade_allowed": terminal_trade_allowed,
@@ -10338,6 +10339,7 @@ def mt5_get_state():
         "spread":      state.get("spread", {}),
         "spreads":     state.get("spread", {}),
         "tradable_symbols": sorted(_mt5_state_tradable_symbol_set(state)),
+        "tradeable_symbols": sorted(_mt5_state_tradable_symbol_set(state)),
         "symbol_specs": state.get("symbol_specs", {}),
         "execution_universe_ready": bool(_mt5_state_tradable_symbol_set(state)),
         # A4: EA self-diagnosis flags (None = old EA/unknown, 0 = OFF, 1 = ON)

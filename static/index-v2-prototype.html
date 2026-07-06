@@ -12331,6 +12331,9 @@ async function _todayBuildPlan(){
   if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   var _levSel=parseInt(document.getElementById('todayLev')?.value); if(_levSel>0) window._todayLeverage=_levSel;
   var _ap=document.getElementById('todayAutoPlace'); if(_ap) c.autoPlace=!!_ap.checked;
+  window._todayBrokerFilteredOpps=[];
+  window._todayBrokerFilteredCount=0;
+  window._todayNoPlanReason='';
   // Pull the live broker account: real balance AND real leverage (for accurate margin).
   try{
     var st=await dvFetch('/api/mt5/state');
@@ -12410,6 +12413,7 @@ async function _todayBuildPlan(){
   ranked.sort(function(a,b){
     return (_todayMt5BrokerExecutableScore(b)-_todayMt5BrokerExecutableScore(a)) || ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
   });
+  ranked = _todayBrokerRankedForPlan(ranked);
   var plan=_todaySelectPlan(ranked, c);
   // Total qualifying setups found — counted as UNIQUE SYMBOLS, not symbol×timeframe.
   // We scan each symbol on 3 timeframes, so opps.length triple-counts (e.g. ETHUSD 1h/4h/1d
@@ -12420,9 +12424,10 @@ async function _todayBuildPlan(){
   window._todayOpps = ranked;
   var _planKeys={};
   plan.forEach(function(o){ _planKeys[((o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'')).toUpperCase()]=1; });
+  var _brokerFiltered=(window._todayBrokerFilteredOpps||[]);
   window._todayDeferredOpps = ranked.filter(function(o){
     return !_planKeys[((o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'')).toUpperCase()];
-  });
+  }).concat(_brokerFiltered.slice(0,30));
   _todayRefreshBasketCandidateActions(plan, window._todayDeferredOpps, c);
   // How many quality setups we had to leave out of the plan (caps / diversification).
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=QFLOOR;}).reduce(function(acc,o){ if(!acc.seen[o.sym]){acc.seen[o.sym]=1;acc.n++;} return acc; },{seen:{},n:0}).n - plan.length);
@@ -14195,6 +14200,95 @@ function _todayGoalPace(){
 var _DV_QFLOOR_AHEAD_BUMP   = 10;   // raise quality floor by 10pts when ahead
 var _DV_MAX_TRADES_AHEAD     = 3;    // cap basket at 3 trades when ahead (default=6)
 
+function _todayMt5BrokerUniverse(){
+  var st=window._todayLastMt5State||window._mt5LastState||{};
+  var specs=st.symbol_specs||st.specs||{};
+  var raw=[].concat(st.tradable_symbols||[],st.tradeable_symbols||[],st.broker_symbols||[],st.symbols||[]);
+  var set={}, list=[];
+  function add(v){
+    var sym='';
+    if(typeof v==='string') sym=v;
+    else if(v&&typeof v==='object') sym=v.symbol||v.name||v.path||v.ticker||'';
+    sym=String(sym||'').trim().toUpperCase();
+    if(!sym||set[sym]) return;
+    set[sym]=1; list.push(sym);
+  }
+  raw.forEach(add);
+  Object.keys(specs||{}).forEach(add);
+  return {
+    state:st,
+    connected:st.connected===true,
+    ready:st.execution_universe_ready===true || list.length>0 || Object.keys(specs||{}).length>0,
+    list:list,
+    set:set,
+    specs:specs||{}
+  };
+}
+function _todayMt5SymbolCandidates(o){
+  o=o||{};
+  var sym=String(o.mt5_symbol||o.broker_symbol||o.symbol||o.sym||'').trim().toUpperCase();
+  var compact=sym.replace(/[^A-Z0-9]/g,'');
+  var out=[sym,compact];
+  var aliases={
+    AMZN:['AMAZON'], GOOGL:['GOOG'], GOOGLE:['GOOG'], META:['FACEBOOK','FB'],
+    XAU:['XAUUSD','GOLD'], GOLD:['XAUUSD'], XAG:['XAGUSD','SILVER'], SILVER:['XAGUSD'],
+    WTI:['USOIL','WTICOUSD','CL'], OIL:['USOIL','WTI'], NATGAS:['NGAS','NATURALGAS'],
+    COPPER:['COPPER','HG'], SPX:['SP500','US500'], NDX:['NAS100','USTEC','US100'],
+    DJI:['US30','DJ30'], RUT:['US2000'], FTSE:['UK100'], HSI:['HK50']
+  };
+  (aliases[compact]||[]).forEach(function(a){ out.push(a); });
+  return out.filter(function(v,i,a){ return v&&a.indexOf(v)===i; });
+}
+function _todayMt5SpecForSymbol(universe, symbol){
+  var specs=(universe&&universe.specs)||{};
+  var key=String(symbol||'').toUpperCase();
+  return specs[key]||specs[symbol]||null;
+}
+function _todayMt5SymbolForTrade(o){
+  var u=_todayMt5BrokerUniverse(), candidates=_todayMt5SymbolCandidates(o);
+  for(var i=0;i<candidates.length;i++){
+    if(u.set[candidates[i]] || _todayMt5SpecForSymbol(u,candidates[i])) return candidates[i];
+  }
+  return candidates[0]||String((o&&o.sym)||'').toUpperCase();
+}
+function _todayMt5SymbolStatus(o){
+  var u=_todayMt5BrokerUniverse();
+  if(!u.connected) return {ok:true,text:'MT5 offline - review only',symbol:_todayMt5SymbolForTrade(o)};
+  if(!u.ready) return {ok:false,text:'MT5 broker symbol universe is still syncing',symbol:_todayMt5SymbolForTrade(o)};
+  var candidates=_todayMt5SymbolCandidates(o), chosen='', spec=null;
+  for(var i=0;i<candidates.length;i++){
+    var c=candidates[i], s=_todayMt5SpecForSymbol(u,c);
+    if(u.set[c]||s){ chosen=c; spec=s; break; }
+  }
+  if(!chosen) return {ok:false,text:'Not available on this MT5 account',symbol:candidates[0]||String((o&&o.sym)||'').toUpperCase()};
+  if(spec && String(spec.trade_mode) === '0') return {ok:false,text:'Trading disabled for this MT5 symbol',symbol:chosen};
+  return {ok:true,text:'Broker tradable',symbol:chosen};
+}
+function _todayBrokerPlanGate(o){
+  var s=_todayMt5SymbolStatus(o);
+  if(!s || s.ok!==false) return {ok:true,symbol:(s&&s.symbol)||_todayMt5SymbolForTrade(o),text:(s&&s.text)||'Broker tradable'};
+  return {ok:false,symbol:s.symbol||_todayMt5SymbolForTrade(o),text:s.text||'Not available on this MT5 account'};
+}
+function _todayBrokerRankedForPlan(ranked){
+  var ok=[], blocked=[];
+  (ranked||[]).forEach(function(o){
+    var gate=_todayBrokerPlanGate(o);
+    o._brokerGate=gate;
+    o._mt5Symbol=gate.symbol;
+    if(gate.ok){ ok.push(o); return; }
+    o._todayBrokerFiltered=true;
+    o._brokerReason=gate.text;
+    o._basketReason=gate.text+' - filtered out before Today basket selection';
+    blocked.push(o);
+  });
+  window._todayBrokerFilteredOpps=blocked;
+  window._todayBrokerFilteredCount=blocked.length;
+  window._todayNoPlanReason=(blocked.length && !ok.length)
+    ? 'DotVerse found setups, but none are tradable on this connected MT5 account right now. Today checks your connected MT5 broker universe before it builds the basket, so unavailable or disabled symbols are kept on watch instead of shown as placeable trades.'
+    : '';
+  return ok;
+}
+
 function _todaySelectPlan(ranked, cfg){
   // P3: compute goal pace and tighten when AHEAD (>= 100% of the period goal).
   // BEHIND never loosens below defaults — we never force junk trades to chase
@@ -14241,6 +14335,7 @@ function _todayClassifyBasketCandidate(candidate, plan, cfg){
   var key=((candidate.sym||'')+':'+(candidate.tf||'')+':'+(candidate.sig||'')).toUpperCase();
   var candidateKey=(_todayMt5SymbolForTrade(candidate)||candidate.sym||'').toUpperCase();
   if(!candidate.sym||candidate.sig==='HOLD') return {action:'ignore',reason:'not actionable'};
+  if(candidate._todayBrokerFiltered) return {action:'watch',reason:candidate._basketReason||candidate._brokerReason||'broker universe filter kept this setup on watch'};
   for(var i=0;i<plan.length;i++){
     var p=plan[i]||{}, pkey=((p.sym||'')+':'+(p.tf||'')+':'+(p.sig||'')).toUpperCase();
     var planKey=(_todayMt5SymbolForTrade(p)||p.sym||'').toUpperCase();
@@ -14592,7 +14687,7 @@ function showToday(){
   var protect=_todayProtectMode();
   el.innerHTML =
     '<div class="today-page v2">'
-    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">DotVerse answers whether today is worth trading, caps total risk, then turns the best opportunities into a clear basket you can review.</div></div><div class="pg-hd-right">'+_todayPill('Review before live','green')+_todayPill('Live price check','blue')+'</div></div>'
+    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">DotVerse answers whether today is worth trading, checks your connected MT5 broker universe first, caps total risk, then turns the best executable opportunities into a clear basket you can review.</div></div><div class="pg-hd-right">'+_todayPill('Review before live','green')+_todayPill('Live price check','blue')+'</div></div>'
     + '<div id="todayTopArea"></div>'
     + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>'+(protect?'Protect open trades':'Build today\'s basket')+'</h2><span class="td-pill gold">'+(protect?'No new risk after target':'All assets + all feasible timeframes')+'</span></div>'
     + '<div class="today-v2-setup">'
@@ -14698,7 +14793,8 @@ function _todayRenderPlan(){
   var plan=window._todayPlan||[], c=window._todayCfg||{}, acct=c.acct||_todaySyncAccountFromDom();
   var _horizonLbl = ({daily:'Daily',weekly:'Weekly',monthly:'Monthly'}[(c.goalHorizon||'weekly')])||'Weekly';
   if(!plan.length){
-    area.innerHTML='<div class="td-card"><div class="td-pad" style="text-align:center;padding:34px 20px;"><div style="font-family:var(--syne);font-size:18px;margin-bottom:8px;">Ready when you are.</div><div class="today-v2-copy" style="max-width:520px;margin:0 auto;">Set account equity, your daily, weekly, or monthly profit target, and max basket risk. DotVerse will scan all supported assets and timeframes, then return a beginner-readable basket.</div></div></div>';
+    var noReason=window._todayNoPlanReason||'';
+    area.innerHTML='<div class="td-card"><div class="td-pad" style="text-align:center;padding:34px 20px;"><div style="font-family:var(--syne);font-size:18px;margin-bottom:8px;">'+(noReason?'No MT5-tradable Today basket':'Ready when you are.')+'</div><div class="today-v2-copy" style="max-width:560px;margin:0 auto;">'+(noReason||'Set account equity, your daily, weekly, or monthly profit target, and max basket risk. DotVerse will scan all supported assets and timeframes, then return a beginner-readable basket.')+'</div></div></div>';
     return;
   }
   var money=_todayMoney, money2=_todayMoney2, pxFmt=function(v){ v=parseFloat(v); return !isFinite(v)?'--':(v>=1000?v.toLocaleString('en-US',{maximumFractionDigits:2}):v>=1?String(+v.toFixed(4)):String(+v.toPrecision(4))); };

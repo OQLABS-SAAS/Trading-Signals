@@ -224,3 +224,19 @@ def test_today_v2_compresses_multiladder_instead_of_auto_single_when_possible():
     assert "compressedSplit:compressed" in source
     assert "var compressedScale=actualScale&&legs.some" in source
     assert "DotVerse compressed the preset so every order clears broker minimum lot size" in source
+
+
+def test_today_v2_broker_universe_filters_before_basket_selection():
+    source = _source()
+
+    assert "function _todayMt5BrokerUniverse()" in source
+    assert "function _todayMt5SymbolStatus(o)" in source
+    assert "function _todayBrokerPlanGate(o)" in source
+    assert "function _todayBrokerRankedForPlan(ranked)" in source
+    assert "ranked = _todayBrokerRankedForPlan(ranked);" in source
+    assert "window._todayBrokerFilteredOpps=blocked" in source
+    assert "window._todayNoPlanReason=(blocked.length && !ok.length)" in source
+    assert "DotVerse found setups, but none are tradable on this connected MT5 account right now." in source
+    assert "MT5 broker symbol universe is still syncing" in source
+    assert "filtered out before Today basket selection" in source
+    assert "Today checks your connected MT5 broker universe before it builds the basket" in source
