@@ -123,6 +123,20 @@ def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
     assert "scan request timed out" in block
 
 
+def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
+    block = _extract_function("_todayBuildPlan")
+    render = _extract_function("_todayRenderPlan")
+    assert "_DV_TODAY_BUILD_TIMEOUT_MS = 65000" in HTML
+    assert "var _todayBuildTimedOut=false" in block
+    assert "var _todayBuildWatchdog=setTimeout(function(){" in block
+    assert "Today scan timed out before it could finish" in block
+    assert "clearTimeout(_todayBuildWatchdog)" in block
+    assert "if(!opps.length){" in block
+    assert "Today scanned your markets but found no usable BUY/SELL setups" in block
+    assert "No executable Today basket" in block
+    assert "var noTitle=window._todayNoPlanTitle||''" in render
+
+
 def test_today_goal_pace_uses_horizon_as_pacing_not_scan_filter():
     pace = _extract_function("_todayGoalPace")
     select = _extract_function("_todaySelectPlan")
