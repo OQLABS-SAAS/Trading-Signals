@@ -142,6 +142,12 @@ def test_today_v2_blocks_mt5_permission_and_broker_symbol_gates():
     assert "MT5 AutoTrading off" in source
     assert "function _todayMt5SymbolStatus(o)" in source
     assert "function _todayMt5TradableSet()" in source
+    assert "function _todayMt5ResolveBrokerSymbol(sym)" in source
+    assert "function _todayMt5BrokerExecutableScore(o)" in source
+    assert "AMZN:['AMAZON']" in source
+    assert "DIS:['DISNEY']" in source
+    assert "ticker:_todayMt5SymbolForTrade(o)||o.sym" in source
+    assert "_todayMt5BrokerExecutableScore(b)-_todayMt5BrokerExecutableScore(a)" in source
     assert "Not available on this MT5 account" in source
     assert "Trading disabled for this MT5 symbol" in source
     assert "String(spec.trade_mode)==='0'" in source
@@ -171,6 +177,16 @@ def test_today_v2_explains_requested_vs_actual_risk_after_lot_rounding():
     assert "Allocated '+target.toFixed(2)+'%; actual '+actual.toFixed(2)+'% after broker lot step/stop distance." in source
     assert "var riskFitNote=_todayRiskFitNote(o,s)" in source
     assert "riskFitNote||''" in source
+
+
+def test_today_v2_explains_wait_for_price_in_plain_language():
+    source = _source()
+
+    assert "live price is no longer close enough to the planned entry" in source
+    assert "Wait for price to return near entry, or rebuild Today for a fresh setup." in source
+    assert "Wait for price to come back near entry, or rebuild Today for a fresh setup." in source
+    assert "should wait for price instead of chasing" not in source
+    assert "entry is slightly chased right now" not in source
 
 
 def test_today_v2_compresses_multiladder_instead_of_auto_single_when_possible():

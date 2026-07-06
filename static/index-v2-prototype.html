@@ -12257,6 +12257,10 @@ async function _todayBuildPlan(){
   // Pull the live broker account: real balance AND real leverage (for accurate margin).
   try{
     var st=await dvFetch('/api/mt5/state');
+    if(st){
+      window._todayMt5Online=window._todayMt5Online===true || st.connected===true;
+      if(typeof _todayBridgeMt5StateToGlobalAccount==='function') _todayBridgeMt5StateToGlobalAccount(st);
+    }
     if(st && st.account){
       var lv=parseInt(st.account.leverage);
 	      if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; var le=document.getElementById('todayLev'); if(le){ le.innerHTML=_dvBrokerLeverageOptions(lv); le.value=String(lv); } }
@@ -12327,7 +12331,7 @@ async function _todayBuildPlan(){
   ranked = _todayApplyStrategyModeToOpps(ranked);
   await _todayAutoBacktestCandidates(ranked);
   ranked.sort(function(a,b){
-    return ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
+    return (_todayMt5BrokerExecutableScore(b)-_todayMt5BrokerExecutableScore(a)) || ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
   });
   var plan=_todaySelectPlan(ranked, c);
   // Total qualifying setups found — counted as UNIQUE SYMBOLS, not symbol×timeframe.
@@ -13496,7 +13500,7 @@ async function _todaySendOrders(trades, onProgress, legSubset){
 	  var legResult={symbol:o.sym, legIndex:leg.idx, target:leg.target||'tp1', ok:false, order_id:null, error:null, _trade:o, _leg:leg};
 	  try{
 	    var res=await dvOrderFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-	      ticker:o.sym, asset_type:_normalizeAssetType(o.asset), order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
+	      ticker:_todayMt5SymbolForTrade(o)||o.sym, asset_type:_normalizeAssetType(o.asset), order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
 	      entry:o.entry, sl:o.sl, tp1:leg.tp||o.tp, tp2:o.tp2||null, tp3:o.tp3||null, timeframe:o.tf||'',
 	      strategy_mode:o.strategyMode||_todayStrategyMode(), fib_trigger:(o._fib&&o._fib.moveStopAt)||null, fib_move_sl_to:(o._fib&&o._fib.moveStopTo)||null,
 	      trailing:!!(leg.trailing||(o._autos&&o._autos.trail)),
@@ -13609,7 +13613,7 @@ function _todayRiskFitNote(o, s){
 }
 function _todayTradeReason(o, liveState){
   var tf=o&&o.tf?o.tf:'TF', rr=(o&&o._size&&o._size.rr)?o._size.rr:0, spread=o&&o.spreadQuality?o.spreadQuality:'normal';
-  if(liveState==='Wait') return 'Good '+tf+' setup, but entry is slightly chased right now.';
+  if(liveState==='Wait') return 'Good '+tf+' setup, but live price is no longer close enough to the planned entry. Wait for price to return near entry, or rebuild Today for a fresh setup.';
   if(o&&o._multiEnabled===false) return 'Fast setup; single order keeps execution simple.';
   return tf+' trend quality, '+spread+' spread, clean R:R 1:'+((rr||0).toFixed?rr.toFixed(1):rr)+'.';
 }
@@ -14281,7 +14285,41 @@ function _todayMt5SymbolForTrade(o){
   var asset=String(o.asset||o.asset_type||'').toLowerCase();
   if(asset==='crypto' && sym.indexOf('USD')<0) sym=sym+'USD';
   var map={GC:'XAUUSD',GOLD:'XAUUSD',SI:'XAGUSD',SILVER:'XAGUSD',CL:'USOIL',WTI:'USOIL',BRENT:'UKOIL',NG:'NGAS'};
-  return map[sym]||sym;
+  sym=map[sym]||sym;
+  return _todayMt5ResolveBrokerSymbol(sym);
+}
+
+function _todayMt5BrokerAliasCandidates(sym){
+  sym=_todayNormalizeMt5Symbol(sym);
+  var aliases={
+    AMZN:['AMAZON'],
+    DIS:['DISNEY'],
+    BABA:['ALIBABA'],
+    XOM:['EXXON'],
+    BA:['BOEING'],
+    INTC:['INTEL'],
+    GOOGL:['GOOG']
+  };
+  return [sym].concat(aliases[sym]||[]);
+}
+
+function _todayMt5ResolveBrokerSymbol(sym){
+  sym=_todayNormalizeMt5Symbol(sym);
+  if(!sym) return '';
+  var candidates=_todayMt5BrokerAliasCandidates(sym);
+  var st=_todayLatestMt5State();
+  var specs=(st&&st.symbol_specs&&typeof st.symbol_specs==='object')?st.symbol_specs:{};
+  var inv=_todayMt5TradableSet();
+  for(var i=0;i<candidates.length;i++){
+    var c=_todayNormalizeMt5Symbol(candidates[i]);
+    if(c && (specs[c] || (inv.ready && inv.set[c]))) return c;
+  }
+  return sym;
+}
+
+function _todayMt5BrokerExecutableScore(o){
+  var s=_todayMt5SymbolStatus(o);
+  return (s&&s.ok)?1:0;
 }
 
 function _todayMt5SymbolAdd(set, value){
@@ -14703,7 +14741,7 @@ function _todayRenderPlan(){
   area.innerHTML =
     '<div class="today-v2-summary">'
       + '<div class="today-v2-metric"><div class="td-mini">'+(protect?'Protection answer':(targetNeedsScout?'Scout answer':'Basket answer'))+'</div><b class="green">'+(protect?'New entries paused':(targetNeedsScout?'Scout first':usable.length+' setups selected'))+'</b><p>'+(protect?_horizonLbl+' target is reached. DotVerse adds $0 new basket risk and keeps protection alerts live while open trades resolve.':(targetNeedsScout?usable.length+' valid setup'+(usable.length===1?'':'s')+' found, covering '+(targetPath.total/(targetGoal||1)*100).toFixed(0)+'% of today\'s pace. Do not force size just to hit the whole '+_horizonLbl.toLowerCase()+' goal.':'Today pace covered with '+money2(-totRisk)+' new basket risk and +'+money2(totProfit)+' planned upside.'))+'</p></div>'
-      + '<div class="today-v2-metric"><div class="td-mini">Live readiness</div><b><span class="today-v2-pulse"></span>'+(protect?'Alerts live':(targetNeedsScout?readyNow+' valid now':readyNow+' enter now'))+'</b><p>'+(protect?'TP, SL, break-even, trailing, invalidation, Telegram, and in-app alerts remain active.':(targetNeedsScout?'These setups are technically entry-ready, but the target path is not covered. Scout remains the primary action.':waitCount+' setup'+(waitCount===1?'':'s')+' should wait for price instead of chasing.'))+'</p></div>'
+      + '<div class="today-v2-metric"><div class="td-mini">Live readiness</div><b><span class="today-v2-pulse"></span>'+(protect?'Alerts live':(targetNeedsScout?readyNow+' valid now':readyNow+' enter now'))+'</b><p>'+(protect?'TP, SL, break-even, trailing, invalidation, Telegram, and in-app alerts remain active.':(targetNeedsScout?'These setups are technically entry-ready, but the target path is not covered. Scout remains the primary action.':(waitCount?waitCount+' setup'+(waitCount===1?'':'s')+' are not close enough to the planned entry. Wait for price to come back near entry, or rebuild Today for a fresh setup.':'All selected setups are close enough to their planned entries.')))+'</p></div>'
       + '<div class="today-v2-metric"><div class="td-mini">'+(protect?'Target state':'Target timing')+'</div><b class="gold">'+(protect?'Target reached':targetPath.eta)+'</b><p>'+(protect?'Protect mode stays on until the '+_horizonLbl.toLowerCase()+' target state resets or you explicitly lower the target/progress.':targetPath.text)+'</p></div>'
       + '<div class="today-v2-metric"><div class="td-mini">Open trade monitor</div><b class="blue">'+(protect?'Active now':'Live after place')+'</b><p>'+(protect?'Open trades stay under protection logic; no review/place action is shown for new orders.':'Rows become PnL, current R, stop state, and automation history.')+'</p></div>'
     + '</div>'

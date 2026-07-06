@@ -12106,6 +12106,79 @@ def recommend_automations():
         return jsonify({"error": str(e)}), 500
 
 
+def _today_scout_money(value, signed=False):
+    value = float(value or 0)
+    prefix = "+" if signed and value > 0 else ""
+    if value < 0:
+        prefix = "-"
+    return f"{prefix}${abs(value):,.2f}"
+
+
+def _today_scout_telegram_message(kind, horizon, goal, profit, risk, eta, trades, shortfall=0.0):
+    horizon = horizon if horizon in {"daily", "weekly", "monthly"} else "weekly"
+    horizon_label = {"daily": "today", "weekly": "this week", "monthly": "this month"}[horizon]
+    trades = int(trades or 0)
+    goal_txt = _today_scout_money(goal)
+    profit_txt = _today_scout_money(profit, signed=True)
+    risk_txt = _today_scout_money(-abs(float(risk or 0)), signed=True)
+    eta_txt = str(eta or "watchlist scan")[:48]
+
+    if kind == "protect":
+        return (
+            "Protect Alert: target already reached\n"
+            "What this means:\n"
+            f"DotVerse sees the {horizon} target as reached, so it is not adding new Today risk. It will keep monitoring open trades and protection rules.\n"
+            "Summary:\n"
+            f"• Trades monitored: {trades}\n"
+            f"• Goal: {goal_txt}\n"
+            f"• Current progress: {profit_txt}\n"
+            "• Planned new risk: -$0.00\n"
+            f"• ETA: {eta_txt}\n"
+            "• Reason: protect mode is active\n"
+            "Status:\n"
+            "PROTECTING - no new entries\n"
+            "Next step:\n"
+            "Review open trades, stop losses, take-profit levels, break-even, and trailing settings before changing exposure."
+        )
+
+    if kind == "armed":
+        shortfall_txt = _today_scout_money(shortfall)
+        return (
+            "Scout Alert: scanner armed\n"
+            "What this means:\n"
+            f"DotVerse will keep scanning for possible trades that could cover {horizon_label}'s {goal_txt} target without forcing oversized risk.\n"
+            "Summary:\n"
+            f"• Trades: {trades}\n"
+            f"• Goal: {goal_txt}\n"
+            f"• Potential upside: {profit_txt}\n"
+            f"• Current shortfall: {shortfall_txt}\n"
+            f"• ETA: {eta_txt}\n"
+            "• Reason: scout is watching for a target path\n"
+            "Status:\n"
+            "WATCHING - not yet executed\n"
+            "Next step:\n"
+            "Wait for DotVerse to alert you when a cleaner basket appears, then review symbols, entries, stop losses, take-profit levels, and position sizing."
+        )
+
+    trade_word = "trade" if trades == 1 else "trades"
+    return (
+        f"Scout Alert: {trades} candidate {trade_word} found\n"
+        "What this means:\n"
+        f"DotVerse found {trades} possible {trade_word} that could exceed {horizon_label}'s {goal_txt} target if they work as planned.\n"
+        "Summary:\n"
+        f"• Trades: {trades}\n"
+        f"• Goal: {goal_txt}\n"
+        f"• Potential upside: {profit_txt}\n"
+        f"• Planned risk: {risk_txt}\n"
+        f"• ETA: {eta_txt}\n"
+        "• Reason: scout detected a target path\n"
+        "Status:\n"
+        "SUGGESTED - not yet executed\n"
+        "Next step:\n"
+        "Review the symbols, entries, stop losses, take-profit levels, and position sizing before entering."
+    )
+
+
 @app.route("/api/today/scout-alert", methods=["POST"])
 @login_required
 def today_scout_alert():
@@ -12150,6 +12223,16 @@ def today_scout_alert():
             f"DotVerse will keep scanning for a basket that can cover your "
             f"${goal:,.2f} {goal_label}. Current shortfall: ${shortfall:,.2f}."
         )
+    telegram_msg = _today_scout_telegram_message(
+        kind=kind,
+        horizon=horizon,
+        goal=goal,
+        profit=profit,
+        risk=risk,
+        eta=eta,
+        trades=trades,
+        shortfall=shortfall,
+    )
 
     dedup_raw = f"{user_id}:{kind}:{round(goal, 2)}:{round(profit, 2)}:{eta}"
     dedup_key = "today_scout_alert:" + hashlib.sha1(dedup_raw.encode("utf-8")).hexdigest()
@@ -12160,7 +12243,7 @@ def today_scout_alert():
         pass
 
     try:
-        send_telegram(f"{title}\n{body}")
+        send_telegram(telegram_msg)
     except Exception as e:
         print(f"[today_scout] Telegram send failed: {e}")
 
