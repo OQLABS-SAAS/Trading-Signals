@@ -12044,7 +12044,7 @@ function _todayStrategyMode(){
 function _todayStrategyModeLabel(mode){
   mode=mode||_todayStrategyMode();
   if(mode==='fixed_micro_lot') return 'Fixed Micro-Lot Signal';
-  if(mode==='fib_236') return 'Fib 23.6 Confirmed Entry';
+  if(mode==='fib_236') return 'Fib 23.6 Setup';
   return 'Standard DotVerse';
 }
 function _todaySetStrategyMode(mode){
@@ -12105,7 +12105,7 @@ function _todayApplyFib236Preset(o){
     confirmation:close>0?'candle close/live price checked':'signal engine confirmation',
     reason:beyond50?'Price already reached Fib 50. Wait for a 23.6 retest instead of chasing.':'Enter only after 23.6 confirms; TP1 38.2, TP2 61.8, move SL to 38.2 at Fib 50.'
   };
-  o.reason=(o.reason||'Live DotVerse signal')+' Fib mode: 23.6 confirmed entry, 12 stop, TP1 38.2, TP2 61.8.';
+  o.reason=(o.reason||'Live DotVerse signal')+' Fib mode: 23.6 setup, 12 stop, TP1 38.2, TP2 61.8.';
   return o;
 }
 function _todayApplyStrategyModeToOpps(opps){
@@ -12121,20 +12121,37 @@ function _todayApplyStrategyModeToOpps(opps){
 function _todayFibReadiness(o){
   var f=o&&o._fib;
   if(!f) return null;
-  if(f.status==='invalid') return {text:'Fib invalid', cls:'invalid'};
+  if(f.status==='invalid') return {text:'Setup invalid', cls:'invalid'};
   if(o&&o._live&&o._live.price){
     var live=parseFloat(o._live.price)||0, isBuy=String(o.sig||'BUY').toUpperCase()!=='SELL';
-    if(live>0 && ((isBuy&&live>=f.fib50)||(!isBuy&&live<=f.fib50))) return {text:'Wait for 23.6 retest', cls:'wait'};
-    if(live>0 && ((isBuy&&live<o.entry)||(!isBuy&&live>o.entry))) return {text:'Wait 23.6 close', cls:'wait'};
+    if(live>0 && ((isBuy&&live>=f.fib50)||(!isBuy&&live<=f.fib50))) return {text:'Do not chase - wait for retest', cls:'wait'};
+    if(live>0 && ((isBuy&&live<o.entry)||(!isBuy&&live>o.entry))) return {text:'Waiting for 23.6 confirmation', cls:'wait'};
   }
-  if(f.status==='waiting_confirm') return {text:'Wait 23.6 close', cls:'wait'};
-  if(f.status==='wait_retest') return {text:'Wait for 23.6 retest', cls:'wait'};
+  if(f.status==='waiting_confirm') return {text:'Waiting for 23.6 confirmation', cls:'wait'};
+  if(f.status==='wait_retest') return {text:'Do not chase - wait for retest', cls:'wait'};
   return null;
+}
+function _todayFibStatusLabel(f){
+  var s=(f&&f.status)||'confirmed';
+  if(s==='invalid') return 'Setup invalid';
+  if(s==='waiting_confirm') return 'Waiting for 23.6 confirmation';
+  if(s==='confirmed_by_signal') return 'Confirmed by signal engine';
+  if(s==='wait_retest') return 'Do not chase - wait for retest';
+  return '23.6 confirmed';
+}
+function _todayFibActionLine(f){
+  var s=(f&&f.status)||'confirmed';
+  if(s==='invalid') return 'Do not enter. The Fib levels are not valid for this setup.';
+  if(s==='waiting_confirm') return 'Wait for candle confirmation on the selected timeframe before entering.';
+  if(s==='wait_retest') return 'Price already stretched to Fib 50. Wait for a cleaner 23.6 retest instead of chasing.';
+  return 'Review the live price, stop, targets, and order size before entering.';
 }
 function _todayFibSummaryHtml(o, pxFmt){
   var f=o&&o._fib; if(!f) return '';
   pxFmt=pxFmt||function(v){return v;};
-  return '<div class="today-v2-path" style="border-color:rgba(201,168,76,.28);background:rgba(201,168,76,.055);"><div class="td-mini">Fib 23.6 Confirmed Entry</div><b>23.6 entry · 12 stop · 38.2 / 61.8 targets</b><div class="today-v2-copy" style="margin-top:7px">If price reaches Fib 50, DotVerse queues a stop move to Fib 38.2. Current Fib status: '+String(f.status||'confirmed').replace(/_/g,' ')+'.</div><div class="today-v2-copy" style="margin-top:8px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.52)">12 '+pxFmt(f.fib12)+' · 23.6 '+pxFmt(f.fib236)+' · 38.2 '+pxFmt(f.fib382)+' · 50 '+pxFmt(f.fib50)+' · 61.8 '+pxFmt(f.fib618)+'</div></div>';
+  var status=_todayFibStatusLabel(f), action=_todayFibActionLine(f);
+  var source=f.confirmation||'signal engine confirmation', tf=((o&&o.tf)||'selected').toString().toUpperCase();
+  return '<div class="today-v2-path" style="border-color:rgba(201,168,76,.28);background:rgba(201,168,76,.055);"><div class="td-mini">Fib 23.6 Setup</div><b>This setup looks for entry on a shallow retracement inside the current trend.</b><div class="today-v2-copy" style="margin-top:7px">Entry at Fib 23.6, stop at Fib 12, targets at Fib 38.2 and 61.8.</div><div class="today-v2-copy" style="margin-top:8px"><b>Status:</b> '+status+'<br><b>Next step:</b> '+action+'</div><div class="today-v2-copy" style="margin-top:8px"><b>Entry rule:</b> Enter only after price confirms the 23.6 level on the selected timeframe.<br><b>Protection rule:</b> If price reaches Fib 50, prepare to move protection to Fib 38.2. If Fib 50 was already hit before entry, wait for retest instead of chasing.</div><div class="today-v2-copy" style="margin-top:8px;font-family:var(--mono);font-size:10px;color:rgba(237,232,216,.52)">Confirmation source: '+source+' · Selected timeframe: '+tf+'<br>12 '+pxFmt(f.fib12)+' · 23.6 '+pxFmt(f.fib236)+' · 38.2 '+pxFmt(f.fib382)+' · 50 '+pxFmt(f.fib50)+' · 61.8 '+pxFmt(f.fib618)+'</div></div>';
 }
 // SMART per-trade automations — calls the real DotVerse engine so each trade
 // (BUY vs SELL, scalp vs swing, with-trend vs against) gets its own set.
@@ -14579,7 +14596,7 @@ function showToday(){
     + '<div id="todayTopArea"></div>'
     + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>'+(protect?'Protect open trades':'Build today\'s basket')+'</h2><span class="td-pill gold">'+(protect?'No new risk after target':'All assets + all feasible timeframes')+'</span></div>'
     + '<div class="today-v2-setup">'
-      + '<div class="today-v2-field"><div class="td-mini">Today Strategy Mode</div><select id="todayStrategyMode" onchange="_todaySetStrategyMode(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(201,168,76,.30);border-radius:4px;outline:0;color:rgba(201,168,76,.95);font-family:var(--mono);font-size:12px;padding:5px 6px;"><option value="standard"'+(_todayStrategyMode()==='standard'?' selected':'')+'>Standard DotVerse</option><option value="fixed_micro_lot"'+(_todayStrategyMode()==='fixed_micro_lot'?' selected':'')+'>Fixed Micro-Lot Signal</option><option value="fib_236"'+(_todayStrategyMode()==='fib_236'?' selected':'')+'>Fib 23.6 Confirmed Entry</option></select><div class="today-v2-copy" style="font-size:10px;margin-top:4px">'+(_todayStrategyMode()==='fib_236'?'Wait for 23.6 confirmation; stop 12, TP 38.2 / 61.8.':(_todayStrategyMode()==='fixed_micro_lot'?'Every $1,000 account equity opens 0.01 lot. DotVerse will not round up above the fixed rule just to satisfy a broker minimum.':'Choose how Today prepares trade levels and execution metadata.'))+'</div></div>'
+      + '<div class="today-v2-field"><div class="td-mini">Today Strategy Mode</div><select id="todayStrategyMode" onchange="_todaySetStrategyMode(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(201,168,76,.30);border-radius:4px;outline:0;color:rgba(201,168,76,.95);font-family:var(--mono);font-size:12px;padding:5px 6px;"><option value="standard"'+(_todayStrategyMode()==='standard'?' selected':'')+'>Standard DotVerse</option><option value="fixed_micro_lot"'+(_todayStrategyMode()==='fixed_micro_lot'?' selected':'')+'>Fixed Micro-Lot Signal</option><option value="fib_236"'+(_todayStrategyMode()==='fib_236'?' selected':'')+'>Fib 23.6 Setup</option></select><div class="today-v2-copy" style="font-size:10px;margin-top:4px">'+(_todayStrategyMode()==='fib_236'?'Entry at Fib 23.6, stop at Fib 12, targets at Fib 38.2 and 61.8. Status tells you whether to enter, wait, or skip.':(_todayStrategyMode()==='fixed_micro_lot'?'Every $1,000 account equity opens 0.01 lot. DotVerse will not round up above the fixed rule just to satisfy a broker minimum.':'Choose how Today prepares trade levels and execution metadata.'))+'</div></div>'
       + '<div class="today-v2-field"><div class="td-mini">Account equity</div><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#ede8d8;font-family:var(--mono);font-size:16px;"><div id="todayAcctSource" class="today-v2-copy" style="font-size:10px;margin-top:4px">'+_todayAccountSourceLabel()+'</div></div>'
       + (function(){ var _dh=_todayDefaultHorizon(); var _h=c.goalHorizon||_dh.horizon||'weekly'; var _lbl={'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[_h]||'Weekly'; var _gv=c.profitGoal||_dh.profitGoal||500; return '<div class="today-v2-field"><div class="td-mini"><span id="todayHorizonLabel">'+_lbl+' profit target</span></div><select id="todayHorizon" onchange="_todaySetHorizon(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(93,232,160,.25);border-radius:4px;outline:0;color:rgba(93,232,160,.8);font-family:var(--mono);font-size:12px;padding:3px 4px;"><option value="daily"'+((_h==="daily")?" selected":"")+'>Daily</option><option value="weekly"'+((_h==="weekly")?" selected":"")+'>Weekly</option><option value="monthly"'+((_h==="monthly")?" selected":"")+'>Monthly</option></select><input id="todayProfitGoal" type="number" step="10" min="0" value="'+_gv+'" oninput="_todaySetProfitGoal(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#5de8a0;font-family:var(--mono);font-size:16px;"></div>'; })()
       + '<div class="today-v2-field"><div class="td-mini">Max combined risk</div><input id="todayRisk" type="number" step="0.1" min="0.1" max="12" value="'+(c.riskPct||3)+'" oninput="_todaySetGlobalRisk(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#e8706e;font-family:var(--mono);font-size:16px;"><div class="today-v2-copy" style="font-size:10px;margin-top:4px">Total planned stop-loss risk across this basket until trades close.</div></div>'
