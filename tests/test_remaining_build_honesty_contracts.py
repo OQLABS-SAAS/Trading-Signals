@@ -159,6 +159,25 @@ def test_quick_scan_all_markets_uses_shared_signal_mapper():
     assert "return {" not in block[block.index("const rawOpps") : block.index("if (rawOpps.length")]
 
 
+def test_signal_cards_use_fixed_micro_lot_rule_per_account_equity():
+    helper = _extract_function("_dvSignalCardLotSize")
+    quick_one = _extract_function("qpAnalyse")
+    quick_all = _extract_function("qpScanAll")
+    signals = _extract_function("_sfFetchSignals")
+    normalize = _extract_function("_normalizeSignalContext")
+
+    assert "Math.floor(acct/1000)" in helper
+    assert "0.01" in helper
+    assert "Every $1,000 account equity = 0.01 lot" in helper
+
+    assert "_dvSignalCardLotLabel(o)" in quick_one
+    assert "_dvSignalCardLotLabel(o)" in quick_all
+    assert "_dvSignalCardLotLabel(o)" in signals
+    assert "var signalLot = _dvSignalCardLotSize();" in normalize
+    assert "volume:signalLot>0?signalLot:(src.volume!=null?src.volume:src.lot)" in normalize
+    assert "lots:signalLot>0?signalLot:(src.lots!=null?src.lots:(src.volume!=null?src.volume:src.lot))" in normalize
+
+
 def test_market_opportunity_scan_auto_backtests_before_cache():
     block = _extract_function("_mktRunOpportunityScan")
     assert "_runScanBase(groups)" in block

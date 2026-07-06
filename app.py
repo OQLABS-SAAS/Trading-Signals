@@ -7468,6 +7468,18 @@ def _job_market_alert(session_name, emoji, note):
 _AUTO_WATCHLIST_ASSET = {inst["ticker"]: inst["asset_type"] for inst in AUTO_WATCHLIST}
 
 
+def _fixed_micro_lot_for_account(account_balance):
+    """Every $1,000 account equity = 0.01 lot, floored to clean 0.01 steps."""
+    try:
+        acct = float(account_balance or 0)
+    except Exception:
+        return 0.0
+    steps = _math.floor(acct / 1000)
+    if steps <= 0:
+        return 0.0
+    return round(steps * 0.01, 2)
+
+
 def _signal_money(lot, entry, sl, tp1, asset_type, ticker):
     """Return {'risk_usd': float|None, 'profit_usd': float|None} for a scan signal.
 
@@ -7548,14 +7560,13 @@ def _job_auto_scan():
     """Scan 18 instruments across scalp (15m) + swing (4H) timeframes every 15 min.
     Sends Telegram + in-app alert for HIGH-confidence BUY/SELL signals above min lot."""
     import time as _time
-    # Respect user's scan_enabled toggle and scan_risk_pct setting.
-    # Bug fix: these were ignored — scan always ran at 1% risk regardless of user preference.
+    # Respect user's scan_enabled toggle. Signal-alert volume is now fixed by
+    # account equity: every $1,000 account equity = 0.01 lot only.
     auto_cfg = _get_automation_settings("default")
     if not auto_cfg.get("scan_enabled", True):
         print("[auto_scan] scan_enabled=False in automation settings — skipping")
         return
-    scan_risk_pct = float(auto_cfg.get("scan_risk_pct", 1.0))
-    print(f"[auto_scan] Starting scan (risk={scan_risk_pct}%)...")
+    print("[auto_scan] Starting scan (fixed micro-lot sizing)...")
     # Get account balance from any active mt5_state
     account_balance = 1000.0
     with mt5_state_lock:
@@ -7627,13 +7638,8 @@ def _job_auto_scan():
             tp3   = res.get("tp3", 0)
             rr    = res.get("rr1", 0)
 
-            lot   = _calc_auto_lot(account_balance, entry, sl, asset_type, risk_pct=scan_risk_pct, ticker=ticker)
-            # Confidence-weighted sizing — real trader logic.
-            # CONFIRMED = full allocation, LIKELY = 75%, HYPOTHESIS = 50%.
-            # Conviction should always scale position size — never bet the same on a weak signal.
+            lot = _fixed_micro_lot_for_account(account_balance)
             conf_label  = res.get("confidence_label", "CONFIRMED")
-            conf_weight = 1.0 if conf_label == "CONFIRMED" else (0.75 if conf_label == "LIKELY" else 0.5)
-            lot         = round(lot * conf_weight, 2)
             if lot < min_lot:
                 _time.sleep(0.5)
                 continue
@@ -7645,7 +7651,6 @@ def _job_auto_scan():
             # ── Send alert ──────────────────────────────────────────────
             type_tag  = "SCALP" if trade_type == "scalping" else "SWING"
             sig_emoji = "🟢" if sig == "BUY" else "🔴"
-            conf_pct_str = "100%" if conf_weight == 1.0 else ("75%" if conf_weight == 0.75 else "50%")
             _money = _signal_money(lot, entry, sl, tp1, asset_type, ticker)
             _risk_usd   = _money["risk_usd"]
             _profit_usd = _money["profit_usd"]
@@ -7654,10 +7659,13 @@ def _job_auto_scan():
                 # same line as "Lot size: X lots", with the TP1 target alongside it.
                 _lot_line = (
                     f"Lot size: {lot:.2f} lots  (≈ ${_risk_usd:,.0f} risk · +${_profit_usd:,.0f} at TP1)\n"
-                    f"({conf_label} — {conf_pct_str} allocation)"
+                    f"Sizing rule: Every $1,000 account equity = 0.01 lot"
                 )
             else:
-                _lot_line = f"Lot size: {lot:.2f} lots ({conf_label} — {conf_pct_str} allocation)"
+                _lot_line = (
+                    f"Lot size: {lot:.2f} lots\n"
+                    f"Sizing rule: Every $1,000 account equity = 0.01 lot"
+                )
             tg_msg = (
                 f"{sig_emoji} {type_tag} SIGNAL — {ticker}\n"
                 f"Direction: {sig}  |  TF: {tf.upper()}\n"
@@ -7666,7 +7674,7 @@ def _job_auto_scan():
                 f"TP1:    {tp1:.5g}  |  TP2: {tp2:.5g}  |  TP3: {tp3:.5g}\n"
                 f"R:R     1:{rr:.1f}\n"
                 f"{_lot_line}\n"
-                f"Confidence: HIGH"
+                f"Confidence: HIGH ({conf_label})"
             )
             # Save scan alert first to get its ID for the callback button
             _bc    = res.get("bullish_count", 0)
@@ -9776,6 +9784,15 @@ def mt5_push_state():
         pass
     positions = body.get("positions", [])
     spreads   = body.get("spreads", {})     # Phase 1.2: live spread map {symbol: spread_pts}
+    broker_symbols = body.get("symbols") or body.get("broker_symbols") or []
+    tradable_symbols = (
+        body.get("tradable_symbols")
+        or body.get("tradeable_symbols")
+        or body.get("trade_symbols")
+        or []
+    )
+    symbol_specs = body.get("symbol_specs") or body.get("specs") or {}
+    execution_universe_ready = body.get("execution_universe_ready")
     # A4: EA self-diagnosis flags — read fresh each push; absent = None (old EA builds)
     terminal_trade_allowed = body.get("terminal_trade_allowed")   # TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
     mql_trade_allowed      = body.get("mql_trade_allowed")        # MQLInfoInteger(MQL_TRADE_ALLOWED)
@@ -9847,6 +9864,11 @@ def mt5_push_state():
             "level_hits":     prev.get("level_hits", {}),  # preserve — set by mt5_level_alert
             "spread_warning": spread_warning,               # Bug S: high-spread guard flag
             "spread":         spreads,                       # Phase 1.2: live spread map
+            "symbols":        broker_symbols,                # broker inventory from EA, if available
+            "tradable_symbols": tradable_symbols,            # symbols EA reports as trade-enabled
+            "tradeable_symbols": tradable_symbols,           # compatibility spelling for frontend callers
+            "symbol_specs":   symbol_specs,                  # per-symbol trade_mode/min/step/contract metadata
+            "execution_universe_ready": execution_universe_ready,
             # A4: EA self-diagnosis flags (None = absent/old EA, 0 = OFF, 1 = ON)
             "terminal_trade_allowed": terminal_trade_allowed,
             "mql_trade_allowed":      mql_trade_allowed,
@@ -9970,6 +9992,11 @@ def mt5_get_state():
         "account_mode_source": account.get("account_mode_source"),
         "positions":   positions,
         "level_hits":  state.get("level_hits", {}),
+        "symbols":     state.get("symbols", []),
+        "tradable_symbols": state.get("tradable_symbols", []),
+        "tradeable_symbols": state.get("tradeable_symbols", state.get("tradable_symbols", [])),
+        "symbol_specs": state.get("symbol_specs", {}),
+        "execution_universe_ready": state.get("execution_universe_ready"),
         # A4: EA self-diagnosis flags (None = old EA/unknown, 0 = OFF, 1 = ON)
         "terminal_trade_allowed": state.get("terminal_trade_allowed"),
         "mql_trade_allowed":      state.get("mql_trade_allowed"),

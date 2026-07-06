@@ -9778,13 +9778,14 @@ function dvLoadScanAlerts(){
       var sigCol=isBuy?'rgba(93,232,160,.9)':'rgba(240,120,120,.9)';
       var tagCol=a.trade_type==='scalping'?'rgba(96,165,250,.8)':'rgba(201,168,76,.8)';
       var tag=a.trade_type==='scalping'?'SCALP':'SWING';
+      var lotLabel=_dvSignalCardLotLabel(a);
       var dollarLine='';
       if(a.risk_usd!=null&&a.profit_usd!=null){
         dollarLine='<div style="color:rgba(93,232,160,.7);margin-top:2px;">'+
-          a.lot+' lots &middot; risks $'+Number(a.risk_usd).toLocaleString()+
+          lotLabel+' &middot; risks $'+Number(a.risk_usd).toLocaleString()+
           ' &middot; +$'+Number(a.profit_usd).toLocaleString()+' at TP1</div>';
       } else if(a.lot){
-        dollarLine='<div style="color:rgba(200,190,170,.5);margin-top:2px;">'+a.lot+' lots</div>';
+        dollarLine='<div style="color:rgba(200,190,170,.5);margin-top:2px;">'+lotLabel+'</div>';
       }
       var entry=a.entry?Number(a.entry).toPrecision(5):'—';
       var sl=a.sl?Number(a.sl).toPrecision(5):'—';
@@ -10394,6 +10395,7 @@ async function qpAnalyse(presetTicker, presetTf) {
       var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
       const cards = rawOpps.map(function(o, i){
         var cc = _confColor(o.sig);
+        var lotLabel = _dvSignalCardLotLabel(o);
         var oJson = JSON.stringify(o).replace(/\"/g, '&quot;');
         return '<div onclick="loadAllTfSignal(' + oJson + ')" style="flex-shrink:0;width:240px;padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(237,232,216,.08);cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:4px;" onmouseover="this.style.borderColor=\'rgba(201,168,76,.3)\';this.style.background=\'rgba(201,168,76,.04)\';" onmouseout="this.style.borderColor=\'rgba(237,232,216,.08)\';this.style.background=\'rgba(255,255,255,.02)\';">'
           + '<div style="display:flex;align-items:center;justify-content:space-between;">'
@@ -10409,6 +10411,7 @@ async function qpAnalyse(presetTicker, presetTf) {
           + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">R:' + o.rr + '</span>'
           + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);" title="Entry / SL / TP">' + (o.entry||'--') + ' · ' + (o.sl||'--') + ' · ' + (o.tp||'--') + '</span>'
           + '</div>'
+          + '<div style="font-family:var(--mono);font-size:8.5px;color:rgba(201,168,76,.78);line-height:1.35;" title="Every $1,000 account equity = 0.01 lot">' + lotLabel + '</div>'
           + '<div style="font-size:8.5px;color:var(--t3);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (o.reason||'').substring(0,80) + '</div>'
           + '</div>';
       }).join('');
@@ -10513,6 +10516,7 @@ async function qpScanAll() {
     var _confColor = function(sig){ return sig==='BUY'?'#5de8a0': sig==='SELL'?'#e8706e':'rgba(201,168,76,.75)'; };
     const cards = rawOpps.map(function(o, i){
       var cc = _confColor(o.sig);
+      var lotLabel = _dvSignalCardLotLabel(o);
       var oJson = JSON.stringify(o).replace(/\"/g, '&quot;');
       var assetIcon = {crypto:'⟠', stock:'⌂', forex:'$', commodity:'◆', index:'∏', equity:'⌂'}[o.asset] || '○';
       return '<div onclick="loadSignalContext(' + oJson + ')" style="flex-shrink:0;width:240px;padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.02);border:1px solid rgba(237,232,216,.08);cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:4px;" onmouseover="this.style.borderColor=\'rgba(201,168,76,.3)\';this.style.background=\'rgba(201,168,76,.04)\';" onmouseout="this.style.borderColor=\'rgba(237,232,216,.08)\';this.style.background=\'rgba(255,255,255,.02)\';">'
@@ -10530,6 +10534,7 @@ async function qpScanAll() {
         + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);">R:' + o.rr + '</span>'
         + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);" title="Entry / SL / TP">' + (o.entry||'--') + ' · ' + (o.sl||'--') + ' · ' + (o.tp||'--') + '</span>'
         + '</div>'
+        + '<div style="font-family:var(--mono);font-size:8.5px;color:rgba(201,168,76,.78);line-height:1.35;" title="Every $1,000 account equity = 0.01 lot">' + lotLabel + '</div>'
         + '<div style="font-size:8.5px;color:var(--t3);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (o.reason||'').substring(0,80) + '</div>'
         + '</div>';
     }).join('');
@@ -12137,6 +12142,9 @@ async function _todayBuildPlan(){
   c.ladderMode = document.getElementById('todayLadderMode')?.value || c.ladderMode || 'beginner';
   var _levSel=parseInt(document.getElementById('todayLev')?.value); if(_levSel>0) window._todayLeverage=_levSel;
   var _ap=document.getElementById('todayAutoPlace'); if(_ap) c.autoPlace=!!_ap.checked;
+  window._todayBrokerFilteredOpps=[];
+  window._todayBrokerFilteredCount=0;
+  window._todayNoPlanReason='';
   // Pull the live broker account: real balance AND real leverage (for accurate margin).
   try{
     var st=await dvFetch('/api/mt5/state');
@@ -12211,6 +12219,7 @@ async function _todayBuildPlan(){
   ranked.sort(function(a,b){
     return ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
   });
+  ranked = _todayBrokerRankedForPlan(ranked);
   var plan=_todaySelectPlan(ranked, c);
   // Total qualifying setups found — counted as UNIQUE SYMBOLS, not symbol×timeframe.
   // We scan each symbol on 3 timeframes, so opps.length triple-counts (e.g. ETHUSD 1h/4h/1d
@@ -12221,9 +12230,10 @@ async function _todayBuildPlan(){
   window._todayOpps = ranked;
   var _planKeys={};
   plan.forEach(function(o){ _planKeys[((o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'')).toUpperCase()]=1; });
+  var _brokerFiltered=(window._todayBrokerFilteredOpps||[]);
   window._todayDeferredOpps = ranked.filter(function(o){
     return !_planKeys[((o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'')).toUpperCase()];
-  });
+  }).concat(_brokerFiltered.slice(0,30));
   _todayRefreshBasketCandidateActions(plan, window._todayDeferredOpps, c);
   // How many quality setups we had to leave out of the plan (caps / diversification).
   window._todayLeftOut = Math.max(0, opps.filter(function(o){return (o.qscore||0)>=QFLOOR;}).reduce(function(acc,o){ if(!acc.seen[o.sym]){acc.seen[o.sym]=1;acc.n++;} return acc; },{seen:{},n:0}).n - plan.length);
@@ -13918,6 +13928,95 @@ function _todayGoalPace(){
 var _DV_QFLOOR_AHEAD_BUMP   = 10;   // raise quality floor by 10pts when ahead
 var _DV_MAX_TRADES_AHEAD     = 3;    // cap basket at 3 trades when ahead (default=6)
 
+function _todayMt5BrokerUniverse(){
+  var st=window._todayLastMt5State||window._mt5LastState||{};
+  var specs=st.symbol_specs||st.specs||{};
+  var raw=[].concat(st.tradable_symbols||[],st.tradeable_symbols||[],st.broker_symbols||[],st.symbols||[]);
+  var set={}, list=[];
+  function add(v){
+    var sym='';
+    if(typeof v==='string') sym=v;
+    else if(v&&typeof v==='object') sym=v.symbol||v.name||v.path||v.ticker||'';
+    sym=String(sym||'').trim().toUpperCase();
+    if(!sym||set[sym]) return;
+    set[sym]=1; list.push(sym);
+  }
+  raw.forEach(add);
+  Object.keys(specs||{}).forEach(add);
+  return {
+    state:st,
+    connected:st.connected===true,
+    ready:st.execution_universe_ready===true || list.length>0 || Object.keys(specs||{}).length>0,
+    list:list,
+    set:set,
+    specs:specs||{}
+  };
+}
+function _todayMt5SymbolCandidates(o){
+  o=o||{};
+  var sym=String(o.mt5_symbol||o.broker_symbol||o.symbol||o.sym||'').trim().toUpperCase();
+  var compact=sym.replace(/[^A-Z0-9]/g,'');
+  var out=[sym,compact];
+  var aliases={
+    AMZN:['AMAZON'], GOOGL:['GOOG'], GOOGLE:['GOOG'], META:['FACEBOOK','FB'],
+    XAU:['XAUUSD','GOLD'], GOLD:['XAUUSD'], XAG:['XAGUSD','SILVER'], SILVER:['XAGUSD'],
+    WTI:['USOIL','WTICOUSD','CL'], OIL:['USOIL','WTI'], NATGAS:['NGAS','NATURALGAS'],
+    COPPER:['COPPER','HG'], SPX:['SP500','US500'], NDX:['NAS100','USTEC','US100'],
+    DJI:['US30','DJ30'], RUT:['US2000'], FTSE:['UK100'], HSI:['HK50']
+  };
+  (aliases[compact]||[]).forEach(function(a){ out.push(a); });
+  return out.filter(function(v,i,a){ return v&&a.indexOf(v)===i; });
+}
+function _todayMt5SpecForSymbol(universe, symbol){
+  var specs=(universe&&universe.specs)||{};
+  var key=String(symbol||'').toUpperCase();
+  return specs[key]||specs[symbol]||null;
+}
+function _todayMt5SymbolForTrade(o){
+  var u=_todayMt5BrokerUniverse(), candidates=_todayMt5SymbolCandidates(o);
+  for(var i=0;i<candidates.length;i++){
+    if(u.set[candidates[i]] || _todayMt5SpecForSymbol(u,candidates[i])) return candidates[i];
+  }
+  return candidates[0]||String((o&&o.sym)||'').toUpperCase();
+}
+function _todayMt5SymbolStatus(o){
+  var u=_todayMt5BrokerUniverse();
+  if(!u.connected) return {ok:true,text:'MT5 offline - review only',symbol:_todayMt5SymbolForTrade(o)};
+  if(!u.ready) return {ok:false,text:'MT5 broker symbol universe is still syncing',symbol:_todayMt5SymbolForTrade(o)};
+  var candidates=_todayMt5SymbolCandidates(o), chosen='', spec=null;
+  for(var i=0;i<candidates.length;i++){
+    var c=candidates[i], s=_todayMt5SpecForSymbol(u,c);
+    if(u.set[c]||s){ chosen=c; spec=s; break; }
+  }
+  if(!chosen) return {ok:false,text:'Not available on this MT5 account',symbol:candidates[0]||String((o&&o.sym)||'').toUpperCase()};
+  if(spec && String(spec.trade_mode) === '0') return {ok:false,text:'Trading disabled for this MT5 symbol',symbol:chosen};
+  return {ok:true,text:'Broker tradable',symbol:chosen};
+}
+function _todayBrokerPlanGate(o){
+  var s=_todayMt5SymbolStatus(o);
+  if(!s || s.ok!==false) return {ok:true,symbol:(s&&s.symbol)||_todayMt5SymbolForTrade(o),text:(s&&s.text)||'Broker tradable'};
+  return {ok:false,symbol:s.symbol||_todayMt5SymbolForTrade(o),text:s.text||'Not available on this MT5 account'};
+}
+function _todayBrokerRankedForPlan(ranked){
+  var ok=[], blocked=[];
+  (ranked||[]).forEach(function(o){
+    var gate=_todayBrokerPlanGate(o);
+    o._brokerGate=gate;
+    o._mt5Symbol=gate.symbol;
+    if(gate.ok){ ok.push(o); return; }
+    o._todayBrokerFiltered=true;
+    o._brokerReason=gate.text;
+    o._basketReason=gate.text+' - filtered out before Today basket selection';
+    blocked.push(o);
+  });
+  window._todayBrokerFilteredOpps=blocked;
+  window._todayBrokerFilteredCount=blocked.length;
+  window._todayNoPlanReason=(blocked.length && !ok.length)
+    ? 'DotVerse found setups, but none are tradable on this connected MT5 account right now. Today checks your connected MT5 broker universe before it builds the basket, so unavailable or disabled symbols are kept on watch instead of shown as placeable trades.'
+    : '';
+  return ok;
+}
+
 function _todaySelectPlan(ranked, cfg){
   // P3: compute goal pace and tighten when AHEAD (>= 100% of the period goal).
   // BEHIND never loosens below defaults — we never force junk trades to chase
@@ -13962,6 +14061,7 @@ function _todayClassifyBasketCandidate(candidate, plan, cfg){
   candidate=candidate||{}; plan=plan||[]; cfg=cfg||window._todayCfg||{};
   var key=((candidate.sym||'')+':'+(candidate.tf||'')+':'+(candidate.sig||'')).toUpperCase();
   if(!candidate.sym||candidate.sig==='HOLD') return {action:'ignore',reason:'not actionable'};
+  if(candidate._todayBrokerFiltered) return {action:'watch',reason:candidate._basketReason||candidate._brokerReason||'broker universe filter kept this setup on watch'};
   for(var i=0;i<plan.length;i++){
     var p=plan[i]||{}, pkey=((p.sym||'')+':'+(p.tf||'')+':'+(p.sig||'')).toUpperCase();
     if(pkey===key) return {action:'ignore',reason:'already in basket'};
@@ -14185,7 +14285,7 @@ function showToday(){
   var protect=_todayProtectMode();
   el.innerHTML =
     '<div class="today-page v2">'
-    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">DotVerse answers whether today is worth trading, caps total risk, then turns the best opportunities into a clear basket you can review.</div></div><div class="pg-hd-right">'+_todayPill('Review before live','green')+_todayPill('Live price check','blue')+'</div></div>'
+    + '<div class="sf-page-head"><div><div class="sf-page-title">Today</div><div class="sf-breadcrumb">DotVerse answers whether today is worth trading, checks your connected MT5 broker universe first, caps total risk, then turns the best executable opportunities into a clear basket you can review.</div></div><div class="pg-hd-right">'+_todayPill('Review before live','green')+_todayPill('Live price check','blue')+'</div></div>'
     + '<div id="todayTopArea"></div>'
     + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>'+(protect?'Protect open trades':'Build today\'s basket')+'</h2><span class="td-pill gold">'+(protect?'No new risk after target':'All assets + all feasible timeframes')+'</span></div>'
     + '<div class="today-v2-setup">'
@@ -14261,7 +14361,8 @@ function _todayRenderPlan(){
   _todayRenderTop();
   var plan=window._todayPlan||[], c=window._todayCfg||{}, acct=c.acct||_todaySyncAccountFromDom();
   if(!plan.length){
-    area.innerHTML='<div class="td-card"><div class="td-pad" style="text-align:center;padding:34px 20px;"><div style="font-family:var(--syne);font-size:18px;margin-bottom:8px;">Ready when you are.</div><div class="today-v2-copy" style="max-width:520px;margin:0 auto;">Set account equity, your daily, weekly, or monthly profit target, and max basket risk. DotVerse will scan all supported assets and timeframes, then return a beginner-readable basket.</div></div></div>';
+    var noReason=window._todayNoPlanReason||'';
+    area.innerHTML='<div class="td-card"><div class="td-pad" style="text-align:center;padding:34px 20px;"><div style="font-family:var(--syne);font-size:18px;margin-bottom:8px;">'+(noReason?'No MT5-tradable Today basket':'Ready when you are.')+'</div><div class="today-v2-copy" style="max-width:560px;margin:0 auto;">'+(noReason||'Set account equity, your daily, weekly, or monthly profit target, and max basket risk. DotVerse will scan all supported assets and timeframes, then return a beginner-readable basket.')+'</div></div></div>';
     return;
   }
   var money=_todayMoney, money2=_todayMoney2, pxFmt=function(v){ v=parseFloat(v); return !isFinite(v)?'--':(v>=1000?v.toLocaleString('en-US',{maximumFractionDigits:2}):v>=1?String(+v.toFixed(4)):String(+v.toPrecision(4))); };
@@ -14633,8 +14734,41 @@ async function _runScanBase(groups, signal, onProgress) {
   return { results: _results, errors: _scanErrors, total: _scanTotal };
 }
 
+function _dvSignalCardAccountEquity(){
+  var states=[window._todayLastMt5State,window._mt5LastState];
+  for(var i=0;i<states.length;i++){
+    var acct=(states[i]&&states[i].account)||null;
+    if(!acct) continue;
+    var eq=parseFloat(acct.equity);
+    if(eq>0) return eq;
+    var bal=parseFloat(acct.balance);
+    if(bal>0) return bal;
+  }
+  var today=parseFloat((window._todayCfg||{}).acct)||0;
+  if(today>0) return today;
+  var sizeInp=parseFloat(document.getElementById('szAcct')?.value)||0;
+  if(sizeInp>0) return sizeInp;
+  return 0;
+}
+function _dvSignalCardLotSize(account){
+  var acct=parseFloat(account);
+  if(!(acct>0)) acct=_dvSignalCardAccountEquity();
+  var lots=Math.floor(acct/1000)*0.01;
+  lots=Math.max(0,lots);
+  return parseFloat(lots.toFixed(2)); // Every $1,000 account equity = 0.01 lot.
+}
+function _dvSignalCardLotLabel(o){
+  var lots=_dvSignalCardLotSize();
+  if(!(lots>0)){
+    var fallback=parseFloat((o||{}).lot||(o||{}).lots||(o||{}).volume)||0;
+    if(fallback>0) return fallback.toFixed(fallback<0.01?4:2)+' lots';
+    return 'Volume waits for account';
+  }
+  return lots.toFixed(2)+' lot'+(lots===0.01?'':'s')+' · Every $1,000 account equity = 0.01 lot';
+}
 function _dvSignalFromScanRow(r, fallbackTf, fallbackAsset){
   r = r || {};
+  var signalLot = _dvSignalCardLotSize();
   return {
     sym:     r.ticker || r.symbol || r.sym || '',
     tf:      String(r.timeframe || r.tf || fallbackTf || '4H').toUpperCase(),
@@ -14658,6 +14792,9 @@ function _dvSignalFromScanRow(r, fallbackTf, fallbackAsset){
     spreadSrc:     r.spread_source  || null,
     spreadQuality: r.spread_quality || 'fair',
     rr1Raw:        r.rr1_raw      != null ? r.rr1_raw      : null,
+    volume: signalLot>0?signalLot:(r.volume!=null?r.volume:r.lot),
+    lots: signalLot>0?signalLot:(r.lots!=null?r.lots:(r.volume!=null?r.volume:r.lot)),
+    lot: signalLot>0?signalLot:(r.lot!=null?r.lot:r.volume),
     smc_structures: r.smc_structures || null,
     quality: r.quality || null,
     qscore: (r.quality&&(r.quality.score!=null?r.quality.score:r.quality))||r.confidence_pct||0,
@@ -14985,6 +15122,7 @@ async function _sfFetchSignals(){
     const circ = Math.round((o.conf || 0) / 100 * 144.5);
     const cardCls = sig === 'BUY' ? 'buy-card' : sig === 'SELL' ? 'sell-card' : '';
     const oJson = JSON.stringify(o).replace(/"/g, '&quot;');
+    const lotLabel = _dvSignalCardLotLabel(o);
 
     // Backtest badge row
     var btBadge = '';
@@ -15075,6 +15213,7 @@ async function _sfFetchSignals(){
       + '<div class="opp-level-item"><span class="opp-lbl">SL</span><span class="opp-val red">' + (o.sl||'--') + '</span></div>'
       + '<div class="opp-level-item"><span class="opp-lbl">TP</span><span class="opp-val grn">' + (o.tp||'--') + '</span></div>'
       + '</div></div></div>'
+      + '<div style="padding:0 14px 7px;font-family:var(--mono);font-size:9.5px;color:rgba(201,168,76,.78);line-height:1.45;" title="Every $1,000 account equity = 0.01 lot">Volume: ' + lotLabel + '</div>'
       + (btBadge ? '<div style="padding:0 14px 4px;">' + btBadge + (tfHint||'') + '</div>' : '')
       + (o.spreadCost && o.spreadCost > 0 ? '<div style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;"><span style="color:rgba(201,168,76,.45);">spread adj</span><span style="padding:1px 6px;border-radius:3px;font-size:8px;letter-spacing:.05em;' + ({'wide':'background:rgba(224,85,85,.12);color:#e05555;','fair':'background:rgba(237,232,216,.07);color:rgba(237,232,216,.4);','tight':'background:rgba(61,190,108,.1);color:#3dbe6c;'}[o.spreadQuality||'fair']||'') + '">' + (o.spreadQuality||'fair').toUpperCase() + '</span>' + (o.spreadSrc === 'live' ? '<span style="display:inline-flex;align-items:center;gap:3px;color:#3dbe6c;font-size:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#3dbe6c;animation:lpulse 1.8s ease-in-out infinite;flex-shrink:0;"></span>LIVE</span>' : '') + '</div>' : '')
       + '<div class="opp-reason">' + o.reason + '</div>'
@@ -16080,6 +16219,7 @@ function _normalizeSignalContext(o, overrides){
   var entry = src.entry != null ? src.entry : src.entry_price;
   var sl = src.sl != null ? src.sl : (src.stop_loss != null ? src.stop_loss : src.stop);
   var tp = src.tp != null ? src.tp : (src.tp1 != null ? src.tp1 : (src.target != null ? src.target : src.target_price));
+  var signalLot = _dvSignalCardLotSize();
   return Object.assign({}, src, {
     sym: sym,
     ticker: src.ticker || sym,
@@ -16095,6 +16235,9 @@ function _normalizeSignalContext(o, overrides){
     stop_loss: src.stop_loss != null ? src.stop_loss : sl,
     tp: tp,
     tp1: src.tp1 != null ? src.tp1 : tp,
+    volume:signalLot>0?signalLot:(src.volume!=null?src.volume:src.lot),
+    lots:signalLot>0?signalLot:(src.lots!=null?src.lots:(src.volume!=null?src.volume:src.lot)),
+    lot:signalLot>0?signalLot:(src.lot!=null?src.lot:src.volume),
     rr: src.rr || src.risk_reward || src.riskReward || '',
     conf: src.conf != null ? src.conf : (src.confidence != null ? src.confidence : src.bull_score)
   });
