@@ -9637,9 +9637,20 @@ def mt5_confirm_order():
                 # For close orders, find the original BUY/SELL order via close_ticket
                 orig_order = db.query(MT5Order).filter(
                     MT5Order.mt5_ticket == order.close_ticket,
-                    MT5Order.user_id == uid,
+                    MT5Order.user_id.in_([uid, "default"]),
                     MT5Order.order_type.in_(["BUY", "SELL"])
                 ).first() if order.close_ticket else None
+                if not orig_order:
+                    orig_order_id = _mt5_dotverse_order_id_from_comment(order.comment)
+                    if orig_order_id:
+                        orig_query = db.query(MT5Order).filter(
+                            MT5Order.id == int(orig_order_id),
+                            MT5Order.user_id.in_([uid, "default"]),
+                            MT5Order.order_type.in_(["BUY", "SELL"]),
+                        )
+                        if getattr(order, "account_id", None) is not None:
+                            orig_query = orig_query.filter(MT5Order.account_id == int(order.account_id))
+                        orig_order = orig_query.first()
                 match_signal = (orig_order.order_type if orig_order else order.order_type)
                 match_symbol = (orig_order.symbol if orig_order else order.symbol)
                 sig_row = db.query(SignalHistory).filter(
@@ -10150,6 +10161,102 @@ def _mt5_trade_permission_issue(state):
     return None
 
 
+def _mt5_dotverse_order_id_from_comment(comment):
+    """Extract DotVerse order id from an MT5 position comment."""
+    try:
+        import re as _re
+        match = _re.search(r"DotVerse #(\d+)", str(comment or ""))
+        return int(match.group(1)) if match else None
+    except Exception:
+        return None
+
+
+def _mt5_state_account_matches(state, account_id):
+    if account_id is None:
+        return True
+    try:
+        return int(state.get("account_id")) == int(account_id)
+    except (TypeError, ValueError):
+        return False
+
+
+def _mt5_user_state_items(user_id):
+    keys = []
+    for key in (str(user_id), "default"):
+        if key not in keys:
+            keys.append(key)
+    with mt5_state_lock:
+        return [(key, dict(mt5_state.get(key) or {})) for key in keys]
+
+
+def _mt5_live_position_for_order(user_id, order_id, account_id=None):
+    for _, state in _mt5_user_state_items(user_id):
+        if not _mt5_state_account_matches(state, account_id):
+            continue
+        for pos in state.get("positions") or []:
+            if _mt5_dotverse_order_id_from_comment(pos.get("comment")) != int(order_id):
+                continue
+            try:
+                ticket = int(pos.get("ticket"))
+            except (TypeError, ValueError):
+                continue
+            if ticket > 0:
+                return dict(pos)
+    return None
+
+
+def _mt5_order_from_live_position_ticket(db, user_id, position_ticket, account_id=None):
+    for _, state in _mt5_user_state_items(user_id):
+        if not _mt5_state_account_matches(state, account_id):
+            continue
+        for pos in state.get("positions") or []:
+            try:
+                live_ticket = int(pos.get("ticket"))
+            except (TypeError, ValueError):
+                continue
+            if live_ticket != int(position_ticket):
+                continue
+            order_id = _mt5_dotverse_order_id_from_comment(pos.get("comment"))
+            if not order_id:
+                return None
+            query = db.query(MT5Order).filter(
+                MT5Order.id == int(order_id),
+                MT5Order.order_type.in_(["BUY", "SELL"]),
+                MT5Order.user_id.in_([str(user_id), "default"]),
+                MT5Order.status == "filled",
+            )
+            if account_id is not None:
+                query = query.filter(MT5Order.account_id == int(account_id))
+            return query.order_by(MT5Order.id.desc()).first()
+    return None
+
+
+def _resolve_owned_mt5_close_target(db, user_id, requested_ticket, account_id=None):
+    """Return (owned_open_order, live_position_ticket) for a close request."""
+    ticket_int = int(requested_ticket)
+    owned_query = db.query(MT5Order).filter(
+        MT5Order.mt5_ticket == ticket_int,
+        MT5Order.order_type.in_(["BUY", "SELL"]),
+        MT5Order.user_id.in_([str(user_id), "default"]),
+        MT5Order.status == "filled",
+    )
+    if account_id is not None:
+        owned_query = owned_query.filter(MT5Order.account_id == int(account_id))
+    owned = owned_query.order_by(MT5Order.id.desc()).first()
+    if owned:
+        live_pos = _mt5_live_position_for_order(user_id, owned.id, getattr(owned, "account_id", None))
+        try:
+            live_ticket = int((live_pos or {}).get("ticket"))
+        except (TypeError, ValueError):
+            live_ticket = ticket_int
+        return owned, live_ticket
+
+    owned = _mt5_order_from_live_position_ticket(db, user_id, ticket_int, account_id)
+    if owned:
+        return owned, ticket_int
+    return None, None
+
+
 @app.route("/api/mt5/state", methods=["GET"])
 @login_required
 def mt5_get_state():
@@ -10446,25 +10553,23 @@ def mt5_close_position():
         return jsonify({"error": f"Invalid ticket ID '{ticket}' — demo trades cannot be closed via API"}), 400
     db = _DBSession()
     try:
-        # S-7: verify the ticket belongs to this user (or "default" for single-user installs).
-        # A filled BUY/SELL MT5Order with mt5_ticket == ticket must exist for this user.
+        # S-7: verify ownership through the filled DotVerse order. MT5 can report
+        # different identifiers for a deal/order and the live open position, so
+        # resolve the requested ticket against the current position inventory too.
         selected_account_id = _selected_mt5_account_id_from_body(body)
-        owned_query = db.query(MT5Order).filter(
-            MT5Order.mt5_ticket == ticket_int,
-            MT5Order.order_type.in_(["BUY", "SELL"]),
-            MT5Order.user_id.in_([user_id, "default"]),
-            MT5Order.status == "filled",
+        owned, close_ticket = _resolve_owned_mt5_close_target(
+            db,
+            user_id,
+            ticket_int,
+            selected_account_id,
         )
-        if selected_account_id is not None:
-            owned_query = owned_query.filter(MT5Order.account_id == selected_account_id)
-        owned = owned_query.order_by(MT5Order.id.desc()).first()
         if not owned:
             return jsonify({"error": f"Position {ticket_int} not found or not yours"}), 403
 
         # B1: dedup — if a pending/executing CLOSE for this ticket already exists, return it.
         owned_account_id = getattr(owned, "account_id", None)
         existing_close_query = db.query(MT5Order).filter(
-            MT5Order.close_ticket == ticket_int,
+            MT5Order.close_ticket == int(close_ticket),
             MT5Order.order_type == "CLOSE",
             MT5Order.user_id.in_([user_id, "default"]),
             MT5Order.status.in_(["pending", "executing"]),
@@ -10475,6 +10580,7 @@ def mt5_close_position():
         if existing_close:
             return jsonify({"status": "duplicate", "id": existing_close.id})
 
+        close_label = f"User close {level}".strip()
         order = MT5Order(
             user_id      = user_id,
             account_id   = owned_account_id,
@@ -10483,9 +10589,9 @@ def mt5_close_position():
             volume       = 0,
             price        = 0,
             action       = "close",
-            close_ticket = ticket_int,
+            close_ticket = int(close_ticket),
             status       = "pending",
-            comment      = f"User close {level}",
+            comment      = f"{close_label} for DotVerse #{owned.id}",
         )
         db.add(order)
         db.commit()
@@ -10525,21 +10631,18 @@ def mt5_move_stop_to_breakeven():
     db = _DBSession()
     try:
         selected_account_id = _selected_mt5_account_id_from_body(body)
-        owned_query = db.query(MT5Order).filter(
-            MT5Order.mt5_ticket == ticket_int,
-            MT5Order.order_type.in_(["BUY", "SELL"]),
-            MT5Order.user_id.in_([user_id, "default"]),
-            MT5Order.status == "filled",
+        owned, position_ticket = _resolve_owned_mt5_close_target(
+            db,
+            user_id,
+            ticket_int,
+            selected_account_id,
         )
-        if selected_account_id is not None:
-            owned_query = owned_query.filter(MT5Order.account_id == selected_account_id)
-        owned = owned_query.order_by(MT5Order.id.desc()).first()
         if not owned:
             return jsonify({"error": f"Position {ticket_int} not found or not yours"}), 403
 
         owned_account_id = getattr(owned, "account_id", None)
         existing_modify_query = db.query(MT5Order).filter(
-            MT5Order.close_ticket == ticket_int,
+            MT5Order.close_ticket == int(position_ticket),
             MT5Order.order_type == "MODIFY",
             MT5Order.action == "modify_sl",
             MT5Order.user_id.in_([user_id, "default"]),
@@ -10560,9 +10663,9 @@ def mt5_move_stop_to_breakeven():
             price        = 0,
             sl           = be_float,
             action       = "modify_sl",
-            close_ticket = ticket_int,
+            close_ticket = int(position_ticket),
             status       = "pending",
-            comment      = f"Manual BE: move SL to entry {be_float}",
+            comment      = f"Manual BE: move SL to entry {be_float} for DotVerse #{owned.id}",
         )
         db.add(order)
         db.commit()
@@ -10600,24 +10703,22 @@ def mt5_set_trailing():
     try:
         db = _DBSession()
         try:
-            # S-8: verify the ticket belongs to this user (or "default" for single-user installs).
+            # S-8: verify ownership through the filled DotVerse order, then send
+            # the EA the live MT5 position ticket.
             selected_account_id = _selected_mt5_account_id_from_body(body)
-            owned_query = db.query(MT5Order).filter(
-                MT5Order.mt5_ticket == ticket_int,
-                MT5Order.order_type.in_(["BUY", "SELL"]),
-                MT5Order.user_id.in_([user_id, "default"]),
-                MT5Order.status == "filled",
+            owned, position_ticket = _resolve_owned_mt5_close_target(
+                db,
+                user_id,
+                ticket_int,
+                selected_account_id,
             )
-            if selected_account_id is not None:
-                owned_query = owned_query.filter(MT5Order.account_id == selected_account_id)
-            owned = owned_query.order_by(MT5Order.id.desc()).first()
             if not owned:
                 return jsonify({"error": f"Position {ticket_int} not found or not yours"}), 403
 
             # B1: dedup — if a pending/executing TRAILING for this ticket already exists, return it.
             owned_account_id = getattr(owned, "account_id", None)
             existing_trailing_query = db.query(MT5Order).filter(
-                MT5Order.close_ticket == ticket_int,
+                MT5Order.close_ticket == int(position_ticket),
                 MT5Order.order_type == "TRAILING",
                 MT5Order.user_id.in_([user_id, "default"]),
                 MT5Order.status.in_(["pending", "executing"]),
@@ -10636,9 +10737,9 @@ def mt5_set_trailing():
                 volume       = 0,
                 price        = pips_float,
                 action       = "trailing",
-                close_ticket = ticket_int,
+                close_ticket = int(position_ticket),
                 status       = "pending",
-                comment      = f"Trailing stop {pips_float} pips",
+                comment      = f"Trailing stop {pips_float} pips for DotVerse #{owned.id}",
             )
             db.add(order)
             db.commit()

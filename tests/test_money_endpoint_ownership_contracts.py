@@ -113,6 +113,19 @@ def _count_orders(Session, order_type=None):
         db.close()
 
 
+def _latest_order(Session, order_type):
+    db = Session()
+    try:
+        return (
+            db.query(dvapp.MT5Order)
+            .filter(dvapp.MT5Order.order_type == order_type)
+            .order_by(dvapp.MT5Order.id.desc())
+            .first()
+        )
+    finally:
+        db.close()
+
+
 # ─── Flask test client ────────────────────────────────────────────────────────
 
 def _authed_pro_client(user_id="testuser"):
@@ -160,6 +173,76 @@ def test_close_allows_owner_to_close_their_ticket(monkeypatch):
     data = resp.get_json()
     assert data["status"] == "ok"
     assert _count_orders(Session, "CLOSE") == before + 1
+
+
+def test_close_accepts_live_position_ticket_from_mt5_state(monkeypatch):
+    """MT5 position tickets differ from stored deal tickets; close must use the live position ticket."""
+    Session = _make_sqlite_session_factory()
+    order_id = _seed_filled_order(Session, "testuser", ticket=400441944)
+    before = _count_orders(Session, "CLOSE")
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+    with dvapp.mt5_state_lock:
+        old_state = dict(dvapp.mt5_state)
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state["testuser"] = {
+            "account_id": None,
+            "positions": [
+                {
+                    "ticket": 496397257,
+                    "symbol": "AMD",
+                    "comment": f"DotVerse #{order_id}",
+                }
+            ],
+        }
+
+    try:
+        client = _authed_pro_client("testuser")
+        resp = client.post("/api/mt5/close", json={"ticket": 496397257, "symbol": "AMD"})
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        assert resp.get_json()["status"] == "ok"
+        assert _count_orders(Session, "CLOSE") == before + 1
+        close_order = _latest_order(Session, "CLOSE")
+        assert close_order.close_ticket == 496397257
+        assert close_order.comment == f"User close for DotVerse #{order_id}"
+    finally:
+        with dvapp.mt5_state_lock:
+            dvapp.mt5_state.clear()
+            dvapp.mt5_state.update(old_state)
+
+
+def test_close_translates_stored_deal_ticket_to_live_position_ticket(monkeypatch):
+    """If the caller sends the stored deal ticket, send EA the current live position ticket instead."""
+    Session = _make_sqlite_session_factory()
+    order_id = _seed_filled_order(Session, "testuser", ticket=400441944)
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+    with dvapp.mt5_state_lock:
+        old_state = dict(dvapp.mt5_state)
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state["testuser"] = {
+            "account_id": None,
+            "positions": [
+                {
+                    "ticket": 496397257,
+                    "symbol": "AMD",
+                    "comment": f"DotVerse #{order_id}",
+                }
+            ],
+        }
+
+    try:
+        client = _authed_pro_client("testuser")
+        resp = client.post("/api/mt5/close", json={"ticket": 400441944, "symbol": "AMD"})
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        close_order = _latest_order(Session, "CLOSE")
+        assert close_order.close_ticket == 496397257
+    finally:
+        with dvapp.mt5_state_lock:
+            dvapp.mt5_state.clear()
+            dvapp.mt5_state.update(old_state)
 
 
 def test_close_allows_default_user_to_close_their_ticket(monkeypatch):
@@ -225,6 +308,74 @@ def test_trailing_allows_owner_to_set_trailing(monkeypatch):
     data = resp.get_json()
     assert data["status"] == "ok"
     assert _count_orders(Session, "TRAILING") == before + 1
+
+
+def test_breakeven_accepts_live_position_ticket_from_mt5_state(monkeypatch):
+    """Manual BE must target the MT5 live position ticket, not the stored deal ticket."""
+    Session = _make_sqlite_session_factory()
+    order_id = _seed_filled_order(Session, "testuser", ticket=400441944)
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+    with dvapp.mt5_state_lock:
+        old_state = dict(dvapp.mt5_state)
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state["testuser"] = {
+            "account_id": None,
+            "positions": [
+                {
+                    "ticket": 496397257,
+                    "symbol": "AMD",
+                    "comment": f"DotVerse #{order_id}",
+                }
+            ],
+        }
+
+    try:
+        client = _authed_pro_client("testuser")
+        resp = client.post("/api/mt5/breakeven", json={"ticket": 496397257, "be_price": 562.95})
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        modify_order = _latest_order(Session, "MODIFY")
+        assert modify_order.close_ticket == 496397257
+        assert modify_order.comment == f"Manual BE: move SL to entry 562.95 for DotVerse #{order_id}"
+    finally:
+        with dvapp.mt5_state_lock:
+            dvapp.mt5_state.clear()
+            dvapp.mt5_state.update(old_state)
+
+
+def test_trailing_accepts_live_position_ticket_from_mt5_state(monkeypatch):
+    """Trailing stop must target the MT5 live position ticket, not the stored deal ticket."""
+    Session = _make_sqlite_session_factory()
+    order_id = _seed_filled_order(Session, "testuser", ticket=400441944)
+
+    monkeypatch.setattr(dvapp, "_DBSession", Session)
+    with dvapp.mt5_state_lock:
+        old_state = dict(dvapp.mt5_state)
+        dvapp.mt5_state.clear()
+        dvapp.mt5_state["testuser"] = {
+            "account_id": None,
+            "positions": [
+                {
+                    "ticket": 496397257,
+                    "symbol": "AMD",
+                    "comment": f"DotVerse #{order_id}",
+                }
+            ],
+        }
+
+    try:
+        client = _authed_pro_client("testuser")
+        resp = client.post("/api/mt5/trailing", json={"ticket": 496397257, "pips": 20})
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        trailing_order = _latest_order(Session, "TRAILING")
+        assert trailing_order.close_ticket == 496397257
+        assert trailing_order.comment == f"Trailing stop 20.0 pips for DotVerse #{order_id}"
+    finally:
+        with dvapp.mt5_state_lock:
+            dvapp.mt5_state.clear()
+            dvapp.mt5_state.update(old_state)
 
 
 def test_trailing_allows_default_user_to_set_trailing(monkeypatch):
