@@ -75,6 +75,7 @@ def test_today_scout_alert_uses_review_template_for_covered_path(monkeypatch):
     assert "• Goal: $100.00" in msg
     assert "• Potential upside: +$293.15" in msg
     assert "• Planned risk: -$143.80" in msg
+    assert "• Sizing rule: every $1,000 account equity = 0.01 lot" in msg
     assert "• ETA: ~3h" in msg
     assert "• Reason: scout detected a target path" in msg
     assert "Status:\nSUGGESTED - not yet executed" in msg

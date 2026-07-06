@@ -11878,6 +11878,25 @@ function _todayLotUnits(o){
   }
   return {cs:cs, stepUnits:sp.lotStep*cs, minUnits:sp.lotMin*cs};
 }
+function _todayFixedMicroLotForAccount(acct){
+  acct=parseFloat(acct)||0;
+  var lots=Math.floor(acct/1000)*0.01;
+  return parseFloat(Math.max(0,lots).toFixed(2));
+}
+function _todayBrokerLotSpec(o){
+  var st=_todayLatestMt5State(), specs=(st&&st.symbol_specs&&typeof st.symbol_specs==='object')?st.symbol_specs:{};
+  var sym=(typeof _todayMt5SymbolForTrade==='function')?_todayMt5SymbolForTrade(o):((o&&o.sym)||'');
+  var spec=sym?specs[sym]:null;
+  if(!spec) return {minLot:0, stepLot:0, source:'local'};
+  var min=parseFloat(spec.min_lot!=null?spec.min_lot:(spec.volume_min!=null?spec.volume_min:spec.lot_min));
+  var step=parseFloat(spec.lot_step!=null?spec.lot_step:(spec.volume_step!=null?spec.volume_step:spec.step_lot));
+  return {minLot:isFinite(min)?min:0, stepLot:isFinite(step)?step:0, source:'broker', symbol:sym};
+}
+function _todayRoundLotsToStepDown(lots, step){
+  lots=parseFloat(lots)||0; step=parseFloat(step)||0;
+  if(!(step>0)) return parseFloat(Math.max(0,lots).toFixed(6));
+  return parseFloat((Math.floor(lots/step + 1e-9)*step).toFixed(6));
+}
 // Back-compat shim: a few call sites still read _TODAY_LOT[asset].{step,min} in units.
 var _TODAY_LOT = {
   forex:     {step:1000,   min:1000  },
@@ -11971,6 +11990,46 @@ function _todaySizeTrade(o, acct, riskPct){
            notionalPctOfAcct: acct>0?(notional/acct*100):0,
            spreadD:spreadD, feeD:feeD, slipD:slipD, costD:costD, unitLabel:unitLabel };
 }
+function _todaySizeFixedMicroTrade(o, acct, capPct){
+  var LOT=_todayLotUnits(o), requestedLots=_todayFixedMicroLotForAccount(acct);
+  if(LOT.nullCs){
+    return { units:0, lots:0, contractSize:null, notional:0, tradeable:false, minLot:0, riskPctReq:0,
+             netLoss:0, netTP1:0, grossRisk:0, rr:0, leveraged:true, lev:1, levReal:false, marginReq:0,
+             riskPctOfAcct:0, notionalPctOfAcct:0, spreadD:0, feeD:0, slipD:0, costD:0,
+             unitLabel:'--', sizeReason:'contract size unknown - cannot size safely', skipReason:'contract size unknown - cannot size safely' };
+  }
+  var local=_TODAY_LOTSPEC[o.asset]||{lotMin:0.01,lotStep:0.01};
+  var broker=_todayBrokerLotSpec(o);
+  var minLots=(broker.minLot>0?broker.minLot:local.lotMin)||0;
+  var stepLots=(broker.stepLot>0?broker.stepLot:local.lotStep)||0.01;
+  var lots=_todayRoundLotsToStepDown(requestedLots, stepLots);
+  var units=lots*LOT.cs;
+  var rm=_todayRiskModel(o), entry=rm.entry, fx=rm.fx, slDist=rm.slDist, tp1=parseFloat(o.tp)||0;
+  var notional=units*entry*fx;
+  var spreadD=rm.spreadUnits*units*fx, feeD=notional*rm.feeRate, slipD=entry*rm.slipFrac*units*fx, costD=spreadD+feeD+slipD;
+  var grossRisk=units*slDist*fx, netLoss=grossRisk+costD;
+  var grossTP1=tp1?Math.abs(tp1-entry)*units*fx:0, netTP1=grossTP1-costD;
+  var rr=netLoss>0?netTP1/netLoss:0, riskPctOfAcct=acct>0?(netLoss/acct*100):0;
+  var tradeable=lots>0, skipReason='';
+  if(!(requestedLots>0)){
+    tradeable=false; skipReason='account equity is below fixed micro-lot minimum';
+  } else if(minLots>0 && lots+1e-9<minLots){
+    tradeable=false; skipReason='fixed micro-lot is below broker minimum ('+requestedLots.toFixed(2)+' lot rule, '+minLots.toFixed(2)+' minimum)';
+  } else if(capPct>0 && riskPctOfAcct>capPct+1e-9){
+    tradeable=false; skipReason='fixed micro-lot risk exceeds available basket risk';
+  }
+  var leveraged=o.asset!=='stock', lev=leveraged?(window._todayLeverage||100):1, marginReq=notional/lev;
+  var sizeReason='Fixed micro-lot rule: every $1,000 account equity opens 0.01 lot';
+  var unitLabel=lots.toFixed(2)+' lots · fixed micro-lot';
+  if(!tradeable && requestedLots>0 && minLots>0 && lots+1e-9<minLots) unitLabel=requestedLots.toFixed(2)+' lot rule · below broker minimum';
+  return { units:units, lots:lots, contractSize:LOT.cs, notional:notional, tradeable:tradeable, minLot:minLots, riskPctReq:0,
+           netLoss:netLoss, netTP1:netTP1, grossRisk:grossRisk, rr:rr,
+           leveraged:leveraged, lev:lev, levReal:!!window._todayLeverageReal, marginReq:marginReq,
+           riskPctOfAcct:riskPctOfAcct, notionalPctOfAcct:acct>0?(notional/acct*100):0,
+           spreadD:spreadD, feeD:feeD, slipD:slipD, costD:costD,
+           unitLabel:unitLabel,
+           sizeReason:sizeReason, skipReason:skipReason };
+}
 function _todayDefaultAutos(tf){
   var t=(tf||'').toLowerCase();
   var slow = t.indexOf('1d')>=0 || t.indexOf('1w')>=0 || t.indexOf('4h')>=0 || t.indexOf('1mo')>=0;
@@ -12055,6 +12114,7 @@ function _todayApplyStrategyModeToOpps(opps){
     if(mode==='fib_236') return _todayApplyFib236Preset(Object.assign({},o));
     o.strategyMode=mode;
     o._strategyLabel=_todayStrategyModeLabel(mode);
+    if(mode==='fixed_micro_lot') o._multiEnabled=false;
     return o;
   });
 }
@@ -12422,7 +12482,8 @@ function _todayLadderLegs(o){
   var s=o&&o._size; if(!o||!s||!s.tradeable) return [];
   var prof=_todayLadderProfile(o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner');
   var spec=_TODAY_LOTSPEC[o.asset]||{lotMin:0.01};
-  var minLot=spec.lotMin||0;
+  var brokerSpec=_todayBrokerLotSpec(o);
+  var minLot=(brokerSpec.minLot>0?brokerSpec.minLot:spec.lotMin)||0;
   var lots=s.lots||_todayMt5Lots(o);
   var entry=parseFloat(o.entry)||0, fx=_todayUsdPerQuote(o), isSell=(o.sig||'BUY').toUpperCase()==='SELL';
   if(o._multiEnabled===false){
@@ -14011,6 +14072,16 @@ async function _todayV2MaybeScoutAlert(targetPath, usable, totals){
 function _todayAllocate(plan, acct, basketRisk){
   if(!plan||!plan.length) return;
   var cap=Math.min(12, Math.max(0.05, parseFloat(basketRisk)||1));
+  if(_todayStrategyMode()==='fixed_micro_lot'){
+    plan.forEach(function(o){
+      o._multiEnabled=false;
+      o._size=_todaySizeFixedMicroTrade(o,acct,cap);
+      o._recRisk=(o._size&&o._size.riskPctOfAcct)||0;
+      o._risk=(o._size&&o._size.riskPctOfAcct)||0;
+    });
+    window._todayBudgetFlex=false;
+    return;
+  }
   var candidates=[];
   plan.forEach(function(o){
     if(o._multiEnabled==null) o._multiEnabled=true;
@@ -14137,7 +14208,8 @@ function _todaySelectPlan(ranked, cfg){
   var plan=[], seen={}, goal=parseFloat(pace.todayTarget)||parseFloat(cfg.profitGoal)||0;
   var newRiskBudget=_todayNewRiskBudget(cfg.acct, cfg);
   for(var i=0;i<(filtered||[]).length;i++){
-    var o=filtered[i], key=(o.sym||'')+':'+(o.tf||'')+':'+(o.sig||'');
+    var o=filtered[i];
+    var key=(_todayMt5SymbolForTrade(o)||o.sym||'').toUpperCase();
     if(seen[key]) continue;
     if(plan.length>=max) break;
     plan.push(o); seen[key]=1;
@@ -14150,11 +14222,14 @@ function _todaySelectPlan(ranked, cfg){
 function _todayClassifyBasketCandidate(candidate, plan, cfg){
   candidate=candidate||{}; plan=plan||[]; cfg=cfg||window._todayCfg||{};
   var key=((candidate.sym||'')+':'+(candidate.tf||'')+':'+(candidate.sig||'')).toUpperCase();
+  var candidateKey=(_todayMt5SymbolForTrade(candidate)||candidate.sym||'').toUpperCase();
   if(!candidate.sym||candidate.sig==='HOLD') return {action:'ignore',reason:'not actionable'};
   for(var i=0;i<plan.length;i++){
     var p=plan[i]||{}, pkey=((p.sym||'')+':'+(p.tf||'')+':'+(p.sig||'')).toUpperCase();
+    var planKey=(_todayMt5SymbolForTrade(p)||p.sym||'').toUpperCase();
     if(pkey===key) return {action:'ignore',reason:'already in basket'};
-    if(p.sym===candidate.sym && p.sig!==candidate.sig) return {action:'watch',reason:'same symbol has opposite basket direction'};
+    if(planKey===candidateKey && p.sig!==candidate.sig) return {action:'watch',reason:'same symbol has opposite basket direction'};
+    if(planKey===candidateKey) return {action:'watch',reason:'same broker symbol already in basket'};
   }
   if(candidate._btVerified!==true) return {action:'watch',reason:candidate._btReason||'automatic backtest has not verified this setup yet'};
   var max=parseInt(cfg.maxTrades)||6, q=_todayQualityScore(candidate)||candidate.qscore||candidate.conf||0;
@@ -14504,7 +14579,7 @@ function showToday(){
     + '<div id="todayTopArea"></div>'
     + '<div class="td-card" style="margin-bottom:14px;"><div class="td-card-head"><h2>'+(protect?'Protect open trades':'Build today\'s basket')+'</h2><span class="td-pill gold">'+(protect?'No new risk after target':'All assets + all feasible timeframes')+'</span></div>'
     + '<div class="today-v2-setup">'
-      + '<div class="today-v2-field"><div class="td-mini">Today Strategy Mode</div><select id="todayStrategyMode" onchange="_todaySetStrategyMode(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(201,168,76,.30);border-radius:4px;outline:0;color:rgba(201,168,76,.95);font-family:var(--mono);font-size:12px;padding:5px 6px;"><option value="standard"'+(_todayStrategyMode()==='standard'?' selected':'')+'>Standard DotVerse</option><option value="fixed_micro_lot"'+(_todayStrategyMode()==='fixed_micro_lot'?' selected':'')+'>Fixed Micro-Lot Signal</option><option value="fib_236"'+(_todayStrategyMode()==='fib_236'?' selected':'')+'>Fib 23.6 Confirmed Entry</option></select><div class="today-v2-copy" style="font-size:10px;margin-top:4px">'+(_todayStrategyMode()==='fib_236'?'Wait for 23.6 confirmation; stop 12, TP 38.2 / 61.8.':'Choose how Today prepares trade levels and execution metadata.')+'</div></div>'
+      + '<div class="today-v2-field"><div class="td-mini">Today Strategy Mode</div><select id="todayStrategyMode" onchange="_todaySetStrategyMode(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(201,168,76,.30);border-radius:4px;outline:0;color:rgba(201,168,76,.95);font-family:var(--mono);font-size:12px;padding:5px 6px;"><option value="standard"'+(_todayStrategyMode()==='standard'?' selected':'')+'>Standard DotVerse</option><option value="fixed_micro_lot"'+(_todayStrategyMode()==='fixed_micro_lot'?' selected':'')+'>Fixed Micro-Lot Signal</option><option value="fib_236"'+(_todayStrategyMode()==='fib_236'?' selected':'')+'>Fib 23.6 Confirmed Entry</option></select><div class="today-v2-copy" style="font-size:10px;margin-top:4px">'+(_todayStrategyMode()==='fib_236'?'Wait for 23.6 confirmation; stop 12, TP 38.2 / 61.8.':(_todayStrategyMode()==='fixed_micro_lot'?'Every $1,000 account equity opens 0.01 lot. DotVerse will not round up above the fixed rule just to satisfy a broker minimum.':'Choose how Today prepares trade levels and execution metadata.'))+'</div></div>'
       + '<div class="today-v2-field"><div class="td-mini">Account equity</div><input id="todayAcct" type="number" step="10" min="0" value="'+(c.acct||'')+'" placeholder="Auto from MT5" oninput="_todaySetAccount(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#ede8d8;font-family:var(--mono);font-size:16px;"><div id="todayAcctSource" class="today-v2-copy" style="font-size:10px;margin-top:4px">'+_todayAccountSourceLabel()+'</div></div>'
       + (function(){ var _dh=_todayDefaultHorizon(); var _h=c.goalHorizon||_dh.horizon||'weekly'; var _lbl={'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[_h]||'Weekly'; var _gv=c.profitGoal||_dh.profitGoal||500; return '<div class="today-v2-field"><div class="td-mini"><span id="todayHorizonLabel">'+_lbl+' profit target</span></div><select id="todayHorizon" onchange="_todaySetHorizon(this.value)" style="width:100%;margin-top:5px;background:transparent;border:1px solid rgba(93,232,160,.25);border-radius:4px;outline:0;color:rgba(93,232,160,.8);font-family:var(--mono);font-size:12px;padding:3px 4px;"><option value="daily"'+((_h==="daily")?" selected":"")+'>Daily</option><option value="weekly"'+((_h==="weekly")?" selected":"")+'>Weekly</option><option value="monthly"'+((_h==="monthly")?" selected":"")+'>Monthly</option></select><input id="todayProfitGoal" type="number" step="10" min="0" value="'+_gv+'" oninput="_todaySetProfitGoal(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#5de8a0;font-family:var(--mono);font-size:16px;"></div>'; })()
       + '<div class="today-v2-field"><div class="td-mini">Max combined risk</div><input id="todayRisk" type="number" step="0.1" min="0.1" max="12" value="'+(c.riskPct||3)+'" oninput="_todaySetGlobalRisk(this.value)" style="width:100%;margin-top:5px;background:transparent;border:0;outline:0;color:#e8706e;font-family:var(--mono);font-size:16px;"><div class="today-v2-copy" style="font-size:10px;margin-top:4px">Total planned stop-loss risk across this basket until trades close.</div></div>'

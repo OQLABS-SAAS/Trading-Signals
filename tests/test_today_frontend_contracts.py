@@ -170,6 +170,31 @@ def test_today_v2_allocates_basket_risk_only_to_executable_setups():
     assert "return Math.max(0, used || 0.6)" not in source
 
 
+def test_today_v2_fixed_micro_lot_mode_uses_account_rule_and_broker_minimums():
+    source = _source()
+
+    assert "function _todayFixedMicroLotForAccount(acct)" in source
+    assert "Math.floor(acct/1000)*0.01" in source
+    assert "function _todayBrokerLotSpec(o)" in source
+    assert "function _todaySizeFixedMicroTrade(o, acct, capPct)" in source
+    assert "fixed micro-lot is below broker minimum" in source
+    assert "Fixed micro-lot rule: every $1,000 account equity opens 0.01 lot" in source
+    assert "if(_todayStrategyMode()==='fixed_micro_lot')" in source
+    assert "o._multiEnabled=false" in source
+    assert "var unitLabel=lots.toFixed(2)+' lots · fixed micro-lot'" in source
+    assert "unitLabel=requestedLots.toFixed(2)+' lot rule · below broker minimum'" in source
+
+
+def test_today_v2_dedupes_selected_basket_by_broker_symbol():
+    source = _source()
+
+    assert "var key=(_todayMt5SymbolForTrade(o)||o.sym||'').toUpperCase();" in source
+    assert "if(seen[key]) continue;" in source
+    assert "var candidateKey=(_todayMt5SymbolForTrade(candidate)||candidate.sym||'').toUpperCase();" in source
+    assert "var planKey=(_todayMt5SymbolForTrade(p)||p.sym||'').toUpperCase();" in source
+    assert "same broker symbol already in basket" in source
+
+
 def test_today_v2_explains_requested_vs_actual_risk_after_lot_rounding():
     source = _source()
 
