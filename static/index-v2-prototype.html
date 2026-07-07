@@ -12343,6 +12343,7 @@ function _todaySelectPlan(ranked, cfg){
   return plan;
 }
 const _DV_TODAY_BUILD_TIMEOUT_MS = 270000;
+const _DV_TODAY_PREFLIGHT_TIMEOUT_MS = 3500;
 async function _todayBuildPlan(){
   var area=document.getElementById('todayPlanArea'); if(!area) return;
   var c=window._todayCfg;
@@ -12365,28 +12366,11 @@ async function _todayBuildPlan(){
   if(typeof _todaySaveCfg==='function') _todaySaveCfg();
   var _levSel=parseInt(document.getElementById('todayLev')?.value); if(_levSel>0) window._todayLeverage=_levSel;
   var _ap=document.getElementById('todayAutoPlace'); if(_ap) c.autoPlace=!!_ap.checked;
+  area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div id="todayScanProgress" style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Preparing Today scan… checking broker and price feeds</div></div>';
   window._todayBrokerFilteredOpps=[];
   window._todayBrokerFilteredCount=0;
   window._todayNoPlanReason='';
   window._todayNoPlanTitle='';
-  // Pull the live broker account: real balance AND real leverage (for accurate margin).
-  try{
-    var st=await dvFetch('/api/mt5/state');
-    if(st){
-      window._todayMt5Online=window._todayMt5Online===true || st.connected===true;
-      if(typeof _todayBridgeMt5StateToGlobalAccount==='function') _todayBridgeMt5StateToGlobalAccount(st);
-    }
-    if(st && st.account){
-      var lv=parseInt(st.account.leverage);
-	      if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; var le=document.getElementById('todayLev'); if(le){ le.innerHTML=_dvBrokerLeverageOptions(lv); le.value=String(lv); } }
-      var b=parseFloat(st.account.balance)||0;
-      if(b>0 && !window._todayAcctManual){ c.acct=b; var ai=document.getElementById('todayAcct'); if(ai) ai.value=Math.round(b); }
-    }
-  }catch(e){}
-  if(!c.acct){ area.innerHTML='<div style="padding:26px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:#e8706e;line-height:1.7;">Enter your account size above so DotVerse can size each trade safely.</div>'; return; }
-  window._todayFreeMargin = window._mt5AccountBalance || c.acct;
-  try{ await _refreshForexRates(); }catch(e){}   // load quote→USD rates BEFORE sizing (JPY pairs etc.)
-  area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div id="todayScanProgress" style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning the full market map for the best setups… this can take 2–3 minutes</div></div>';
   var _todayBuildTimedOut=false;
   function _todayRenderNoPlanDirect(title, reason){
     var safe=function(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
@@ -12405,6 +12389,29 @@ async function _todayBuildPlan(){
     window._todayNoPlanReason='Today full scan timed out before it could finish. DotVerse stopped the spinner instead of pretending it is still scanning. Try again, narrow the markets, or wait a minute for the broker/data feed to recover.';
     _todayRenderNoPlanDirect(window._todayNoPlanTitle, window._todayNoPlanReason);
   }, _DV_TODAY_BUILD_TIMEOUT_MS);
+  // Pull the live broker account: real balance AND real leverage (for accurate margin).
+  try{
+    var st=(typeof dvFetchAbortableT==='function')
+      ? await dvFetchAbortableT('/api/mt5/state', _todayAbortCtrl?{signal:_todayAbortCtrl.signal}:{}, _DV_TODAY_PREFLIGHT_TIMEOUT_MS)
+      : await withTimeout(dvFetch('/api/mt5/state'), _DV_TODAY_PREFLIGHT_TIMEOUT_MS);
+    if(st){
+      window._todayMt5Online=window._todayMt5Online===true || st.connected===true;
+      if(typeof _todayBridgeMt5StateToGlobalAccount==='function') _todayBridgeMt5StateToGlobalAccount(st);
+    }
+    if(st && st.account){
+      var lv=parseInt(st.account.leverage);
+	      if(lv>0){ window._todayLeverage=lv; window._todayLeverageReal=true; window._todayLeverageSource='broker'; var le=document.getElementById('todayLev'); if(le){ le.innerHTML=_dvBrokerLeverageOptions(lv); le.value=String(lv); } }
+      var b=parseFloat(st.account.balance)||0;
+      if(b>0 && !window._todayAcctManual){ c.acct=b; var ai=document.getElementById('todayAcct'); if(ai) ai.value=Math.round(b); }
+    }
+  }catch(e){}
+  if(_todayBuildTimedOut || !_todayIsCurrentRun()) return;
+  if(!c.acct){ _todayBuildTimedOut=true; clearTimeout(_todayBuildWatchdog); area.innerHTML='<div style="padding:26px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:#e8706e;line-height:1.7;">Enter your account size above so DotVerse can size each trade safely.</div>'; return; }
+  window._todayFreeMargin = window._mt5AccountBalance || c.acct;
+  try{ await withTimeout(_refreshForexRates(), _DV_TODAY_PREFLIGHT_TIMEOUT_MS); }catch(e){}   // load quote→USD rates BEFORE sizing (JPY pairs etc.)
+  if(_todayBuildTimedOut || !_todayIsCurrentRun()) return;
+  var preCap=document.getElementById('todayScanProgress');
+  if(preCap) preCap.textContent='Scanning the full market map for the best setups… this can take 2–3 minutes';
   function _todayFinishNoPlan(title, reason){
     _todayBuildTimedOut=true;
     clearTimeout(_todayBuildWatchdog);

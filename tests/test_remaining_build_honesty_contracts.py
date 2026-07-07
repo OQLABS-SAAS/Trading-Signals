@@ -146,6 +146,7 @@ def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
     block = _extract_function("_todayBuildPlan")
     render = _extract_function("_todayRenderPlan")
     assert "_DV_TODAY_BUILD_TIMEOUT_MS = 270000" in HTML
+    assert "_DV_TODAY_PREFLIGHT_TIMEOUT_MS = 3500" in HTML
     assert _html_const_int("_DV_TODAY_BUILD_TIMEOUT_MS") - _html_const_int("_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS") >= 90000
     assert "window._todayBuildRunSeq=(window._todayBuildRunSeq||0)+1" in block
     assert "window._todayBuildAbortCtrl" in block
@@ -155,6 +156,10 @@ def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
     assert "Try scan again" in block
     assert "var _todayBuildTimedOut=false" in block
     assert "var _todayBuildWatchdog=setTimeout(function(){" in block
+    assert block.index("Preparing Today scan") < block.index("dvFetchAbortableT('/api/mt5/state'")
+    assert block.index("var _todayBuildWatchdog=setTimeout(function(){") < block.index("dvFetchAbortableT('/api/mt5/state'")
+    assert "dvFetchAbortableT('/api/mt5/state', _todayAbortCtrl?{signal:_todayAbortCtrl.signal}:{}, _DV_TODAY_PREFLIGHT_TIMEOUT_MS)" in block
+    assert "await withTimeout(_refreshForexRates(), _DV_TODAY_PREFLIGHT_TIMEOUT_MS)" in block
     assert "_todayAbortCtrl.abort()" in block
     assert "Today full scan timed out before it could finish" in block
     assert "Scanning the full market map for the best setups" in block
