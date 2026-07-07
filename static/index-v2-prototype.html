@@ -13851,6 +13851,7 @@ function _todayV2Select(idx){ window._todaySelectedIdx=idx; window._todayExpande
 function _todayV2SetScale(idx,on){
   var o=(window._todayPlan||[])[idx]; if(!o) return;
   o._entryBrainUserOverride=true;
+  o._scaleInScoutRequested=false;
   o._multiEnabled=!!on;
   if(o._multiEnabled){
     o._ladderMode=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
@@ -13862,9 +13863,21 @@ function _todayV2SetScale(idx,on){
   _todayV2RefreshAutos(o);
 }
 
+function _todayV2ScaleInScout(idx){
+  var o=(window._todayPlan||[])[idx]; if(!o) return;
+  o._entryBrainUserOverride=true;
+  o._scaleInScoutRequested=true;
+  o._multiEnabled=false;
+  window._todaySelectedIdx=idx; window._todayExpandedIdx=idx;
+  try{ _todayV2ArmScout(true); }catch(e){}
+  if(typeof _dvToast==='function') _dvToast('Scale-in Scout armed - DotVerse will watch for later add-on entries. No live order is sent from this card.','rgba(201,168,76,.15)','rgba(201,168,76,.4)');
+  _todayRenderPlan();
+}
+
 function _todayV2SetLadderMode(idx, mode){
   var o=(window._todayPlan||[])[idx]; if(!o) return;
   o._entryBrainUserOverride=true;
+  o._scaleInScoutRequested=false;
   o._multiEnabled=true;
   o._ladderMode=mode||'beginner';
   o._ladder=_todayDefaultLadder(o._ladderMode);
@@ -15082,6 +15095,9 @@ function _todayRenderPlan(){
     var placeDisabled=!_todayCanPlaceMt5() || !canExecuteNow;
     var placeLabel=!canExecuteNow?(rd&&rd.text?rd.text:'Not executable yet'):_todayV2PlaceCtaText(targetNeedsScout,false);
     var placeStyle='width:100%;margin-top:12px;min-height:44px'+(placeDisabled?';opacity:.58;cursor:not-allowed':'');
+    var brainMode=String((o._entryBrain&&o._entryBrain.recommended_mode)||'').toLowerCase();
+    var scaleInScout=!!o._scaleInScoutRequested || brainMode==='scale_in';
+    var scaleInNote=scaleInScout?'<div class="today-v2-single" style="border-color:rgba(201,168,76,.28);background:rgba(201,168,76,.055);"><div class="td-mini">Scale-in Scout</div><b>Watching for later add-on entries</b><div class="today-v2-copy" style="margin-top:7px">Scale-in means different future entries, not splitting this order now. DotVerse will scout and alert; No live order is sent from this card.</div></div>':'';
     return '<div class="today-v2-detail">'
       + '<div class="today-v2-selectedTop"><div><div class="today-v2-bigSym">'+o.sym+'</div><div class="today-v2-meta">'+o.asset+' · '+o.tf+' · '+o.sig+'</div></div><span class="td-pill '+(rd.cls==='wait'?'gold':rd.cls==='open'?'blue':'green')+'">'+rd.text+'</span></div>'
       + '<div class="today-v2-liveBox"><div class="td-mini">'+(rd.cls==='open'?'Live trade monitor':'Per-trade live monitor')+'</div><div class="today-v2-priceLine"><span class="today-v2-tick"></span><span class="today-v2-marker"></span></div><div class="today-v2-copy" id="today-livebox-'+idx+'">'+(rd.cls==='open'?'Open trade is monitored here: PnL, current R, stop state, target distance, and automations fired.':'Live price is checked against entry, stop, and target. DotVerse tells you enter now, wait, missed, or invalid. Targets: '+tps.map(function(t,i){return 'TP'+(i+1)+' '+pxFmt(t);}).join(' · '))+'</div></div>'
@@ -15092,8 +15108,9 @@ function _todayRenderPlan(){
       + _todayV2EntryBrainCard(o)
       + '<div class="panelTitle" style="margin:14px 0 8px">'+(protect?'Protection mode':'Execution mode')+'</div><div class="today-v2-copy">'+(protect?'New MT5 orders are paused because the '+_horizonLbl.toLowerCase()+' target is reached. This panel stays useful for monitoring alerts and protection rules, not for adding exposure.':'Choose how this setup is sent to MT5. Same trade idea, different exit style.')+'</div>'
       + (protect?'':presetControls)
-      + (protect?'':'<div class="today-v2-exec"><button class="today-v2-choice '+(!scale||exec.collapsed?'on':'')+'" onclick="_todayV2SetScale('+idx+',false)"><b>Single order</b><span>One entry, one stop, one main target. Best for fast/simple trades.</span></button><button class="today-v2-choice '+(actualScale?'on':(exec.collapsed?'disabled':''))+'" '+(exec.collapsed?'disabled ':'onclick="_todayV2SetScale('+idx+',true)"')+'><b>'+(exec.collapsed?'Scale-out unavailable':'Scale-out plan')+'</b><span>'+(exec.collapsed?'Current size falls below broker minimum if split.':'Open smaller parts, take profit early, leave a smaller runner.')+'</span></button></div>')
+      + (protect?'':'<div class="today-v2-exec"><button class="today-v2-choice '+((!scale||exec.collapsed)&&!scaleInScout?'on':'')+'" onclick="_todayV2SetScale('+idx+',false)"><b>Single order</b><span>One entry, one stop, one main target. Best for fast/simple trades.</span></button><button class="today-v2-choice '+(actualScale?'on':(exec.collapsed?'disabled':''))+'" '+(exec.collapsed?'disabled ':'onclick="_todayV2SetScale('+idx+',true)"')+'><b>'+(exec.collapsed?'Scale-out unavailable':'Scale-out plan')+'</b><span>'+(exec.collapsed?'Current size falls below broker minimum if split.':'Open smaller parts, take profit early, leave a smaller runner.')+'</span></button><button class="today-v2-choice '+(scaleInScout?'on':'')+'" onclick="_todayV2ScaleInScout('+idx+')"><b>Scale-in Scout</b><span>Watch for later add-on or retest entries. No live order is sent from this card.</span></button></div>')
       + (protect?'':'<div class="today-v2-switch"><div><div class="td-mini">'+(actualScale?'Scale-out enabled':(exec.collapsed?'Scale-out unavailable':'Scale-out disabled'))+'</div><div class="today-v2-copy">'+orderText+'</div></div><button class="today-v2-toggle '+(actualScale?'on':'')+'" '+(exec.collapsed?'disabled ':'onclick="_todayV2SetScale('+idx+','+(!scale)+')"')+' aria-label="Toggle scale-out plan"></button></div>')
+      + (protect?'':scaleInNote)
       + (protect?'':ladder)
       + '<div class="panelTitle" style="margin:16px 0 8px">Trade automations</div><div class="today-v2-copy">'+(protect?'Protect mode keeps monitoring TP, SL, break-even, trailing, and invalidation alerts. New entries stay paused.':'Tap a card to turn that automation on or off for this trade. These flags are sent with the MT5 order.')+'</div><div class="today-v2-autos">'+_todayV2AutoControls(o, idx)
       + '</div>'+(o._autoWhy?'<div class="today-v2-copy blue" style="margin-top:8px">'+o._autoWhy+'</div>':'')+(protect?'<button id="today-cta-'+idx+'" class="today-v2-btn" style="width:100%;margin-top:12px;min-height:44px;opacity:.82" onclick="_todayV2ProtectSummary()">Protect mode active</button>':'<button id="today-cta-'+idx+'" class="today-v2-btn" style="'+placeStyle+'" '+(placeDisabled?'disabled ':'')+'onclick="_todayPlaceTrade('+idx+')">'+placeLabel+'</button>')+'</div>';

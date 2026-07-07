@@ -50,6 +50,22 @@ def test_today_v2_exposes_multiladder_presets_and_leg_money():
     assert "esc(legSizeText(l))" in source
 
 
+def test_today_identified_trade_entries_show_execution_choices_including_scale_in_scout():
+    source = _source()
+
+    assert "function _todayV2ScaleInScout(idx)" in source
+    assert "Scale-in Scout" in source
+    assert "No live order is sent from this card." in source
+    assert "_todayV2ArmScout(true)" in source
+    assert "Single order" in source
+    assert "Scale-out plan" in source
+
+    scale_in_start = source.index("function _todayV2ScaleInScout(idx)")
+    scale_in = source[scale_in_start : scale_in_start + 900]
+    assert "dvOrderFetch('/api/mt5/order'" not in scale_in
+    assert "_todayPlaceTrade" not in scale_in
+
+
 def test_today_v2_downgrades_target_not_covered_to_scout_first():
     source = _source()
 
