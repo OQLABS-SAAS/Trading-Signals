@@ -15407,8 +15407,6 @@ def _signal_universe_scan_budget(body):
         budget = float(raw_budget)
     except (TypeError, ValueError):
         budget = 0.0
-    if budget <= 0 and str(payload.get("scan_mode") or "").lower() == "today":
-        budget = 10.0
     if budget <= 0:
         return None
     return max(1.0, min(30.0, budget))
@@ -15437,6 +15435,139 @@ def _collect_signal_universe_candidates(scan_requests, scan_budget_seconds=None)
     finally:
         pool.shutdown(wait=not timed_out, cancel_futures=timed_out)
     return candidates, errors, timed_out
+
+
+_signal_universe_cache = {}
+_signal_universe_cache_lock = threading.Lock()
+_signal_universe_refreshing = set()
+_SIGNAL_UNIVERSE_CACHE_FRESH_SECONDS = int(os.environ.get("SIGNAL_UNIVERSE_CACHE_FRESH_SECONDS", "180"))
+_SIGNAL_UNIVERSE_CACHE_STALE_SECONDS = int(os.environ.get("SIGNAL_UNIVERSE_CACHE_STALE_SECONDS", "900"))
+
+
+def _signal_universe_cache_signature(scan_requests, body):
+    scan_scope = [
+        {
+            "asset_type": req.asset_type,
+            "timeframe": req.timeframe,
+            "tickers": req.tickers,
+        }
+        for req in scan_requests
+    ]
+    filters = body.get("filters") if isinstance(body.get("filters"), dict) else {}
+    raw = json.dumps({"scan_scope": scan_scope, "filters": filters}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def _signal_universe_cache_key(signature):
+    return f"signal_universe:today:latest:{signature}"
+
+
+def _signal_universe_cache_get(signature):
+    key = _signal_universe_cache_key(signature)
+    now = time.time()
+    if _redis_client:
+        try:
+            cached = _redis_client.get(key)
+            if cached:
+                payload = json.loads(cached)
+                ts = float(payload.get("cache_stored_at") or 0)
+                if ts and now - ts <= _SIGNAL_UNIVERSE_CACHE_STALE_SECONDS:
+                    return payload, now - ts
+        except Exception:
+            pass
+    with _signal_universe_cache_lock:
+        entry = _signal_universe_cache.get(key)
+        if entry and now - entry.get("ts", 0) <= _SIGNAL_UNIVERSE_CACHE_STALE_SECONDS:
+            return json.loads(json.dumps(entry["payload"])), now - entry["ts"]
+        if entry:
+            _signal_universe_cache.pop(key, None)
+    return None, None
+
+
+def _signal_universe_cache_set(signature, payload):
+    key = _signal_universe_cache_key(signature)
+    now = time.time()
+    cached_payload = json.loads(json.dumps(payload))
+    cached_payload["cache_stored_at"] = now
+    cached_payload["cache_signature"] = signature
+    cached_payload["cache_hit"] = False
+    if _redis_client:
+        try:
+            _redis_client.setex(key, _SIGNAL_UNIVERSE_CACHE_STALE_SECONDS, json.dumps(cached_payload))
+        except Exception:
+            pass
+    with _signal_universe_cache_lock:
+        _signal_universe_cache[key] = {"ts": now, "payload": cached_payload}
+
+
+def _signal_universe_mark_cached(payload, age_seconds, refresh_pending=False):
+    out = json.loads(json.dumps(payload))
+    out["cache_hit"] = True
+    out["cache_age_seconds"] = round(float(age_seconds or 0), 1)
+    out["refresh_pending"] = bool(refresh_pending)
+    return out
+
+
+def _signal_universe_build_response(run_id, body, scan_requests, scan_scope, candidates, errors, timed_out, scan_budget_seconds):
+    _sort_scan_candidates(candidates)
+    ready = any(not c.get("error") for c in candidates)
+    as_of_utc = datetime.utcnow().isoformat() + "Z"
+    provider_health = _signal_universe_provider_health(candidates, errors)
+    return {
+        "ready": ready,
+        "run_id": run_id,
+        "as_of_utc": as_of_utc,
+        "provider_policy_version": "provider-first-v1",
+        "scan_scope": scan_scope,
+        "universe_filters": body.get("filters") if isinstance(body.get("filters"), dict) else {},
+        "market_regime": {"status": "computed_per_candidate"},
+        "candidates": candidates,
+        "results": candidates,
+        "count": len(candidates),
+        "errors": errors,
+        "provider_health": provider_health,
+        "request_count": len(scan_requests),
+        "scan_mode": body.get("scan_mode") or "standard",
+        "scan_budget_seconds": scan_budget_seconds,
+        "partial": bool(timed_out),
+        "timed_out": bool(timed_out),
+        "cache_hit": False,
+        "refresh_pending": False,
+    }
+
+
+def _signal_universe_refresh_cache_background(signature, body, scan_requests, scan_scope):
+    try:
+        candidates, errors, timed_out = _collect_signal_universe_candidates(scan_requests, None)
+        payload = _signal_universe_build_response(
+            "sigrun_" + uuid.uuid4().hex[:12],
+            body,
+            scan_requests,
+            scan_scope,
+            candidates,
+            errors,
+            timed_out,
+            None,
+        )
+        if payload.get("ready") and not payload.get("timed_out"):
+            _signal_universe_cache_set(signature, payload)
+    finally:
+        with _signal_universe_cache_lock:
+            _signal_universe_refreshing.discard(signature)
+
+
+def _signal_universe_maybe_refresh_cache(signature, body, scan_requests, scan_scope):
+    with _signal_universe_cache_lock:
+        if signature in _signal_universe_refreshing:
+            return True
+        _signal_universe_refreshing.add(signature)
+    th = threading.Thread(
+        target=_signal_universe_refresh_cache_background,
+        args=(signature, body, scan_requests, scan_scope),
+        daemon=True,
+    )
+    th.start()
+    return True
 
 
 def _signal_universe_provider_health(candidates, errors):
@@ -15485,33 +15616,32 @@ def signal_universe_run():
                 "timeframe": scan_request.timeframe,
                 "tickers": scan_request.tickers,
             })
+        is_today_scan = str(body.get("scan_mode") or "").lower() == "today"
+        use_today_cache = is_today_scan and body.get("force_refresh") is not True
+        cache_signature = _signal_universe_cache_signature(scan_requests, body) if use_today_cache else None
+        if cache_signature:
+            cached_payload, cache_age = _signal_universe_cache_get(cache_signature)
+            if cached_payload:
+                refresh_pending = False
+                if cache_age is not None and cache_age > _SIGNAL_UNIVERSE_CACHE_FRESH_SECONDS:
+                    refresh_pending = _signal_universe_maybe_refresh_cache(cache_signature, body, scan_requests, scan_scope)
+                return jsonify(_signal_universe_mark_cached(cached_payload, cache_age, refresh_pending))
         if scan_requests:
             candidates, errors, timed_out = _collect_signal_universe_candidates(scan_requests, scan_budget_seconds)
         else:
             timed_out = False
-        _sort_scan_candidates(candidates)
-        ready = any(not c.get("error") for c in candidates)
-        as_of_utc = datetime.utcnow().isoformat() + "Z"
-        provider_health = _signal_universe_provider_health(candidates, errors)
-        response = {
-            "ready": ready,
-            "run_id": run_id,
-            "as_of_utc": as_of_utc,
-            "provider_policy_version": "provider-first-v1",
-            "scan_scope": scan_scope,
-            "universe_filters": body.get("filters") if isinstance(body.get("filters"), dict) else {},
-            "market_regime": {"status": "computed_per_candidate"},
-            "candidates": candidates,
-            "results": candidates,
-            "count": len(candidates),
-            "errors": errors,
-            "provider_health": provider_health,
-            "request_count": len(scan_requests),
-            "scan_mode": body.get("scan_mode") or "standard",
-            "scan_budget_seconds": scan_budget_seconds,
-            "partial": bool(timed_out),
-            "timed_out": bool(timed_out),
-        }
+        response = _signal_universe_build_response(
+            run_id,
+            body,
+            scan_requests,
+            scan_scope,
+            candidates,
+            errors,
+            timed_out,
+            scan_budget_seconds,
+        )
+        if cache_signature and response.get("ready") and not response.get("timed_out"):
+            _signal_universe_cache_set(cache_signature, response)
         return jsonify(response)
     except Exception as e:
         return jsonify({"ready": False, "error": str(e)}), 500

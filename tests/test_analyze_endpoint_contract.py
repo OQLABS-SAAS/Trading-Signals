@@ -310,6 +310,77 @@ def test_signal_universe_run_projects_canonical_provider_first_contract(monkeypa
     assert ("EURUSD=X", "forex") in calls["provider"]
 
 
+def test_today_signal_universe_reuses_latest_complete_scan_cache(monkeypatch):
+    calls = {"provider": 0}
+    df = _market_df()
+
+    def fake_provider(*args, **kwargs):
+        calls["provider"] += 1
+        out = df.copy()
+        out.attrs["dotverse_provider_trace"] = {
+            "policy": "provider-first-v1",
+            "primary": "EODHD when configured",
+            "fallbacks": ["Twelve Data", "Stooq", "FMP", "Yahoo v8", "safe_download"],
+            "provider_used": "EODHD",
+            "attempted": ["EODHD"],
+            "fallback_used": False,
+            "last_error": None,
+        }
+        return out
+
+    monkeypatch.setattr(dvapp, "_redis_client", None)
+    with dvapp._signal_universe_cache_lock:
+        dvapp._signal_universe_cache.clear()
+        dvapp._signal_universe_refreshing.clear()
+    monkeypatch.setattr(dvapp, "provider_first_download", fake_provider)
+    monkeypatch.setattr(
+        dvapp,
+        "calculate_indicators",
+        lambda *args, **kwargs: {
+            "price": 100.5,
+            "chg_1d": 1.2,
+            "rsi": 55,
+            "vol_ratio": 1.1,
+            "ema_trend": "MIXED",
+            "supertrend": "NEUTRAL",
+        },
+    )
+    monkeypatch.setattr(
+        dvapp,
+        "get_analysis",
+        lambda *args, **kwargs: {
+            "signal": "BUY",
+            "entry": 100,
+            "stop_loss": 95,
+            "tp1": 110,
+            "summary": "Test setup",
+            "confidence": "MEDIUM",
+            "confidence_label": "LIKELY",
+        },
+    )
+    monkeypatch.setattr(dvapp, "detect_counter_trade", lambda *args, **kwargs: {"counter_trade": False})
+    monkeypatch.setattr(dvapp, "calculate_win_rate", lambda *args, **kwargs: {"win_rate": 60, "sample_size": 40})
+
+    client = _authed_pro_client()
+    payload = {
+        "scan_mode": "today",
+        "groups": [{"tickers": ["eurusd"], "asset_type": "fx", "tfs": ["1h"]}],
+    }
+    first = client.post("/api/signal-universe/run", json=payload)
+    second = client.post("/api/signal-universe/run", json=payload)
+
+    assert first.status_code == 200, first.get_data(as_text=True)
+    assert second.status_code == 200, second.get_data(as_text=True)
+    first_data = first.get_json()
+    second_data = second.get_json()
+    assert first_data["ready"] is True
+    assert first_data["cache_hit"] is False
+    assert second_data["ready"] is True
+    assert second_data["cache_hit"] is True
+    assert second_data["results"] == first_data["results"]
+    assert calls["provider"] == 1
+
+
 def test_signal_universe_run_keeps_group_timeframe_scans_concurrent():
     source = open(dvapp.__file__).read()
     start = source.index('def signal_universe_run():')
@@ -345,7 +416,8 @@ def test_today_signal_universe_prioritizes_fast_diverse_requests():
         ("stock", "30m"),
         ("crypto", "30m"),
     ]
-    assert dvapp._signal_universe_scan_budget({"scan_mode": "today"}) == 10.0
+    assert dvapp._signal_universe_scan_budget({"scan_mode": "standard"}) is None
+    assert dvapp._signal_universe_scan_budget({"scan_mode": "today"}) is None
     assert dvapp._signal_universe_scan_budget({"scan_mode": "today", "max_seconds": 90}) == 30.0
 
 

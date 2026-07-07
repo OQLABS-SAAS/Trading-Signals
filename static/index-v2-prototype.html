@@ -12333,7 +12333,7 @@ function _todaySelectPlan(ranked, cfg){
   _todayAllocate(plan, cfg.acct, cfg.riskPct||1);
   return plan;
 }
-const _DV_TODAY_BUILD_TIMEOUT_MS = 65000;
+const _DV_TODAY_BUILD_TIMEOUT_MS = 270000;
 async function _todayBuildPlan(){
   var area=document.getElementById('todayPlanArea'); if(!area) return;
   var c=window._todayCfg;
@@ -12377,7 +12377,7 @@ async function _todayBuildPlan(){
   if(!c.acct){ area.innerHTML='<div style="padding:26px 20px;text-align:center;font-family:var(--mono);font-size:11px;color:#e8706e;line-height:1.7;">Enter your account size above so DotVerse can size each trade safely.</div>'; return; }
   window._todayFreeMargin = window._mt5AccountBalance || c.acct;
   try{ await _refreshForexRates(); }catch(e){}   // load quote→USD rates BEFORE sizing (JPY pairs etc.)
-  area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div id="todayScanProgress" style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning your markets for the best setups… 20–30s</div></div>';
+  area.innerHTML='<div style="padding:34px 20px;text-align:center;"><div style="width:30px;height:30px;border-radius:50%;border:2.5px solid rgba(201,168,76,.2);border-top-color:var(--gold);animation:dvSpinAnim .8s linear infinite;margin:0 auto 12px;"></div><div id="todayScanProgress" style="font-family:var(--mono);font-size:11px;color:rgba(237,232,216,.5);">Scanning the full market map for the best setups… this can take 2–3 minutes</div></div>';
   var _todayBuildTimedOut=false;
   function _todayRenderNoPlanDirect(title, reason){
     var safe=function(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
@@ -12393,7 +12393,7 @@ async function _todayBuildPlan(){
     window._todayDeferredOpps=[];
     window._todayCandidateActions=[];
     window._todayNoPlanTitle='Today scan timed out';
-    window._todayNoPlanReason='Today scan timed out before it could finish. DotVerse stopped the spinner instead of pretending it is still scanning. Try again, narrow the markets, or wait a minute for the broker/data feed to recover.';
+    window._todayNoPlanReason='Today full scan timed out before it could finish. DotVerse stopped the spinner instead of pretending it is still scanning. Try again, narrow the markets, or wait a minute for the broker/data feed to recover.';
     _todayRenderNoPlanDirect(window._todayNoPlanTitle, window._todayNoPlanReason);
   }, _DV_TODAY_BUILD_TIMEOUT_MS);
   function _todayFinishNoPlan(title, reason){
@@ -12453,7 +12453,11 @@ async function _todayBuildPlan(){
   (function(){
     var _uniq=(typeof _dvUniqueSignalCount==='function')?_dvUniqueSignalCount(opps):opps.length;
     var _strip=document.querySelector('.today-v2-scan');
-    var _label=_jFail?'Partial scan - '+_jFail+' market scan'+(_jFail===1?'':'s')+' failed':'Scan complete';
+    var _cacheAge=res&&res.cache_hit?Math.max(0, Math.round((res.cache_age_seconds||0)/60)):0;
+    var _label=res&&res.cache_hit
+      ? 'Latest full scan'+(_cacheAge?' - updated '+_cacheAge+' min ago':'')
+      : (_jFail?'Partial scan - '+_jFail+' market scan'+(_jFail===1?'':'s')+' failed':'Full scan complete');
+    if(res&&res.refresh_pending) _label+=' - refreshing in background';
     if(_strip) _strip.innerHTML='<span>'+_label+'</span><span>'+_uniq+' setup'+(_uniq===1?'':'s')+' found</span>';
     var _cap=document.getElementById('todayScanProgress');
     if(_cap) _cap.textContent=_label+' — '+_uniq+' setup'+(_uniq===1?'':'s')+' found';
@@ -15182,6 +15186,7 @@ const ALL_SCAN_GROUPS = [
 ];
 const ALL_SCAN_TFS = ['15m','30m','1h','4h','1d','1w','1mo'];
 const _DV_SIGNAL_UNIVERSE_TIMEOUT_MS = 12000;
+const _DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS = 180000;
 const _DV_SCAN_BATCH_TIMEOUT_MS = 18000;
 
 // Shared scan engine — parallel POSTs to /api/scan-list for each group × timeframe
@@ -15199,9 +15204,9 @@ async function _runScanBase(groups, signal, onProgress, scanMode) {
     const universe = await dvFetchAbortableT('/api/signal-universe/run', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ groups: groups, scan_mode: scanMode || 'standard', max_seconds: scanMode === 'today' ? 10 : undefined }),
+      body:JSON.stringify({ groups: groups, scan_mode: scanMode || 'standard' }),
       signal: signal
-    }, _DV_SIGNAL_UNIVERSE_TIMEOUT_MS);
+    }, scanMode === 'today' ? _DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS : _DV_SIGNAL_UNIVERSE_TIMEOUT_MS);
     if(!universe){
       _scanErrors.push('signal universe scan timed out; falling back to batched scanner');
     }
@@ -15216,6 +15221,9 @@ async function _runScanBase(groups, signal, onProgress, scanMode) {
           run: universe,
           run_id: universe.run_id,
           provider_health: universe.provider_health || null,
+          cache_hit: !!universe.cache_hit,
+          cache_age_seconds: universe.cache_age_seconds || 0,
+          refresh_pending: !!universe.refresh_pending,
           ready: true
         };
       }
