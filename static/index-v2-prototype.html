@@ -12134,6 +12134,11 @@ function _todayApplyStrategyModeToOpps(opps){
     return o;
   });
 }
+function _todayFibOwnsExecutionGate(o){
+  if(!o||!o._fib) return false;
+  var mode=String(o.strategyMode||((window._todayCfg||{}).strategyMode)||'').toLowerCase();
+  return mode==='fib_236'||mode==='fib'||mode==='fib236'||o._strategyLabel==='Fib 23.6 Setup';
+}
 function _todayFibReadiness(o){
   var f=o&&o._fib;
   if(!f) return null;
@@ -13964,11 +13969,14 @@ function _todayV2EntryBrainCard(o){
     return '<div class="today-v2-path"><div class="td-mini">Entry brain</div><b>Advisory pending</b><div class="today-v2-copy" style="margin-top:7px">'+esc((o&&o._entryBrainError)||'DotVerse will choose an execution style once chart evidence is available.')+'</div></div>';
   }
   var mode=_todayEntryBrainModeLabel(b.recommended_mode);
-  var cls=b.execution_authority?'green':(b.recommended_mode==='scale_in'||b.recommended_mode==='wait'?'gold':'blue');
+  var fibGate=_todayFibOwnsExecutionGate(o);
+  if(fibGate && b.recommended_mode==='wait') mode='Structure note';
+  var cls=fibGate?'blue':(b.execution_authority?'green':(b.recommended_mode==='scale_in'||b.recommended_mode==='wait'?'gold':'blue'));
   var ruleText=b.rule_statuses?Object.keys(b.rule_statuses).map(function(k){return k+': '+b.rule_statuses[k];}).join(' | '):'';
   var ev=(b.evidence||[]).slice(0,3).map(function(x){return '<div>- '+esc(x)+'</div>';}).join('');
-  var authority=b.execution_authority?'DotVerse may apply this mode automatically.':'Advisory only - live execution authority is locked.';
-  return '<div class="today-v2-path"><div class="td-mini">Entry brain | '+esc(mode)+'</div><b class="'+cls+'">'+esc(mode)+' recommended</b><div class="today-v2-copy" style="margin-top:7px">'+esc(b.authority_reason||authority)+'</div>'
+  var authority=fibGate?'Fib 23.6 preset controls entry; entry brain is advisory only for execution style and caution.':(b.execution_authority?'DotVerse may apply this mode automatically.':'Advisory only - live execution authority is locked.');
+  var authorityText=fibGate?authority:(b.authority_reason||authority);
+  return '<div class="today-v2-path"><div class="td-mini">Entry brain | '+esc(mode)+'</div><b class="'+cls+'">'+esc(mode)+' recommended</b><div class="today-v2-copy" style="margin-top:7px">'+esc(authorityText)+'</div>'
     + '<div class="today-v2-copy" style="margin-top:8px">'+esc(b.reason||'No detailed reason returned.')+'</div>'
     + (ev?'<div class="today-v2-copy" style="margin-top:8px">'+ev+'</div>':'')
     + (ruleText?'<div class="today-v2-copy" style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42)">'+esc(ruleText)+'</div>':'')
@@ -13981,6 +13989,8 @@ function _todayV2EffectiveReadiness(o, rd){
   var sym=_todayMt5SymbolStatus(o);
   if(sym&&!sym.ok) return {text:sym.text, cls:'wait'};
   var b=o&&o._entryBrain, mode=String((b&&b.recommended_mode)||'').toLowerCase();
+  var fibGate=_todayFibOwnsExecutionGate(o);
+  if(fibGate && (mode==='wait'||mode==='scale_in')) return rd;
   if(mode==='wait') return {text:'Brain says wait', cls:'wait'};
   if(mode==='scale_in' && !(b&&b.execution_authority===true)) return {text:'Scale-in advisory', cls:'wait'};
   return rd;

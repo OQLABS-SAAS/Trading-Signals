@@ -71,3 +71,22 @@ def test_today_order_payload_sends_fib_metadata_to_mt5_order():
     assert "fib_trigger" in payload
     assert "fib_move_sl_to" in payload
     assert re.search(r"tp2:\s*o\.tp2", payload)
+
+
+def test_today_fib_preset_is_entry_authority_over_generic_entry_brain_wait():
+    html = _html()
+
+    assert "function _todayFibOwnsExecutionGate" in html
+
+    readiness_start = html.index("function _todayV2EffectiveReadiness")
+    readiness = html[readiness_start : readiness_start + 1200]
+
+    assert "var fibGate=_todayFibOwnsExecutionGate(o)" in readiness
+    assert "if(fibGate && (mode==='wait'||mode==='scale_in')) return rd" in readiness
+    assert "if(mode==='wait') return {text:'Brain says wait', cls:'wait'}" in readiness
+
+    card_start = html.index("function _todayV2EntryBrainCard")
+    card = html[card_start : card_start + 2600]
+
+    assert "Fib 23.6 preset controls entry" in card
+    assert "Structure note" in card
