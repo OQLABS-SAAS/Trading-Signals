@@ -15332,6 +15332,23 @@ async function _runScanBase(groups, signal, onProgress, scanMode) {
     }
     if(universe && Array.isArray(universe.candidates || universe.results)){
       var _universeResults = universe.candidates || universe.results || [];
+      if(scanMode === 'today' && (universe.timed_out || universe.partial || universe.refresh_pending)){
+        window._dvSignalUniverseRun = universe;
+        return {
+          results: _universeResults,
+          errors: (universe.errors || []),
+          total: universe.request_count || groups.length || 0,
+          run: universe,
+          run_id: universe.run_id,
+          provider_health: universe.provider_health || null,
+          cache_hit: !!universe.cache_hit,
+          cache_age_seconds: universe.cache_age_seconds || 0,
+          refresh_pending: !!universe.refresh_pending,
+          timed_out: !!universe.timed_out,
+          partial: !!universe.partial,
+          ready: false
+        };
+      }
       if(universe.ready !== false && _universeResults.length > 0){
         window._dvSignalUniverseRun = universe;
         return {
@@ -15348,23 +15365,6 @@ async function _runScanBase(groups, signal, onProgress, scanMode) {
         };
       }
       (universe.errors || ['signal universe returned no ready candidates']).forEach(function(err){ _scanErrors.push(err); });
-      if(scanMode === 'today' && (universe.timed_out || universe.partial || universe.refresh_pending)){
-        window._dvSignalUniverseRun = universe;
-        return {
-          results: _universeResults,
-          errors: _scanErrors,
-          total: universe.request_count || groups.length || 0,
-          run: universe,
-          run_id: universe.run_id,
-          provider_health: universe.provider_health || null,
-          cache_hit: !!universe.cache_hit,
-          cache_age_seconds: universe.cache_age_seconds || 0,
-          refresh_pending: !!universe.refresh_pending,
-          timed_out: !!universe.timed_out,
-          partial: !!universe.partial,
-          ready: false
-        };
-      }
     }
   } catch(e) {
     if (e?.name === 'AbortError') throw e;

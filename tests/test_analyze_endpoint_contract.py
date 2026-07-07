@@ -457,6 +457,7 @@ def test_web_boot_does_not_start_rq_worker_sidecar_by_default():
     assert 'DOTVERSE_START_RQ_WORKER_IN_WEB:-0' in boot
     assert "RQ worker sidecar disabled for web fast-start" in boot
     assert "exec gunicorn app:app" in boot
+    assert 'WORKERS="${WEB_CONCURRENCY:-1}"' in boot
 
 
 def test_provider_first_preserves_monthly_interval_for_mtf_trend(monkeypatch):

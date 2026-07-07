@@ -134,6 +134,10 @@ def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
     assert "scanMode === 'today' ? _DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS : _DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
     assert "cache_hit: !!universe.cache_hit" in block
     assert "refresh_pending: !!universe.refresh_pending" in block
+    assert block.index("universe.timed_out || universe.partial || universe.refresh_pending") < block.index("universe.ready !== false && _universeResults.length > 0")
+    assert "timed_out: !!universe.timed_out" in block
+    assert "partial: !!universe.partial" in block
+    assert "ready: false" in block
     assert "dvFetchAbortableT('/api/signal-universe/run'" in block
     assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
     assert ": _DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
