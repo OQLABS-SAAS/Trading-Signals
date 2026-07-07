@@ -136,6 +136,7 @@ def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
     assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
     assert ": _DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
     assert "signal universe scan timed out; falling back to batched scanner" in block
+    assert "var CONCURRENCY = 10" in block
     assert "dvFetchAbortableT(req.url, req.opts, _DV_SCAN_BATCH_TIMEOUT_MS)" in block
     assert "scan request timed out" in block
 
@@ -166,6 +167,21 @@ def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
     assert "_runScanBase(groups, _todayAbortCtrl?_todayAbortCtrl.signal:null" in block
     assert "}, 'today')" in block
     assert "var noTitle=window._todayNoPlanTitle||''" in render
+
+
+def test_today_basket_selection_prioritizes_live_executable_candidates():
+    build = _extract_function("_todayBuildPlan")
+    select = _extract_function("_todaySelectPlan")
+    precheck = _extract_function("_todayPrecheckCandidateLiveReadiness")
+    rank = _extract_function("_todayExecutableRank")
+
+    assert "await _todayPrecheckCandidateLiveReadiness(ranked" in build
+    assert build.index("ranked = _todayApplyStrategyModeToOpps(ranked);") < build.index("await _todayPrecheckCandidateLiveReadiness(ranked")
+    assert "_todayExecutableRank(a)-_todayExecutableRank(b)" in select
+    assert "dvFetchAbortableT('/api/live-price?ticker='" in precheck
+    assert "o._live={price:live" in precheck
+    assert "if(o._liveChecked && _todayCanExecuteNow(o)) return 0" in rank
+    assert "if(rd&&rd.cls==='wait') return 3" in rank
 
 
 def test_today_goal_pace_uses_horizon_as_pacing_not_scan_filter():

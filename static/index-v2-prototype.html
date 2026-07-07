@@ -12486,6 +12486,8 @@ async function _todayBuildPlan(){
     return (_todayMt5BrokerExecutableScore(b)-_todayMt5BrokerExecutableScore(a)) || ((b._btVerified?1:0)-(a._btVerified?1:0)) || (b.qscore||0)-(a.qscore||0) || (b.conf||0)-(a.conf||0);
   });
   ranked = _todayBrokerRankedForPlan(ranked);
+  await _todayPrecheckCandidateLiveReadiness(ranked, _todayAbortCtrl?_todayAbortCtrl.signal:null);
+  if(_todayBuildTimedOut || !_todayIsCurrentRun()) return;
   var plan=_todaySelectPlan(ranked, c);
   if(!plan.length && !window._todayNoPlanReason){
     window._todayNoPlanTitle='No executable Today basket';
@@ -14371,6 +14373,39 @@ function _todayBrokerRankedForPlan(ranked){
   return ok;
 }
 
+async function _todayPrecheckCandidateLiveReadiness(candidates, signal){
+  var list=(candidates||[]).slice(0,30);
+  await Promise.all(list.map(async function(o){
+    if(!o || o._liveChecked) return;
+    o._liveChecked=true;
+    try{
+      var assetParam=o.asset==='equity'?'stock':(o.asset||'stock');
+      var res=await dvFetchAbortableT('/api/live-price?ticker='+encodeURIComponent(o.sym)+'&asset_type='+encodeURIComponent(assetParam), {signal:signal}, 5000);
+      if(!res||!res.price){ o._liveUnknown=true; return; }
+      var live=parseFloat(res.price)||0;
+      var st=_todayLiveStatus(o, live);
+      o._live={price:live, distPct:st.distPct, rr:st.liveRR, invalid:st.invalid, status:st.label};
+      o._liveReady=(!st.invalid && st.state==='good');
+    }catch(e){
+      o._liveUnknown=true;
+    }
+  }));
+  return candidates;
+}
+
+function _todayExecutableRank(o){
+  if(!o) return 9;
+  try{
+    if(o._liveChecked && _todayCanExecuteNow(o)) return 0;
+    if(o._liveUnknown) return 1;
+    if(!o._liveChecked) return 1;
+    var rd=_todayExecutionReadiness(o);
+    if(rd&&rd.cls==='invalid') return 4;
+    if(rd&&rd.cls==='wait') return 3;
+  }catch(e){}
+  return 2;
+}
+
 function _todaySelectPlan(ranked, cfg){
   // P3: compute goal pace and tighten when AHEAD (>= 100% of the period goal).
   // BEHIND never loosens below defaults — we never force junk trades to chase
@@ -14397,6 +14432,13 @@ function _todaySelectPlan(ranked, cfg){
     filtered = (ranked||[]).filter(function(o){ return (o.qscore||0) >= effectiveQfloor; })
                .concat((ranked||[]).filter(function(o){ return (o.qscore||0) < effectiveQfloor; }));
   }
+
+  filtered=(filtered||[]).slice().sort(function(a,b){
+    return _todayExecutableRank(a)-_todayExecutableRank(b)
+      || ((b._btVerified?1:0)-(a._btVerified?1:0))
+      || (b.qscore||0)-(a.qscore||0)
+      || (b.conf||0)-(a.conf||0);
+  });
 
   var plan=[], seen={}, goal=parseFloat(pace.todayTarget)||parseFloat(cfg.profitGoal)||0;
   var newRiskBudget=_todayNewRiskBudget(cfg.acct, cfg);
@@ -15251,9 +15293,9 @@ async function _runScanBase(groups, signal, onProgress, scanMode) {
   });
   // Live progress so the scan never looks frozen (the #1 user-journey pain).
   if(typeof onProgress==='function'){ try{ onProgress(0, _requests.length, 0); }catch(_e){} }
-  // Process requests in batches of 6 (max concurrent)
+  // Process requests in batches of 10 (paid Railway has enough headroom; keep it bounded for providers)
   var _results = [];
-  var CONCURRENCY = 6;
+  var CONCURRENCY = 10;
   for (var i = 0; i < _requests.length; i += CONCURRENCY) {
     var batch = _requests.slice(i, i + CONCURRENCY);
     var batchResults = await Promise.allSettled(batch.map(function(req){

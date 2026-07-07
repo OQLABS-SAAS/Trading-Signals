@@ -416,7 +416,7 @@ def test_signal_universe_run_keeps_group_timeframe_scans_concurrent():
     helper = source[helper_start:helper_end]
 
     assert "ThreadPoolExecutor(max_workers=max_workers)" in helper
-    assert "max_workers = min(6, len(scan_requests))" in helper
+    assert "max_workers = min(12, len(scan_requests))" in helper
     assert "as_completed(futures, timeout=scan_budget_seconds)" in helper
     assert "pool.shutdown(wait=not timed_out, cancel_futures=timed_out)" in helper
 

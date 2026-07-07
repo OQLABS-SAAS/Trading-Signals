@@ -15420,7 +15420,7 @@ def _collect_signal_universe_candidates(scan_requests, scan_budget_seconds=None)
         return candidates, errors, timed_out
     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeoutError
 
-    max_workers = min(6, len(scan_requests))
+    max_workers = min(12, len(scan_requests))
     pool = ThreadPoolExecutor(max_workers=max_workers)
     futures = [pool.submit(_run_scan_request, scan_request) for scan_request in scan_requests]
     try:
