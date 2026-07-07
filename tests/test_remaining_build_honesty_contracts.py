@@ -121,10 +121,11 @@ def test_today_build_plan_scans_all_timeframes_before_goal_selection():
 def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
     block = _extract_function("_runScanBase")
     assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS = 12000" in HTML
-    assert "_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS = 45000" in HTML
+    assert "_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS = 240000" in HTML
     assert "_DV_SCAN_BATCH_TIMEOUT_MS = 18000" in HTML
+    assert "_DV_TODAY_SCAN_BATCH_TIMEOUT_MS = 45000" in HTML
     assert _html_const_int("_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS") > _html_const_int("_DV_SIGNAL_UNIVERSE_TIMEOUT_MS")
-    assert _html_const_int("_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS") <= 45000
+    assert _html_const_int("_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS") >= 180000
     assert "function dvFetchAbortableT" in HTML
     assert "ctrl.abort()" in HTML
     assert "onProgress(0, _expectedTotal, 0)" in block
@@ -138,14 +139,15 @@ def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
     assert ": _DV_SIGNAL_UNIVERSE_TIMEOUT_MS" in block
     assert "signal universe scan timed out; falling back to batched scanner" in block
     assert "var CONCURRENCY = 10" in block
-    assert "dvFetchAbortableT(req.url, req.opts, _DV_SCAN_BATCH_TIMEOUT_MS)" in block
+    assert "var reqTimeout = scanMode === 'today' ? _DV_TODAY_SCAN_BATCH_TIMEOUT_MS : _DV_SCAN_BATCH_TIMEOUT_MS" in block
+    assert "dvFetchAbortableT(req.url, req.opts, reqTimeout)" in block
     assert "scan request timed out" in block
 
 
 def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
     block = _extract_function("_todayBuildPlan")
     render = _extract_function("_todayRenderPlan")
-    assert "_DV_TODAY_BUILD_TIMEOUT_MS = 270000" in HTML
+    assert "_DV_TODAY_BUILD_TIMEOUT_MS = 420000" in HTML
     assert "_DV_TODAY_PREFLIGHT_TIMEOUT_MS = 3500" in HTML
     assert _html_const_int("_DV_TODAY_BUILD_TIMEOUT_MS") - _html_const_int("_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS") >= 90000
     assert "window._todayBuildRunSeq=(window._todayBuildRunSeq||0)+1" in block
