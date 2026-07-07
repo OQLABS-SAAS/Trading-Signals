@@ -187,7 +187,8 @@ def test_today_basket_selection_prioritizes_live_executable_candidates():
     assert "dvFetchAbortableT('/api/live-price?ticker='" in precheck
     assert "o._live={price:live" in precheck
     assert "_todayV2LoadEntryBrain(o)" in brain_precheck
-    assert "list.length>=12" in brain_precheck
+    assert "list.length>=18" in brain_precheck
+    assert "if(!(o.sym&&o.sig&&o.entry&&o.sl&&o.tp)) return" in brain_precheck
     assert "_todayCanExecuteNow(o)" in totals
     assert "if(o._liveChecked && _todayCanExecuteNow(o)) return 0" in rank
     assert "if(rd&&rd.cls==='wait') return 3" in rank
