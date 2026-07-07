@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# DotVerse boot — starts the RQ worker as a background process and gunicorn as
-# the foreground (PID 1) process. Both inherit the web service's env vars
-# (REDIS_URL, DATABASE_URL, DEEPSEEK_API_KEY, etc.) automatically.
+# DotVerse web boot — starts gunicorn as the foreground (PID 1) process.
 #
 # Why a separate process for the worker (not a thread inside gunicorn):
 #   - RQ's Worker.work() forks child processes for each job; fork() inside a
@@ -24,15 +22,16 @@ echo "[boot] REDIS_URL configured: $([ -n "$REDIS_URL" ] && echo yes || echo no)
 echo "[boot] DATABASE_URL configured: $([ -n "$DATABASE_URL" ] && echo yes || echo no)"
 echo "[boot] DEEPSEEK_API_KEY configured: $([ -n "$DEEPSEEK_API_KEY" ] && echo yes || echo no)"
 
-# Start RQ worker in the background so jobs (verdict / backtest) actually run.
-echo "[boot] Launching RQ worker process"
-python run_worker.py &
-WORKER_PID=$!
+if [ "${DOTVERSE_START_RQ_WORKER_IN_WEB:-0}" = "1" ]; then
+  echo "[boot] Launching RQ worker sidecar because DOTVERSE_START_RQ_WORKER_IN_WEB=1"
+  python run_worker.py &
+  WORKER_PID=$!
+  trap 'echo "[boot] Shutdown requested — stopping worker (PID $WORKER_PID)"; kill "$WORKER_PID" 2>/dev/null || true; exit 0' SIGTERM SIGINT
+else
+  echo "[boot] RQ worker sidecar disabled for web fast-start"
+fi
 
-# If gunicorn dies or receives SIGTERM, take the worker down with it.
-trap 'echo "[boot] Shutdown requested — stopping worker (PID $WORKER_PID)"; kill "$WORKER_PID" 2>/dev/null || true; exit 0' SIGTERM SIGINT
-
-echo "[boot] Worker PID $WORKER_PID — starting gunicorn"
+echo "[boot] starting gunicorn"
 
 # exec replaces this shell with gunicorn so signals route correctly.
 exec gunicorn app:app \

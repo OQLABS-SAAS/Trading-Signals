@@ -8079,8 +8079,13 @@ def _job_check_signal_expiry():
 scheduler.add_job(_job_check_signal_expiry, "interval", minutes=30,
                   id="signal_expiry_check", max_instances=1, coalesce=True)
 
-scheduler.start()
-atexit.register(lambda: scheduler.shutdown(wait=False))
+_DOTVERSE_SCHEDULER_ENABLED = (
+    os.environ.get("WORKER_MODE") == "1"
+    or os.environ.get("DOTVERSE_ENABLE_SCHEDULER", "").strip().lower() in ("1", "true", "yes", "on")
+)
+if _DOTVERSE_SCHEDULER_ENABLED:
+    scheduler.start()
+    atexit.register(lambda: scheduler.shutdown(wait=False))
 
 # ─── FOREX AUTO-DETECTION ─────────────────────────────────────
 _CURRENCIES = {

@@ -445,6 +445,20 @@ def test_today_signal_universe_prioritizes_fast_diverse_requests():
     assert dvapp._signal_universe_scan_budget({"scan_mode": "today", "max_seconds": 90}) == 30.0
 
 
+def test_web_import_does_not_start_background_scheduler():
+    assert dvapp._DOTVERSE_SCHEDULER_ENABLED is False
+    assert dvapp.scheduler.running is False
+
+
+def test_web_boot_does_not_start_rq_worker_sidecar_by_default():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "start.sh"), encoding="utf-8") as fh:
+        boot = fh.read()
+    assert 'DOTVERSE_START_RQ_WORKER_IN_WEB:-0' in boot
+    assert "RQ worker sidecar disabled for web fast-start" in boot
+    assert "exec gunicorn app:app" in boot
+
+
 def test_provider_first_preserves_monthly_interval_for_mtf_trend(monkeypatch):
     calls = []
 
