@@ -121,9 +121,10 @@ def test_today_build_plan_scans_all_timeframes_before_goal_selection():
 def test_shared_scan_engine_cannot_leave_today_spinner_waiting_forever():
     block = _extract_function("_runScanBase")
     assert "_DV_SIGNAL_UNIVERSE_TIMEOUT_MS = 12000" in HTML
-    assert "_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS = 180000" in HTML
+    assert "_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS = 45000" in HTML
     assert "_DV_SCAN_BATCH_TIMEOUT_MS = 18000" in HTML
     assert _html_const_int("_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS") > _html_const_int("_DV_SIGNAL_UNIVERSE_TIMEOUT_MS")
+    assert _html_const_int("_DV_TODAY_SIGNAL_UNIVERSE_TIMEOUT_MS") <= 45000
     assert "function dvFetchAbortableT" in HTML
     assert "ctrl.abort()" in HTML
     assert "onProgress(0, _expectedTotal, 0)" in block
@@ -157,6 +158,7 @@ def test_today_build_plan_cannot_leave_scan_spinner_waiting_forever():
     assert "_todayAbortCtrl.abort()" in block
     assert "Today full scan timed out before it could finish" in block
     assert "Scanning the full market map for the best setups" in block
+    assert "Preparing full scan across" in block
     assert "Latest full scan" in block
     assert "refreshing in background" in block
     assert "Full scan complete" in block
