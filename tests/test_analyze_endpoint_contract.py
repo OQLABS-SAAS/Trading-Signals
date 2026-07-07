@@ -441,7 +441,7 @@ def test_today_signal_universe_prioritizes_fast_diverse_requests():
         ("crypto", "30m"),
     ]
     assert dvapp._signal_universe_scan_budget({"scan_mode": "standard"}) is None
-    assert dvapp._signal_universe_scan_budget({"scan_mode": "today"}) is None
+    assert dvapp._signal_universe_scan_budget({"scan_mode": "today"}) == 30.0
     assert dvapp._signal_universe_scan_budget({"scan_mode": "today", "max_seconds": 90}) == 30.0
 
 

@@ -15407,6 +15407,8 @@ def _signal_universe_scan_budget(body):
         budget = float(raw_budget)
     except (TypeError, ValueError):
         budget = 0.0
+    if budget <= 0 and str(payload.get("scan_mode") or "").lower() == "today":
+        budget = float(os.environ.get("TODAY_SIGNAL_UNIVERSE_REQUEST_BUDGET_SECONDS", "30"))
     if budget <= 0:
         return None
     return max(1.0, min(30.0, budget))
@@ -15646,6 +15648,8 @@ def signal_universe_run():
         )
         if cache_signature and response.get("ready") and not response.get("timed_out"):
             _signal_universe_cache_set(cache_signature, response)
+        elif cache_signature and response.get("timed_out"):
+            response["refresh_pending"] = _signal_universe_maybe_refresh_cache(cache_signature, body, scan_requests, scan_scope)
         return jsonify(response)
     except Exception as e:
         return jsonify({"ready": False, "error": str(e)}), 500
