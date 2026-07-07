@@ -89,6 +89,18 @@ def test_dismiss_sets_sessionStorage_flag():
     assert "sessionStorage" in block
 
 
+def test_briefing_show_and_dismiss_clear_duplicate_blocking_panels():
+    """Repeated briefing calls must not leave duplicate overlays blocking Today."""
+    show_start = HTML.index("function _dvShowBriefing(")
+    show_block = HTML[show_start:show_start + 1200]
+    dismiss_start = HTML.index("function _dvDismissBriefing(")
+    dismiss_block = HTML[dismiss_start:dismiss_start + 700]
+
+    assert "querySelectorAll('[data-dv-briefing-panel=\"1\"]')" in show_block
+    assert "querySelectorAll('[data-dv-briefing-panel=\"1\"]')" in dismiss_block
+    assert "forEach(function(p)" in dismiss_block
+
+
 def test_login_clears_seen_flag():
     """goDash must clear the sessionStorage briefing-seen flag on every login."""
     start = HTML.index("function goDash(")
