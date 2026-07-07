@@ -12487,6 +12487,7 @@ async function _todayBuildPlan(){
   });
   ranked = _todayBrokerRankedForPlan(ranked);
   await _todayPrecheckCandidateLiveReadiness(ranked, _todayAbortCtrl?_todayAbortCtrl.signal:null);
+  await _todayPrecheckCandidateEntryBrain(ranked, c, _todayAbortCtrl?_todayAbortCtrl.signal:null);
   if(_todayBuildTimedOut || !_todayIsCurrentRun()) return;
   var plan=_todaySelectPlan(ranked, c);
   if(!plan.length && !window._todayNoPlanReason){
@@ -14393,6 +14394,27 @@ async function _todayPrecheckCandidateLiveReadiness(candidates, signal){
   return candidates;
 }
 
+async function _todayPrecheckCandidateEntryBrain(candidates, cfg, signal){
+  var seen={}, list=[];
+  (candidates||[]).forEach(function(o){
+    if(!o || list.length>=12) return;
+    if(signal&&signal.aborted) return;
+    if(o._todayBrokerFiltered) return;
+    var key=(_todayMt5SymbolForTrade(o)||o.sym||'').toUpperCase();
+    if(!key || seen[key]) return;
+    seen[key]=1;
+    list.push(o);
+  });
+  await Promise.all(list.map(async function(o){
+    if(signal&&signal.aborted) return;
+    try{
+      if(!o._size) _todayAllocate([o], (cfg&&cfg.acct)||0, (cfg&&cfg.riskPct)||1);
+      await _todayV2LoadEntryBrain(o);
+    }catch(e){}
+  }));
+  return candidates;
+}
+
 function _todayExecutableRank(o){
   if(!o) return 9;
   try{
@@ -14404,6 +14426,23 @@ function _todayExecutableRank(o){
     if(rd&&rd.cls==='wait') return 3;
   }catch(e){}
   return 2;
+}
+
+function _todayExecutablePlanTotals(plan, acct){
+  var out={profit:0,risk:0,margin:0,notional:0,tradeable:0};
+  (plan||[]).forEach(function(o){
+    var s=o&&o._size;
+    if(!s||!s.tradeable) return;
+    if(typeof _todayCanExecuteNow==='function' && !_todayCanExecuteNow(o)) return;
+    var lt=_todayLadderTotals(o);
+    out.profit+=lt.profit||s.netTP1||0;
+    out.risk+=lt.risk||s.netLoss||0;
+    out.margin+=lt.margin||s.marginReq||0;
+    out.notional+=lt.notional||s.notional||0;
+    out.tradeable++;
+  });
+  out.riskPct=acct>0?(out.risk/acct*100):0;
+  return out;
 }
 
 function _todaySelectPlan(ranked, cfg){
@@ -14449,7 +14488,7 @@ function _todaySelectPlan(ranked, cfg){
     if(plan.length>=max) break;
     plan.push(o); seen[key]=1;
     _todayAllocate(plan, cfg.acct, newRiskBudget||0.05);
-    if(goal>0 && _todayPlanTotals(plan,cfg.acct).profit>=goal && plan.length>=2) break;
+    if(goal>0 && _todayExecutablePlanTotals(plan,cfg.acct).profit>=goal && plan.length>=2) break;
   }
   _todayAllocate(plan, cfg.acct, newRiskBudget||0.05);
   return plan;

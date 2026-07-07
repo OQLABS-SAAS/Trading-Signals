@@ -173,13 +173,22 @@ def test_today_basket_selection_prioritizes_live_executable_candidates():
     build = _extract_function("_todayBuildPlan")
     select = _extract_function("_todaySelectPlan")
     precheck = _extract_function("_todayPrecheckCandidateLiveReadiness")
+    brain_precheck = _extract_function("_todayPrecheckCandidateEntryBrain")
+    totals = _extract_function("_todayExecutablePlanTotals")
     rank = _extract_function("_todayExecutableRank")
 
     assert "await _todayPrecheckCandidateLiveReadiness(ranked" in build
+    assert "await _todayPrecheckCandidateEntryBrain(ranked" in build
     assert build.index("ranked = _todayApplyStrategyModeToOpps(ranked);") < build.index("await _todayPrecheckCandidateLiveReadiness(ranked")
+    assert build.index("await _todayPrecheckCandidateLiveReadiness(ranked") < build.index("await _todayPrecheckCandidateEntryBrain(ranked")
+    assert build.index("await _todayPrecheckCandidateEntryBrain(ranked") < build.index("var plan=_todaySelectPlan(ranked, c);")
     assert "_todayExecutableRank(a)-_todayExecutableRank(b)" in select
+    assert "_todayExecutablePlanTotals(plan,cfg.acct).profit>=goal" in select
     assert "dvFetchAbortableT('/api/live-price?ticker='" in precheck
     assert "o._live={price:live" in precheck
+    assert "_todayV2LoadEntryBrain(o)" in brain_precheck
+    assert "list.length>=12" in brain_precheck
+    assert "_todayCanExecuteNow(o)" in totals
     assert "if(o._liveChecked && _todayCanExecuteNow(o)) return 0" in rank
     assert "if(rd&&rd.cls==='wait') return 3" in rank
 
