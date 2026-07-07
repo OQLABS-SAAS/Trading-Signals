@@ -15462,6 +15462,10 @@ def _signal_universe_cache_key(signature):
     return f"signal_universe:today:latest:{signature}"
 
 
+def _signal_universe_cache_clone(payload):
+    return json.loads(json.dumps(_sanitize(payload), default=str))
+
+
 def _signal_universe_cache_get(signature):
     key = _signal_universe_cache_key(signature)
     now = time.time()
@@ -15478,7 +15482,7 @@ def _signal_universe_cache_get(signature):
     with _signal_universe_cache_lock:
         entry = _signal_universe_cache.get(key)
         if entry and now - entry.get("ts", 0) <= _SIGNAL_UNIVERSE_CACHE_STALE_SECONDS:
-            return json.loads(json.dumps(entry["payload"])), now - entry["ts"]
+            return _signal_universe_cache_clone(entry["payload"]), now - entry["ts"]
         if entry:
             _signal_universe_cache.pop(key, None)
     return None, None
@@ -15487,7 +15491,7 @@ def _signal_universe_cache_get(signature):
 def _signal_universe_cache_set(signature, payload):
     key = _signal_universe_cache_key(signature)
     now = time.time()
-    cached_payload = json.loads(json.dumps(payload))
+    cached_payload = _signal_universe_cache_clone(payload)
     cached_payload["cache_stored_at"] = now
     cached_payload["cache_signature"] = signature
     cached_payload["cache_hit"] = False
@@ -15501,7 +15505,7 @@ def _signal_universe_cache_set(signature, payload):
 
 
 def _signal_universe_mark_cached(payload, age_seconds, refresh_pending=False):
-    out = json.loads(json.dumps(payload))
+    out = _signal_universe_cache_clone(payload)
     out["cache_hit"] = True
     out["cache_age_seconds"] = round(float(age_seconds or 0), 1)
     out["refresh_pending"] = bool(refresh_pending)
@@ -15617,9 +15621,9 @@ def signal_universe_run():
                 "tickers": scan_request.tickers,
             })
         is_today_scan = str(body.get("scan_mode") or "").lower() == "today"
-        use_today_cache = is_today_scan and body.get("force_refresh") is not True
-        cache_signature = _signal_universe_cache_signature(scan_requests, body) if use_today_cache else None
-        if cache_signature:
+        skip_cache_read = body.get("force_refresh") is True
+        cache_signature = _signal_universe_cache_signature(scan_requests, body) if is_today_scan else None
+        if cache_signature and not skip_cache_read:
             cached_payload, cache_age = _signal_universe_cache_get(cache_signature)
             if cached_payload:
                 refresh_pending = False

@@ -365,9 +365,14 @@ def test_today_signal_universe_reuses_latest_complete_scan_cache(monkeypatch):
     payload = {
         "scan_mode": "today",
         "groups": [{"tickers": ["eurusd"], "asset_type": "fx", "tfs": ["1h"]}],
+        "force_refresh": True,
     }
     first = client.post("/api/signal-universe/run", json=payload)
-    second = client.post("/api/signal-universe/run", json=payload)
+    second_payload = {
+        "scan_mode": "today",
+        "groups": [{"tickers": ["eurusd"], "asset_type": "fx", "tfs": ["1h"]}],
+    }
+    second = client.post("/api/signal-universe/run", json=second_payload)
 
     assert first.status_code == 200, first.get_data(as_text=True)
     assert second.status_code == 200, second.get_data(as_text=True)
@@ -379,6 +384,25 @@ def test_today_signal_universe_reuses_latest_complete_scan_cache(monkeypatch):
     assert second_data["cache_hit"] is True
     assert second_data["results"] == first_data["results"]
     assert calls["provider"] == 1
+
+
+def test_signal_universe_cache_serializes_provider_payloads_with_timestamps(monkeypatch):
+    monkeypatch.setattr(dvapp, "_redis_client", None)
+    with dvapp._signal_universe_cache_lock:
+        dvapp._signal_universe_cache.clear()
+        dvapp._signal_universe_refreshing.clear()
+
+    payload = {
+        "ready": True,
+        "results": [{"symbol": "EURUSD", "data_timestamp_utc": pd.Timestamp("2026-07-07T10:00:00Z")}],
+        "candidates": [{"symbol": "EURUSD", "data_timestamp_utc": pd.Timestamp("2026-07-07T10:00:00Z")}],
+    }
+    dvapp._signal_universe_cache_set("timestamp-test", payload)
+    cached, age = dvapp._signal_universe_cache_get("timestamp-test")
+
+    assert age is not None
+    assert cached["ready"] is True
+    assert isinstance(cached["results"][0]["data_timestamp_utc"], str)
 
 
 def test_signal_universe_run_keeps_group_timeframe_scans_concurrent():
