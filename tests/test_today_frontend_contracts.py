@@ -36,12 +36,14 @@ def test_today_v2_exposes_multiladder_presets_and_leg_money():
     source = _source()
 
     assert "function _todayV2SetLadderMode(idx, mode)" in source
-    assert "Ladder preset" in source
+    assert "Ladder preset intelligence" in source
     assert "function presetBtn(id,label,copy)" in source
     assert "presetBtn('conservative','Conservative'" in source
     assert "presetBtn('beginner','Beginner'" in source
     assert "presetBtn('aggressive','Aggressive'" in source
-    assert "Preset controls are inactive" in source
+    assert "DotVerse fit check:" in source
+    assert "recommended" in source
+    assert "Conservative banks earliest; Beginner balances partials; Aggressive keeps a runner" in source
     assert "Each row below is one MT5 order." in source
     assert "MT5 volume is lots, units, contracts, or shares; cash in is margin; controls is position value." in source
     assert "Every leg below has its own cash in, controlled value" not in source
@@ -61,21 +63,23 @@ def test_today_identified_trade_entries_show_execution_choices_including_scale_i
     assert "Single order" in source
     assert "Scale-out plan" in source
     assert "function _todayV2ScalePlanCard" in source
-    assert "Trade ladder &amp; scale plan" in source
-    assert "Scale-out suggested" in source
-    assert "Scale-in watch suggested" in source
-    assert "Scale-in is a watch plan only" in source
-    assert "No live add-on order is sent now" in source
-    assert "Next action: use Single, Scale-out plan, or Scale-in Scout below" in source
+    assert "function _todayV2LadderPresetAdvice" in source
+    assert "Recommended execution" in source
+    assert "Aggressive scale-out" in source
+    assert "Conservative scale-out" in source
+    assert "Beginner scale-out" in source
+    assert "Scale-in Scout" in source
+    assert "no live add-on order is sent now" in source
+    assert "Next action: follow the recommendation" in source
     assert "_todayV2ScalePlanCard(o, legs, exec, money2, pxFmt)" in source
 
-    scale_plan_start = source.index("function _todayV2ScalePlanCard")
-    scale_plan = source[scale_plan_start : scale_plan_start + 3600]
-    assert "Use scale-out" in scale_plan
+    scale_plan_start = source.index("function _todayV2LadderPresetAdvice")
+    scale_plan = source[scale_plan_start : scale_plan_start + 5200]
+    assert "Scale-out = multiple smaller MT5 orders from the same entry price" in scale_plan
     assert "broker minimum lot" in scale_plan
-    assert "same entry" in scale_plan
-    assert "later add-on/retest entry" in scale_plan
-    assert "No live add-on order is sent now" in scale_plan
+    assert "later separate entry after retest/confirmation" in scale_plan
+    assert "Scout mode watches; it does not place a second order now" in scale_plan
+    assert "Higher hold risk" in scale_plan
 
     scale_in_start = source.index("function _todayV2ScaleInScout(idx)")
     scale_in = source[scale_in_start : scale_in_start + 900]

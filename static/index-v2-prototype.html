@@ -14033,34 +14033,51 @@ function _todayV2EntryBrainCard(o){
     + (ruleText?'<div class="today-v2-copy" style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42)">'+esc(ruleText)+'</div>':'')
     + '</div>';
 }
+function _todayV2LadderPresetAdvice(o, exec){
+  o=o||{}; exec=exec||{};
+  var b=o._entryBrain||{}, mode=String(b.recommended_mode||'single').toLowerCase();
+  var rr=parseFloat(o.rr||o.rr1||0), q=(typeof _todayQualityScore==='function'?_todayQualityScore(o):0)||0;
+  var hasRunner=!!(o.tp3||o.tp2||String((o._ladderMode||'')).toLowerCase()==='aggressive');
+  if(exec.collapsed) return {id:'single', label:'Single order', why:'Split orders would fall below broker minimum lot at this risk/account size.'};
+  if(mode==='wait') return {id:'wait', label:'Wait / no ladder', why:'Entry brain says timing is not clean enough to add exposure now.'};
+  if(mode==='scale_in' && b.execution_authority!==true) return {id:'scout', label:'Scale-in Scout', why:'Good idea may need a later retest/add-on entry. Scout it; do not send an add-on order now.'};
+  if(mode==='scale_out' && b.execution_authority===true){
+    if(rr>=2.4 && hasRunner) return {id:'aggressive', label:'Aggressive scale-out', why:'Strong reward path. Take partials and leave a smaller runner only after review.'};
+    if(rr<1.8 || q<60) return {id:'conservative', label:'Conservative scale-out', why:'Edge is usable but not clean enough for a big runner. Bank more at TP1.'};
+    return {id:'beginner', label:'Beginner scale-out', why:'Balanced split: take some profit early, keep some exposure for TP2/TP3.'};
+  }
+  if(exec.active) return {id:o._ladderMode||'beginner', label:'Scale-out selected', why:'You selected same-entry split orders. Review each assigned exit before sending.'};
+  return {id:'single', label:'Single order', why:'No strong reason to split this entry yet. One entry, one stop, one main target is cleaner.'};
+}
 function _todayV2ScalePlanCard(o, legs, exec, money2, pxFmt){
   var esc=function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
   o=o||{}; legs=legs||[]; exec=exec||{};
   var b=o._entryBrain||{}, mode=String(b.recommended_mode||'single').toLowerCase();
   var authority=b.execution_authority===true;
   var actualScale=!!exec.active, collapsed=!!exec.collapsed;
+  var advice=_todayV2LadderPresetAdvice(o, exec);
+  var sameEntry='Scale-out = multiple smaller MT5 orders from the same entry price, each with its own assigned exit.';
   var scaleOutText=actualScale
-    ? ('Use scale-out: '+legs.length+' smaller MT5 order'+(legs.length===1?'':'s')+' from the same entry, each with its own assigned exit.')
-    : (collapsed?'Do not split yet: broker minimum lot makes the ladder too small at this risk/account size.':'Single order is currently cleaner. You can still switch on scale-out below before review.');
+    ? ('Use scale-out: '+legs.length+' same-entry MT5 order'+(legs.length===1?'':'s')+'. '+sameEntry)
+    : (collapsed?'Do not split yet: broker minimum lot makes the ladder too small at this risk/account size.':(advice.id==='single'?'Single order is currently cleaner. Split only if you want partial exits.':'Scale-out is available below if you want partial exits.'));
   var scaleInText=(mode==='scale_in'||o._scaleInScoutRequested)
-    ? 'Scale-in is a watch plan only: wait for a later add-on/retest entry. No live add-on order is sent now.'
+    ? 'Scale-in = a later separate entry after retest/confirmation. Scout/watch only here; no live add-on order is sent now.'
     : 'No scale-in add-on is suggested yet. If structure improves, use Scale-in Scout to watch for a later entry.';
-  var verdict=mode==='scale_out'&&authority?'Scale-out suggested'
-    : mode==='scale_in'?'Scale-in watch suggested'
-    : mode==='wait'?'Wait before adding exposure'
-    : actualScale?'Scale-out selected'
-    : 'Single order suggested';
-  var tone=mode==='wait'?'gold':(actualScale||authority?'green':'blue');
+  var verdict=advice.label;
+  var tone=(advice.id==='wait'||advice.id==='scout')?'gold':((actualScale||authority)?'green':'blue');
+  var guard=advice.id==='aggressive'?'Higher hold risk: only use if you accept runner give-back.':advice.id==='conservative'?'Defensive: banks more at TP1, less runner risk.':advice.id==='beginner'?'Balanced default: easiest split to manage.':advice.id==='single'?'Simplest execution: do not confuse this with scaling into multiple future entries.':advice.id==='scout'?'Scout mode watches; it does not place a second order now.':'Do not add exposure until the setup improves.';
   var legRows=actualScale?legs.map(function(l){
     var tgt=l.trailing?'trail runner':((l.target||'tp1').toUpperCase()+' '+(l.tp?pxFmt(l.tp):''));
-    return '<div class="today-v2-copy" style="display:flex;justify-content:space-between;gap:10px;border-top:1px solid rgba(237,232,216,.06);padding-top:5px;margin-top:5px"><span>Order '+(l.idx||1)+' · '+Math.round((l.share||0)*100)+'% · '+esc(tgt)+'</span><span class="red">'+money2(-(l.risk||0))+'</span><span class="green">+'+money2(l.profit||0)+'</span></div>';
+    return '<div class="today-v2-copy" style="display:grid;grid-template-columns:1fr auto auto;gap:10px;border-top:1px solid rgba(237,232,216,.06);padding-top:5px;margin-top:5px"><span>Order '+(l.idx||1)+' · '+Math.round((l.share||0)*100)+'% · '+esc(tgt)+'</span><span class="red">'+money2(-(l.risk||0))+'</span><span class="green">+'+money2(l.profit||0)+'</span></div>';
   }).join(''):'';
   return '<div class="today-v2-path" style="border-color:rgba(126,183,255,.22);background:rgba(126,183,255,.045)">'
-    + '<div class="td-mini">Trade ladder &amp; scale plan</div><b class="'+tone+'">'+esc(verdict)+'</b>'
+    + '<div class="td-mini">Recommended execution</div><b class="'+tone+'">'+esc(verdict)+'</b>'
+    + '<div class="today-v2-copy" style="margin-top:8px"><strong>Why:</strong> '+esc(advice.why)+'</div>'
     + '<div class="today-v2-copy" style="margin-top:8px"><strong>Scale-out:</strong> '+esc(scaleOutText)+'</div>'
     + legRows
-    + '<div class="today-v2-copy" style="margin-top:8px"><strong>Scale-in:</strong> '+esc(scaleInText)+'</div>'
-    + '<div class="today-v2-copy" style="margin-top:8px;color:rgba(201,168,76,.82)">Next action: use Single, Scale-out plan, or Scale-in Scout below, then review before any MT5 order is sent.</div>'
+    + '<div class="today-v2-copy" style="margin-top:8px"><strong>Scale-in Scout:</strong> '+esc(scaleInText)+'</div>'
+    + '<div class="today-v2-copy" style="margin-top:8px"><strong>Guardrail:</strong> '+esc(guard)+'</div>'
+    + '<div class="today-v2-copy" style="margin-top:8px;color:rgba(201,168,76,.82)">Next action: follow the recommendation, or manually choose Single / Scale-out / Scale-in Scout below, then review before any MT5 order is sent.</div>'
   + '</div>';
 }
 function _todayV2EffectiveReadiness(o, rd){
@@ -15297,13 +15314,18 @@ function _todayRenderPlan(){
       : '<div class="today-v2-single"><div class="td-mini">'+(exec.collapsed?'Scale-out unavailable':'Single order preview')+'</div><b>'+o.sym+' '+o.sig+' · 1 MT5 order · '+money2(-s.netLoss)+' risk · +'+money2(s.netTP1)+' planned profit</b><div class="today-v2-copy" style="margin-top:7px">'+(exec.collapsed?'The selected risk creates parts below broker minimum lot size, so DotVerse keeps the trade as one order instead of pretending it can split it.':'Simple execution with live monitor, spread guard, news guard, and breakeven still available.')+'</div></div>';
     var preset=o._ladderMode||((window._todayCfg||{}).ladderMode)||'beginner';
     var presetDisabled=!scale || exec.collapsed;
+    var presetAdvice=_todayV2LadderPresetAdvice(o, exec);
     function presetBtn(id,label,copy){
-      return '<button class="today-v2-choice '+(preset===id?'on':'')+'" '+(presetDisabled?'disabled ':'onclick="_todayV2SetLadderMode('+idx+',\''+id+'\')"')+'><b>'+label+'</b><span>'+copy+'</span></button>';
+      var rec=presetAdvice.id===id;
+      return '<button class="today-v2-choice '+(preset===id?'on':'')+' '+(rec?'recommended':'')+'" '+(presetDisabled?'disabled ':'onclick="_todayV2SetLadderMode('+idx+',\''+id+'\')"')+'><b>'+label+(rec?' · recommended':'')+'</b><span>'+copy+'</span></button>';
     }
-    var presetControls='<div class="panelTitle" style="margin:14px 0 8px">Ladder preset</div><div class="today-v2-copy">'+(presetDisabled?'Preset controls are inactive because this setup is going as one MT5 order at the current account/risk size. Raise account/risk or pick a larger setup before split presets matter.':'Choose how this setup splits across MT5 orders. The selected preset updates leg math and automation recommendations before review.')+'</div><div class="today-v2-preset">'
-      + presetBtn('conservative','Conservative','60 / 25 / 15. More weight on TP1.')
-      + presetBtn('beginner','Beginner','50 / 30 / 20. Balanced default.')
-      + presetBtn('aggressive','Aggressive','Includes a trail runner. Higher hold risk.')
+    var presetHint=presetDisabled
+      ? (exec.collapsed?'DotVerse recommends one MT5 order because the split would fall below broker minimum lot.':'Single order is recommended unless you manually switch on scale-out.')
+      : ('DotVerse fit check: '+presetAdvice.label+' — '+presetAdvice.why+' Conservative banks earliest; Beginner balances partials; Aggressive keeps a runner and carries more give-back risk.');
+    var presetControls='<div class="panelTitle" style="margin:14px 0 8px">Ladder preset intelligence</div><div class="today-v2-copy">'+presetHint+'</div><div class="today-v2-preset">'
+      + presetBtn('conservative','Conservative','Best when edge is usable but not clean. Bank more at TP1.')
+      + presetBtn('beginner','Beginner','Balanced default: partial profit early, still leaves TP2/TP3 exposure.')
+      + presetBtn('aggressive','Aggressive','Only for strong reward paths. Adds runner risk and more give-back.')
       + '</div>';
     var canExecuteNow=(typeof _todayCanExecuteNow==='function')?_todayCanExecuteNow(o):true;
     var placeDisabled=!_todayCanPlaceMt5() || !canExecuteNow;
