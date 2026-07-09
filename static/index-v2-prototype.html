@@ -13661,6 +13661,40 @@ function _todayMt5Lots(o){
   var u=(o._size&&o._size.units)||0, cs=_todayContractSize(o)||1;
   return u/cs;
 }
+function _todayLegOrderPayload(o, leg){
+  leg=leg||{};
+  var tv=(o.bullCount||0)+(o.bearCount||0);
+  var assignedTp=leg.trailing?null:(leg.tp||o.tp||null);
+  return {
+    ticker:_todayMt5SymbolForTrade(o)||o.sym,
+    asset_type:_normalizeAssetType(o.asset),
+    order_type:'Market',
+    lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)),
+    direction:(o.sig||'BUY').toUpperCase(),
+    entry:o.entry,
+    sl:o.sl,
+    tp1:assignedTp,
+    tp2:null,
+    tp3:null,
+    timeframe:o.tf||'',
+    strategy_mode:o.strategyMode||_todayStrategyMode(),
+    fib_trigger:(o._fib&&o._fib.moveStopAt)||null,
+    fib_move_sl_to:(o._fib&&o._fib.moveStopTo)||null,
+    trailing:!!leg.trailing,
+    be:!!(o._autos&&o._autos.be),
+    macro:!!(o._autos&&o._autos.macro),
+    inval:!!(o._autos&&o._autos.inval),
+    sent:!!(o._autos&&o._autos.sent),
+    tp1_alert:!!(!leg.trailing&&o._autos&&o._autos.tp1),
+    tp2_alert:false,
+    weekend:!!(o._autos&&o._autos.weekend),
+    ladder_leg_index:leg.idx||1,
+    ladder_leg_target:leg.target||'tp1',
+    comment:'DotVerse Today L#'+(leg.idx||1)+' '+(leg.target||'tp1').toUpperCase()+' '+(o.sig||'')+' '+o.sym,
+    entry_confluence:tv>0?((o.bullCount||0)/tv):null,
+    entry_atr:o.atr||null
+  };
+}
 // _todaySendOrders — shared order-submit loop used by manual confirm AND auto-place.
 // Returns {ok, fail, lastError, legs} where legs is an array of per-leg result objects:
 //   { symbol, legIndex, target, ok, order_id (if ok), error (if failed), _trade }
@@ -13682,21 +13716,10 @@ async function _todaySendOrders(trades, onProgress, legSubset){
 	  });
 	}
 	for(var i=0;i<queue.length;i++){
-	  var o=queue[i].trade, leg=queue[i].leg; var tv=(o.bullCount||0)+(o.bearCount||0);
+	  var o=queue[i].trade, leg=queue[i].leg;
 	  var legResult={symbol:o.sym, legIndex:leg.idx, target:leg.target||'tp1', ok:false, order_id:null, error:null, _trade:o, _leg:leg};
 	  try{
-	    var res=await dvOrderFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-	      ticker:_todayMt5SymbolForTrade(o)||o.sym, asset_type:_normalizeAssetType(o.asset), order_type:'Market', lots:parseFloat((leg.lots||_todayMt5Lots(o)).toFixed(6)), direction:(o.sig||'BUY').toUpperCase(),
-	      entry:o.entry, sl:o.sl, tp1:leg.tp||o.tp, tp2:o.tp2||null, tp3:o.tp3||null, timeframe:o.tf||'',
-	      strategy_mode:o.strategyMode||_todayStrategyMode(), fib_trigger:(o._fib&&o._fib.moveStopAt)||null, fib_move_sl_to:(o._fib&&o._fib.moveStopTo)||null,
-	      trailing:!!(leg.trailing||(o._autos&&o._autos.trail)),
-	      be:!!(o._autos&&o._autos.be), macro:!!(o._autos&&o._autos.macro),
-	      inval:!!(o._autos&&o._autos.inval), sent:!!(o._autos&&o._autos.sent),
-	      tp1_alert:!!(o._autos&&o._autos.tp1), tp2_alert:!!(o._autos&&o._autos.tp2),
-	      weekend:!!(o._autos&&o._autos.weekend),
-	      comment:'DotVerse Today L#'+leg.idx+' '+(leg.target||'tp1').toUpperCase()+' '+(o.sig||'')+' '+o.sym,
-	      entry_confluence: tv>0?((o.bullCount||0)/tv):null, entry_atr:o.atr||null
-	    })});
+	    var res=await dvOrderFetch('/api/mt5/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_todayLegOrderPayload(o, leg))});
 	    if(res&&res.order_id){ ok++; legResult.ok=true; legResult.order_id=res.order_id; }
 	    else { fail++; legResult.error=_mt5OrderErrorText(res); lastError=legResult.error; }
 	  }catch(e){
@@ -14046,7 +14069,11 @@ function _todayV2TargetPath(usable, goal, money2){
   goal=parseFloat(goal)||0;
   var _c=window._todayCfg||{};
   var _pace=(typeof _todayGoalPace==='function')?_todayGoalPace():{todayTarget:goal,periodGoal:goal,horizon:(_c.goalHorizon||'weekly'),daysLeft:1};
-  var _paceGoal=parseFloat(_pace.todayTarget)||goal;
+  var _rawPaceGoal=parseFloat(_pace.todayTarget);
+  var _rawPeriodGoal=parseFloat(_pace.periodGoal);
+  var _periodGoal=(isFinite(_rawPeriodGoal)&&_rawPeriodGoal>0)?_rawPeriodGoal:goal;
+  var _paceGoal=isFinite(_rawPaceGoal)?_rawPaceGoal:_periodGoal;
+  var _usesPaceSlice=_periodGoal>0&&_paceGoal>0&&Math.abs(_periodGoal-_paceGoal)>0.01;
   var _tpHorizonLbl=({'daily':'Daily','weekly':'Weekly','monthly':'Monthly'}[(_c.goalHorizon||'weekly')])||'Weekly';
   var _tpHorizonLow=_tpHorizonLbl.toLowerCase();
   var _paceCopy=_pace.horizon==='daily'?'today target':'today pace toward the '+_tpHorizonLow+' target';
@@ -14055,16 +14082,148 @@ function _todayV2TargetPath(usable, goal, money2){
     return {sym:o.sym, tf:o.tf, profit:lt.profit||(o._size&&o._size.netTP1)||0, mins:d.mins, hold:d.hold};
   }).sort(function(a,b){ return a.mins-b.mins; });
   var total=items.reduce(function(a,x){ return a+(x.profit||0); },0);
-  if(!(goal>0)) return {title:'No '+_tpHorizonLow+' target set', text:'Set a '+_tpHorizonLow+' target so DotVerse can show the path and timing.', eta:'--', covered:false, shortfall:0, total:total, paceGoal:_paceGoal, periodGoal:goal};
+  if(!(goal>0)) return {title:'No '+_tpHorizonLow+' target set', text:'Set a '+_tpHorizonLow+' target so DotVerse can show the path and timing.', eta:'--', covered:false, shortfall:0, total:total, paceGoal:_paceGoal, periodGoal:_periodGoal, usesPaceSlice:_usesPaceSlice, paceCopy:_paceCopy};
   var acc=0, hit=null;
   for(var i=0;i<items.length;i++){
     acc+=items[i].profit||0;
     if(acc>=_paceGoal){ hit={idx:i+1, mins:items[i].mins, sym:items[i].sym}; break; }
   }
   if(hit){
-    return {title:'Today pace covered', text:'If targets resolve in order, today can cover '+money2(_paceGoal)+' of pace toward the '+_tpHorizonLow+' target around '+_todayV2EtaText(hit.mins)+' after '+hit.idx+' trade'+(hit.idx===1?'':'s')+'. The rest of the '+_tpHorizonLow+' plan stays in Scout instead of being forced now.', eta:_todayV2EtaText(hit.mins), covered:true, shortfall:0, total:total, paceGoal:_paceGoal, periodGoal:goal, paceCopy:_paceCopy};
+    return {title:'Today pace covered', text:'If targets resolve in order, today can cover '+money2(_paceGoal)+' of pace toward the '+_tpHorizonLow+' target around '+_todayV2EtaText(hit.mins)+' after '+hit.idx+' trade'+(hit.idx===1?'':'s')+'. The rest of the '+_tpHorizonLow+' plan stays in Scout instead of being forced now.', eta:_todayV2EtaText(hit.mins), covered:true, shortfall:0, total:total, paceGoal:_paceGoal, periodGoal:_periodGoal, usesPaceSlice:_usesPaceSlice, paceCopy:_paceCopy};
   }
-  return {title:'Today pace not covered', text:'This basket covers '+(_paceGoal>0?Math.min(100,total/_paceGoal*100).toFixed(0):0)+'% of today\'s pace and still needs '+money2(_paceGoal-total)+'. DotVerse should keep scouting instead of forcing the whole '+_tpHorizonLow+' goal into today.', eta:'scout mode', covered:false, shortfall:Math.max(0,_paceGoal-total), total:total, paceGoal:_paceGoal, periodGoal:goal, paceCopy:_paceCopy};
+  return {title:'Today pace not covered', text:'This basket covers '+(_paceGoal>0?Math.min(100,total/_paceGoal*100).toFixed(0):0)+'% of today\'s pace and still needs '+money2(_paceGoal-total)+'. DotVerse should keep scouting instead of forcing the whole '+_tpHorizonLow+' goal into today.', eta:'scout mode', covered:false, shortfall:Math.max(0,_paceGoal-total), total:total, paceGoal:_paceGoal, periodGoal:_periodGoal, usesPaceSlice:_usesPaceSlice, paceCopy:_paceCopy};
+}
+
+function _todayStrategyPresetEvidence(plan, usable, cfg, targetPath){
+  plan=plan||[]; usable=usable||[]; cfg=cfg||{}; targetPath=targetPath||{};
+  var mode=_todayStrategyMode(), label=_todayStrategyModeLabel(mode);
+  var profit=parseFloat(targetPath.total)||0;
+  var paceGoal=parseFloat(targetPath.paceGoal)||0;
+  var periodGoal=parseFloat(targetPath.periodGoal||cfg.profitGoal)||0;
+  var actions=window._todayCandidateActionCounts||{};
+  var deferred=(window._todayCandidateActions||[]).length;
+  var brokerFiltered=parseInt(window._todayBrokerFilteredCount||0)||0;
+  var leftOut=parseInt(window._todayLeftOut||0)||0;
+  var fib={confirmed:0,waiting:0,invalid:0,none:0};
+  var quality={directional:0,confirmed:0,likely:0,hypothesis:0,good:0,excellent:0,rrOk:0,spreadOk:0,btVerified:0};
+  (plan||[]).forEach(function(o){
+    if(!o) return;
+    if(o.sig==='BUY'||o.sig==='SELL') quality.directional++;
+    var lbl=String(o.confLbl||o.confidence_label||o.confidence||'').toUpperCase();
+    if(lbl==='CONFIRMED') quality.confirmed++;
+    else if(lbl==='LIKELY') quality.likely++;
+    else if(lbl==='HYPOTHESIS') quality.hypothesis++;
+    var qs=0;
+    try{ qs=(typeof _todayQualityScore==='function'?_todayQualityScore(o):0)||parseFloat(o.qscore)||parseFloat(o.conf)||0; }catch(_qe){ qs=parseFloat(o.qscore)||parseFloat(o.conf)||0; }
+    if(qs>=60) quality.good++;
+    if(qs>=80) quality.excellent++;
+    var rr=parseFloat(o.rr||o.rr1||0);
+    if(rr>=1.5) quality.rrOk++;
+    if(String(o.spreadQuality||'fair').toLowerCase()!=='wide') quality.spreadOk++;
+    if(o._btVerified===true) quality.btVerified++;
+  });
+  var blockers={brainWait:0,scaleIn:0,liveWait:0,invalid:0,broker:brokerFiltered,sizing:0,other:0};
+  var scaleOut=0, scaleInAdvisory=0, executable=0, blocked=0;
+  usable.forEach(function(item){
+    var o=item&&item.o; if(!o) return;
+    var b=o._entryBrain||{}, rd=null, can=false;
+    try{ rd=_todayExecutionReadiness(o); can=_todayCanExecuteNow(o); }catch(e){ rd={text:'Unknown gate',cls:'wait'}; }
+    if(can) executable++; else{
+      blocked++;
+      var txt=String((rd&&rd.text)||'').toLowerCase();
+      if(txt.indexOf('brain')>=0 || String(b.recommended_mode||'').toLowerCase()==='wait') blockers.brainWait++;
+      else if(txt.indexOf('scale-in')>=0 || (b.recommended_mode==='scale_in'&&b.execution_authority!==true)) blockers.scaleIn++;
+      else if((rd&&rd.cls)==='invalid' || (o._live&&o._live.invalid)) blockers.invalid++;
+      else if(txt.indexOf('mt5')>=0 || txt.indexOf('broker')>=0 || txt.indexOf('available')>=0) blockers.broker++;
+      else if(!(o._size&&o._size.tradeable)) blockers.sizing++;
+      else if(txt.indexOf('wait')>=0 || (rd&&rd.cls)==='wait') blockers.liveWait++;
+      else blockers.other++;
+    }
+    if(b.recommended_mode==='scale_out'&&b.execution_authority===true) scaleOut++;
+    if(b.recommended_mode==='scale_in'&&b.execution_authority!==true) scaleInAdvisory++;
+    if(mode==='fib_236'){
+      var st=String((o._fib&&o._fib.status)||'').toLowerCase();
+      if(st==='confirmed'||st==='confirmed_by_signal') fib.confirmed++;
+      else if(st==='wait_retest'||st==='waiting_confirm') fib.waiting++;
+      else if(st==='invalid') fib.invalid++;
+      else fib.none++;
+    }
+  });
+  var watched=(actions.watch||0)+brokerFiltered;
+  var upgradeable=(actions.add||0)+(actions.replace||0);
+  var blockerBits=[];
+  if(blockers.brainWait) blockerBits.push(blockers.brainWait+' brain wait');
+  if(blockers.scaleIn) blockerBits.push(blockers.scaleIn+' scale-in advisory');
+  if(blockers.liveWait) blockerBits.push(blockers.liveWait+' live wait');
+  if(blockers.invalid) blockerBits.push(blockers.invalid+' invalid');
+  if(blockers.broker) blockerBits.push(blockers.broker+' broker blocked');
+  if(blockers.sizing) blockerBits.push(blockers.sizing+' sizing blocked');
+  if(leftOut) blockerBits.push(leftOut+' left out by basket caps/quality');
+  if(!blockerBits.length && watched) blockerBits.push(watched+' on watch');
+  var pacePct=paceGoal>0?Math.min(999,profit/paceGoal*100):0;
+  var periodPct=periodGoal>0?Math.min(999,profit/periodGoal*100):0;
+  var verdict='Not enough yet', tone='gold', reason='This preset does not yet cover today\'s pace. Keep Scout on or rebuild when the market gives cleaner setups.';
+  if(_todayProtectMode()){
+    verdict='Protect mode'; tone='green'; reason='Target progress is already protected. Today should monitor open risk instead of adding new entries.';
+  }else if(targetPath.covered&&executable>0){
+    verdict='Good enough for today\'s pace'; tone='green'; reason='The selected preset creates an executable basket that covers today\'s pace toward the target.';
+  }else if(executable<1){
+    verdict='Not executable yet'; tone='red'; reason='The scan found candidates, but this preset has no executable setup after live-price, broker, sizing, or brain gates.';
+  }else if(mode==='fixed_micro_lot'){
+    verdict='Too small for target'; tone='gold'; reason='Fixed Micro-Lot is safer and simpler, but the projected profit is not enough for the current pace target.';
+  }else if(mode==='fib_236'&&fib.waiting>0&&fib.confirmed<1){
+    verdict='Waiting for Fib retest'; tone='gold'; reason='Fib 23.6 has setups on watch, but current price action is not clean enough to chase.';
+  }
+  var horizonLabel=({'daily':'daily','weekly':'weekly','monthly':'monthly'}[(cfg.goalHorizon||'weekly')])||'weekly';
+  var selectedCount=plan.length||0;
+  var qualityCriteria={
+    direction:{ok:quality.directional>0,tone:quality.directional>0?'green':'red',detail:quality.directional+' BUY/SELL setup'+(quality.directional===1?'':'s')+' selected'},
+    confluence:{ok:(quality.confirmed+quality.likely)>0&&quality.good>0,tone:quality.excellent>0?'green':quality.good>0?'gold':'red',detail:quality.confirmed+' confirmed · '+quality.likely+' likely · '+quality.good+' good+ quality'},
+    reward:{ok:selectedCount>0&&quality.rrOk===selectedCount&&quality.spreadOk===selectedCount,tone:(selectedCount>0&&quality.rrOk===selectedCount&&quality.spreadOk===selectedCount)?'green':quality.rrOk>0?'gold':'red',detail:quality.rrOk+'/'+selectedCount+' meet RR floor · '+quality.spreadOk+'/'+selectedCount+' spread acceptable'},
+    history:{ok:quality.btVerified>0,tone:quality.btVerified>0?'green':'gold',detail:quality.btVerified+' backtest verified · gate: WR 50%+, PF 1.0+, 30 trades, expectancy 0.10+'},
+    execution:{ok:executable>0,tone:executable>0?'green':'red',detail:executable+' executable now · '+blocked+' blocked/waiting'},
+    target:{ok:!!targetPath.covered,tone:targetPath.covered?'green':'gold',detail:(targetPath.covered?'covers today pace':'short by '+_todayMoney2(targetPath.shortfall||0))}
+  };
+  return {mode:mode,label:label,verdict:verdict,tone:tone,reason:reason,horizonLabel:horizonLabel,scanCount:window._todayScanCount||plan.length,selected:plan.length,usable:usable.length,deferred:deferred,watched:watched,upgradeable:upgradeable,brokerFiltered:brokerFiltered,leftOut:leftOut,actions:actions,blockers:blockers,blockerSummary:blockerBits.join(' · '),quality:quality,qualityCriteria:qualityCriteria,executable:executable,blocked:blocked,profit:profit,paceGoal:paceGoal,periodGoal:periodGoal,pacePct:pacePct,periodPct:periodPct,scaleOut:scaleOut,scaleInAdvisory:scaleInAdvisory,fib:fib};
+}
+function _todayQualityCriterion(label, item){
+  item=item||{};
+  var esc=function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  return '<div class="today-v2-auto '+(item.tone==='red'?'off':'')+'"><b>'+esc(label)+'</b>'+esc(item.detail||'')+'<small>'+esc(item.ok?'passes current quality check':'needs watch/review before action')+'</small></div>';
+}
+function _todaySignalQualityCriteriaPanel(e){
+  if(!e||!e.qualityCriteria) return '';
+  var q=e.qualityCriteria;
+  return '<div style="margin-top:12px"><div class="td-mini">Signal quality criteria</div><div class="today-v2-autos" style="margin-top:8px">'
+    + _todayQualityCriterion('Direction',q.direction)
+    + _todayQualityCriterion('Confluence',q.confluence)
+    + _todayQualityCriterion('R:R + cost',q.reward)
+    + _todayQualityCriterion('Backtest edge',q.history)
+    + _todayQualityCriterion('Execution',q.execution)
+    + _todayQualityCriterion('Target fit',q.target)
+    + '</div><div class="td-sub" style="margin-top:9px">A good DotVerse signal is not just BUY or SELL. It needs confluence, clean reward/risk, acceptable spread, historical edge where available, execution readiness, and enough target relevance.</div></div>';
+}
+function _todayStrategyPresetVerdictCard(e, money2){
+  if(!e) return '';
+  money2=money2||_todayMoney2;
+  var esc=function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  var fibLine=e.mode==='fib_236'?'<span>Fib: '+e.fib.confirmed+' confirmed · '+e.fib.waiting+' wait/retest · '+e.fib.invalid+' invalid</span>':'';
+  var why=e.blockerSummary?'<div class="td-sub" style="margin-top:9px;color:rgba(201,168,76,.82)">Why not stronger yet: '+esc(e.blockerSummary)+'.</div>':'';
+  return '<div class="td-card today-v2-strategyVerdict" style="margin-bottom:12px"><div class="td-card-head"><h2>Strategy preset verdict</h2><div class="td-stack">'+_todayPill(esc(e.label),'blue')+_todayPill(esc(e.verdict),e.tone)+'</div></div><div class="td-pad"><div class="today-v2-copy">'+esc(e.reason)+'</div><div class="td-stack" style="margin-top:10px">'
+    + '<span>'+e.scanCount+' scan setup'+(e.scanCount===1?'':'s')+'</span>'
+    + '<span>'+e.selected+' selected</span>'
+    + '<span>'+e.executable+' executable / '+e.usable+' usable</span>'
+    + '<span>'+e.deferred+' deferred</span>'
+    + '<span>'+e.watched+' on watch</span>'
+    + '<span>'+e.upgradeable+' add/replace candidate'+(e.upgradeable===1?'':'s')+'</span>'
+    + '<span>'+e.brokerFiltered+' broker filtered</span>'
+    + '<span>pace '+e.pacePct.toFixed(0)+'%</span>'
+    + '<span>'+(e.horizonLabel||'weekly')+' '+e.periodPct.toFixed(0)+'%</span>'
+    + '<span>profit +'+money2(e.profit)+'</span>'
+    + '<span>scale-out '+e.scaleOut+'</span>'
+    + '<span>scale-in watch '+e.scaleInAdvisory+'</span>'
+    + fibLine
+  + '</div>'+why+_todaySignalQualityCriteriaPanel(e)+'<div class="td-sub" style="margin-top:9px">Scan finds trades first. This card judges whether the selected strategy preset turns those found trades into a good enough plan.</div></div></div>';
 }
 
 function _todayV2ToggleAuto(idx, key){
@@ -14122,7 +14281,9 @@ function _todayV2ScoutPanel(targetPath, cfg, money2){
   }
   var s=_todayV2ScoutState(), on=!!s.on;
   var shortfall=targetPath.shortfall||0;
-  return '<div class="today-v2-scout '+(on?'on':'')+'"><div><div class="td-mini">'+(on?'Scout mode armed':'Scout mode available')+'</div><b>'+(targetPath.covered?'Target path found':'Keep hunting for the missing '+money2(shortfall))+'</b><div class="today-v2-copy" style="margin-top:6px">'+(on?'DotVerse will keep using the 15-minute server scanner for Telegram/in-app alerts, and this open app will rebuild Today and play an alarm when a basket covers the '+_spHorizonLow+' target.':'Arm Scout so DotVerse does not stop at needs rebuild. It keeps scanning for better setups and alerts you instead of forcing oversize risk.')+'</div></div><button onclick="_todayV2ArmScout('+(!on)+')">'+(on?'Scout ON':'Alert me')+'</button></div>';
+  var targetCopy=(targetPath&&targetPath.paceCopy)||('today pace toward the '+_spHorizonLow+' target');
+  var pathLabel=targetPath.covered?(targetPath.usesPaceSlice?'Today pace path found':'Target path found'):'Keep hunting for the missing '+money2(shortfall);
+  return '<div class="today-v2-scout '+(on?'on':'')+'"><div><div class="td-mini">'+(on?'Scout mode armed':'Scout mode available')+'</div><b>'+pathLabel+'</b><div class="today-v2-copy" style="margin-top:6px">'+(on?'DotVerse will keep using the 15-minute server scanner for Telegram/in-app alerts, and this open app will rebuild Today and play an alarm when a basket covers '+targetCopy+'.':'Arm Scout so DotVerse does not stop at needs rebuild. It keeps scanning for better setups and alerts you instead of forcing oversize risk.')+'</div></div><button onclick="_todayV2ArmScout('+(!on)+')">'+(on?'Scout ON':'Alert me')+'</button></div>';
 }
 async function _todayV2ProtectSummary(){
   var c=window._todayCfg||{}, prog=_todayGoalProgressValue(c.goalHorizon||'weekly');
@@ -14163,7 +14324,9 @@ async function _todayV2ArmScout(on){
       settingsOk=!!settingsResp;
     }catch(e){}
     try{
-      var alertResp=await dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'armed',goal:s.goal,goal_horizon:(c.goalHorizon||'weekly'),profit:path.total||0,risk:0,eta:path.eta||'15 min scan',trades:(window._todayPlan||[]).length})});
+      var periodGoal=parseFloat(path.periodGoal||c.profitGoal)||0;
+      var paceGoal=parseFloat(path.paceGoal||periodGoal)||0;
+      var alertResp=await dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'armed',goal:paceGoal,pace_goal:paceGoal,period_goal:periodGoal,goal_horizon:(c.goalHorizon||'weekly'),profit:path.total||0,risk:0,eta:path.eta||'15 min scan',trades:(window._todayPlan||[]).length})});
       alertOk=!!(alertResp && (alertResp.status==='ok'||alertResp.status==='deduped'));
     }catch(e){}
     if(!(settingsOk&&alertOk)){
@@ -14201,7 +14364,9 @@ async function _todayV2MaybeScoutAlert(targetPath, usable, totals){
   _todayV2PlayAlarm(false);
   var ok=false;
   try{
-    var resp=await dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'covered',goal:(targetPath.paceGoal||c.profitGoal||0),period_goal:c.profitGoal||0,goal_horizon:(c.goalHorizon||'weekly'),profit:targetPath.total||0,risk:Math.abs((totals&&totals.risk)||0),eta:targetPath.eta,trades:(usable||[]).length})});
+    var periodGoal=parseFloat(targetPath.periodGoal||c.profitGoal)||0;
+    var paceGoal=parseFloat(targetPath.paceGoal||periodGoal)||0;
+    var resp=await dvFetch('/api/today/scout-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'covered',goal:paceGoal,pace_goal:paceGoal,period_goal:periodGoal,goal_horizon:(c.goalHorizon||'weekly'),profit:targetPath.total||0,risk:Math.abs((totals&&totals.risk)||0),eta:targetPath.eta,trades:(usable||[]).length})});
     ok=!!(resp && (resp.status==='ok'||resp.status==='deduped'));
   }catch(e){}
   if(ok){
@@ -14513,7 +14678,9 @@ function _todaySelectPlan(ranked, cfg){
       || (b.conf||0)-(a.conf||0);
   });
 
-  var plan=[], seen={}, goal=parseFloat(pace.todayTarget)||parseFloat(cfg.profitGoal)||0;
+  var rawGoal=parseFloat(pace.todayTarget);
+  var cfgGoal=parseFloat(cfg.profitGoal);
+  var plan=[], seen={}, goal=isFinite(rawGoal)?rawGoal:(isFinite(cfgGoal)?cfgGoal:0);
   var newRiskBudget=_todayNewRiskBudget(cfg.acct, cfg);
   for(var i=0;i<(filtered||[]).length;i++){
     var o=filtered[i];
@@ -15019,6 +15186,8 @@ function _todayRenderPlan(){
   var displayExp=protect?0:totExp, displayMargin=protect?0:totMargin, displayRisk=protect?0:totRisk, displayProfit=protect?0:totProfit, displayOrders=protect?0:totOrders;
   var totalAfterTone=totalAfterPct>capPct?'red':(remainingPct<0.15?'gold':'green');
   var targetPath=_todayV2TargetPath(usable, c.profitGoal||0, money2);
+  var strategyEvidence=_todayStrategyPresetEvidence(plan, usable, c, targetPath);
+  window._todayLastStrategyEvidence=strategyEvidence;
   var targetGoal=parseFloat((targetPath&&targetPath.paceGoal)||c.profitGoal)||0;
   var targetNeedsScout=!protect && targetPath && !targetPath.covered && targetGoal>0;
   var mt5CanPlace=_todayCanPlaceMt5();
@@ -15136,6 +15305,7 @@ function _todayRenderPlan(){
       + '<div class="today-v2-metric"><div class="td-mini">Open trade monitor</div><b class="blue">'+(protect?'Active now':'Live after place')+'</b><p>'+(protect?'Open trades stay under protection logic; no review/place action is shown for new orders.':'Rows become PnL, current R, stop state, and automation history.')+'</p></div>'
     + '</div>'
     + _todayV2ScoutPanel(targetPath,c,money2)
+    + _todayStrategyPresetVerdictCard(strategyEvidence,money2)
     + priorityTotals
     + (protect?'<div class="td-card"><div class="td-card-head"><h2>Protection watchlist</h2><span class="td-pill green">no new orders</span></div><div class="td-pad" style="padding:16px;"><div class="today-v2-autos"><div class="today-v2-auto"><b>Open trades monitored</b>DotVerse keeps watching current R, stop state, and target distance.</div><div class="today-v2-auto"><b>Stops protected</b>Break-even, trailing, and invalidation checks stay active where eligible.</div><div class="today-v2-auto"><b>TP/SL alerts live</b>Target, stop-loss, and protection-state changes can still alert.</div><div class="today-v2-auto optional"><b>Telegram + in-app</b>Protect-mode notifications stay available without adding exposure.</div></div></div></div>':_todayV2TimeframeAuditPanel(plan, usableIdx, esc)+'<div class="today-v2-main"><div class="td-card"><div class="td-card-head"><h2>Review trades</h2><span class="td-pill green">volume · cash · controls · risk</span></div><div class="today-v2-tableWrap"><table class="today-v2-table"><thead><tr><th>Trade</th><th>Readiness</th><th>Duration</th><th>MT5 volume / cash / controls</th><th>Risk</th><th>R:R</th><th>Profit</th><th>Mode</th><th>Why selected</th></tr></thead><tbody>'+usable.map(row).join('')+'</tbody></table></div></div><div class="td-card">'+detail(selected)+'</div></div>')
     + '<div class="today-v2-bottom"><div class="bitem"><div class="td-mini">Cash put in total</div><b class="gold">'+money2(displayMargin)+'</b><div class="today-v2-footNote">sum of margin/cash per trade</div></div><div class="bitem"><div class="td-mini">Position value</div><b>'+money(displayExp)+'</b><div class="today-v2-footNote">not cash put in</div></div><div class="bitem"><div class="td-mini">New basket risk</div><b class="red">'+money2(-displayRisk)+' / '+displayRiskPct.toFixed(2)+'%</b><div class="today-v2-footNote">'+(protect?'paused by protect mode':(targetNeedsScout?'target not covered':'selected setups only'))+'</div></div><div class="bitem"><div class="td-mini">Already open risk</div><b class="gold">'+openRiskPct.toFixed(2)+'%</b><div class="today-v2-footNote">before this basket</div></div><div class="bitem"><div class="td-mini">Total after placing</div><b class="'+totalAfterTone+'">'+totalAfterPct.toFixed(2)+'% / '+capPct.toFixed(1)+'%</b><div class="today-v2-footNote">'+(protect?'open risk only':(targetNeedsScout?'optional review':'open + new basket'))+'</div></div><div class="bitem"><div class="td-mini">Remaining buffer</div><b class="'+(remainingPct<=0?'red':remainingPct<0.15?'gold':'green')+'">'+remainingPct.toFixed(2)+'%</b></div><div class="bitem"><div class="td-mini">'+(protect?'Protection state':'Planned profit')+'</div><b class="green">'+(protect?'Active':'+'+money2(displayProfit))+'</b>'+(!protect&&targetNeedsScout&&(targetPath.shortfall||0)>0?'<span class="today-v2-footNote gold" style="display:block;margin-top:2px;">shortfall '+money2(targetPath.shortfall||0)+'</span>':'')+'</div><div class="bitem"><div class="td-mini">Orders</div><b>'+displayOrders+' new MT5 order'+(displayOrders===1?'':'s')+'</b><div class="today-v2-footNote">'+bottomOrderNote+'</div></div><button class="today-v2-review" '+(bottomDisabled?'disabled ':'')+'onclick="'+(protect?'_todayV2ProtectSummary()':'_todayPlaceAll()')+'">'+bottomPlaceLabel+'</button></div>';

@@ -207,6 +207,24 @@ def test_leg_subset_skips_full_ladder_expansion():
     assert leg_subset_idx < ladder_legs_idx
 
 
+def test_today_scale_out_payload_is_one_exit_per_mt5_order():
+    """Each Today scale-out leg must send only its assigned exit to MT5."""
+    start = HTML.index("function _todayLegOrderPayload")
+    payload = HTML[start : start + 2400]
+    assert "var assignedTp=leg.trailing?null:(leg.tp||o.tp||null)" in payload
+    assert "tp1:assignedTp" in payload
+    assert "tp2:null" in payload
+    assert "tp3:null" in payload
+    assert "trailing:!!leg.trailing" in payload
+    assert "tp1_alert:!!(!leg.trailing&&o._autos&&o._autos.tp1)" in payload
+    assert "tp2_alert:false" in payload
+    assert "ladder_leg_index:leg.idx||1" in payload
+    assert "ladder_leg_target:leg.target||'tp1'" in payload
+    assert "tp2:o.tp2" not in payload
+    assert "tp3:o.tp3" not in payload
+    assert "leg.trailing||(o._autos&&o._autos.trail)" not in payload
+
+
 def test_retry_ok_legs_accumulated_to_prevent_double_count():
     """After retry, _okLegs must be extended with newly-placed legs."""
     assert "_okLegs.concat(" in HTML or "_okLegs=_okLegs.concat(" in HTML

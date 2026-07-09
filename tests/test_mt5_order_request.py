@@ -55,6 +55,28 @@ def test_normalize_mt5_submit_order_rejects_bad_numeric_aliases():
         raise AssertionError("invalid tp1 should fail")
 
 
+def test_normalize_mt5_submit_order_accepts_trailing_leg_without_fixed_tp():
+    order = normalize_mt5_submit_order(
+        {
+            "ticker": "EURUSD",
+            "asset_type": "forex",
+            "direction": "BUY",
+            "lots": 0.1,
+            "entry": "1.1000",
+            "sl": "1.0900",
+            "tp1": None,
+            "tp2": None,
+            "tp3": None,
+            "trailing": True,
+        }
+    )
+
+    assert order.tp is None
+    assert order.tp2 is None
+    assert order.tp3 is None
+    assert order.trailing is True
+
+
 def test_normalize_broker_order_rejects_bad_or_zero_quantity():
     for quantity in ("bad", 0):
         try:

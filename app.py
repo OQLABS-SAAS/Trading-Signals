@@ -12121,11 +12121,19 @@ def _today_scout_money(value, signed=False):
     return f"{prefix}${abs(value):,.2f}"
 
 
-def _today_scout_telegram_message(kind, horizon, goal, profit, risk, eta, trades, shortfall=0.0):
+def _today_scout_telegram_message(
+    kind, horizon, goal, profit, risk, eta, trades, shortfall=0.0,
+    pace_goal=None, period_goal=None,
+):
     horizon = horizon if horizon in {"daily", "weekly", "monthly"} else "weekly"
     horizon_label = {"daily": "today", "weekly": "this week", "monthly": "this month"}[horizon]
+    horizon_title = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}[horizon]
     trades = int(trades or 0)
-    goal_txt = _today_scout_money(goal)
+    pace_goal = float(pace_goal if pace_goal is not None else goal or 0)
+    full_goal = float(period_goal or 0) or pace_goal
+    uses_pace_slice = horizon != "daily" and full_goal > 0 and pace_goal > 0 and abs(full_goal - pace_goal) > 0.01
+    goal_txt = _today_scout_money(full_goal)
+    pace_goal_txt = _today_scout_money(pace_goal)
     profit_txt = _today_scout_money(profit, signed=True)
     risk_txt = _today_scout_money(-abs(float(risk or 0)), signed=True)
     eta_txt = str(eta or "watchlist scan")[:48]
@@ -12150,15 +12158,33 @@ def _today_scout_telegram_message(kind, horizon, goal, profit, risk, eta, trades
 
     if kind == "armed":
         shortfall_txt = _today_scout_money(shortfall)
+        if uses_pace_slice:
+            what_it_means = (
+                f"DotVerse will keep scanning for possible trades that could cover today's "
+                f"{pace_goal_txt} pace toward {horizon_label}'s {goal_txt} target without forcing oversized risk."
+            )
+            goal_lines = (
+                f"• {horizon_title} target: {goal_txt}\n"
+                f"• Today's pace goal: {pace_goal_txt}\n"
+                f"• Current pace shortfall: {shortfall_txt}\n"
+            )
+        else:
+            what_it_means = (
+                f"DotVerse will keep scanning for possible trades that could cover "
+                f"{horizon_label}'s {goal_txt} target without forcing oversized risk."
+            )
+            goal_lines = (
+                f"• Goal: {goal_txt}\n"
+                f"• Current shortfall: {shortfall_txt}\n"
+            )
         return (
             "Scout Alert: scanner armed\n"
             "What this means:\n"
-            f"DotVerse will keep scanning for possible trades that could cover {horizon_label}'s {goal_txt} target without forcing oversized risk.\n"
+            f"{what_it_means}\n"
             "Summary:\n"
             f"• Trades: {trades}\n"
-            f"• Goal: {goal_txt}\n"
+            f"{goal_lines}"
             f"• Potential upside: {profit_txt}\n"
-            f"• Current shortfall: {shortfall_txt}\n"
             "• Sizing rule: every $1,000 account equity = 0.01 lot\n"
             f"• ETA: {eta_txt}\n"
             "• Reason: scout is watching for a target path\n"
@@ -12169,20 +12195,38 @@ def _today_scout_telegram_message(kind, horizon, goal, profit, risk, eta, trades
         )
 
     trade_word = "trade" if trades == 1 else "trades"
+    if uses_pace_slice:
+        what_it_means = (
+            f"DotVerse found {trades} possible {trade_word} that can cover today's pace toward "
+            f"{horizon_label}'s {goal_txt} target if they work as planned."
+        )
+        goal_lines = (
+            f"• {horizon_title} target: {goal_txt}\n"
+            f"• Today's pace goal: {pace_goal_txt}\n"
+        )
+        reason = "scout found a possible route toward the target"
+    else:
+        what_it_means = (
+            f"DotVerse found {trades} possible {trade_word} that could exceed "
+            f"{horizon_label}'s {goal_txt} target if they work as planned."
+        )
+        goal_lines = f"• Goal: {goal_txt}\n"
+        reason = "scout detected a target path"
+
     return (
         f"Scout Alert: {trades} candidate {trade_word} found\n"
         "What this means:\n"
-        f"DotVerse found {trades} possible {trade_word} that could exceed {horizon_label}'s {goal_txt} target if they work as planned.\n"
+        f"{what_it_means}\n"
         "Summary:\n"
         f"• Trades: {trades}\n"
-        f"• Goal: {goal_txt}\n"
+        f"{goal_lines}"
         f"• Potential upside: {profit_txt}\n"
         f"• Planned risk: {risk_txt}\n"
         "• Sizing rule: every $1,000 account equity = 0.01 lot\n"
         f"• ETA: {eta_txt}\n"
-        "• Reason: scout detected a target path\n"
+        f"• Reason: {reason}\n"
         "Status:\n"
-        "SUGGESTED - not yet executed\n"
+        "SUGGESTED - review only, not executed\n"
         "Next step:\n"
         "Review the symbols, entries, stop losses, take-profit levels, and position sizing before entering."
     )
@@ -12205,20 +12249,39 @@ def today_scout_alert():
     horizon_raw = str(data.get("goal_horizon") or data.get("horizon") or "weekly").lower()
     horizon = horizon_raw if horizon_raw in {"daily", "weekly", "monthly"} else "weekly"
     goal_label = horizon + " target"
-    goal = float(data.get("goal") or 0)
+    pace_goal = float(data.get("pace_goal") or data.get("goal") or 0)
+    period_goal = float(data.get("period_goal") or 0)
+    if period_goal <= 0:
+        period_goal = pace_goal
+    display_goal = period_goal
+    uses_pace_slice = (
+        horizon != "daily"
+        and period_goal > 0
+        and pace_goal > 0
+        and abs(period_goal - pace_goal) > 0.01
+    )
     profit = float(data.get("profit") or 0)
     risk = float(data.get("risk") or 0)
     eta = str(data.get("eta") or "watchlist scan")[:48]
     trades = int(data.get("trades") or 0)
-    shortfall = max(0.0, goal - profit)
+    pace_shortfall = max(0.0, pace_goal - profit)
+    period_shortfall = max(0.0, period_goal - profit)
+    shortfall = pace_shortfall if uses_pace_slice else period_shortfall
 
     if kind == "covered":
         title = "Today scout found a target path"
-        body = (
-            f"{trades} trade(s) can cover the {goal_label}: "
-            f"+${profit:,.2f} planned upside vs ${goal:,.2f} goal, "
-            f"risk ${risk:,.2f}, ETA {eta}."
-        )
+        if uses_pace_slice:
+            body = (
+                f"{trades} trade(s) can cover today's pace toward the {goal_label}: "
+                f"+${profit:,.2f} planned upside vs ${pace_goal:,.2f} pace goal "
+                f"(${period_goal:,.2f} {goal_label}), risk ${risk:,.2f}, ETA {eta}."
+            )
+        else:
+            body = (
+                f"{trades} trade(s) can cover the {goal_label}: "
+                f"+${profit:,.2f} planned upside vs ${display_goal:,.2f} goal, "
+                f"risk ${risk:,.2f}, ETA {eta}."
+            )
     elif kind == "protect":
         title = "Today protect mode active"
         body = (
@@ -12228,22 +12291,31 @@ def today_scout_alert():
         )
     else:
         title = "Today scout armed"
-        body = (
-            f"DotVerse will keep scanning for a basket that can cover your "
-            f"${goal:,.2f} {goal_label}. Current shortfall: ${shortfall:,.2f}."
-        )
+        if uses_pace_slice:
+            body = (
+                f"DotVerse will keep scanning for a basket that can cover today's "
+                f"${pace_goal:,.2f} pace toward your ${period_goal:,.2f} {goal_label}. "
+                f"Current pace shortfall: ${shortfall:,.2f}."
+            )
+        else:
+            body = (
+                f"DotVerse will keep scanning for a basket that can cover your "
+                f"${display_goal:,.2f} {goal_label}. Current shortfall: ${shortfall:,.2f}."
+            )
     telegram_msg = _today_scout_telegram_message(
         kind=kind,
         horizon=horizon,
-        goal=goal,
+        goal=pace_goal,
         profit=profit,
         risk=risk,
         eta=eta,
         trades=trades,
         shortfall=shortfall,
+        pace_goal=pace_goal,
+        period_goal=period_goal,
     )
 
-    dedup_raw = f"{user_id}:{kind}:{round(goal, 2)}:{round(profit, 2)}:{eta}"
+    dedup_raw = f"{user_id}:{kind}:{round(pace_goal, 2)}:{round(period_goal, 2)}:{round(profit, 2)}:{eta}"
     dedup_key = "today_scout_alert:" + hashlib.sha1(dedup_raw.encode("utf-8")).hexdigest()
     try:
         if _redis_client and _redis_client.get(dedup_key):
@@ -12257,8 +12329,19 @@ def today_scout_alert():
         print(f"[today_scout] Telegram send failed: {e}")
 
     _push_notification(user_id, "today_scout", title, body, data={
-        "kind": kind, "goal": goal, "profit": profit, "risk": risk,
-        "eta": eta, "trades": trades, "shortfall": shortfall, "goal_horizon": horizon,
+        "kind": kind,
+        "goal": pace_goal,
+        "pace_goal": pace_goal,
+        "period_goal": period_goal,
+        "display_goal": display_goal,
+        "profit": profit,
+        "risk": risk,
+        "eta": eta,
+        "trades": trades,
+        "shortfall": shortfall,
+        "pace_shortfall": pace_shortfall,
+        "period_shortfall": period_shortfall,
+        "goal_horizon": horizon,
     })
     try:
         if _redis_client:

@@ -19,7 +19,8 @@ def test_today_v2_exposes_all_order_automation_flags():
     assert "['inval','Invalid setup'" in source
     assert "['sent','Sentiment'" in source
     assert "['weekend','Weekend guard'" in source
-    assert "tp2_alert:!!(o._autos&&o._autos.tp2)" in source
+    assert "tp2_alert:false" in source
+    assert "tp2_alert:!!(o._autos&&o._autos.tp2)" not in source
     assert "weekend:!!(o._autos&&o._autos.weekend)" in source
 
 
