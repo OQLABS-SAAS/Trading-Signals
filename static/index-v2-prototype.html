@@ -14036,18 +14036,35 @@ function _todayV2EntryBrainCard(o){
 function _todayV2LadderPresetAdvice(o, exec){
   o=o||{}; exec=exec||{};
   var b=o._entryBrain||{}, mode=String(b.recommended_mode||'single').toLowerCase();
+  var strat=String(o.strategyMode||((window._todayCfg||{}).strategyMode)||_todayStrategyMode()).toLowerCase();
+  if(strat==='fixed'||strat==='micro') strat='fixed_micro_lot';
+  if(strat==='fib'||strat==='fib236') strat='fib_236';
+  var strategyLabel=_todayStrategyModeLabel(strat);
   var rr=parseFloat(o.rr||o.rr1||0), q=(typeof _todayQualityScore==='function'?_todayQualityScore(o):0)||0;
   var hasRunner=!!(o.tp3||o.tp2||String((o._ladderMode||'')).toLowerCase()==='aggressive');
-  if(exec.collapsed) return {id:'single', label:'Single order', why:'Split orders would fall below broker minimum lot at this risk/account size.'};
-  if(mode==='wait') return {id:'wait', label:'Wait / no ladder', why:'Entry brain says timing is not clean enough to add exposure now.'};
-  if(mode==='scale_in' && b.execution_authority!==true) return {id:'scout', label:'Scale-in Scout', why:'Good idea may need a later retest/add-on entry. Scout it; do not send an add-on order now.'};
-  if(mode==='scale_out' && b.execution_authority===true){
-    if(rr>=2.4 && hasRunner) return {id:'aggressive', label:'Aggressive scale-out', why:'Strong reward path. Take partials and leave a smaller runner only after review.'};
-    if(rr<1.8 || q<60) return {id:'conservative', label:'Conservative scale-out', why:'Edge is usable but not clean enough for a big runner. Bank more at TP1.'};
-    return {id:'beginner', label:'Beginner scale-out', why:'Balanced split: take some profit early, keep some exposure for TP2/TP3.'};
+  var mk=function(id,label,why,strategyWhy){ return {id:id,label:label,why:why,strategyLabel:strategyLabel,strategyWhy:strategyWhy}; };
+  if(exec.collapsed) return mk('single','Single order','Split orders would fall below broker minimum lot at this risk/account size.','This preset cannot safely use laddering until each split order stays above broker minimum size.');
+  if(strat==='fixed_micro_lot'){
+    if(exec.active) return mk('conservative','Conservative scale-out','You manually selected same-entry split orders, but Fixed Micro-Lot should stay defensive. Bank more at TP1 and avoid runner-heavy presets.','Fixed Micro-Lot is built for minimum-size execution. Laddering is only good when every split remains a valid micro order.');
+    return mk('single','Single order','Fixed Micro-Lot is cleaner as one minimum-size order unless the setup/account size clearly supports several valid micro orders.','Fixed Micro-Lot prioritizes simple, small execution over complex ladders.');
   }
-  if(exec.active) return {id:o._ladderMode||'beginner', label:'Scale-out selected', why:'You selected same-entry split orders. Review each assigned exit before sending.'};
-  return {id:'single', label:'Single order', why:'No strong reason to split this entry yet. One entry, one stop, one main target is cleaner.'};
+  if(strat==='fib_236'){
+    var f=o._fib||{}, fs=String(f.status||'').toLowerCase();
+    if(fs==='invalid') return mk('wait','Fib invalid / no ladder','Fib 23.6 is invalid here, so no ladder preset should be used.','Fib 23.6 requires a valid 23.6 entry, Fib 12 stop, and 38.2/61.8 target path before laddering matters.');
+    if(fs==='waiting_confirm') return mk('wait','Fib waiting / no ladder','Wait for 23.6 confirmation before deciding single vs scale-out.','Fib 23.6 laddering is only useful after the shallow retracement entry is confirmed.');
+    if(fs==='wait_retest') return mk('scout','Fib retest scout','Price is already stretched toward Fib 50. Scout a cleaner 23.6 retest instead of splitting a chase entry.','Fib 23.6 should not ladder a late/chased entry; wait for retest first.');
+    if(hasRunner && rr>=1.8) return mk('beginner','Fib 23.6 scale-out','Fib targets fit a balanced scale-out: partial at 38.2, remainder toward 61.8 after confirmation.','Fib 23.6 supports scale-out only when confirmed: TP1 at 38.2, TP2 at 61.8, no blind runner.');
+    return mk('conservative','Fib conservative ladder','Fib is confirmed, but the reward path is not wide enough for an aggressive runner. Bank more at 38.2.','Fib 23.6 favors conservative/balanced exits unless the 61.8 path is clean.');
+  }
+  if(mode==='wait') return mk('wait','Wait / no ladder','Entry brain says timing is not clean enough to add exposure now.','Standard DotVerse can ladder only after timing and execution quality are clean.');
+  if(mode==='scale_in' && b.execution_authority!==true) return mk('scout','Scale-in Scout','Good idea may need a later retest/add-on entry. Scout it; do not send an add-on order now.','Standard DotVerse treats scale-in as a future-entry scout unless execution authority explicitly allows it.');
+  if(mode==='scale_out' && b.execution_authority===true){
+    if(rr>=2.4 && hasRunner) return mk('aggressive','Aggressive scale-out','Strong reward path. Take partials and leave a smaller runner only after review.','Standard DotVerse may use a runner when R:R and structure are strong enough.');
+    if(rr<1.8 || q<60) return mk('conservative','Conservative scale-out','Edge is usable but not clean enough for a big runner. Bank more at TP1.','Standard DotVerse should keep weaker/shorter setups defensive.');
+    return mk('beginner','Beginner scale-out','Balanced split: take some profit early, keep some exposure for TP2/TP3.','Standard DotVerse default ladder is balanced when quality and reward path are good.');
+  }
+  if(exec.active) return mk(o._ladderMode||'beginner','Scale-out selected','You selected same-entry split orders. Review each assigned exit before sending.','Manual scale-out should still match the selected strategy preset and broker size.');
+  return mk('single','Single order','No strong reason to split this entry yet. One entry, one stop, one main target is cleaner.','Standard DotVerse uses single order when ladder edge is not clearly better.');
 }
 function _todayV2ScalePlanCard(o, legs, exec, money2, pxFmt){
   var esc=function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
@@ -14073,6 +14090,7 @@ function _todayV2ScalePlanCard(o, legs, exec, money2, pxFmt){
   return '<div class="today-v2-path" style="border-color:rgba(126,183,255,.22);background:rgba(126,183,255,.045)">'
     + '<div class="td-mini">Recommended execution</div><b class="'+tone+'">'+esc(verdict)+'</b>'
     + '<div class="today-v2-copy" style="margin-top:8px"><strong>Why:</strong> '+esc(advice.why)+'</div>'
+    + '<div class="today-v2-copy" style="margin-top:8px"><strong>Strategy preset fit:</strong> '+esc(advice.strategyLabel||_todayStrategyModeLabel())+' — '+esc(advice.strategyWhy||'Ladder choice is checked against the selected strategy preset.')+'</div>'
     + '<div class="today-v2-copy" style="margin-top:8px"><strong>Scale-out:</strong> '+esc(scaleOutText)+'</div>'
     + legRows
     + '<div class="today-v2-copy" style="margin-top:8px"><strong>Scale-in Scout:</strong> '+esc(scaleInText)+'</div>'
@@ -15321,7 +15339,7 @@ function _todayRenderPlan(){
     }
     var presetHint=presetDisabled
       ? (exec.collapsed?'DotVerse recommends one MT5 order because the split would fall below broker minimum lot.':'Single order is recommended unless you manually switch on scale-out.')
-      : ('DotVerse fit check: '+presetAdvice.label+' — '+presetAdvice.why+' Conservative banks earliest; Beginner balances partials; Aggressive keeps a runner and carries more give-back risk.');
+      : ('DotVerse fit check for '+presetAdvice.strategyLabel+': '+presetAdvice.label+' — '+presetAdvice.why+' '+presetAdvice.strategyWhy+' Conservative banks earliest; Beginner balances partials; Aggressive keeps a runner.');
     var presetControls='<div class="panelTitle" style="margin:14px 0 8px">Ladder preset intelligence</div><div class="today-v2-copy">'+presetHint+'</div><div class="today-v2-preset">'
       + presetBtn('conservative','Conservative','Best when edge is usable but not clean. Bank more at TP1.')
       + presetBtn('beginner','Beginner','Balanced default: partial profit early, still leaves TP2/TP3 exposure.')

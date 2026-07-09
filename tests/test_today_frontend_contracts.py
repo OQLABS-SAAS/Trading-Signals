@@ -41,8 +41,10 @@ def test_today_v2_exposes_multiladder_presets_and_leg_money():
     assert "presetBtn('conservative','Conservative'" in source
     assert "presetBtn('beginner','Beginner'" in source
     assert "presetBtn('aggressive','Aggressive'" in source
-    assert "DotVerse fit check:" in source
-    assert "recommended" in source
+    assert "DotVerse fit check for" in source
+    assert "strategyLabel" in source
+    assert "Fixed Micro-Lot is built for minimum-size execution" in source
+    assert "Fib 23.6 supports scale-out only when confirmed" in source
     assert "Conservative banks earliest; Beginner balances partials; Aggressive keeps a runner" in source
     assert "Each row below is one MT5 order." in source
     assert "MT5 volume is lots, units, contracts, or shares; cash in is margin; controls is position value." in source
@@ -65,6 +67,11 @@ def test_today_identified_trade_entries_show_execution_choices_including_scale_i
     assert "function _todayV2ScalePlanCard" in source
     assert "function _todayV2LadderPresetAdvice" in source
     assert "Recommended execution" in source
+    assert "Strategy preset fit:" in source
+    assert "Fixed Micro-Lot is cleaner as one minimum-size order" in source
+    assert "Fib waiting / no ladder" in source
+    assert "Fib retest scout" in source
+    assert "Fib 23.6 scale-out" in source
     assert "Aggressive scale-out" in source
     assert "Conservative scale-out" in source
     assert "Beginner scale-out" in source
@@ -74,8 +81,12 @@ def test_today_identified_trade_entries_show_execution_choices_including_scale_i
     assert "_todayV2ScalePlanCard(o, legs, exec, money2, pxFmt)" in source
 
     scale_plan_start = source.index("function _todayV2LadderPresetAdvice")
-    scale_plan = source[scale_plan_start : scale_plan_start + 5200]
+    scale_plan = source[scale_plan_start : scale_plan_start + 7600]
     assert "Scale-out = multiple smaller MT5 orders from the same entry price" in scale_plan
+    assert "Fixed Micro-Lot prioritizes simple, small execution over complex ladders" in scale_plan
+    assert "Fib 23.6 laddering is only useful after the shallow retracement entry is confirmed" in scale_plan
+    assert "Fib 23.6 should not ladder a late/chased entry" in scale_plan
+    assert "Fib targets fit a balanced scale-out" in scale_plan
     assert "broker minimum lot" in scale_plan
     assert "later separate entry after retest/confirmation" in scale_plan
     assert "Scout mode watches; it does not place a second order now" in scale_plan
