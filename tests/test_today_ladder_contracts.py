@@ -34,3 +34,21 @@ def test_today_bottom_summary_reflows_without_nine_column_grid():
     assert ".today-v2-bottom{position:static" in HTML
     assert "grid-template-columns:repeat(auto-fit,minmax(132px,1fr))" in HTML
     assert "grid-template-columns:repeat(8,minmax(104px,1fr)) 178px" not in HTML
+
+
+def test_today_v2_has_phone_and_tablet_friendly_breakpoints():
+    assert "@media(max-width:1180px)" in HTML
+    assert "@media(max-width:900px)" in HTML
+    assert "@media(max-width:520px)" in HTML
+    assert ".today-page.v2{padding-bottom:16px;max-width:100%;overflow-x:hidden}" in HTML
+    assert ".today-v2-setup{grid-template-columns:repeat(2,minmax(0,1fr))}" in HTML
+    assert ".today-v2-summary{grid-template-columns:repeat(2,minmax(0,1fr))}" in HTML
+    assert ".today-v2-tableWrap{overflow-x:auto;-webkit-overflow-scrolling:touch}" in HTML
+    assert ".today-v2-tableWrap{overflow:visible}" in HTML
+    assert ".today-v2-table,.today-v2-table thead,.today-v2-table tbody,.today-v2-table tr,.today-v2-table td{display:block;width:100%;box-sizing:border-box}" in HTML
+    assert ".today-v2-table thead{display:none}" in HTML
+    assert ".today-v2-table td{display:grid;grid-template-columns:92px minmax(0,1fr)" in HTML
+    for label in ["Trade", "Readiness", "Duration", "Volume", "Risk", "R:R", "Profit", "Mode", "Why"]:
+        assert f'content:"{label}"' in HTML
+    assert ".today-v2-review{width:100%;min-height:44px}" in HTML
+    assert ".today-v2-selectedTop,.today-v2-switch,.today-v2-scout{align-items:stretch;flex-direction:column}" in HTML
