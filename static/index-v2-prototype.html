@@ -14031,6 +14031,36 @@ function _todayV2EntryBrainCard(o){
     + (ruleText?'<div class="today-v2-copy" style="margin-top:8px;font-family:var(--mono);font-size:9px;color:rgba(237,232,216,.42)">'+esc(ruleText)+'</div>':'')
     + '</div>';
 }
+function _todayV2ScalePlanCard(o, legs, exec, money2, pxFmt){
+  var esc=function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  o=o||{}; legs=legs||[]; exec=exec||{};
+  var b=o._entryBrain||{}, mode=String(b.recommended_mode||'single').toLowerCase();
+  var authority=b.execution_authority===true;
+  var actualScale=!!exec.active, collapsed=!!exec.collapsed;
+  var scaleOutText=actualScale
+    ? ('Use scale-out: '+legs.length+' smaller MT5 order'+(legs.length===1?'':'s')+' from the same entry, each with its own assigned exit.')
+    : (collapsed?'Do not split yet: broker minimum lot makes the ladder too small at this risk/account size.':'Single order is currently cleaner. You can still switch on scale-out below before review.');
+  var scaleInText=(mode==='scale_in'||o._scaleInScoutRequested)
+    ? 'Scale-in is a watch plan only: wait for a later add-on/retest entry. No live add-on order is sent now.'
+    : 'No scale-in add-on is suggested yet. If structure improves, use Scale-in Scout to watch for a later entry.';
+  var verdict=mode==='scale_out'&&authority?'Scale-out suggested'
+    : mode==='scale_in'?'Scale-in watch suggested'
+    : mode==='wait'?'Wait before adding exposure'
+    : actualScale?'Scale-out selected'
+    : 'Single order suggested';
+  var tone=mode==='wait'?'gold':(actualScale||authority?'green':'blue');
+  var legRows=actualScale?legs.map(function(l){
+    var tgt=l.trailing?'trail runner':((l.target||'tp1').toUpperCase()+' '+(l.tp?pxFmt(l.tp):''));
+    return '<div class="today-v2-copy" style="display:flex;justify-content:space-between;gap:10px;border-top:1px solid rgba(237,232,216,.06);padding-top:5px;margin-top:5px"><span>Order '+(l.idx||1)+' · '+Math.round((l.share||0)*100)+'% · '+esc(tgt)+'</span><span class="red">'+money2(-(l.risk||0))+'</span><span class="green">+'+money2(l.profit||0)+'</span></div>';
+  }).join(''):'';
+  return '<div class="today-v2-path" style="border-color:rgba(126,183,255,.22);background:rgba(126,183,255,.045)">'
+    + '<div class="td-mini">Trade ladder &amp; scale plan</div><b class="'+tone+'">'+esc(verdict)+'</b>'
+    + '<div class="today-v2-copy" style="margin-top:8px"><strong>Scale-out:</strong> '+esc(scaleOutText)+'</div>'
+    + legRows
+    + '<div class="today-v2-copy" style="margin-top:8px"><strong>Scale-in:</strong> '+esc(scaleInText)+'</div>'
+    + '<div class="today-v2-copy" style="margin-top:8px;color:rgba(201,168,76,.82)">Next action: use Single, Scale-out plan, or Scale-in Scout below, then review before any MT5 order is sent.</div>'
+  + '</div>';
+}
 function _todayV2EffectiveReadiness(o, rd){
   rd=rd||{text:'Enter now',cls:''};
   var perm=_todayMt5PermissionStatus();
@@ -15288,6 +15318,7 @@ function _todayRenderPlan(){
       + '<div class="panelTitle" style="margin:14px 0 8px">Why DotVerse picked it</div><div class="today-v2-copy">'+_todayTradeReason(o, rd.text)+' Pattern check: '+((o.winRateN||0)>=30?'recent price-pattern history found '+o.winRateN+' comparable bars/trades for this ticker and timeframe':'not enough personal closed trades yet, so DotVerse is showing indicator agreement and recent-pattern evidence, not a calibrated win probability')+'.</div>'
       + _todayFibSummaryHtml(o, pxFmt)
       + _todayV2EntryBrainCard(o)
+      + _todayV2ScalePlanCard(o, legs, exec, money2, pxFmt)
       + '<div class="panelTitle" style="margin:14px 0 8px">'+(protect?'Protection mode':'Execution mode')+'</div><div class="today-v2-copy">'+(protect?'New MT5 orders are paused because the '+_horizonLbl.toLowerCase()+' target is reached. This panel stays useful for monitoring alerts and protection rules, not for adding exposure.':'Choose how this setup is sent to MT5. Same trade idea, different exit style.')+'</div>'
       + (protect?'':presetControls)
       + (protect?'':'<div class="today-v2-exec"><button class="today-v2-choice '+((!scale||exec.collapsed)&&!scaleInScout?'on':'')+'" onclick="_todayV2SetScale('+idx+',false)"><b>Single order</b><span>One entry, one stop, one main target. Best for fast/simple trades.</span></button><button class="today-v2-choice '+(actualScale?'on':(exec.collapsed?'disabled':''))+'" '+(exec.collapsed?'disabled ':'onclick="_todayV2SetScale('+idx+',true)"')+'><b>'+(exec.collapsed?'Scale-out unavailable':'Scale-out plan')+'</b><span>'+(exec.collapsed?'Current size falls below broker minimum if split.':'Open smaller parts, take profit early, leave a smaller runner.')+'</span></button><button class="today-v2-choice '+(scaleInScout?'on':'')+'" onclick="_todayV2ScaleInScout('+idx+')"><b>Scale-in Scout</b><span>Watch for later add-on or retest entries. No live order is sent from this card.</span></button></div>')

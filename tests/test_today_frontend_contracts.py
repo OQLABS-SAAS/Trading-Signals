@@ -60,6 +60,22 @@ def test_today_identified_trade_entries_show_execution_choices_including_scale_i
     assert "_todayV2ArmScout(true)" in source
     assert "Single order" in source
     assert "Scale-out plan" in source
+    assert "function _todayV2ScalePlanCard" in source
+    assert "Trade ladder &amp; scale plan" in source
+    assert "Scale-out suggested" in source
+    assert "Scale-in watch suggested" in source
+    assert "Scale-in is a watch plan only" in source
+    assert "No live add-on order is sent now" in source
+    assert "Next action: use Single, Scale-out plan, or Scale-in Scout below" in source
+    assert "_todayV2ScalePlanCard(o, legs, exec, money2, pxFmt)" in source
+
+    scale_plan_start = source.index("function _todayV2ScalePlanCard")
+    scale_plan = source[scale_plan_start : scale_plan_start + 3600]
+    assert "Use scale-out" in scale_plan
+    assert "broker minimum lot" in scale_plan
+    assert "same entry" in scale_plan
+    assert "later add-on/retest entry" in scale_plan
+    assert "No live add-on order is sent now" in scale_plan
 
     scale_in_start = source.index("function _todayV2ScaleInScout(idx)")
     scale_in = source[scale_in_start : scale_in_start + 900]
