@@ -759,6 +759,61 @@ def test_mt5_pending_poll_returns_account_context_and_marks_executing(monkeypatc
     assert fake_db.closed is True
 
 
+
+
+def test_mt5_pending_poll_blocks_demo_order_when_connected_mt5_is_live(monkeypatch):
+    order = SimpleNamespace(
+        id=202,
+        user_id="testuser",
+        account_id=7,
+        symbol="EURUSD",
+        order_type="BUY",
+        volume=0.2,
+        price=1.08,
+        sl=1.075,
+        tp=1.09,
+        tp2=None,
+        tp3=None,
+        action="open",
+        close_ticket=None,
+        trailing=False,
+        be=False,
+        macro=False,
+        inval=False,
+        sent=False,
+        tp1_alert=False,
+        tp2_alert=False,
+        weekend=False,
+        status="pending",
+    )
+    account = SimpleNamespace(id=7, account_number="123456", account_type="DEMO")
+    fake_db = _FakePendingDB([order], [account])
+    previous_bypass = dvapp.MT5_BYPASS_USER_IDS
+
+    monkeypatch.setattr(dvapp, "_DBSession", lambda: fake_db)
+    monkeypatch.setattr(dvapp, "_get_automation_settings", lambda _user_id: {
+        "trailing_on": False, "trailing_pips": 50, "trailing_atr_mult": 1,
+    })
+    monkeypatch.setattr(dvapp, "_mt5_state_for_account", lambda _user_id, _account: {
+        "account": {"login": "123456", "trade_mode": 2, "is_live": True, "is_demo": False},
+    })
+    dvapp.MT5_BYPASS_USER_IDS = {"testuser"}
+    try:
+        resp = dvapp.app.test_client().get("/api/mt5/pending")
+    finally:
+        dvapp.MT5_BYPASS_USER_IDS = previous_bypass
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    assert data["orders"] == []
+    assert data["blocked_mode_mismatches"] == [{
+        "order_id": 202,
+        "saved_mode": "DEMO",
+        "connected_mode": "LIVE",
+    }]
+    assert order.status == "pending"
+    assert fake_db.committed is True
+    assert fake_db.closed is True
 def test_mt5_pending_poll_includes_per_order_settings_for_mixed_default_queue(monkeypatch):
     user_order = SimpleNamespace(
         id=101,

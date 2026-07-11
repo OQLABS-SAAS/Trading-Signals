@@ -9546,10 +9546,32 @@ def admin_repair_schema():
     return jsonify({"results": results})
 
 
+def _mt5_pending_order_mode_mismatch(ea_uid, account):
+    """Return a DEMO/LIVE mismatch for a pending order, if telemetry proves one.
+
+    Keep legacy no-telemetry behavior compatible, but never hand an order to an
+    EA when the latest connected MT5 mode conflicts with the saved account mode.
+    The order remains pending for operator review instead of crossing DEMO/LIVE.
+    """
+    if account is None:
+        return None
+    saved_mode = normalize_mt5_account_type({}, fallback=getattr(account, "account_type", None))
+    if saved_mode not in {"DEMO", "LIVE"}:
+        return None
+    live_state = _mt5_state_for_account(ea_uid or "default", account)
+    if not isinstance(live_state, dict) or not live_state:
+        return None
+    live_account = annotate_mt5_account_mode(live_state.get("account", {}))
+    live_mode = normalize_mt5_account_type(live_account)
+    if live_mode in {"DEMO", "LIVE"} and live_mode != saved_mode:
+        return {"saved_mode": saved_mode, "connected_mode": live_mode}
+    return None
+
+
 @app.route("/api/mt5/pending", methods=["GET"])
 @_require_ea
 def mt5_get_pending():
-    """EA polls this every 5s — returns pending orders and marks them as executing."""
+    """EA polls this every 5s — returns mode-safe pending orders."""
     if not _DBSession:
         return jsonify({"orders": []})
     ea_uid = getattr(request, 'ea_user_id', None)
@@ -9569,6 +9591,7 @@ def mt5_get_pending():
             orders = orders.filter(MT5Order.account_id == int(ea_account_id))
         orders = orders.all()
         result = []
+        blocked_mode_mismatches = []
         account_ids = [o.account_id for o in orders if o.account_id]
         account_map = {}
         if account_ids:
@@ -9576,8 +9599,16 @@ def mt5_get_pending():
                 a.id: a for a in db.query(TradingAccount).filter(TradingAccount.id.in_(account_ids)).all()
             }
         for o in orders:
-            projected = project_pending_mt5_order(o)
             account = account_map.get(o.account_id)
+            mismatch = _mt5_pending_order_mode_mismatch(ea_uid, account)
+            if mismatch:
+                blocked_mode_mismatches.append({
+                    "order_id": o.id,
+                    "saved_mode": mismatch["saved_mode"],
+                    "connected_mode": mismatch["connected_mode"],
+                })
+                continue
+            projected = project_pending_mt5_order(o)
             order_settings_user_id = str(o.user_id or ea_uid or "default")
             cfg = _get_automation_settings(order_settings_user_id)
             projected["settings"] = {
@@ -9605,7 +9636,7 @@ def mt5_get_pending():
             "trailing_pips":     float(cfg.get("trailing_pips", 50.0)),
             "trailing_atr_mult": float(cfg.get("trailing_atr_mult", 1.0)),
         }
-        return jsonify({"orders": result, "settings": settings})
+        return jsonify({"orders": result, "blocked_mode_mismatches": blocked_mode_mismatches, "settings": settings})
     except Exception as e:
         db.rollback()
         return jsonify({"orders": []})
