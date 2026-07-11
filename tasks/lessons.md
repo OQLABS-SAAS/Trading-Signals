@@ -24,5 +24,8 @@ Never mark an operator test account as connected by fabricating MT5 state. Demo 
 **Private app access lesson:**
 DotVerse is currently for the user's own/internal use, so subscription tiers should not block features. Remove free/pro/elite paywalls, but keep real safety gates: authentication, account ownership, per-account EA secrets, fresh MT5 telemetry, DEMO/LIVE evidence, broker trade permissions, symbol tradeability, and duplicate-order protection.
 
+**Shared MT5 workspace lesson:**
+If the Google OAuth login shows MT5/EA online but an email/password operator login shows offline, the issue is user scoping, not necessarily EA failure. The EA secret and live MT5 state may belong to the Google-owned TradingAccount row. In private-app mode, operator/test logins should be able to read the shared primary MT5 connection and submit orders against the actual connected TradingAccount owner, otherwise orders can become invisible to the EA poller.
+
 **Implementation note:**
 When an account is saved but EA telemetry is absent, status cards should still show the saved DEMO/LIVE mode while clearly saying EA is disconnected. Execution endpoints must continue requiring fresh EA state before accepting orders.

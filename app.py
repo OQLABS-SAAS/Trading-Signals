@@ -869,12 +869,34 @@ def _agent_rate_limit(limit=60, window=60):
         return decorated
     return decorator
 
+def _private_app_shared_mt5_enabled():
+    """Whether authenticated users share the same private DotVerse MT5 workspace."""
+    return str(os.environ.get("DOTVERSE_PRIVATE_APP_SHARED_MT5", "1")).strip().lower() not in {"0", "false", "no", "off"}
+
+
 def _agent_user_ids():
-    """Return (session_uid, [session_uid, 'default']) for Agent tab dual-ID queries."""
+    """Return user ids visible in Agent tab queries.
+
+    DotVerse is currently a private/internal app. In that mode, operator/test
+    logins should see the same MT5 workspace as the Google-auth owner instead of
+    looking disconnected simply because the EA secret belongs to another user.
+    """
     session_uid = str(session.get("user_id"))
     ids = [session_uid]
     if session_uid != "default":
         ids.append("default")
+    if _private_app_shared_mt5_enabled() and _DBSession:
+        db = _DBSession()
+        try:
+            owner_ids = db.query(TradingAccount.user_id).filter(TradingAccount.is_active == True).distinct().all()
+            for row in owner_ids:
+                uid = str(row[0])
+                if uid and uid not in ids:
+                    ids.append(uid)
+        except Exception:
+            pass
+        finally:
+            db.close()
     return session_uid, ids
 
 # ─── Tier Cap Helpers (7.2) ─────────────────────────────────────
@@ -8836,8 +8858,7 @@ def _sync_mt5_account_mode_from_state(user_id, account_info, account_id=None):
 
 
 def _mt5_state_account_for_user(user_id):
-    with mt5_state_lock:
-        state = mt5_state.get(str(user_id)) or mt5_state.get("default")
+    state = _mt5_state_for_user(user_id)
     if not isinstance(state, dict):
         return {}
     return annotate_mt5_account_mode(state.get("account", {}))
@@ -8846,7 +8867,34 @@ def _mt5_state_account_for_user(user_id):
 def _mt5_state_for_user(user_id):
     with mt5_state_lock:
         state = mt5_state.get(str(user_id)) or mt5_state.get("default")
+        if not isinstance(state, dict) and _private_app_shared_mt5_enabled():
+            state = _primary_shared_mt5_state_locked()
     return state if isinstance(state, dict) else {}
+
+
+def _primary_shared_mt5_state_locked():
+    """Return the single fresh shared MT5 state, if unambiguous.
+
+    Caller must hold mt5_state_lock. This is read-only fallback for the private
+    DotVerse workspace: a test/operator login should see the Google-owned EA
+    connection when there is exactly one live MT5 terminal. If multiple terminals
+    are connected, do not guess.
+    """
+    connected = []
+    now = datetime.utcnow()
+    for state in mt5_state.values():
+        if not isinstance(state, dict) or not isinstance(state.get("account"), dict):
+            continue
+        try:
+            last_seen = state.get("last_seen")
+            if not last_seen:
+                continue
+            seen = datetime.fromisoformat(str(last_seen).replace("Z", ""))
+            if (now - seen).total_seconds() < 45:
+                connected.append(state)
+        except Exception:
+            continue
+    return connected[0] if len(connected) == 1 else None
 
 
 def _mt5_state_for_account(user_id, account=None):
@@ -9112,10 +9160,9 @@ def _reconcile_mt5_positions_from_push(db, user_id, account_id, positions):
 def _resolve_selected_mt5_account(db, user_id, payload=None):
     body = payload if isinstance(payload, dict) else {}
     requested_id = body.get("account_id") or body.get("trading_account_id")
-    query = db.query(TradingAccount).filter(
-        TradingAccount.user_id == str(user_id),
-        TradingAccount.is_active == True,
-    )
+    query = db.query(TradingAccount).filter(TradingAccount.is_active == True)
+    if not _private_app_shared_mt5_enabled():
+        query = query.filter(TradingAccount.user_id == str(user_id))
     if requested_id not in (None, ""):
         try:
             account = query.filter(TradingAccount.id == int(requested_id)).first()
@@ -9125,7 +9172,17 @@ def _resolve_selected_mt5_account(db, user_id, payload=None):
             raise OrderValidationError("selected MT5 account is not available")
         return account
 
-    live_account = _mt5_state_account_for_user(user_id)
+    live_state = _mt5_state_for_user(user_id)
+    live_state_account_id = live_state.get("account_id") if isinstance(live_state, dict) else None
+    if live_state_account_id not in (None, ""):
+        try:
+            account = query.filter(TradingAccount.id == int(live_state_account_id)).first()
+        except (TypeError, ValueError):
+            account = None
+        if account:
+            return account
+
+    live_account = annotate_mt5_account_mode(live_state.get("account", {}) if isinstance(live_state, dict) else {})
     login = str(live_account.get("login") or live_account.get("account_number") or "").strip()
     if login:
         account = query.filter(TradingAccount.account_number == login).first()
@@ -9204,8 +9261,9 @@ def mt5_submit_order():
     db = _DBSession()
     try:
         account = _resolve_selected_mt5_account(db, user_id, body)
+        execution_user_id = str(getattr(account, "user_id", None) or user_id)
         readiness = _assert_mt5_account_ready_for_order(
-            user_id,
+            execution_user_id,
             account,
             symbol=symbol,
             asset_type=order_request.asset_type,
@@ -9213,7 +9271,7 @@ def mt5_submit_order():
         account_type = normalize_mt5_account_type({}, fallback=account.account_type)
         duplicate = _find_recent_duplicate_mt5_order(
             db,
-            user_id,
+            execution_user_id,
             account.id,
             symbol,
             order_request.direction,
@@ -9250,7 +9308,7 @@ def mt5_submit_order():
                 "message": "Duplicate order already queued or executing",
             })
         order = MT5Order(
-            user_id          = user_id,
+            user_id          = execution_user_id,
             account_id       = account.id,
             symbol           = symbol,
             order_type       = order_request.direction,
@@ -9284,7 +9342,7 @@ def mt5_submit_order():
         # The MT5 ticket is not known yet (EA hasn't confirmed); entry_price is
         # updated to the actual fill price in mt5_confirm_order once the EA reports back.
         _ensure_watch_for_order(
-            user_id     = user_id,
+            user_id     = execution_user_id,
             ticker      = order_request.ticker,
             asset_type  = order_request.asset_type,
             timeframe   = order_request.timeframe,
@@ -9367,7 +9425,7 @@ def orders_submit():
         account_type = normalize_mt5_account_type({}, fallback=account.account_type)
         duplicate = _find_recent_duplicate_mt5_order(
             db,
-            user_id,
+            execution_user_id,
             account.id,
             order_request.symbol,
             order_request.side,
@@ -10272,8 +10330,7 @@ def _resolve_owned_mt5_close_target(db, user_id, requested_ticket, account_id=No
 def mt5_get_state():
     """Frontend reads account info and positions."""
     user_id = str(session.get("user_id"))
-    with mt5_state_lock:
-        state = mt5_state.get(user_id) or mt5_state.get("default")
+    state = _mt5_state_for_user(user_id)
     if not state:
         return jsonify({
             "connected": False,
@@ -13001,10 +13058,10 @@ def accounts_list():
     user_id = str(session.get("user_id"))
     db = _DBSession()
     try:
-        accounts = db.query(TradingAccount).filter(
-            TradingAccount.user_id == user_id,
-            TradingAccount.is_active == True,
-        ).order_by(TradingAccount.sort_order, TradingAccount.name).all()
+        query = db.query(TradingAccount).filter(TradingAccount.is_active == True)
+        if not _private_app_shared_mt5_enabled():
+            query = query.filter(TradingAccount.user_id == user_id)
+        accounts = query.order_by(TradingAccount.sort_order, TradingAccount.name).all()
         return jsonify({"accounts": [_account_to_dict(a) for a in accounts]})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -13142,11 +13199,10 @@ def accounts_summary(account_id):
         return jsonify({"error": "db unavailable"}), 503
     db = _DBSession()
     try:
-        account = db.query(TradingAccount).filter(
-            TradingAccount.id == account_id,
-            TradingAccount.user_id == user_id,
-            TradingAccount.is_active == True,
-        ).first()
+        query = db.query(TradingAccount).filter(TradingAccount.is_active == True)
+        if not _private_app_shared_mt5_enabled():
+            query = query.filter(TradingAccount.user_id == user_id)
+        account = query.filter(TradingAccount.id == account_id).first()
         if not account:
             return jsonify({"error": "Account not found"}), 404
         state = _mt5_state_for_account(user_id, account)
