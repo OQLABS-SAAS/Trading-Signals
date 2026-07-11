@@ -808,19 +808,18 @@ def require_admin(f):
     return decorated
 
 def require_tier(minimum):
-    """Decorator — blocks API calls unless user's tier meets the minimum.
-    Tiers: free(0) < pro(1) < elite(2). Returns 402 Payment Required."""
+    """Private-app compatibility decorator.
+
+    DotVerse is currently operated as the user's internal tool, not a SaaS with
+    subscription paywalls. Keep this decorator in place so route structure stays
+    stable, but do not block authenticated users by free/pro/elite tier. Broker
+    safety remains enforced elsewhere: login_required, account ownership,
+    per-account EA secrets, fresh MT5 state, DEMO/LIVE mode checks, symbol
+    tradeability, and duplicate-order protection.
+    """
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
-            tier = session.get("user_tier", "free")
-            tiers = {"free": 0, "pro": 1, "elite": 2}
-            if tiers.get(tier, 0) < tiers.get(minimum, 0):
-                return jsonify({
-                    "error": "Upgrade required",
-                    "required_tier": minimum,
-                    "current_tier": tier
-                }), 402
             return f(*args, **kwargs)
         return decorated
     return decorator

@@ -21,5 +21,8 @@ DotVerse needs an explicit operator/test-account provisioning path: authenticate
 **Safety rule:**
 Never mark an operator test account as connected by fabricating MT5 state. Demo trade tests require real deployed app session state and fresh EA telemetry.
 
+**Private app access lesson:**
+DotVerse is currently for the user's own/internal use, so subscription tiers should not block features. Remove free/pro/elite paywalls, but keep real safety gates: authentication, account ownership, per-account EA secrets, fresh MT5 telemetry, DEMO/LIVE evidence, broker trade permissions, symbol tradeability, and duplicate-order protection.
+
 **Implementation note:**
 When an account is saved but EA telemetry is absent, status cards should still show the saved DEMO/LIVE mode while clearly saying EA is disconnected. Execution endpoints must continue requiring fresh EA state before accepting orders.
