@@ -8626,12 +8626,19 @@ async function _agentRenderPanel(name, panel){
     }
     var accts = accounts.map(function(a){
       var login = a.login || a.account_number || '';
-      return '<div class="agent-acct-card" data-id="'+_agentEsc(a.id)+'" data-tip="'+_agentEsc(a.name+' \u2014 Balance: '+(a.balance != null ? a.balance : 'N/A')+' | Status: '+((a.status||'online').charAt(0).toUpperCase()+(a.status||'online').slice(1))+' | Broker: '+(a.broker||'N/A'))+'" onclick="_agentSelectClient(\''+_agentEsc(a.id)+'\')">'
-        + '<div class="agent-acct-header"><div class="agent-acct-av">'+_agentEsc(a.initials||'??')+'</div><div class="agent-acct-name">'+_agentEsc(a.name)+'</div>'+_agentSvgDot(a.status)+'</div>'
+      var connected = !!a.connected || String(a.status||'').toLowerCase()==='online';
+      var mode = a.account_type || (a.is_demo ? 'DEMO' : (a.is_live ? 'LIVE' : 'UNKNOWN'));
+      var eaStatus = connected ? 'EA online' : 'EA disconnected';
+      var eaHelp = connected ? 'Fresh MT5 terminal state is available.' : 'Saved '+mode+' account; waiting for the MT5 EA to push fresh state with this account secret.';
+      return '<div class="agent-acct-card" data-id="'+_agentEsc(a.id)+'" data-tip="'+_agentEsc(a.name+' \u2014 Balance: '+(a.balance != null ? a.balance : 'N/A')+' | Status: '+eaStatus+' | Broker: '+(a.broker||'N/A'))+'" onclick="_agentSelectClient(\''+_agentEsc(a.id)+'\')">'
+        + '<div class="agent-acct-header"><div class="agent-acct-av">'+_agentEsc(a.initials||'??')+'</div><div class="agent-acct-name">'+_agentEsc(a.name)+'</div>'+_agentSvgDot(connected?'online':'disconnected')+'</div>'
         + '<div class="agent-acct-details">'
         + '<div class="agent-acct-row"><span class="agent-acct-label">Broker</span><span class="agent-acct-value">'+_agentEsc(a.broker||'N/A')+'</span></div>'
         + '<div class="agent-acct-row"><span class="agent-acct-label">Server</span><span class="agent-acct-value">'+_agentEsc(a.server||'N/A')+'</span></div>'
         + '<div class="agent-acct-row"><span class="agent-acct-label">Login</span><span class="agent-acct-value agent-mono">'+_agentEsc(login||'N/A')+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Mode</span><span class="agent-acct-value agent-mono">'+_agentEsc(mode)+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">EA Status</span><span class="agent-acct-value '+(connected?'ok':'warn')+'">'+_agentEsc(eaStatus)+'</span></div>'
+        + '<div class="agent-acct-row"><span class="agent-acct-label">Next step</span><span class="agent-acct-value">'+_agentEsc(eaHelp)+'</span></div>'
         + '<div class="agent-acct-row"><span class="agent-acct-label">Balance</span><span class="agent-acct-value agent-mono">'+_agentEsc(a.balance != null ? (typeof a.balance === 'number' ? '$' + a.balance.toFixed(2) : a.balance) : 'N/A')+'</span></div>'
         + '<div class="agent-acct-row"><span class="agent-acct-label">Equity</span><span class="agent-acct-value agent-mono">'+_agentEsc(a.equity != null ? (typeof a.equity === 'number' ? '$' + a.equity.toFixed(2) : a.equity) : (a.balance != null ? (typeof a.balance === 'number' ? '$' + a.balance.toFixed(2) : a.balance) : 'N/A'))+'</span></div>'
         + '<div class="agent-acct-row"><span class="agent-acct-label">Leverage</span><span class="agent-acct-value">'+_agentEsc(a.leverage != null ? a.leverage : 'N/A')+'</span></div>'

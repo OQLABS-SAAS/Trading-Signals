@@ -16,3 +16,10 @@ def test_mt5_frontend_surfaces_demo_live_account_mode():
     assert "MT5 UNKNOWN" not in HTML
     assert "mode === 'DEMO' ? '#5de8a0' : '#c9a84c'" in HTML
     assert "_mt5SetStatus(d.connected, lastSeenStr, accountType)" in HTML
+
+
+def test_agent_account_card_explains_saved_demo_but_ea_disconnected():
+    assert "EA Status" in HTML
+    assert "EA disconnected" in HTML
+    assert "waiting for the MT5 EA to push fresh state with this account secret" in HTML
+    assert "Saved '+mode+' account" in HTML

@@ -13129,37 +13129,60 @@ def accounts_delete(account_id):
         return jsonify({"error": str(e)}), 500
     finally:
         db.close()
-
 @app.route("/api/accounts/<int:account_id>/summary", methods=["GET"])
 @login_required
 def accounts_summary(account_id):
-    """Return balance/equity/margin from mt5_state for this user's account."""
+    """Return account summary, using saved DEMO/LIVE mode when EA telemetry is offline.
+
+    A saved account should never look like an unknown account just because the EA
+    has not connected yet. Execution readiness still requires fresh EA state in
+    _assert_mt5_account_ready_for_order; this endpoint is only the status card.
+    """
     user_id = str(session.get("user_id"))
-    with mt5_state_lock:
-        state = mt5_state.get(user_id) or mt5_state.get("default")
-    if not state:
+    if not _DBSession:
+        return jsonify({"error": "db unavailable"}), 503
+    db = _DBSession()
+    try:
+        account = db.query(TradingAccount).filter(
+            TradingAccount.id == account_id,
+            TradingAccount.user_id == user_id,
+            TradingAccount.is_active == True,
+        ).first()
+        if not account:
+            return jsonify({"error": "Account not found"}), 404
+        state = _mt5_state_for_account(user_id, account)
+        if not state:
+            saved_mode = normalize_mt5_account_type({}, fallback=account.account_type)
+            return jsonify({
+                "balance": None, "equity": None, "margin": None,
+                "margin_free": None, "margin_level": None,
+                "connected": False,
+                "account_type": saved_mode,
+                "is_demo": saved_mode == "DEMO",
+                "is_live": saved_mode == "LIVE",
+                "account_mode_source": "saved",
+                "status": "ea_disconnected",
+                "message": "DEMO account saved, but the MT5 EA has not pushed fresh state yet.",
+            })
+        acct_info = annotate_mt5_account_mode(state.get("account", {}), fallback=account.account_type)
+        age = _mt5_state_age_seconds(state)
+        connected = age is not None and age < 45
         return jsonify({
-            "balance": None, "equity": None, "margin": None,
-            "margin_free": None, "margin_level": None, "connected": False,
-            "account_type": None, "is_demo": False, "is_live": False,
+            "balance":      acct_info.get("balance"),
+            "equity":       acct_info.get("equity"),
+            "margin":       acct_info.get("margin"),
+            "margin_free":  acct_info.get("margin_free"),
+            "margin_level": acct_info.get("margin_level"),
+            "account_type": acct_info.get("account_type"),
+            "is_demo":      acct_info.get("is_demo"),
+            "is_live":      acct_info.get("is_live"),
+            "account_mode_source": acct_info.get("account_mode_source"),
+            "connected":    connected,
+            "secs_ago":     int(age) if age is not None else None,
+            "status":       "online" if connected else "ea_stale",
         })
-    acct_info = annotate_mt5_account_mode(state.get("account", {}))
-    last_seen = datetime.fromisoformat(state["last_seen"])
-    secs_ago  = (datetime.utcnow() - last_seen).total_seconds()
-    connected = secs_ago < 45
-    return jsonify({
-        "balance":      acct_info.get("balance"),
-        "equity":       acct_info.get("equity"),
-        "margin":       acct_info.get("margin"),
-        "margin_free":  acct_info.get("margin_free"),
-        "margin_level": acct_info.get("margin_level"),
-        "account_type": acct_info.get("account_type"),
-        "is_demo":      acct_info.get("is_demo"),
-        "is_live":      acct_info.get("is_live"),
-        "account_mode_source": acct_info.get("account_mode_source"),
-        "connected":    connected,
-        "secs_ago":     int(secs_ago),
-    })
+    finally:
+        db.close()
 
 # ─── TRADING JOURNAL ENDPOINTS ────────────────────────────────
 

@@ -55,3 +55,17 @@ def test_account_serializer_uses_default_mt5_fallback_state():
     assert "live_states_for_query_ids(mt5_state, query_ids)" in helper
     assert "find_live_state_for_account(" in helper
     assert "serialize_trading_account(a, state)" in helper
+
+
+def test_account_summary_reports_saved_demo_when_ea_is_disconnected():
+    source = _source()
+    start = source.index("def accounts_summary(account_id):")
+    end = source.index("# ─── TRADING JOURNAL ENDPOINTS", start)
+    summary = source[start:end]
+
+    assert "using saved DEMO/LIVE mode when EA telemetry is offline" in summary
+    assert "saved_mode = normalize_mt5_account_type({}, fallback=account.account_type)" in summary
+    assert '"account_mode_source": "saved"' in summary
+    assert '"status": "ea_disconnected"' in summary
+    assert "MT5 EA has not pushed fresh state yet" in summary
+    assert "Execution readiness still requires fresh EA state" in summary
