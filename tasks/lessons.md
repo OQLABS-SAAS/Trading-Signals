@@ -27,5 +27,11 @@ DotVerse is currently for the user's own/internal use, so subscription tiers sho
 **Shared MT5 workspace lesson:**
 If the Google OAuth login shows MT5/EA online but an email/password operator login shows offline, the issue is user scoping, not necessarily EA failure. The EA secret and live MT5 state may belong to the Google-owned TradingAccount row. In private-app mode, operator/test logins should be able to read the shared primary MT5 connection and submit orders against the actual connected TradingAccount owner, otherwise orders can become invisible to the EA poller.
 
+**Operator verification lesson:**
+After shared-MT5 workspace routing, the `hermestest` operator login can see the Google-owned DEMO MT5 state when the EA is online. For Today testing, verify the operator login sees `connected=true`, `is_demo=true`, fresh `secs_ago`, and the real broker account before any order step.
+
+**Today execution-readiness lesson:**
+A broad Today scan can find many analytical setups while only a smaller subset is broker-executable through the connected MT5 symbol universe. Capture the chain separately: scan candidates, usable entry/SL/TP candidates, broker-executable candidates, Entry Brain mode, and preset verdict. In the July 11 operator test, fresh bounded scan found many candidates but only forex pairs were clearly broker-executable; Entry Brain returned mostly `wait`, so the correct trader verdict was “watch/select carefully,” not blind auto-trade.
+
 **Implementation note:**
 When an account is saved but EA telemetry is absent, status cards should still show the saved DEMO/LIVE mode while clearly saying EA is disconnected. Execution endpoints must continue requiring fresh EA state before accepting orders.
